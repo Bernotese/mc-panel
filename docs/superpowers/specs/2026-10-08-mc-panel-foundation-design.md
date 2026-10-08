@@ -96,7 +96,7 @@ Linux-spezifisches liegt hinter Interfaces, Implementierungen per Build-Tag:
 
 | Interface | Linux | macOS (Dev) |
 |---|---|---|
-| `Firewall` | nftables (Set `mcpanel_jail` in eigener Tabelle `inet mcpanel`) | No-op, loggt nur |
+| `Firewall` | nftables (Sets `mcpanel_jail4` und `mcpanel_jail6` in eigener Tabelle `inet mcpanel`) | No-op, loggt nur |
 | Peer-Credentials | `SO_PEERCRED` | `LOCAL_PEERCRED` (`getpeereid`) |
 
 ### 3.4 Konfiguration
@@ -263,6 +263,6 @@ Token-Bucket (In-Memory, pro Prozess):
 2. `make dev` auf macOS → UI unter `http://localhost:5173` erreichbar.
 3. `panel admin create` → erzwungenes 2FA-Setup → Login mit Passwort + TOTP und mit Passkey funktioniert.
 4. Eingeschränkter Benutzer mit `server.power` für Stub-Server A sieht nur Server A; Zugriff auf Server B → `403`.
-5. 5 falsche Logins → Jail im Security Center sichtbar, ntfy-/Discord-Testbenachrichtigung kommt an; in der Linux-VM zeigt `nft list set inet mcpanel mcpanel_jail` die IP.
+5. 5 falsche Logins → Jail im Security Center sichtbar, ntfy-/Discord-Testbenachrichtigung kommt an; in der Linux-VM zeigt `nft list set inet mcpanel mcpanel_jail4` (bzw. `mcpanel_jail6`) die IP.
 6. Alle Aktionen stehen im Audit-Log, `panel audit verify` meldet OK; nach manueller Manipulation einer Zeile schlägt `verify` fehl.
 7. `make release` erzeugt Linux-Binaries (amd64/arm64) mit eingebettetem Frontend; agent + panel starten in der Linux-VM.
