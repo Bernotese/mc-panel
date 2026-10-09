@@ -67,17 +67,20 @@ func (s *Service) APIRateLimit(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Sessions and anonymous IP keys live in separate maps, so rotating anonymous keys
+		// (e.g. many IPv6 networks) cannot push new sessions into the shared overflow bucket.
+		lim := s.apiAnon
 		key := "ip:invalid" // dedicated bucket for requests without a usable client IP
 		if k := httpx.IPKey(normalizeIP(httpx.ClientIP(r.Context()))); k.IsValid() {
 			key = "ip:" + k.String()
 		}
 		if p, ok := principal.From(r.Context()); ok && p.SessionID != 0 {
-			key = "session:" + strconv.FormatInt(p.SessionID, 10)
+			lim, key = s.api, "session:"+strconv.FormatInt(p.SessionID, 10)
 		}
 		now := s.clock.Now()
-		take := s.api.take
+		take := lim.take
 		if ip := normalizeIP(httpx.ClientIP(r.Context())); ip.IsValid() && s.snap.Load().allowed(ip, now) {
-			take = s.api.takeExempt // allowlisted callers are not affected by overflow of the shared bucket
+			take = lim.takeExempt // allowlisted callers are not affected by overflow of the shared bucket
 		}
 		if d := take(key, now); d > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(RetryAfterSeconds(d)))
