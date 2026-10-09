@@ -10,6 +10,7 @@ import (
 	"mcpanel/internal/audit"
 	"mcpanel/internal/httpx"
 	"mcpanel/internal/notify"
+	"mcpanel/internal/password"
 	"mcpanel/internal/rbac"
 	"mcpanel/internal/store"
 )
@@ -88,6 +89,9 @@ func (h *Handler) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	case isValidationError(err):
 		writeValidation(w, r, err.Error())
+		return
+	case errors.Is(err, password.ErrBusy):
+		writeBusy(w, r)
 		return
 	case err != nil:
 		httpx.Internal(w, r, err)

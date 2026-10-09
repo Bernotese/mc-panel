@@ -40,7 +40,10 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := h.q.AuthGetUserByUsername(ctx, req.Username)
 	if errors.Is(err, sql.ErrNoRows) {
-		password.DummyVerify(req.Password)
+		if errors.Is(password.DummyVerifyContext(ctx, req.Password), password.ErrBusy) {
+			busy(w, r)
+			return
+		}
 		h.recordAttempt(r, req.Username, 0, defense.StagePassword, false, reasonUnknownUser)
 		invalidCredentials(w, r)
 		return
@@ -49,11 +52,15 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	ok, rehash, err := password.Verify(req.Password, user.PasswordHash)
-	if err != nil {
+	ok, rehash, err := password.VerifyContext(ctx, req.Password, user.PasswordHash)
+	if errors.Is(err, password.ErrMalformedHash) {
 		// Unusable hash (e.g. "!" from user creation without password): equalise timing.
-		password.DummyVerify(req.Password)
+		err = password.DummyVerifyContext(ctx, req.Password)
 		ok = false
+	}
+	if errors.Is(err, password.ErrBusy) {
+		busy(w, r)
+		return
 	}
 	if !ok {
 		h.recordAttempt(r, user.Username, user.ID, defense.StagePassword, false, reasonBadPassword)
@@ -140,7 +147,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) rehashPassword(r *http.Request, u store.User, pw string) {
-	hash, err := password.Hash(pw)
+	hash, err := password.HashContext(r.Context(), pw)
 	if err == nil {
 		err = h.q.AuthRehashPassword(r.Context(), store.AuthRehashPasswordParams{
 			PasswordHash: hash, Now: h.clock.Now().UnixMilli(), ID: u.ID,
