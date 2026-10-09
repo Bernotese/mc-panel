@@ -14,7 +14,11 @@ import (
 	"mcpanel/internal/store"
 )
 
-const maxRuleCommentLen = 200
+const (
+	maxRuleCommentLen = 200
+	minAllowBitsV4    = 8
+	minAllowBitsV6    = 32
+)
 
 var errBadCIDR = errors.New("cidr must be an IPv4 or IPv6 address or network, e.g. 203.0.113.0/24")
 
@@ -88,6 +92,11 @@ func (h *Handler) createIPRule(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Kind != "allow" && req.Kind != "deny" {
 		validation(w, r, "kind must be allow or deny")
+		return
+	}
+	if req.Kind == "allow" && (p.Addr().Is4() && p.Bits() < minAllowBitsV4 || p.Addr().Is6() && p.Bits() < minAllowBitsV6) {
+		// an allow rule for (nearly) everything would disable jails, deny rules and the country filter
+		validation(w, r, "allow rules must cover at most a /8 (IPv4) or /32 (IPv6) network")
 		return
 	}
 	comment := strings.TrimSpace(req.Comment)

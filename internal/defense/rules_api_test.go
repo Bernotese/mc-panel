@@ -121,3 +121,28 @@ func TestLockoutCheckFailsClosedWithoutCallerIP(t *testing.T) {
 		t.Fatal("an unknown caller IP cannot be proven safe; locksOut must report a reason")
 	}
 }
+
+func TestDeleteAllowRuleMaskingOwnJailIsRejected(t *testing.T) {
+	e := newEnv(t)
+	own := e.addRule(t, callerIP+"/32", "allow", nil)
+	// a jail on the caller's key exists but is masked by the allow rule
+	e.insertJail(t, callerIP+"/32", e.clk.Now(), e.clk.Now().Add(time.Hour))
+	e.reload(t)
+	wantStatus(t, e.call(t, http.MethodDelete, fmt.Sprintf("/security/ip-rules/%d", own), nil, callerIP),
+		http.StatusConflict, httpx.CodeConflict)
+}
+
+func TestCreateAllowRuleRejectsOverlyBroadPrefixes(t *testing.T) {
+	e := newEnv(t)
+	for _, cidr := range []string{"0.0.0.0/0", "10.0.0.0/7", "::/0", "2000::/31"} {
+		rec := e.call(t, http.MethodPost, "/security/ip-rules", ruleBody(cidr, "allow"), callerIP)
+		if rec.Code != http.StatusBadRequest || errCode(rec) != httpx.CodeValidation {
+			t.Errorf("%s: %d %s", cidr, rec.Code, rec.Body)
+		}
+	}
+	for _, cidr := range []string{"10.0.0.0/8", "2001:db8::/32"} {
+		wantStatus(t, e.call(t, http.MethodPost, "/security/ip-rules", ruleBody(cidr, "allow"), callerIP), http.StatusCreated, "")
+	}
+	// deny rules are not restricted by this limit
+	wantStatus(t, e.call(t, http.MethodPost, "/security/ip-rules", ruleBody("203.0.0.0/8", "deny"), callerIP), http.StatusCreated, "")
+}
