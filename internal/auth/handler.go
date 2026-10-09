@@ -123,6 +123,11 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Patch("/me", rbac.Authenticated(), h.updateMe)
 	api.Post("/me/password", rbac.Authenticated(), h.changePassword)
 	api.Post("/me/recovery-codes", rbac.Authenticated().WithSudo(), h.regenerateRecoveryCodes)
+	api.Get("/me/sessions", rbac.Authenticated(), h.listMySessions)
+	api.Delete("/me/sessions/{id}", rbac.Authenticated(), h.revokeMySession)
+	api.Post("/me/sessions/revoke-others", rbac.Authenticated(), h.revokeOtherSessions)
+	api.Get("/admin/sessions", rbac.Admin(), h.listAllSessions)
+	api.Delete("/admin/sessions/{id}", rbac.Admin().WithSudo(), h.revokeAnySession)
 }
 
 type factors struct {
