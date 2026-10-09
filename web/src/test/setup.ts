@@ -1,7 +1,9 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-import { afterEach } from 'vitest'
+import { afterAll, afterEach, beforeAll } from 'vitest'
 import i18n, { i18nReady } from '@/i18n'
+import { resetDb } from '@/mocks/db'
+import { server } from '@/mocks/node'
 import { installMatchMedia, setPrefersDark, setViewport } from './media'
 
 class ResizeObserverStub {
@@ -18,10 +20,14 @@ installMatchMedia()
 await i18nReady
 await i18n.changeLanguage('de')
 
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(async () => {
   cleanup()
+  server.resetHandlers()
+  resetDb()
   setViewport('desktop')
   setPrefersDark(false)
   localStorage.clear()
   await i18n.changeLanguage('de')
 })
+afterAll(() => server.close())
