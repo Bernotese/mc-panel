@@ -1,8 +1,11 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import openapiYaml from '../../../api/openapi.yaml?raw'
 import { callApi, field } from '@/test/call-api'
 import { db, loginAs } from './db'
 import { operations } from './handlers'
+
+const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../api/openapi.yaml'), 'utf8')
 
 describe('mock coverage', () => {
   it('mocks every operationId of api/openapi.yaml exactly once', () => {
