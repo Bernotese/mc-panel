@@ -74,7 +74,12 @@ func (s *Service) APIRateLimit(next http.Handler) http.Handler {
 		if p, ok := principal.From(r.Context()); ok && p.SessionID != 0 {
 			key = "session:" + strconv.FormatInt(p.SessionID, 10)
 		}
-		if d := s.api.take(key, s.clock.Now()); d > 0 {
+		now := s.clock.Now()
+		take := s.api.take
+		if ip := normalizeIP(httpx.ClientIP(r.Context())); ip.IsValid() && s.snap.Load().allowed(ip, now) {
+			take = s.api.takeExempt // allowlisted callers are not affected by overflow of the shared bucket
+		}
+		if d := take(key, now); d > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(RetryAfterSeconds(d)))
 			httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "too many requests")
 			return
