@@ -3,6 +3,7 @@ import type { Messages } from './de'
 export const en: Messages = {
   common: {
     cancel: 'Cancel',
+    close: 'Close',
     save: 'Save',
     delete: 'Delete',
     create: 'Create',
