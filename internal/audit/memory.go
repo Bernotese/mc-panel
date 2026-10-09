@@ -5,6 +5,8 @@ import (
 	"sync"
 )
 
+var _ Recorder = (*MemoryRecorder)(nil)
+
 // MemoryRecorder is a test double that keeps entries in memory.
 type MemoryRecorder struct {
 	mu      sync.Mutex
