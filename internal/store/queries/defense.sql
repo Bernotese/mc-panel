@@ -82,3 +82,54 @@ SELECT * FROM ip_rules WHERE id = sqlc.arg(id);
 
 -- name: DefenseDeleteIPRule :execrows
 DELETE FROM ip_rules WHERE id = sqlc.arg(id);
+
+-- name: DefenseAttemptSeries :many
+SELECT CAST((ts - sqlc.arg(start)) / sqlc.arg(bucket_ms) AS INTEGER) AS bucket,
+       count(CASE WHEN success = 1 THEN 1 END) AS successes,
+       count(CASE WHEN success = 0 THEN 1 END) AS failures
+FROM login_attempts
+WHERE ts >= sqlc.arg(since)
+GROUP BY bucket
+ORDER BY bucket;
+
+-- name: DefenseTopFailingIPs :many
+SELECT ip_key, CAST(MAX(country) AS TEXT) AS country, count(*) AS failures
+FROM login_attempts
+WHERE success = 0 AND ts >= sqlc.arg(since)
+GROUP BY ip_key
+ORDER BY failures DESC, ip_key
+LIMIT 10;
+
+-- name: DefenseTopFailingCountries :many
+SELECT country, count(*) AS failures
+FROM login_attempts
+WHERE success = 0 AND ts >= sqlc.arg(since) AND country <> ''
+GROUP BY country
+ORDER BY failures DESC, country
+LIMIT 10;
+
+-- name: DefenseCountFailuresTotal :one
+SELECT count(*) FROM login_attempts WHERE success = 0 AND ts >= sqlc.arg(since);
+
+-- name: DefenseCountActiveJails :one
+SELECT count(*) FROM jails WHERE lifted_at IS NULL AND expires_at > sqlc.arg(now);
+
+-- name: DefenseNewDeviceLogins :many
+SELECT a.ts, a.username, a.ip, a.country, a.user_agent
+FROM login_attempts a
+WHERE a.success = 1 AND a.reason = 'complete' AND a.user_id IS NOT NULL
+  AND a.ts >= sqlc.arg(since)
+  AND NOT EXISTS (
+      SELECT 1 FROM login_attempts b
+      WHERE b.user_id = a.user_id AND b.ip_key = a.ip_key AND b.success = 1
+        AND b.reason = 'complete' AND b.id < a.id)
+ORDER BY a.ts DESC, a.id DESC
+LIMIT 50;
+
+-- name: DefenseListAttempts :many
+SELECT * FROM login_attempts
+WHERE id < sqlc.arg(before_id)
+  AND (sqlc.arg(any_success) = 1 OR success = sqlc.arg(success))
+  AND (sqlc.arg(any_ip) = 1 OR ip = sqlc.arg(ip) OR ip_key = sqlc.arg(ip_key))
+ORDER BY id DESC
+LIMIT sqlc.arg(lim);
