@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+	"time"
 
 	"mcpanel/internal/audit"
 	"mcpanel/internal/httpx"
@@ -102,4 +103,20 @@ func TestPutSettingsRejectsSelfLockout(t *testing.T) {
 		wantStatus(t, e.call(t, http.MethodPut, "/security/settings", settingsBody(false, false, []string{"DE"}), callerIP),
 			http.StatusOK, "")
 	})
+}
+
+func TestPutSettingsExpiringAllowRuleDoesNotSatisfyAdminAllowlist(t *testing.T) {
+	e := newEnv(t)
+	exp := t0.Add(time.Hour)
+	e.addRule(t, "198.51.100.0/24", "allow", &exp)
+	wantStatus(t, e.call(t, http.MethodPut, "/security/settings", settingsBody(false, true, []string{}), callerIP),
+		http.StatusConflict, httpx.CodeConflict)
+}
+
+func TestPutSettingsCountriesRequireGeoIP(t *testing.T) {
+	e := newEnv(t, func(d *Deps) { d.GeoAvailable = false })
+	wantStatus(t, e.call(t, http.MethodPut, "/security/settings", settingsBody(false, false, []string{"DE"}), callerIP),
+		http.StatusBadRequest, httpx.CodeValidation)
+	wantStatus(t, e.call(t, http.MethodPut, "/security/settings", settingsBody(true, false, []string{}), callerIP),
+		http.StatusOK, "")
 }

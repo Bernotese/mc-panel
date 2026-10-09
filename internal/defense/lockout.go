@@ -5,8 +5,20 @@ import (
 	"slices"
 	"time"
 
+	"mcpanel/internal/httpx"
 	"mcpanel/internal/store"
 )
+
+// allowedPermanently is like allowed but ignores allow rules that expire.
+func (s *snapshot) allowedPermanently(ip netip.Addr, now time.Time) bool {
+	ip = normalizeIP(ip)
+	for _, r := range s.allow {
+		if r.expires.IsZero() && r.active(now) && r.prefix.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
 
 // locksOut reports why ip would be locked out of the panel under this snapshot.
 func (s *snapshot) locksOut(ip netip.Addr, now time.Time, geo GeoResolver) string {
@@ -17,8 +29,13 @@ func (s *snapshot) locksOut(ip netip.Addr, now time.Time, geo GeoResolver) strin
 	if r := s.blockReason(ip, now, geo); r != "" {
 		return r
 	}
-	if s.settings.AdminAllowlistOnly && !ip.IsLoopback() && !s.allowed(ip, now) {
+	if s.settings.AdminAllowlistOnly && !ip.IsLoopback() && !s.allowedPermanently(ip, now) {
+		// a rule that expires would silently lock the admin out later
 		return "admin_allowlist"
+	}
+	// removing an allow rule must not expose the caller to a jail it currently masks
+	if _, ok := s.jailedUntil(httpx.IPKey(ip), now); ok && !s.allowed(ip, now) {
+		return "jailed"
 	}
 	return ""
 }

@@ -65,6 +65,10 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) {
 		validation(w, r, "too many allowed countries")
 		return
 	}
+	if len(req.AllowedCountries) > 0 && !h.s.GeoAvailable() {
+		validation(w, r, "country filter requires the GeoIP database, which is not available")
+		return
+	}
 	countries := make([]string, 0, len(req.AllowedCountries))
 	seen := make(map[string]bool, len(req.AllowedCountries))
 	for _, c := range req.AllowedCountries {
