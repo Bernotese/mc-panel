@@ -6,6 +6,8 @@ import (
 	"sync"
 )
 
+var _ LoginGuard = (*FakeGuard)(nil)
+
 // FakeGuard is a test double for LoginGuard. Set the *Err fields to simulate blocks.
 type FakeGuard struct {
 	mu              sync.Mutex

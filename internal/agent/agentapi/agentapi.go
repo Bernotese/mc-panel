@@ -66,18 +66,31 @@ type Firewall interface {
 
 // ValidateBanPrefix only allows single IPv4 hosts (/32) and IPv6 /64../128,
 // never loopback – so a compromised panel cannot firewall whole networks.
+// IPv4-mapped IPv6 addresses, unmasked prefixes, and link-local or multicast
+// addresses are refused as well.
 func ValidateBanPrefix(p netip.Prefix) error {
 	if !p.IsValid() {
 		return errors.New("invalid prefix")
 	}
 	a := p.Addr()
-	if a.IsLoopback() || a.IsUnspecified() {
+	if a.Is4In6() {
+		return fmt.Errorf("refusing IPv4-mapped IPv6 prefix %s", p)
+	}
+	m := p.Masked()
+	if p != m {
+		return fmt.Errorf("prefix %s has host bits set, want %s", p, m)
+	}
+	ma := m.Addr()
+	if ma.IsLoopback() || ma.IsUnspecified() || ma.IsLinkLocalUnicast() || ma.IsMulticast() {
 		return fmt.Errorf("refusing to ban %s", p)
 	}
-	if a.Is4() && p.Bits() != 32 {
+	if p.Contains(netip.MustParseAddr("::1")) || p.Contains(netip.IPv6Unspecified()) {
+		return fmt.Errorf("refusing to ban %s", p)
+	}
+	if ma.Is4() && m.Bits() != 32 {
 		return fmt.Errorf("IPv4 bans must be /32, got %s", p)
 	}
-	if a.Is6() && p.Bits() < 64 {
+	if ma.Is6() && m.Bits() < 64 {
 		return fmt.Errorf("IPv6 bans must be /64 or narrower, got %s", p)
 	}
 	return nil

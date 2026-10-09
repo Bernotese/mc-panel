@@ -39,6 +39,11 @@ type Nop struct{}
 
 func (Nop) Notify(context.Context, Event) {}
 
+var (
+	_ Notifier = Nop{}
+	_ Notifier = (*Recording)(nil)
+)
+
 // Recording is a test double.
 type Recording struct {
 	mu     sync.Mutex

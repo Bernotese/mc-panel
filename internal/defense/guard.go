@@ -44,7 +44,7 @@ func (e *RateLimitError) Error() string {
 
 // LoginGuard is consulted by the auth handlers.
 type LoginGuard interface {
-	// CheckLogin is called before verifying a password. Returns nil, ErrJailed or *RateLimitError.
+	// CheckLogin is called before verifying a password. Returns nil, ErrJailed, ErrIPBlocked or *RateLimitError.
 	CheckLogin(ctx context.Context, ip netip.Addr, username string) error
 	// CheckSecondFactor is called before verifying a 2FA/sudo code. key identifies the session.
 	CheckSecondFactor(ctx context.Context, ip netip.Addr, key string) error
