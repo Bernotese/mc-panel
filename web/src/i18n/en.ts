@@ -175,6 +175,8 @@ export const en: Messages = {
       stop: 'Stop',
       restart: 'Restart',
     },
+    stop_title: 'Stop server "{{name}}"?',
+    stop_description: 'Players are disconnected as soon as the server shuts down.',
     power_requested: '{{action}} requested for “{{name}}”.',
   },
   users: {
@@ -309,6 +311,8 @@ export const en: Messages = {
       created: '{{ip}} blocked.',
       lift: 'Lift',
       lift_for: 'Lift block for {{ip}}',
+      lift_title: 'Lift the ban for {{ip}}?',
+      lift_description: 'The IP address may sign in again immediately.',
       lifted: 'Block for {{ip}} lifted.',
       col: {
         ip: 'IP',

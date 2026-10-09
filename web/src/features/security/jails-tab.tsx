@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { unwrap, unwrapVoid } from '@/api/errors'
 import type { Jail } from '@/api/types'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { DataList, type Column } from '@/components/data-list'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -28,6 +29,7 @@ export function JailsTab() {
   const notifyError = useErrorToast()
   const [onlyActive, setOnlyActive] = useState(true)
   const [creating, setCreating] = useState(false)
+  const [liftTarget, setLiftTarget] = useState<Jail | null>(null)
   const jails = useQuery({
     queryKey: ['security', 'jails', onlyActive],
     queryFn: () => unwrap(api.GET('/security/jails', { params: { query: { active: onlyActive } } })),
@@ -39,6 +41,7 @@ export function JailsTab() {
       void queryClient.invalidateQueries({ queryKey: securityKey })
     },
     onError: notifyError,
+    onSettled: () => setLiftTarget(null),
   })
   const fetchedAt = jails.dataUpdatedAt
 
@@ -79,7 +82,7 @@ export function JailsTab() {
             variant="outline"
             aria-label={t('security.jails.lift_for', { ip: j.ip_key })}
             disabled={lift.isPending}
-            onClick={() => lift.mutate(j)}
+            onClick={() => setLiftTarget(j)}
           >
             {t('security.jails.lift')}
           </Button>
@@ -109,6 +112,15 @@ export function JailsTab() {
         <DataList items={jails.data ?? []} columns={columns} rowKey={(j) => j.id} caption={t('security.jails.caption')} empty={t('security.jails.empty')} />
       )}
       <CreateJailDialog open={creating} onOpenChange={setCreating} />
+      <ConfirmDialog
+        open={liftTarget !== null}
+        onOpenChange={(open) => !open && setLiftTarget(null)}
+        title={t('security.jails.lift_title', { ip: liftTarget?.ip_key ?? '' })}
+        description={t('security.jails.lift_description')}
+        confirmLabel={t('security.jails.lift')}
+        pending={lift.isPending}
+        onConfirm={() => liftTarget && lift.mutate(liftTarget)}
+      />
     </div>
   )
 }

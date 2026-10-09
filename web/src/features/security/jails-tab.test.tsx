@@ -19,6 +19,8 @@ describe('JailsTab', () => {
     const user = userEvent.setup()
     await renderWithProviders(<JailsTab />, { me: loginAs('admin') })
     await user.click(await screen.findByRole('button', { name: 'Sperre für 203.0.113.5/32 aufheben' }))
+    const confirm = screen.getByRole('dialog', { name: 'Sperre für 203.0.113.5/32 aufheben?' })
+    await user.click(within(confirm).getByRole('button', { name: 'Aufheben' }))
     const sudo = await screen.findByRole('dialog', { name: 'Aktion bestätigen' })
     await user.type(within(sudo).getByLabelText('Code aus der Authenticator-App'), MOCK_TOTP_CODE)
     await user.click(within(sudo).getByRole('button', { name: 'Bestätigen' }))

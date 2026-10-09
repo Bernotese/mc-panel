@@ -8,6 +8,7 @@ interface ApiErrorInit {
   message: string
   requestId?: string
   retryAfterSeconds?: number
+  sudoCancelled?: boolean
 }
 
 export class ApiError extends Error {
@@ -15,6 +16,8 @@ export class ApiError extends Error {
   readonly code: ApiErrorCode
   readonly requestId?: string
   readonly retryAfterSeconds?: number
+  /** The 403 sudo_required was returned because the user dismissed the sudo dialog – nothing to report. */
+  readonly sudoCancelled: boolean
 
   constructor(init: ApiErrorInit) {
     super(init.message)
@@ -23,7 +26,20 @@ export class ApiError extends Error {
     this.code = init.code
     this.requestId = init.requestId
     this.retryAfterSeconds = init.retryAfterSeconds
+    this.sudoCancelled = init.sudoCancelled === true
   }
+}
+
+const cancelledSudoResponses = new WeakSet<Response>()
+
+/** Called by the API middleware when the user closed the sudo dialog without confirming. */
+export function markSudoCancelled(response: Response): Response {
+  cancelledSudoResponses.add(response)
+  return response
+}
+
+export function isSudoCancelled(err: unknown): boolean {
+  return err instanceof ApiError && err.sudoCancelled
 }
 
 const KNOWN_CODES: ReadonlySet<string> = new Set<ErrorCode>([
@@ -52,6 +68,7 @@ function isErrorCode(value: unknown): value is ErrorCode {
 
 export function toApiError(response: Response, body: unknown): ApiError {
   const retryHeader = response.headers.get('Retry-After')
+  const sudoCancelled = cancelledSudoResponses.has(response)
   const retryAfterSeconds = retryHeader && /^\d+$/.test(retryHeader) ? Number(retryHeader) : undefined
   if (typeof body === 'object' && body !== null) {
     const b = body as { error?: unknown; message?: unknown; request_id?: unknown }
@@ -62,6 +79,7 @@ export function toApiError(response: Response, body: unknown): ApiError {
         message: typeof b.message === 'string' ? b.message : b.error,
         requestId: typeof b.request_id === 'string' ? b.request_id : undefined,
         retryAfterSeconds,
+        sudoCancelled,
       })
     }
   }

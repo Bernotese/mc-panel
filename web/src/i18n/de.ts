@@ -173,6 +173,8 @@ export const de = {
       stop: 'Stopp',
       restart: 'Neustart',
     },
+    stop_title: 'Server „{{name}}“ stoppen?',
+    stop_description: 'Spieler werden getrennt, sobald der Server heruntergefahren wird.',
     power_requested: '{{action}} für „{{name}}“ angefordert.',
   },
   users: {
@@ -308,6 +310,8 @@ export const de = {
       lift: 'Aufheben',
       lift_for: 'Sperre für {{ip}} aufheben',
       lifted: 'Sperre für {{ip}} aufgehoben.',
+      lift_title: 'Sperre für {{ip}} aufheben?',
+      lift_description: 'Die IP-Adresse darf sich danach sofort wieder anmelden.',
       col: {
         ip: 'IP',
         reason: 'Grund',
