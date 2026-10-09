@@ -1,6 +1,7 @@
 export const de = {
   common: {
     cancel: 'Abbrechen',
+    close: 'Schließen',
     save: 'Speichern',
     delete: 'Löschen',
     create: 'Anlegen',

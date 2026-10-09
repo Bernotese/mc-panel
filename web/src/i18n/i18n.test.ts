@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { de } from './de'
 import { en } from './en'
 import i18n, { detectLocale } from './index'
@@ -78,5 +78,28 @@ describe('i18n resources', () => {
     expect(detectLocale(['fr-FR', 'de-AT'])).toBe('de')
     expect(detectLocale(['fr'])).toBe('de')
     expect(detectLocale([])).toBe('de')
+  })
+
+  it('keeps <html lang> in sync with the active locale', async () => {
+    await i18n.changeLanguage('en')
+    expect(document.documentElement.lang).toBe('en')
+    await i18n.changeLanguage('de')
+    expect(document.documentElement.lang).toBe('de')
+  })
+
+  describe('before login', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+      vi.resetModules()
+    })
+
+    it('sets <html lang> from the detected browser language', async () => {
+      vi.stubGlobal('navigator', { ...navigator, languages: ['en-GB', 'de'] })
+      vi.resetModules()
+      document.documentElement.lang = ''
+      const fresh = await import('./index')
+      await fresh.i18nReady
+      expect(document.documentElement.lang).toBe('en')
+    })
   })
 })

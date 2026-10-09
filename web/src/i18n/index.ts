@@ -15,6 +15,13 @@ export function detectLocale(languages: readonly string[] = typeof navigator ===
   return 'de'
 }
 
+function syncHtmlLang(language: string): void {
+  if (typeof document !== 'undefined') document.documentElement.lang = language
+}
+
+// Registered before init so the detected (pre-login) language is applied to <html lang> as well.
+i18n.on('languageChanged', syncHtmlLang)
+
 export const i18nReady = i18n.use(initReactI18next).init({
   resources: { de: { translation: de }, en: { translation: en } },
   lng: detectLocale(),
