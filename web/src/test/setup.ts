@@ -1,6 +1,8 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll } from 'vitest'
+import { setCsrfToken } from '@/api/csrf'
+import { resetApiHandlers } from '@/api/handlers'
 import i18n, { i18nReady } from '@/i18n'
 import { resetDb } from '@/mocks/db'
 import { server } from '@/mocks/node'
@@ -25,6 +27,8 @@ afterEach(async () => {
   cleanup()
   server.resetHandlers()
   resetDb()
+  resetApiHandlers()
+  setCsrfToken('')
   setViewport('desktop')
   setPrefersDark(false)
   localStorage.clear()
