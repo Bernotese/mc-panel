@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -24,6 +25,33 @@ import (
 	"mcpanel/internal/users"
 	"mcpanel/internal/webui"
 )
+
+// sessionPruneInterval is how often ended sessions older than auth.SessionRetention are deleted.
+const sessionPruneInterval = time.Hour
+
+// pruneSessionsLoop calls prune once immediately and then every interval until ctx is done.
+func pruneSessionsLoop(ctx context.Context, prune func(context.Context) (int64, error), every time.Duration) {
+	once := func() {
+		n, err := prune(ctx)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			slog.Error("prune sessions", "err", err)
+		case n > 0:
+			slog.Info("pruned old sessions", "count", n)
+		}
+	}
+	once()
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			once()
+		}
+	}
+}
 
 type appDeps struct {
 	Clock clock.Clock
@@ -111,9 +139,10 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 
 	run := func(ctx context.Context) {
 		var wg sync.WaitGroup
-		wg.Add(2)
+		wg.Add(3)
 		go func() { defer wg.Done(); disp.Run(ctx) }()
 		go func() { defer wg.Done(); svc.Run(ctx) }()
+		go func() { defer wg.Done(); pruneSessionsLoop(ctx, authH.PruneSessions, sessionPruneInterval) }()
 		wg.Wait()
 	}
 	return &app{

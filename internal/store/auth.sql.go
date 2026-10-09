@@ -551,6 +551,20 @@ func (q *Queries) AuthListCredentials(ctx context.Context, userID int64) ([]Weba
 	return items, nil
 }
 
+const authPruneSessions = `-- name: AuthPruneSessions :execrows
+DELETE FROM sessions
+WHERE expires_at < ?1 OR (revoked_at IS NOT NULL AND revoked_at < ?1)
+`
+
+// Removes sessions that ended (revoked or expired) before the cutoff.
+func (q *Queries) AuthPruneSessions(ctx context.Context, cutoff int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, authPruneSessions, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const authRehashPassword = `-- name: AuthRehashPassword :exec
 UPDATE users SET password_hash = ?1, updated_at = ?2
 WHERE id = ?3

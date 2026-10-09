@@ -128,3 +128,26 @@ func TestRunStopsOnCancel(t *testing.T) {
 		t.Fatal("background loops did not stop after cancel")
 	}
 }
+
+func TestPruneSessionsLoopRunsImmediatelyAndPeriodically(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := make(chan struct{}, 10)
+	done := make(chan struct{})
+	go func() {
+		pruneSessionsLoop(ctx, func(context.Context) (int64, error) { calls <- struct{}{}; return 1, nil }, 10*time.Millisecond)
+		close(done)
+	}()
+	for i := 0; i < 3; i++ {
+		select {
+		case <-calls:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("prune call %d did not happen", i+1)
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("loop did not stop on cancel")
+	}
+}
