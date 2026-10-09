@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"unicode/utf8"
 
 	"mcpanel/internal/store"
 )
@@ -37,11 +38,22 @@ func Verify(ctx context.Context, db *sql.DB) (VerifyReport, error) {
 			return VerifyReport{OK: true, Checked: checked}, nil
 		}
 		for _, row := range rows {
-			if row.ID != lastID+1 || row.PrevHash != prevHash || row.Hash != ComputeHash(prevHash, row) {
+			if row.ID != lastID+1 || !validRow(row) || row.PrevHash != prevHash || row.Hash != ComputeHash(prevHash, row) {
 				return VerifyReport{Checked: checked, FirstBadID: row.ID}, nil
 			}
 			prevHash, lastID = row.Hash, row.ID
 			checked++
 		}
 	}
+}
+
+// validRow reports whether every stored text field is valid UTF-8. The canonical form
+// (encoding/json) hashes invalid bytes as U+FFFD, so such rows could be altered unnoticed.
+func validRow(row store.AuditLog) bool {
+	for _, s := range []string{row.ActorType, row.ActorName, row.Action, row.Target, row.Ip, row.Result, row.Details} {
+		if !utf8.ValidString(s) {
+			return false
+		}
+	}
+	return true
 }

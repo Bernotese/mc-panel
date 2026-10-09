@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"mcpanel/internal/clock"
@@ -39,6 +40,7 @@ func (r *SQLRecorder) Record(ctx context.Context, e Entry) error {
 	if err != nil {
 		return err
 	}
+	details = validUTF8(details)
 	// The action already happened; the entry must be written even if the request is cancelled.
 	ctx = context.WithoutCancel(ctx)
 
@@ -121,5 +123,13 @@ func normalize(ctx context.Context, e Entry) (Entry, error) {
 			e.IP = ip.String()
 		}
 	}
+	// encoding/json maps invalid UTF-8 to U+FFFD while hashing; store exactly what is hashed
+	// so differently-tampered bytes can never share a hash.
+	e.Action = validUTF8(e.Action)
+	e.Target = validUTF8(e.Target)
+	e.IP = validUTF8(e.IP)
+	e.ActorName = validUTF8(e.ActorName)
 	return e, nil
 }
+
+func validUTF8(s string) string { return strings.ToValidUTF8(s, "\uFFFD") }
