@@ -23,18 +23,35 @@ describe('wireApi', () => {
     expect(nav.push).toHaveBeenCalledWith('/login')
   })
 
-  it('does not navigate again when already on a login page', () => {
-    const nav = fakeNavigator('/login/2fa')
+  it('does not navigate again when already on /login', () => {
+    const nav = fakeNavigator('/login')
     wireApi(new QueryClient(), nav)
     apiHandlers().onUnauthorized()
     expect(nav.push).not.toHaveBeenCalled()
   })
 
-  it('sends setup-stage users to /setup-2fa', () => {
+  it('sends an expired pre-auth session on /login/2fa back to /login', () => {
+    const nav = fakeNavigator('/login/2fa')
+    wireApi(new QueryClient(), nav)
+    apiHandlers().onUnauthorized()
+    expect(nav.push).toHaveBeenCalledWith('/login')
+  })
+
+  it('sends setup-stage users to /setup-2fa', async () => {
     const nav = fakeNavigator('/users')
     wireApi(new QueryClient(), nav)
-    apiHandlers().onSetupRequired()
+    await apiHandlers().onSetupRequired()
     expect(nav.push).toHaveBeenCalledWith('/setup-2fa')
+  })
+
+  it('refreshes a cached full-stage Me before navigating to /setup-2fa', async () => {
+    const qc = new QueryClient()
+    qc.setQueryData(meKey, { ...loginAs('newadmin', { stage: 'full' }), stage: 'full' })
+    const stageAtPush: Array<string | undefined> = []
+    const nav = { currentPath: () => '/', push: vi.fn(() => stageAtPush.push(qc.getQueryData<{ stage: string }>(meKey)?.stage)) }
+    wireApi(qc, nav)
+    await apiHandlers().onSetupRequired()
+    expect(stageAtPush).toEqual(['setup'])
   })
 
   it('applies every Me the client sees', () => {

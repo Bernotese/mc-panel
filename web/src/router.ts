@@ -1,14 +1,23 @@
 // web/src/router.ts
 import type { QueryClient } from '@tanstack/react-query'
-import { createRouter } from '@tanstack/react-router'
+import { createRouter, type RouterHistory } from '@tanstack/react-router'
+import { RouteError } from '@/components/route-error'
 import { routeTree } from './routeTree.gen'
 
 export interface RouterContext {
   queryClient: QueryClient
 }
 
-export function createAppRouter(queryClient: QueryClient) {
-  return createRouter({ routeTree, context: { queryClient }, defaultPreload: 'intent', defaultPreloadStaleTime: 0, scrollRestoration: true })
+export function createAppRouter(queryClient: QueryClient, history?: RouterHistory) {
+  return createRouter({
+    routeTree,
+    context: { queryClient },
+    history,
+    defaultPreload: 'intent',
+    defaultPreloadStaleTime: 0,
+    scrollRestoration: true,
+    defaultErrorComponent: RouteError,
+  })
 }
 
 declare module '@tanstack/react-router' {

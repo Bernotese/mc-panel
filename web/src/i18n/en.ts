@@ -27,6 +27,7 @@ export const en: Messages = {
     home: 'Back to overview',
   },
   errors: {
+    title: 'Something went wrong',
     bad_request: 'Invalid request',
     validation_failed: 'Invalid input',
     unauthorized: 'Please sign in again.',

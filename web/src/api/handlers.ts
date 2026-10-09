@@ -3,7 +3,8 @@ import type { Me } from './types'
 
 export interface ApiHandlers {
   onUnauthorized(): void
-  onSetupRequired(): void
+  /** May be async: the middleware waits for it before handing the 403 back to the caller. */
+  onSetupRequired(): void | Promise<void>
   requestSudo(): Promise<boolean>
   onMe(me: Me): void
 }

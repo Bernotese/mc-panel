@@ -25,6 +25,7 @@ export const de = {
     home: 'Zur Übersicht',
   },
   errors: {
+    title: 'Etwas ist schiefgelaufen',
     bad_request: 'Ungültige Anfrage',
     validation_failed: 'Eingaben ungültig',
     unauthorized: 'Bitte melde dich erneut an.',

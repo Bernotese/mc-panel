@@ -3,12 +3,16 @@ import { redirect } from '@tanstack/react-router'
 import type { Me } from '@/api/types'
 import type { RouterContext } from '@/router'
 import type { AuthPath } from './guards'
-import { loadMe } from './me'
+import { loadMe, refreshMe } from './me'
 
 /** Turns a pure guard into a TanStack Router beforeLoad hook. */
 export function guardBeforeLoad(guard: (me: Me | null) => AuthPath | null) {
   return async ({ context }: { context: RouterContext }): Promise<void> => {
-    const target = guard(await loadMe(context.queryClient))
+    let target = guard(await loadMe(context.queryClient))
+    if (target) {
+      // Never redirect on cached state alone: the session may have changed stage behind our back (e.g. downgraded to setup).
+      target = guard(await refreshMe(context.queryClient))
+    }
     if (target) throw redirect({ to: target })
   }
 }

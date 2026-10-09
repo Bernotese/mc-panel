@@ -117,7 +117,7 @@ export function createApiClient(baseUrl: string = `${window.location.origin}/api
       }
       if (response.status !== 403 || !copy) return response
       if (code === 'setup_2fa_required') {
-        apiHandlers().onSetupRequired()
+        await apiHandlers().onSetupRequired()
         return response
       }
       if (code === 'csrf_invalid') {
