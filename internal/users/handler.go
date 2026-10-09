@@ -38,6 +38,7 @@ func (h *Handler) Routes(api *rbac.Router) {
 	h.userRoutes(api)
 	h.manageRoutes(api)
 	h.permissionRoutes(api)
+	h.serverRoutes(api)
 }
 
 // pathID parses the {id} URL parameter; false for non-numeric or non-positive values.
