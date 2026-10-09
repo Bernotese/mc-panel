@@ -57,10 +57,10 @@ func RealIP(trusted []netip.Prefix) func(http.Handler) http.Handler {
 
 func peerIP(remote string) netip.Addr {
 	if ap, err := netip.ParseAddrPort(remote); err == nil {
-		return ap.Addr().Unmap()
+		return ap.Addr().Unmap().WithZone("")
 	}
 	if a, err := netip.ParseAddr(remote); err == nil {
-		return a.Unmap()
+		return a.Unmap().WithZone("")
 	}
 	return netip.Addr{}
 }
@@ -72,7 +72,7 @@ func fromXFF(header string, trusted []netip.Prefix, fallback netip.Addr) netip.A
 		if err != nil {
 			return fallback
 		}
-		a = a.Unmap()
+		a = a.Unmap().WithZone("")
 		if !isTrusted(a, trusted) {
 			return a
 		}
