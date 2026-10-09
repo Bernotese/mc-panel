@@ -78,6 +78,7 @@ type Service struct {
 	kick   chan struct{}
 
 	syncMu     sync.Mutex
+	unbMu      sync.Mutex     // guards unbannable (also read by the status endpoint)
 	unbannable map[int64]bool // jail IDs whose ban failed permanently
 }
 
@@ -119,4 +120,16 @@ func (s *Service) kickSync() {
 	case s.kick <- struct{}{}:
 	default:
 	}
+}
+
+func (s *Service) isUnbannable(id int64) bool {
+	s.unbMu.Lock()
+	defer s.unbMu.Unlock()
+	return s.unbannable[id]
+}
+
+func (s *Service) markUnbannable(id int64) {
+	s.unbMu.Lock()
+	defer s.unbMu.Unlock()
+	s.unbannable[id] = true
 }

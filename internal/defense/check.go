@@ -33,10 +33,16 @@ func (s *Service) CheckLogin(_ context.Context, ip netip.Addr, username string) 
 	if s.jailed(ip, now) {
 		return ErrJailed
 	}
-	if d := s.loginIP.take(httpx.IPKey(normalizeIP(ip)).String(), now); d > 0 {
+	allowlisted := s.snap.Load().allowed(normalizeIP(ip), now)
+	ipKey := httpx.IPKey(normalizeIP(ip)).String()
+	take := s.loginIP.take
+	if allowlisted {
+		take = s.loginIP.takeExempt // never fall into the shared overflow bucket
+	}
+	if d := take(ipKey, now); d > 0 {
 		return &RateLimitError{RetryAfter: d}
 	}
-	if s.snap.Load().allowed(normalizeIP(ip), now) {
+	if allowlisted {
 		// allowlisted addresses skip the per-username bucket, so others cannot lock
 		// them out by exhausting it; the per-IP bucket keeps brute force bounded
 		return nil

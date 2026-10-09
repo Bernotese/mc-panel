@@ -1,6 +1,7 @@
 package defense
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -212,5 +213,29 @@ func TestAPIRateLimitAllowlistedBypassesOverflowBucket(t *testing.T) {
 		if rec := e.apiReq("/api/x", 4242, "192.0.2.7"); rec.Code != http.StatusNoContent {
 			t.Fatalf("allowlisted session request %d: %d", i, rec.Code)
 		}
+	}
+}
+
+func TestCheckLoginAllowlistedBypassesIPOverflowBucket(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.addRule(t, "192.0.2.0/24", "allow", nil)
+	e.svc.loginIP.max = 2
+	for i := 1; i <= 2; i++ {
+		if err := e.svc.CheckLogin(ctx, addr(fmt.Sprintf("198.51.100.%d", i)), fmt.Sprintf("u%d", i)); err != nil {
+			t.Fatalf("fill %d: %v", i, err)
+		}
+	}
+	// rotating foreign keys drain the shared overflow bucket
+	drained := false
+	for i := 0; i < 10 && !drained; i++ {
+		drained = e.svc.CheckLogin(ctx, addr(fmt.Sprintf("203.0.113.%d", i+1)), fmt.Sprintf("v%d", i)) != nil
+	}
+	if !drained {
+		t.Fatal("precondition: overflow bucket must be exhausted")
+	}
+	// a new allowlisted key is neither limited by the overflow bucket nor blocked
+	if err := e.svc.CheckLogin(ctx, addr("192.0.2.7"), "admin"); err != nil {
+		t.Fatalf("allowlisted admin login must pass while the map is full: %v", err)
 	}
 }

@@ -170,19 +170,6 @@ func (q *Queries) DefenseCountJailsSince(ctx context.Context, arg DefenseCountJa
 	return count, err
 }
 
-const defenseCountPendingSync = `-- name: DefenseCountPendingSync :one
-SELECT count(*) FROM jails
-WHERE (fw_banned_at IS NULL AND lifted_at IS NULL AND expires_at > ?1)
-   OR (lifted_at IS NOT NULL AND fw_banned_at IS NOT NULL AND fw_unbanned_at IS NULL)
-`
-
-func (q *Queries) DefenseCountPendingSync(ctx context.Context, now int64) (int64, error) {
-	row := q.db.QueryRowContext(ctx, defenseCountPendingSync, now)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const defenseDeleteAttemptsBefore = `-- name: DefenseDeleteAttemptsBefore :execrows
 DELETE FROM login_attempts WHERE ts < ?1
 `

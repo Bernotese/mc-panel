@@ -257,7 +257,8 @@ func (h *Handler) agentStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // pendingSync counts jails waiting for a firewall change. Jails masked by an
-// allow rule are intentionally app-only and not counted.
+// allow rule (app-only by design) or permanently rejected by the agent (not
+// retried) are not counted.
 func (s *Service) pendingSync(ctx context.Context, now time.Time) (int64, error) {
 	toBan, err := s.q.DefenseJailsToBan(ctx, now.UnixMilli())
 	if err != nil {
@@ -269,7 +270,7 @@ func (s *Service) pendingSync(ctx context.Context, now time.Time) (int64, error)
 	}
 	n := int64(len(toUnban))
 	for _, j := range toBan {
-		if !s.maskedByAllow(j, now) {
+		if !s.maskedByAllow(j, now) && !s.isUnbannable(j.ID) {
 			n++
 		}
 	}

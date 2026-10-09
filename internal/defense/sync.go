@@ -83,7 +83,7 @@ func (s *Service) syncBans(ctx context.Context, now time.Time) error {
 		return fmt.Errorf("defense: jails to ban: %w", err)
 	}
 	for _, j := range jails {
-		if s.unbannable[j.ID] || s.maskedByAllow(j, now) {
+		if s.isUnbannable(j.ID) || s.maskedByAllow(j, now) {
 			continue
 		}
 		ok, err := s.banJail(ctx, j, now)
@@ -107,7 +107,7 @@ func (s *Service) banJail(ctx context.Context, j store.Jail, now time.Time) (boo
 		err = agentapi.ValidateBanPrefix(p)
 	}
 	if err != nil {
-		s.unbannable[j.ID] = true
+		s.markUnbannable(j.ID)
 		s.log.Error("defense: jail cannot be banned in the firewall", "jail_id", j.ID, "ip_key", j.IpKey, "err", err)
 		return false, nil
 	}
@@ -122,7 +122,7 @@ func (s *Service) banJail(ctx context.Context, j store.Jail, now time.Time) (boo
 	if isUnavailable(err) {
 		return false, fmt.Errorf("defense: ban %s: %w", p, err)
 	}
-	s.unbannable[j.ID] = true
+	s.markUnbannable(j.ID)
 	s.log.Error("defense: agent rejected ban; not retrying", "jail_id", j.ID, "prefix", p, "err", err)
 	return false, nil
 }
@@ -161,7 +161,7 @@ func (s *Service) reconcile(ctx context.Context, now time.Time) error {
 	}
 	for _, j := range jails {
 		p, err := netip.ParsePrefix(j.IpKey)
-		if err != nil || s.unbannable[j.ID] {
+		if err != nil || s.isUnbannable(j.ID) {
 			continue
 		}
 		if s.maskedByAllow(j, now) {
