@@ -36,14 +36,32 @@ done
 
 die() { echo "vm-setup: $*" >&2; exit 1; }
 
-# vm_root runs the bash script on stdin as root inside the VM.
+# vm_root runs the bash script on stdin as root inside the VM; arguments become $1, $2, ...
 vm_root() {
   case "$VM_TOOL" in
-    lima) limactl shell --workdir / "$VM_NAME" sudo bash -s ;;
-    orb) orb -m "$VM_NAME" -u root bash -s ;;
+    lima) limactl shell --workdir / "$VM_NAME" sudo bash -s -- "$@" ;;
+    orb) orb -m "$VM_NAME" -u root bash -s -- "$@" ;;
     *) die "unknown VM_TOOL=$VM_TOOL (lima|orb)" ;;
   esac
 }
+
+# vm_user runs a command as the default (unprivileged) VM user.
+vm_user() {
+  case "$VM_TOOL" in
+    lima) limactl shell --workdir / "$VM_NAME" "$@" ;;
+    orb) orb -m "$VM_NAME" "$@" ;;
+    *) die "unknown VM_TOOL=$VM_TOOL (lima|orb)" ;;
+  esac
+}
+
+# Temp file inside the VM that holds the uploaded archive; removed again on every exit.
+REMOTE_ARCHIVE=""
+cleanup() {
+  if [ -n "$REMOTE_ARCHIVE" ]; then
+    vm_user rm -f -- "$REMOTE_ARCHIVE" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
 
 # vm_copy copies a local file to a path inside the VM (as the default VM user).
 vm_copy() {
@@ -127,19 +145,22 @@ install_and_start() {
   [ "${#archives[@]}" -eq 1 ] ||
     die "expected exactly one dist/mc-panel_*_linux_${goarch}.tar.gz, found ${#archives[@]} - run make release"
   echo "== installing ${archives[0]}"
-  vm_copy "${archives[0]}" /tmp/mc-panel.tar.gz
+  # Unpredictable name, owned by the VM user (0600), instead of a fixed /tmp path.
+  REMOTE_ARCHIVE="$(vm_user mktemp /tmp/mc-panel.XXXXXXXX.tar.gz)"
+  vm_copy "${archives[0]}" "$REMOTE_ARCHIVE"
 
-  vm_root <<'GUEST'
+  vm_root "$REMOTE_ARCHIVE" <<'GUEST'
 set -euo pipefail
+archive="$1"
 for unit in mcpanel-panel mcpanel-agent; do
   systemctl stop "$unit.service" 2>/dev/null || true
   systemctl reset-failed "$unit.service" 2>/dev/null || true
 done
 
 tmp="$(mktemp -d)"
-tar -xzf /tmp/mc-panel.tar.gz -C "$tmp"
+tar -xzf "$archive" -C "$tmp"
 install -m 0755 -o root -g root "$tmp/panel" "$tmp/agent" /usr/local/bin/
-rm -rf "$tmp" /tmp/mc-panel.tar.gz
+rm -rf "$tmp" "$archive"
 
 cat >/etc/mc-panel/agent.toml <<EOF
 socket = "/run/mc-panel/agent.sock"

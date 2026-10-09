@@ -101,7 +101,6 @@ linters:
     warn-unused: false
     presets:
       - std-error-handling
-      - common-false-positives
     paths:
       - internal/store/db\.go$
       - internal/store/models\.go$
@@ -132,13 +131,20 @@ linters:
         linters:
           - misspell
         text: adress
+      # secretbox reads/creates the master key file at the operator-configured path
+      # (config key file, never request input), so G304 is a false positive there.
+      - path: internal/secretbox/secretbox\.go
+        linters:
+          - gosec
+        text: G304
       # Phase 0: store.Open pings once at startup without a request context.
       - path: internal/store/open\.go
         linters:
           - noctx
         text: Ping
       # Spec §3: the agent socket is 0660 with group mcpanel so the panel user can connect.
-      - linters:
+      - path: (cmd|internal)/agent/
+        linters:
           - gosec
         text: G302
         source: "0o?660"

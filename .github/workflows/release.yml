@@ -31,6 +31,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # Only commits that are on main may be released. fetch-depth 0 above fetched every
+      # branch, so origin/main exists without needing credentials in this step.
+      - name: Verify tagged commit is on main
+        run: |
+          set -euo pipefail
+          if ! git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null; then
+            echo "::error::origin/main not found in the checkout - cannot verify the tagged commit"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" refs/remotes/origin/main; then
+            echo "::error::tagged commit ${GITHUB_SHA} is not on main - refusing to release"
+            exit 1
+          fi
+          echo "tagged commit ${GITHUB_SHA} is an ancestor of origin/main"
+
       # No caches in release builds: a cache written by a PR run must never feed a release.
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -41,14 +56,28 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
+          node-version: "24"
 
       - name: Install web dependencies
         working-directory: web
         run: npm ci
 
+      # golangci-lint is built from source with the Go toolchain (module proxy + checksum DB)
+      # rather than via an action, so no GITHUB_TOKEN is involved. Same version as ci.yml.
+      - name: Install golangci-lint
+        run: |
+          set -euo pipefail
+          GOBIN="${RUNNER_TEMP}/bin" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Lint
+        run: make lint
+
       - name: Tests
         run: make test
+
+      - name: Race tests
+        run: make test-race
 
       # Built here, without GITHUB_TOKEN in the environment, so npm/Vite code never sees it.
       # GoReleaser then runs with --skip=before; its post-build hook still fails the release
