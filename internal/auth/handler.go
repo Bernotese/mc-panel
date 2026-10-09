@@ -120,6 +120,9 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Post("/auth/2fa/webauthn/finish", preAuth, h.finishWebAuthnLogin)
 	api.Post("/auth/sudo/webauthn/begin", rbac.Authenticated(), h.beginSudoWebAuthn)
 	api.Post("/auth/sudo/webauthn/finish", rbac.Authenticated(), h.finishSudoWebAuthn)
+	api.Patch("/me", rbac.Authenticated(), h.updateMe)
+	api.Post("/me/password", rbac.Authenticated(), h.changePassword)
+	api.Post("/me/recovery-codes", rbac.Authenticated().WithSudo(), h.regenerateRecoveryCodes)
 }
 
 type factors struct {
