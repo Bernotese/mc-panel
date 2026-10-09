@@ -1,0 +1,270 @@
+package auth
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+
+	"mcpanel/internal/audit"
+	"mcpanel/internal/httpx"
+	"mcpanel/internal/notify"
+	"mcpanel/internal/principal"
+	"mcpanel/internal/store"
+)
+
+var (
+	errLastSecondFactor = errors.New("auth: would remove the last mandatory second factor")
+	errNotEnabled       = errors.New("auth: method not enabled")
+	errNotFound         = errors.New("auth: not found")
+)
+
+type totpSetupResponse struct {
+	Secret     string `json:"secret"`
+	OtpauthURL string `json:"otpauth_url"`
+}
+
+type recoveryCodesResponse struct {
+	Codes []string `json:"codes"`
+}
+
+// withTx runs fn in a write transaction. store.Open sets _txlock=immediate, so the
+// transaction takes the write lock at BEGIN and concurrent factor removals serialise.
+// Never call h.auditLog inside fn (the audit recorder opens its own transaction).
+func (h *Handler) withTx(ctx context.Context, fn func(q *store.Queries) error) error {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := fn(h.q.WithTx(tx)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// requireSudoIf2FA: once a user has any second factor, adding another one needs sudo.
+func (h *Handler) requireSudoIf2FA(w http.ResponseWriter, r *http.Request, p principal.Principal, u store.User) bool {
+	f, err := h.factors(r.Context(), h.q, u)
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return false
+	}
+	if f.has2FA() && !h.clock.Now().Before(p.SudoUntil) {
+		httpx.WriteError(w, r, http.StatusForbidden, httpx.CodeSudoRequired, "re-authentication required")
+		return false
+	}
+	return true
+}
+
+func replaceRecoveryCodes(ctx context.Context, q *store.Queries, userID int64, now int64) ([]string, error) {
+	codes, err := generateRecoveryCodes()
+	if err != nil {
+		return nil, err
+	}
+	if err := q.AuthDeleteRecoveryCodes(ctx, userID); err != nil {
+		return nil, err
+	}
+	for _, c := range codes {
+		if err := q.AuthInsertRecoveryCode(ctx, store.AuthInsertRecoveryCodeParams{
+			UserID: userID, CodeHash: hashRecoveryCode(c), CreatedAt: now,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return codes, nil
+}
+
+// issueRecoveryCodesIfNone issues a fresh set when the user has no unused codes
+// (first 2FA method); otherwise it returns an empty list.
+func issueRecoveryCodesIfNone(ctx context.Context, q *store.Queries, userID int64, now int64) ([]string, error) {
+	n, err := q.AuthCountUnusedRecoveryCodes(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if n > 0 {
+		return []string{}, nil
+	}
+	return replaceRecoveryCodes(ctx, q, userID, now)
+}
+
+// promoteSetup upgrades a setup-stage session to full once a 2FA method exists.
+// The token rotates; the CSRF token is kept (the response is not a Me object).
+func (h *Handler) promoteSetup(w http.ResponseWriter, r *http.Request, p principal.Principal) error {
+	if p.Stage != principal.StageSetup {
+		return nil
+	}
+	ctx := r.Context()
+	sess, err := h.q.AuthGetSessionByID(ctx, p.SessionID)
+	if err != nil {
+		return err
+	}
+	tok, _, err := h.sessions.Rotate(ctx, sess, Rotation{Stage: principal.StageFull, SudoUntil: sess.SudoUntil})
+	if err != nil {
+		return err
+	}
+	setSessionCookie(w, tok)
+	return nil
+}
+
+func (h *Handler) factorRemovalError(w http.ResponseWriter, r *http.Request, err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, errLastSecondFactor):
+		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "cannot remove the last two-factor method")
+	case errors.Is(err, errNotEnabled):
+		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "TOTP is not enabled")
+	case errors.Is(err, errNotFound):
+		httpx.WriteError(w, r, http.StatusNotFound, httpx.CodeNotFound, "passkey not found")
+	default:
+		httpx.Internal(w, r, err)
+	}
+	return true
+}
+
+func (h *Handler) notify2FAChanged(ctx context.Context, u store.User, change string) {
+	ip := ""
+	if a := httpx.ClientIP(ctx); a.IsValid() {
+		ip = a.String()
+	}
+	h.notifier.Notify(ctx, notify.Event{
+		Type: notify.Event2FAChanged, Title: "Two-factor settings changed",
+		Message: fmt.Sprintf("%s: %s", u.Username, change), IP: ip, Username: u.Username, Time: h.clock.Now(),
+	})
+}
+
+func (h *Handler) setupTOTP(w http.ResponseWriter, r *http.Request) {
+	p, user, ok := h.current(w, r)
+	if !ok || !h.requireSudoIf2FA(w, r, p, user) {
+		return
+	}
+	if user.TotpEnabled == 1 {
+		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "TOTP is already enabled; disable it first")
+		return
+	}
+	secret, url, err := newTOTPKey(user.Username)
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	enc, err := sealTOTPSecret(h.box, user.ID, secret)
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	n, err := h.q.AuthSetPendingTOTP(r.Context(), store.AuthSetPendingTOTPParams{
+		TotpSecretEnc: enc, Now: h.clock.Now().UnixMilli(), ID: user.ID,
+	})
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	if n != 1 {
+		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "TOTP is already enabled; disable it first")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, totpSetupResponse{Secret: secret, OtpauthURL: url})
+}
+
+func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
+	p, user, ok := h.current(w, r)
+	if !ok {
+		return
+	}
+	code, ok := decodeCode(w, r)
+	if !ok {
+		return
+	}
+	if user.TotpEnabled == 1 || len(user.TotpSecretEnc) == 0 {
+		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "no TOTP setup pending")
+		return
+	}
+	ctx := r.Context()
+	if err := h.guard.CheckSecondFactor(ctx, httpx.ClientIP(ctx), secondFactorKey(p)); err != nil {
+		h.guardError(w, r, err)
+		return
+	}
+	secret, err := openTOTPSecret(h.box, user.ID, user.TotpSecretEnc)
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	step, matched := matchTOTP(secret, code, h.clock.Now())
+	if !matched || step <= user.TotpLastStep {
+		invalidCode(w, r)
+		return
+	}
+	now := h.clock.Now().UnixMilli()
+	var codes []string
+	err = h.withTx(ctx, func(q *store.Queries) error {
+		n, err := q.AuthEnableTOTP(ctx, store.AuthEnableTOTPParams{Step: step, Now: now, ID: user.ID})
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return errNotEnabled
+		}
+		codes, err = issueRecoveryCodesIfNone(ctx, q, user.ID, now)
+		return err
+	})
+	if errors.Is(err, errNotEnabled) {
+		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "no TOTP setup pending")
+		return
+	}
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	if err := h.promoteSetup(w, r, p); err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	h.auditLog(ctx, user.ID, user.Username, audit.ActionTOTPEnable, user.Username, audit.ResultSuccess, nil)
+	h.notify2FAChanged(ctx, user, "TOTP enabled")
+	httpx.WriteJSON(w, http.StatusOK, recoveryCodesResponse{Codes: codes})
+}
+
+func (h *Handler) disableTOTP(w http.ResponseWriter, r *http.Request) {
+	_, user, ok := h.current(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	now := h.clock.Now().UnixMilli()
+	err := h.withTx(ctx, func(q *store.Queries) error {
+		u, err := q.AuthGetUserByID(ctx, user.ID)
+		if err != nil {
+			return err
+		}
+		if u.TotpEnabled != 1 {
+			return errNotEnabled
+		}
+		passkeys, err := q.AuthCountCredentials(ctx, u.ID)
+		if err != nil {
+			return err
+		}
+		if passkeys == 0 {
+			mandatory, err := h.twoFactorMandatory(ctx, q, u)
+			if err != nil {
+				return err
+			}
+			if mandatory {
+				return errLastSecondFactor
+			}
+		}
+		if _, err := q.AuthDisableTOTP(ctx, store.AuthDisableTOTPParams{Now: now, ID: u.ID}); err != nil {
+			return err
+		}
+		if passkeys == 0 {
+			return q.AuthDeleteRecoveryCodes(ctx, u.ID)
+		}
+		return nil
+	})
+	if h.factorRemovalError(w, r, err) {
+		return
+	}
+	h.auditLog(ctx, user.ID, user.Username, audit.ActionTOTPDisable, user.Username, audit.ResultSuccess, nil)
+	h.notify2FAChanged(ctx, user, "TOTP disabled")
+	w.WriteHeader(http.StatusNoContent)
+}
