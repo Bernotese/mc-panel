@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - "stream/**"
   pull_request:
   schedule:
     # Weekly run so new advisories (govulncheck, npm audit) surface without code changes.
@@ -251,12 +250,6 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends nftables
           sudo nft --version
 
-      - name: Look for integration tests
-        run: |
-          if ! grep -rlE '^//go:build .*nftintegration' --include='*_test.go' internal/agent; then
-            echo "::warning::no nftintegration tests under internal/agent yet (expected once stream C is merged)"
-          fi
-
       # Test binaries are compiled as the runner user and only executed as root,
       # so no root-owned files end up in the Go caches.
       - name: Integration tests as root
@@ -321,12 +314,7 @@ jobs:
           version: v2.18.2
           args: check
 
-      - name: Snapshot skipped notice
-        if: hashFiles('cmd/agent/main.go') == ''
-        run: echo "::warning::cmd/agent is missing (stream C not merged yet) - release snapshot skipped"
-
       - name: GoReleaser snapshot
-        if: hashFiles('cmd/agent/main.go') != ''
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
@@ -334,7 +322,6 @@ jobs:
           args: release --snapshot --clean
 
       - name: Verify snapshot artifacts
-        if: hashFiles('cmd/agent/main.go') != ''
         run: |
           set -euo pipefail
           ls -l dist

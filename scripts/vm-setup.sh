@@ -171,8 +171,9 @@ chown root:root /etc/mc-panel/agent.toml
 chmod 0600 /etc/mc-panel/agent.toml
 
 cat >/etc/mc-panel/panel.toml <<'EOF'
-# VM test profile: production mode (no -dev). In production Caddy terminates TLS;
-# the panel itself only requires public_url to use https.
+# VM test profile: production mode (no -dev). In production Caddy terminates TLS and the
+# panel listens on its default unix socket; here it listens on TCP 192.0.2.1:8080 so the
+# test client namespace (192.0.2.2) reaches it directly. public_url must use https.
 listen = "192.0.2.1:8080"
 public_url = "https://mcpanel.test"
 data_dir = "/var/lib/mc-panel"
@@ -215,7 +216,9 @@ systemctl is-active mcpanel-agent.service mcpanel-panel.service
 if nft list table inet mcpanel >/dev/null 2>&1; then
   echo "nftables: table inet mcpanel present"
 else
-  echo "WARNING: table inet mcpanel not present yet (agent creates it on startup once stream C is merged)"
+  journalctl -u mcpanel-agent --no-pager -n 50
+  echo "table inet mcpanel missing (the agent creates it on startup)" >&2
+  exit 1
 fi
 GUEST
 }
