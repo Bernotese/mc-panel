@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -42,6 +43,7 @@ func newDispEnv(t *testing.T, opts DispatcherOptions) *dispEnv {
 	if opts.Backoff == nil {
 		opts.Backoff = []time.Duration{0, 0, 0}
 	}
+	opts.Dev = true // tests deliver to httptest servers on 127.0.0.1
 	e.d = NewDispatcher(db, e.box, e.clk, opts)
 	return e
 }
@@ -85,7 +87,7 @@ func TestNotifyDedup(t *testing.T) {
 	e.d.Notify(ctx, Event{Type: EventUserCreated, Username: "b"})
 	e.d.Notify(ctx, Event{Type: EventTest, IP: "x"})
 	e.d.Notify(ctx, Event{Type: EventTest, IP: "x"})
-	if n := len(e.d.ch); n != 8 {
+	if n := len(e.d.ch) + len(e.d.prio); n != 8 { // test events use the reserved queue
 		t.Fatalf("events without IP and test events are never deduplicated, queued %d", n)
 	}
 }
@@ -216,5 +218,72 @@ func TestSendTest(t *testing.T) {
 	}
 	if err := e.d.SendTest(ctx, row.ID); !errors.Is(err, ErrConfig) {
 		t.Fatalf("broken config: %v", err)
+	}
+}
+
+func TestRestrictedClientRejectsInternalDestinations(t *testing.T) {
+	e := newDispEnv(t, DispatcherOptions{})
+	h := newHookServer(t, http.StatusOK) // listens on 127.0.0.1
+	id := e.addNotifier(t, KindNtfy, "internal", Config{URL: h.srv.URL, Topic: "alerts"}, true)
+	prod := NewDispatcher(e.db, e.box, e.clk, DispatcherOptions{Backoff: []time.Duration{}}) // Dev=false
+	err := prod.SendTest(context.Background(), id)
+	var pe *PermanentError
+	if err == nil || !errors.As(err, &pe) || !IsTransportError(err) {
+		t.Fatalf("SendTest = %v, want permanent transport error", err)
+	}
+	if len(h.requests()) != 0 {
+		t.Fatalf("no connection to loopback may be made outside dev, got %d requests", len(h.requests()))
+	}
+}
+
+func TestBlockedDestinations(t *testing.T) {
+	for ip, blocked := range map[string]bool{
+		"127.0.0.1": true, "::1": true, "10.1.2.3": true, "192.168.0.1": true, "172.16.0.1": true, "fd00::1": true,
+		"169.254.169.254": true, "fe80::1": true, "0.0.0.0": true, "224.0.0.1": true, "::ffff:127.0.0.1": true,
+		"203.0.113.7": false, "2001:db8::1": false, "8.8.8.8": false,
+	} {
+		if got := blockedDestination(netip.MustParseAddr(ip)); got != blocked {
+			t.Errorf("blockedDestination(%s) = %v, want %v", ip, got, blocked)
+		}
+	}
+}
+
+func TestCriticalEventsAreNotStarvedByFullQueue(t *testing.T) {
+	e := newDispEnv(t, DispatcherOptions{QueueSize: 1})
+	h := newHookServer(t, http.StatusOK)
+	e.addNotifier(t, KindNtfy, "n", Config{URL: h.srv.URL, Topic: "alerts"}, true)
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		e.d.Notify(ctx, Event{Type: EventUserCreated}) // fills the normal queue
+	}
+	e.d.Notify(ctx, Event{Type: EventAuditChainBroken, Title: "chain"})
+	e.d.Notify(ctx, Event{Type: EventTest, Title: "test"})
+	if n := len(e.d.prio); n != 2 {
+		t.Fatalf("critical events must use the reserved queue, queued %d", n)
+	}
+	rctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go e.d.Run(rctx)
+	deadline := time.Now().Add(2 * time.Second)
+	for len(h.requests()) < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("delivered %d, want 3", len(h.requests()))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if first := h.requests()[0]; first.title != "chain" {
+		t.Fatalf("critical events are delivered first, got %q", first.title)
+	}
+}
+
+func TestDedupRecordedOnlyWhenQueued(t *testing.T) {
+	e := newDispEnv(t, DispatcherOptions{QueueSize: 1})
+	ctx := context.Background()
+	e.d.Notify(ctx, Event{Type: EventUserCreated})                  // occupies the queue
+	e.d.Notify(ctx, Event{Type: EventJailed, IP: "203.0.113.7/32"}) // dropped: queue full
+	<-e.d.ch
+	e.d.Notify(ctx, Event{Type: EventJailed, IP: "203.0.113.7/32"}) // must not be suppressed by the dropped one
+	if n := len(e.d.ch); n != 1 {
+		t.Fatalf("event dropped on a full queue must not count for deduplication, queued %d", n)
 	}
 }
