@@ -24,8 +24,7 @@ func (h *Handler) sudoTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if err := h.guard.CheckSecondFactor(ctx, httpx.ClientIP(ctx), secondFactorKey(p)); err != nil {
-		h.guardError(w, r, err)
+	if !h.checkSecondFactor(w, r, p, user) {
 		return
 	}
 	reason, err := h.consumeTOTP(ctx, user, code)
