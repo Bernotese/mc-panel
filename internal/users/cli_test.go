@@ -120,3 +120,43 @@ func TestRunAdminCreateBoundsStdin(t *testing.T) {
 		t.Fatalf("users=%d audit=%d, want none", n, len(rec.Entries))
 	}
 }
+
+func TestParseAdminCreateArgs(t *testing.T) {
+	tests := []struct {
+		args    []string
+		want    string
+		wantErr string
+	}{
+		{args: []string{"-username", "admin"}, want: "admin"},
+		{args: []string{"-username=config"}, want: "config"},
+		{args: nil, wantErr: "-username is required"},
+		{args: []string{"-username", ""}, wantErr: "-username is required"},
+		{args: []string{"-username", "a b"}, wantErr: "username must match"},
+		{args: []string{"-username", "ab"}, wantErr: "username must match"},
+		{args: []string{"-username", "admin", "extra"}, wantErr: "unexpected arguments"},
+		{args: []string{"-bogus"}, wantErr: "flag provided but not defined"},
+	}
+	for _, tc := range tests {
+		got, err := users.ParseAdminCreateArgs(tc.args)
+		if tc.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("%v: err = %v, want containing %q", tc.args, err, tc.wantErr)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("%v: got %q, %v; want %q", tc.args, got, err, tc.want)
+		}
+	}
+}
+
+// RunAdminCreate parses (and validates) the arguments before it reads the password.
+func TestRunAdminCreateRejectsBadUsernameBeforeReadingStdin(t *testing.T) {
+	db := storetest.Open(t)
+	r := &countingReader{total: 100}
+	err := users.RunAdminCreate(context.Background(), db, clock.NewFake(t0), &audit.MemoryRecorder{},
+		[]string{"-username", "a b"}, r, &bytes.Buffer{})
+	if !errors.Is(err, users.ErrInvalidUsername) || r.read != 0 {
+		t.Fatalf("err = %v, read = %d; want ErrInvalidUsername before reading stdin", err, r.read)
+	}
+}

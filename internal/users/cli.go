@@ -22,23 +22,15 @@ import (
 // admin role and must set up 2FA at first login (enforced by stream A). db must be migrated.
 func RunAdminCreate(ctx context.Context, db *sql.DB, c clock.Clock, rec audit.Recorder,
 	args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := flag.NewFlagSet("admin create", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	username := fs.String("username", "", "username of the new admin")
-	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("admin create: %w", err)
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("admin create: unexpected arguments: %s", strings.Join(fs.Args(), " "))
-	}
-	if *username == "" {
-		return errors.New("admin create: -username is required")
+	username, err := ParseAdminCreateArgs(args)
+	if err != nil {
+		return err
 	}
 	pw, err := readPasswordLine(stdin)
 	if err != nil {
 		return fmt.Errorf("admin create: %w", err)
 	}
-	u, err := newUser(ctx, store.New(db), c.Now(), *username, pw, string(principal.RoleAdmin))
+	u, err := newUser(ctx, store.New(db), c.Now(), username, pw, string(principal.RoleAdmin))
 	if err != nil {
 		return fmt.Errorf("admin create: %w", err)
 	}
@@ -51,6 +43,28 @@ func RunAdminCreate(ctx context.Context, db *sql.DB, c clock.Clock, rec audit.Re
 	}
 	_, _ = fmt.Fprintf(stdout, "created admin user %q (id %d); two-factor setup is required at first login\n", u.Username, u.ID)
 	return nil
+}
+
+// ParseAdminCreateArgs parses the `admin create` arguments (-username NAME, nothing else) and
+// validates the username. cmd/panel calls it before prompting for the password, RunAdminCreate
+// before reading stdin, so both reject a bad invocation identically.
+func ParseAdminCreateArgs(args []string) (string, error) {
+	fs := flag.NewFlagSet("admin create", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	username := fs.String("username", "", "username of the new admin")
+	if err := fs.Parse(args); err != nil {
+		return "", fmt.Errorf("admin create: %w", err)
+	}
+	if fs.NArg() > 0 {
+		return "", fmt.Errorf("admin create: unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if *username == "" {
+		return "", errors.New("admin create: -username is required")
+	}
+	if err := ValidateUsername(*username); err != nil {
+		return "", fmt.Errorf("admin create: %w", err)
+	}
+	return *username, nil
 }
 
 // readPasswordLine returns the first line of r without the trailing line terminator.

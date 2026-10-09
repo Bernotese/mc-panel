@@ -91,35 +91,6 @@ func TestUsageMentionsDefaultConfig(t *testing.T) {
 	}
 }
 
-func TestAdminCreateUsername(t *testing.T) {
-	tests := []struct {
-		args    []string
-		want    string
-		wantErr string
-	}{
-		{args: []string{"-username", "admin"}, want: "admin"},
-		{args: []string{"-username=config"}, want: "config"},
-		{args: nil, wantErr: "-username is required"},
-		{args: []string{"-username", ""}, wantErr: "-username is required"},
-		{args: []string{"-username", "a b"}, wantErr: "username must match"},
-		{args: []string{"-username", "ab"}, wantErr: "username must match"},
-		{args: []string{"-username", "admin", "extra"}, wantErr: "unexpected arguments"},
-		{args: []string{"-bogus"}, wantErr: "flag provided but not defined"},
-	}
-	for _, tc := range tests {
-		got, err := adminCreateUsername(tc.args)
-		if tc.wantErr != "" {
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Errorf("%v: err = %v, want containing %q", tc.args, err, tc.wantErr)
-			}
-			continue
-		}
-		if err != nil || got != tc.want {
-			t.Errorf("%v: got %q, %v; want %q", tc.args, got, err, tc.want)
-		}
-	}
-}
-
 func TestAskTwice(t *testing.T) {
 	feed := func(answers ...string) func(string) (string, error) {
 		i := 0
