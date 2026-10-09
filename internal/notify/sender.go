@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -25,13 +28,55 @@ func (e *PermanentError) Unwrap() error { return e.Err }
 
 const httpTimeout = 5 * time.Second
 
-// NewHTTPClient returns the client used for notifications: 5 s timeout and no redirects
-// (a redirect could leak the webhook token to another host).
+// NewHTTPClient returns the client used for notifications in development and
+// tests: 5 s timeout and no redirects (a redirect could leak the webhook token
+// to another host). It connects to any destination; production uses
+// NewRestrictedHTTPClient.
 func NewHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout:       httpTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
+}
+
+var errBlockedDestination = errors.New("destination address is not allowed")
+
+// blockedDestination reports addresses notifiers must never connect to
+// (loopback, private, link-local, unspecified, multicast).
+func blockedDestination(a netip.Addr) bool {
+	a = a.Unmap().WithZone("")
+	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
+		a.IsMulticast() || a.IsUnspecified()
+}
+
+// NewRestrictedHTTPClient is like NewHTTPClient but refuses to connect to
+// internal destinations. The check runs on the resolved address right before
+// connecting, so it also covers DNS names and DNS rebinding. Environment
+// proxies are ignored (they would bypass the check).
+func NewRestrictedHTTPClient() *http.Client {
+	dialer := &net.Dialer{
+		Timeout: httpTimeout,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return errBlockedDestination
+			}
+			a, err := netip.ParseAddr(host)
+			if err != nil || blockedDestination(a) {
+				return errBlockedDestination
+			}
+			return nil
+		},
+	}
+	c := NewHTTPClient()
+	c.Transport = &http.Transport{
+		Proxy:                 nil,
+		DialContext:           dialer.DialContext,
+		TLSHandshakeTimeout:   httpTimeout,
+		ResponseHeaderTimeout: httpTimeout,
+		DisableKeepAlives:     true,
+	}
+	return c
 }
 
 func NewSender(kind Kind, c Config, client *http.Client) (Sender, error) {
@@ -44,13 +89,36 @@ func NewSender(kind Kind, c Config, client *http.Client) (Sender, error) {
 	return nil, fmt.Errorf("notify: unknown kind %q", kind)
 }
 
+// transportError marks failures before an HTTP status was received (DNS,
+// connect, TLS, blocked destination). Its text may contain network details, so
+// API handlers do not show it to clients.
+type transportError struct {
+	kind Kind
+	err  error
+}
+
+func (e *transportError) Error() string {
+	return fmt.Sprintf("notify: %s request failed: %v", e.kind, e.err)
+}
+func (e *transportError) Unwrap() error { return e.err }
+
+// IsTransportError reports whether err is a delivery failure without HTTP response.
+func IsTransportError(err error) bool {
+	var te *transportError
+	return errors.As(err, &te)
+}
+
 // requestError removes the request URL (which may contain secrets) from transport errors.
 func requestError(kind Kind, err error) error {
 	var ue *url.Error
 	if errors.As(err, &ue) {
 		err = ue.Err
 	}
-	return fmt.Errorf("notify: %s request failed: %w", kind, err)
+	var out error = &transportError{kind: kind, err: err}
+	if errors.Is(err, errBlockedDestination) {
+		out = &PermanentError{Err: out} // retrying cannot help
+	}
+	return out
 }
 
 func checkStatus(kind Kind, resp *http.Response) error {

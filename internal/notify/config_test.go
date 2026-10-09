@@ -41,6 +41,8 @@ func TestValidateConfig(t *testing.T) {
 		{"ntfy localhost in prod", KindNtfy, Config{URL: "https://localhost:8080", Topic: "a"}, false, false},
 		{"ntfy private ip in prod", KindNtfy, Config{URL: "https://10.0.0.5", Topic: "a"}, false, false},
 		{"ntfy loopback v6 in prod", KindNtfy, Config{URL: "https://[::1]:2586", Topic: "a"}, false, false},
+		{"ntfy localhost trailing dot", KindNtfy, Config{URL: "https://localhost.:8080", Topic: "a"}, false, false},
+		{"ntfy subdomain localhost trailing dot", KindNtfy, Config{URL: "https://x.localhost./", Topic: "a"}, false, false},
 		{"ntfy http localhost in dev", KindNtfy, Config{URL: "http://127.0.0.1:2586", Topic: "a"}, true, true},
 		{"ntfy http in prod", KindNtfy, Config{URL: "http://ntfy.sh", Topic: "a"}, false, false},
 		{"relative url", KindNtfy, Config{URL: "/ntfy", Topic: "a"}, false, false},

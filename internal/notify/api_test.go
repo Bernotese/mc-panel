@@ -34,16 +34,25 @@ type apiEnv struct {
 	audit *audit.MemoryRecorder
 	rt    *rbac.Router
 	mux   http.Handler
+	dev   bool
 }
 
 func newAPIEnv(t *testing.T, dev bool) *apiEnv {
 	t.Helper()
 	de := newDispEnv(t, DispatcherOptions{Backoff: []time.Duration{}})
 	rec := &audit.MemoryRecorder{}
+	e := &apiEnv{dispEnv: de, audit: rec, dev: dev}
+	e.mux = routerFor(t, e)
+	return e
+}
+
+// routerFor (re)builds the HTTP router for the current dispatcher of e.
+func routerFor(t *testing.T, e *apiEnv) http.Handler {
+	t.Helper()
 	mux := chi.NewRouter()
-	rt := rbac.NewRouter(mux, noPerms{}, de.clk)
-	NewHandler(HandlerDeps{DB: de.db, Box: de.box, Dispatcher: de.d, Audit: rec, Clock: de.clk, Dev: dev}).Routes(rt)
-	return &apiEnv{dispEnv: de, audit: rec, rt: rt, mux: mux}
+	e.rt = rbac.NewRouter(mux, noPerms{}, e.clk)
+	NewHandler(HandlerDeps{DB: e.db, Box: e.box, Dispatcher: e.d, Audit: e.audit, Clock: e.clk, Dev: e.dev}).Routes(e.rt)
+	return mux
 }
 
 func (e *apiEnv) call(t *testing.T, method, path string, body any) *httptest.ResponseRecorder {
@@ -247,4 +256,64 @@ func TestTestNotifierEndpoint(t *testing.T) {
 		t.Fatalf("message = %q", msg)
 	}
 	expect(t, e.call(t, http.MethodPost, "/security/notifiers/999/test", nil), http.StatusNotFound, httpx.CodeNotFound)
+}
+
+func TestUpdateNotifierURLChangeRequiresSecretsAgain(t *testing.T) {
+	e := newAPIEnv(t, false)
+	ctx := context.Background()
+	rec := e.call(t, http.MethodPost, "/security/notifiers",
+		map[string]any{"kind": "ntfy", "name": "phone", "enabled": true, "url": "https://ntfy.sh", "topic": "alerts", "token": "tk_secret"})
+	expect(t, rec, http.StatusCreated, "")
+	var created map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	path := fmt.Sprintf("/security/notifiers/%d", int64(created["id"].(float64)))
+
+	// the stored token/topic must never be sent to a new host
+	for _, body := range []map[string]any{
+		{"url": "https://attacker.example"},
+		{"url": "https://attacker.example", "topic": "alerts"},
+		{"url": "https://attacker.example", "token": ""},
+	} {
+		expect(t, e.call(t, http.MethodPatch, path, body), http.StatusBadRequest, httpx.CodeValidation)
+	}
+	id := int64(created["id"].(float64))
+	row, _ := e.q.DefenseGetNotifier(ctx, id)
+	cfg, err := OpenConfig(e.box, KindNtfy, row.ConfigEnc)
+	if err != nil || cfg.URL != "https://ntfy.sh" || cfg.Token != "tk_secret" {
+		t.Fatalf("config must be unchanged after rejected updates: %+v, %v", cfg, err)
+	}
+	expect(t, e.call(t, http.MethodPatch, path,
+		map[string]any{"url": "https://ntfy.example.org", "topic": "alerts2", "token": ""}), http.StatusOK, "")
+	row, _ = e.q.DefenseGetNotifier(ctx, id)
+	cfg, _ = OpenConfig(e.box, KindNtfy, row.ConfigEnc)
+	if cfg.URL != "https://ntfy.example.org" || cfg.Topic != "alerts2" || cfg.Token != "" {
+		t.Fatalf("config = %+v", cfg)
+	}
+	// an unchanged URL does not require the secrets again
+	expect(t, e.call(t, http.MethodPatch, path, map[string]any{"url": "https://ntfy.example.org"}), http.StatusOK, "")
+}
+
+func TestTestNotifierTransportErrorIsGeneric(t *testing.T) {
+	e := newAPIEnv(t, false)
+	h := newHookServer(t, http.StatusOK) // 127.0.0.1, blocked outside dev
+	id := e.addNotifier(t, KindNtfy, "internal", Config{URL: h.srv.URL, Topic: "secrettopicname"}, true)
+	e.d = NewDispatcher(e.db, e.box, e.clk, DispatcherOptions{Backoff: []time.Duration{}}) // non-dev client
+	e.mux = routerFor(t, e)
+	rec := e.call(t, http.MethodPost, fmt.Sprintf("/security/notifiers/%d/test", id), nil)
+	expect(t, rec, http.StatusBadRequest, httpx.CodeValidation)
+	msg := apiErr(rec).Message
+	if strings.Contains(msg, "127.0.0.1") || strings.Contains(msg, "secrettopicname") || strings.Contains(msg, h.srv.URL) {
+		t.Fatalf("transport error details must not reach the client: %q", msg)
+	}
+}
+
+func TestTestNotifierDatabaseErrorIsInternal(t *testing.T) {
+	e := newAPIEnv(t, true)
+	id := e.addNotifier(t, KindNtfy, "n", Config{URL: "http://127.0.0.1:1", Topic: "a"}, true)
+	_ = e.db.Close()
+	rec := e.call(t, http.MethodPost, fmt.Sprintf("/security/notifiers/%d/test", id), nil)
+	expect(t, rec, http.StatusInternalServerError, "")
+	if strings.Contains(strings.ToLower(rec.Body.String()), "database") || strings.Contains(rec.Body.String(), "sql") {
+		t.Fatalf("raw error text must not reach the client: %s", rec.Body)
+	}
 }

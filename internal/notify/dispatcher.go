@@ -19,7 +19,11 @@ const (
 	DedupWindow      = 5 * time.Minute
 	defaultQueueSize = 100
 	maxDedupEntries  = 1024
+	prioQueueSize    = 16
 )
+
+// critical events use the reserved queue and are never deduplicated.
+func critical(t EventType) bool { return t == EventAuditChainBroken || t == EventTest }
 
 // DefaultBackoff are the delays between delivery attempts (1 attempt + 3 retries).
 var DefaultBackoff = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
@@ -27,6 +31,7 @@ var DefaultBackoff = []time.Duration{time.Second, 2 * time.Second, 4 * time.Seco
 var (
 	ErrNotFound = errors.New("notify: notifier not found")
 	ErrConfig   = errors.New("notify: notifier configuration is unreadable")
+	ErrInternal = errors.New("notify: internal error")
 )
 
 type DispatcherOptions struct {
@@ -34,6 +39,9 @@ type DispatcherOptions struct {
 	Backoff   []time.Duration // nil → DefaultBackoff; empty → no retries
 	Client    *http.Client    // default NewHTTPClient()
 	Logger    *slog.Logger    // default slog.Default()
+	// Dev allows notifier targets on internal addresses (default client only);
+	// leave false in production.
+	Dev bool
 }
 
 // Dispatcher implements Notifier: events are queued without blocking and
@@ -46,6 +54,7 @@ type Dispatcher struct {
 	backoff []time.Duration
 	log     *slog.Logger
 	ch      chan Event
+	prio    chan Event // reserved for events that must not be starved by floods
 
 	mu   sync.Mutex
 	last map[string]time.Time
@@ -61,14 +70,18 @@ func NewDispatcher(db *sql.DB, box *secretbox.Box, c clock.Clock, opts Dispatche
 		opts.Backoff = DefaultBackoff
 	}
 	if opts.Client == nil {
-		opts.Client = NewHTTPClient()
+		if opts.Dev {
+			opts.Client = NewHTTPClient()
+		} else {
+			opts.Client = NewRestrictedHTTPClient()
+		}
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
 	return &Dispatcher{
 		q: store.New(db), box: box, clock: c, client: opts.Client, backoff: opts.Backoff, log: opts.Logger,
-		ch: make(chan Event, opts.QueueSize), last: make(map[string]time.Time),
+		ch: make(chan Event, opts.QueueSize), prio: make(chan Event, prioQueueSize), last: make(map[string]time.Time),
 	}
 }
 
@@ -77,22 +90,41 @@ func (d *Dispatcher) Notify(_ context.Context, e Event) {
 	if e.Time.IsZero() {
 		e.Time = now
 	}
-	if e.Type != EventTest && e.IP != "" && d.isDuplicate(string(e.Type)+"|"+e.IP, now) {
+	if critical(e.Type) {
+		select {
+		case d.prio <- e:
+		default:
+			d.log.Warn("notify: priority queue full, dropping event", "type", e.Type)
+		}
 		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	key := ""
+	if e.IP != "" {
+		key = string(e.Type) + "|" + e.IP
+		if d.isDuplicate(key, now) {
+			return
+		}
 	}
 	select {
 	case d.ch <- e:
+		if key != "" {
+			d.remember(key, now) // only events that were really queued suppress later ones
+		}
 	default:
 		d.log.Warn("notify: queue full, dropping event", "type", e.Type)
 	}
 }
 
+// isDuplicate must be called with d.mu held.
 func (d *Dispatcher) isDuplicate(key string, now time.Time) bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if t, ok := d.last[key]; ok && now.Sub(t) < DedupWindow {
-		return true
-	}
+	t, ok := d.last[key]
+	return ok && now.Sub(t) < DedupWindow
+}
+
+// remember must be called with d.mu held.
+func (d *Dispatcher) remember(key string, now time.Time) {
 	d.last[key] = now
 	if len(d.last) > maxDedupEntries {
 		for k, t := range d.last {
@@ -101,15 +133,22 @@ func (d *Dispatcher) isDuplicate(key string, now time.Time) bool {
 			}
 		}
 	}
-	return false
 }
 
 // Run delivers queued events until ctx is cancelled.
 func (d *Dispatcher) Run(ctx context.Context) {
 	for {
+		select { // reserved queue first
+		case e := <-d.prio:
+			d.deliver(ctx, e)
+			continue
+		default:
+		}
 		select {
 		case <-ctx.Done():
 			return
+		case e := <-d.prio:
+			d.deliver(ctx, e)
 		case e := <-d.ch:
 			d.deliver(ctx, e)
 		}
@@ -167,7 +206,7 @@ func (d *Dispatcher) SendTest(ctx context.Context, id int64) error {
 		return ErrNotFound
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: load notifier: %v", ErrInternal, err)
 	}
 	s, err := d.senderFor(n)
 	if err != nil {

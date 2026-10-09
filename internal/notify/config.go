@@ -71,6 +71,7 @@ func ValidateConfig(kind Kind, c Config, dev bool) error {
 		return errors.New("url must use https")
 	}
 	host := strings.ToLower(u.Hostname())
+	internalHost := strings.TrimSuffix(host, ".") // "localhost." is localhost too
 	switch kind {
 	case KindDiscord:
 		if host != "discord.com" && host != "discordapp.com" {
@@ -88,7 +89,7 @@ func ValidateConfig(kind Kind, c Config, dev bool) error {
 			return errors.New("topic and token are only valid for ntfy")
 		}
 	case KindNtfy:
-		if !dev && isInternalHost(host) {
+		if !dev && isInternalHost(internalHost) {
 			return errors.New("ntfy server must not be localhost or a loopback, private or link-local address")
 		}
 		if !topicRE.MatchString(c.Topic) {

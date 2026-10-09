@@ -220,6 +220,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
+	oldURL := cfg.URL
 	name, enabled := row.Name, row.Enabled
 	var fields []string
 	if req.Name != nil {
@@ -246,6 +247,11 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	if req.Token != nil {
 		cfg.Token = strings.TrimSpace(*req.Token)
 		fields = append(fields, "token")
+	}
+	if cfg.URL != oldURL && kind == KindNtfy && (req.Topic == nil || req.Token == nil) {
+		// the stored topic/token must not be sent to a different server
+		validation(w, r, "changing url requires topic and token in the same request (token may be empty)")
+		return
 	}
 	if err := ValidateConfig(kind, cfg, h.dev); err != nil {
 		validation(w, r, err.Error())
@@ -314,8 +320,12 @@ func (h *Handler) test(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	case errors.Is(err, ErrNotFound):
 		notFound(w, r)
-	case errors.Is(err, ErrConfig):
+	case errors.Is(err, ErrConfig), errors.Is(err, ErrInternal):
 		httpx.Internal(w, r, err)
+	case IsTransportError(err):
+		// network details (hosts, resolved addresses) stay in the server log
+		h.log.Warn("notify: test notification failed", "notifier_id", id, "err", err)
+		validation(w, r, "test notification failed: the target could not be reached")
 	default:
 		// Sender errors are sanitized (no URL, topic or token).
 		validation(w, r, "test notification failed: "+err.Error())
