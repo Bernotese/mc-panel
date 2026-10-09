@@ -119,7 +119,7 @@ func TestCreateAndListNotifiers(t *testing.T) {
 	expect(t, rec, http.StatusCreated, "")
 	var n map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &n)
-	if n["name"] != "Ops" || n["kind"] != "discord" || n["enabled"] != true ||
+	if n["name"] != "Ops" || n["kind"] != "discord" || n["enabled"] != jsonTrue ||
 		n["target_masked"] != "https://discord.com/api/webhooks/1234…/****" || n["created_at"] != float64(dT0.UnixMilli()) {
 		t.Fatalf("notifier = %v", n)
 	}

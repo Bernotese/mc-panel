@@ -176,7 +176,7 @@ func (d *Dispatcher) deliver(ctx context.Context, e Event) {
 func (d *Dispatcher) senderFor(n store.Notifier) (Sender, error) {
 	cfg, err := OpenConfig(d.box, Kind(n.Kind), n.ConfigEnc)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrConfig, err)
+		return nil, fmt.Errorf("%w: %w", ErrConfig, err)
 	}
 	return NewSender(Kind(n.Kind), cfg, d.client)
 }
@@ -206,7 +206,7 @@ func (d *Dispatcher) SendTest(ctx context.Context, id int64) error {
 		return ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("%w: load notifier: %v", ErrInternal, err)
+		return fmt.Errorf("%w: load notifier: %w", ErrInternal, err)
 	}
 	s, err := d.senderFor(n)
 	if err != nil {

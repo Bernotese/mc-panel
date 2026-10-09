@@ -19,14 +19,14 @@ func settingsBody(enforce, allowlistOnly bool, countries []string) map[string]an
 func TestGetSettings(t *testing.T) {
 	e := newEnv(t)
 	got := decode[map[string]any](t, e.call(t, http.MethodGet, "/security/settings", nil, callerIP))
-	if got["enforce_2fa_for_users"] != false || got["admin_allowlist_only"] != false || got["geoip_available"] != true {
+	if got["enforce_2fa_for_users"] != jsonFalse || got["admin_allowlist_only"] != jsonFalse || got["geoip_available"] != jsonTrue {
 		t.Fatalf("settings = %v", got)
 	}
 	if c, ok := got["allowed_countries"].([]any); !ok || len(c) != 0 {
 		t.Fatalf("allowed_countries must be an empty array, got %#v", got["allowed_countries"])
 	}
 	noGeo := newEnv(t, func(d *Deps) { d.GeoAvailable = false })
-	if got := decode[map[string]any](t, noGeo.call(t, http.MethodGet, "/security/settings", nil, callerIP)); got["geoip_available"] != false {
+	if got := decode[map[string]any](t, noGeo.call(t, http.MethodGet, "/security/settings", nil, callerIP)); got["geoip_available"] != jsonFalse {
 		t.Fatalf("geoip_available = %v", got["geoip_available"])
 	}
 }
@@ -37,7 +37,7 @@ func TestPutSettings(t *testing.T) {
 	rec := e.call(t, http.MethodPut, "/security/settings", settingsBody(true, false, []string{"DE", "AT", "DE"}), callerIP)
 	wantStatus(t, rec, http.StatusOK, "")
 	got := decode[map[string]any](t, rec)
-	if got["enforce_2fa_for_users"] != true || len(got["allowed_countries"].([]any)) != 2 || got["geoip_available"] != true {
+	if got["enforce_2fa_for_users"] != jsonTrue || len(got["allowed_countries"].([]any)) != 2 || got["geoip_available"] != jsonTrue {
 		t.Fatalf("response = %v", got)
 	}
 	stored, err := store.LoadSecuritySettings(context.Background(), e.q)

@@ -25,13 +25,13 @@ func (d *discordSender) Send(ctx context.Context, e Event) error {
 	if err != nil {
 		return &PermanentError{Err: err}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url, bytes.NewReader(payload)) //nolint:gosec // G704: target is admin-configured, validated by ValidateConfig and dialed via the restricted client
 	if err != nil {
 		return &PermanentError{Err: errors.New("notify: discord: invalid webhook URL")}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "mc-panel")
-	resp, err := d.client.Do(req)
+	resp, err := d.client.Do(req) //nolint:gosec // G704: target is admin-configured, validated by ValidateConfig and dialed via the restricted client
 	if err != nil {
 		return requestError(KindDiscord, err)
 	}

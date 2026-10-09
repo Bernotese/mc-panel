@@ -173,7 +173,7 @@ func TestAgentStatus(t *testing.T) {
 		e := newEnv(t)
 		e.insertJail(t, "203.0.113.7/32", t0, t0.Add(time.Hour))
 		got := decode[map[string]any](t, e.call(t, http.MethodGet, "/security/agent", nil, callerIP))
-		if got["reachable"] != false || got["firewall"] != "" || got["version"] != "" || got["pending_sync"] != float64(1) {
+		if got["reachable"] != jsonFalse || got["firewall"] != "" || got["version"] != "" || got["pending_sync"] != float64(1) {
 			t.Fatalf("status = %v", got)
 		}
 	})
@@ -181,7 +181,7 @@ func TestAgentStatus(t *testing.T) {
 		fa := newFakeAgent()
 		e := newEnv(t, withAgent(fa))
 		got := decode[map[string]any](t, e.call(t, http.MethodGet, "/security/agent", nil, callerIP))
-		if got["reachable"] != true || got["firewall"] != "noop" || got["version"] != "test" || got["pending_sync"] != float64(0) {
+		if got["reachable"] != jsonTrue || got["firewall"] != "noop" || got["version"] != "test" || got["pending_sync"] != float64(0) {
 			t.Fatalf("status = %v", got)
 		}
 	})
@@ -191,7 +191,7 @@ func TestAgentStatus(t *testing.T) {
 		e := newEnv(t, withAgent(fa))
 		rec := e.call(t, http.MethodGet, "/security/agent", nil, callerIP)
 		wantStatus(t, rec, http.StatusOK, "")
-		if got := decode[map[string]any](t, rec); got["reachable"] != false {
+		if got := decode[map[string]any](t, rec); got["reachable"] != jsonFalse {
 			t.Fatalf("status = %v", got)
 		}
 	})

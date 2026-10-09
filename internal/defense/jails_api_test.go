@@ -2,13 +2,14 @@ package defense
 
 import (
 	"fmt"
-	"mcpanel/internal/principal"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"mcpanel/internal/principal"
 
 	"mcpanel/internal/audit"
 	"mcpanel/internal/httpx"
@@ -25,8 +26,8 @@ func TestListJails(t *testing.T) {
 	rec := e.call(t, http.MethodGet, "/security/jails", nil, callerIP)
 	wantStatus(t, rec, http.StatusOK, "")
 	items := decode[[]map[string]any](t, rec)
-	if len(items) != 1 || items[0]["id"] != float64(active) || items[0]["firewall_synced"] != false ||
-		items[0]["lifted_at"] != nil || items[0]["manual"] != false || items[0]["ip_key"] != "203.0.113.1/32" {
+	if len(items) != 1 || items[0]["id"] != float64(active) || items[0]["firewall_synced"] != jsonFalse ||
+		items[0]["lifted_at"] != nil || items[0]["manual"] != jsonFalse || items[0]["ip_key"] != "203.0.113.1/32" {
 		t.Fatalf("active jails = %v", items)
 	}
 	for _, k := range []string{"id", "ip_key", "reason", "level", "manual", "created_at", "expires_at", "lifted_at", "lifted_by", "firewall_synced"} {
@@ -39,7 +40,7 @@ func TestListJails(t *testing.T) {
 		t.Fatalf("all jails = %v", all)
 	}
 	for _, j := range all {
-		if j["id"] == float64(lifted) && (j["lifted_by"] != "admin" || j["firewall_synced"] != true) {
+		if j["id"] == float64(lifted) && (j["lifted_by"] != "admin" || j["firewall_synced"] != jsonTrue) {
 			t.Fatalf("lifted jail = %v", j)
 		}
 	}
@@ -52,7 +53,7 @@ func TestCreateJail(t *testing.T) {
 		map[string]any{"ip": "2001:db8:1:2::5", "duration_minutes": 60, "reason": "scanner"}, callerIP)
 	wantStatus(t, rec, http.StatusCreated, "")
 	j := decode[map[string]any](t, rec)
-	if j["ip_key"] != "2001:db8:1:2::/64" || j["manual"] != true || j["level"] != float64(1) ||
+	if j["ip_key"] != "2001:db8:1:2::/64" || j["manual"] != jsonTrue || j["level"] != float64(1) ||
 		j["expires_at"] != float64(t0.Add(time.Hour).UnixMilli()) || j["reason"] != "scanner" {
 		t.Fatalf("jail = %v", j)
 	}
