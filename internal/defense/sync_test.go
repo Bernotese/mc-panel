@@ -288,3 +288,94 @@ func TestCleanupLimiters(t *testing.T) {
 		t.Fatalf("idle buckets not removed: %d/%d", e.svc.loginIP.size(), e.svc.loginUser.size())
 	}
 }
+
+// An allowlisted /128 inside a jailed /64 must never be firewalled.
+func TestSyncSkipsJailsOverlappingAllowRule(t *testing.T) {
+	fa := newFakeAgent()
+	e := newEnv(t, withAgent(fa))
+	ctx := context.Background()
+	e.addRule(t, "2001:db8:1:2::5/128", "allow", nil)
+	// another address in the same /64 gets the whole key jailed
+	e.fail(t, "2001:db8:1:2::99", 5)
+	if js := e.activeJails(t); len(js) != 1 || js[0].IpKey != "2001:db8:1:2::/64" {
+		t.Fatalf("precondition: jails = %+v", js)
+	}
+	if err := e.svc.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if bans, _, _ := fa.calls(); len(bans) != 0 {
+		t.Fatalf("a /64 containing an allowlisted address must not be banned: %v", bans)
+	}
+	// the app-level jail stays in place for everybody else
+	if err := e.svc.CheckLogin(ctx, addr("2001:db8:1:2::99"), "x"); !errors.Is(err, ErrJailed) {
+		t.Fatalf("app-level jail must remain: %v", err)
+	}
+}
+
+func TestSyncUnbansWhenAllowRuleIsAddedLater(t *testing.T) {
+	fa := newFakeAgent()
+	e := newEnv(t, withAgent(fa))
+	ctx := context.Background()
+	e.insertJail(t, "2001:db8:1:2::/64", t0, t0.Add(time.Hour))
+	if err := e.svc.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if bans, _, _ := fa.calls(); len(bans) != 1 {
+		t.Fatalf("precondition: bans = %v", bans)
+	}
+	e.addRule(t, "2001:db8:1:2::5/128", "allow", nil)
+	if err := e.svc.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, unbans, _ := fa.calls()
+	if len(unbans) != 1 || unbans[0] != netip.MustParsePrefix("2001:db8:1:2::/64") {
+		t.Fatalf("unban calls = %v", unbans)
+	}
+	if err := e.svc.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if bans, unbans, _ := fa.calls(); len(bans) != 1 || len(unbans) != 1 {
+		t.Fatalf("no ban/unban churn expected: bans=%v unbans=%v", bans, unbans)
+	}
+}
+
+func TestSyncCancelledCallsAreTransient(t *testing.T) {
+	fa := newFakeAgent()
+	fa.setBanErr(context.Canceled) // e.g. shutdown while a call is in flight
+	e := newEnv(t, withAgent(fa))
+	ctx := context.Background()
+	e.insertJail(t, "203.0.113.7/32", t0, t0.Add(time.Hour))
+	if err := e.svc.SyncOnce(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("SyncOnce = %v, want context.Canceled", err)
+	}
+	fa.setBanErr(nil)
+	if err := e.svc.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if bans, _, _ := fa.calls(); len(bans) != 1 {
+		t.Fatalf("jail must not be marked unbannable after a cancelled call: %v", bans)
+	}
+}
+
+// bareAgent reports bans as bare addresses without a prefix length.
+type bareAgent struct{ *fakeAgent }
+
+func (b bareAgent) Bans(context.Context) ([]agentapi.Ban, error) {
+	return []agentapi.Ban{{Prefix: "203.0.113.7", ExpiresInSeconds: 600}, {Prefix: "2001:db8:1:2::", ExpiresInSeconds: 600}}, nil
+}
+
+func TestReconcileAcceptsBareAddressesFromAgent(t *testing.T) {
+	fa := newFakeAgent()
+	e := newEnv(t, withAgent(bareAgent{fa}))
+	ctx := context.Background()
+	e.insertJail(t, "203.0.113.7/32", t0, t0.Add(time.Hour))
+	if err := e.svc.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if bans, _, _ := fa.calls(); len(bans) != 1 {
+		t.Fatalf("a ban listed as bare address is present and must not be re-banned: %v", bans)
+	}
+}

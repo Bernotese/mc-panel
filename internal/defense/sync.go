@@ -15,7 +15,18 @@ import (
 
 // isUnavailable reports transient agent failures that must be retried later.
 func isUnavailable(err error) bool {
-	return errors.Is(err, agentapi.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded)
+	return errors.Is(err, agentapi.ErrUnavailable) ||
+		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+}
+
+// maskedByAllow reports whether an active allow rule overlaps the jail's key.
+// Such jails are enforced in the app only, never in the firewall.
+func (s *Service) maskedByAllow(j store.Jail, now time.Time) bool {
+	p, err := netip.ParsePrefix(j.IpKey)
+	if err != nil {
+		return false
+	}
+	return s.snap.Load().allowOverlaps(p, now)
 }
 
 func (s *Service) callAgent(ctx context.Context, fn func(context.Context) error) error {
@@ -72,7 +83,7 @@ func (s *Service) syncBans(ctx context.Context, now time.Time) error {
 		return fmt.Errorf("defense: jails to ban: %w", err)
 	}
 	for _, j := range jails {
-		if s.unbannable[j.ID] {
+		if s.unbannable[j.ID] || s.maskedByAllow(j, now) {
 			continue
 		}
 		ok, err := s.banJail(ctx, j, now)
@@ -143,11 +154,30 @@ func (s *Service) reconcile(ctx context.Context, now time.Time) error {
 	for _, b := range bans {
 		if p, err := netip.ParsePrefix(b.Prefix); err == nil {
 			present[p.Masked()] = true
+		} else if a, err := netip.ParseAddr(b.Prefix); err == nil {
+			// bare address: single-host prefix
+			present[netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen())] = true
 		}
 	}
 	for _, j := range jails {
 		p, err := netip.ParsePrefix(j.IpKey)
-		if err != nil || present[p.Masked()] || s.unbannable[j.ID] {
+		if err != nil || s.unbannable[j.ID] {
+			continue
+		}
+		if s.maskedByAllow(j, now) {
+			// an allowlisted address lives inside this key: the app-level jail stays,
+			// but the firewall must not cut off the allowlisted address
+			if present[p.Masked()] {
+				if err := s.callAgent(ctx, func(c context.Context) error { return s.agent.Unban(c, p) }); err != nil {
+					if isUnavailable(err) {
+						return fmt.Errorf("defense: unban %s: %w", p, err)
+					}
+					s.log.Error("defense: agent rejected unban of allowlisted jail", "jail_id", j.ID, "prefix", p, "err", err)
+				}
+			}
+			continue
+		}
+		if present[p.Masked()] {
 			continue
 		}
 		s.log.Warn("defense: ban missing in firewall; re-banning", "jail_id", j.ID, "prefix", p)
