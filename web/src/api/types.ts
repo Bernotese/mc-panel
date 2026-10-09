@@ -1,0 +1,52 @@
+import type { components } from './schema'
+
+type Schemas = components['schemas']
+
+export type ErrorBody = Schemas['Error']
+export type ErrorCode = Schemas['Error']['error']
+export type Role = Schemas['Role']
+export type Stage = Schemas['Stage']
+export type Locale = Schemas['Locale']
+export type Permission = Schemas['Permission']
+export type SecondFactor = Schemas['SecondFactor']
+export type Me = Schemas['Me']
+export type Passkey = Schemas['Passkey']
+export type PasskeyCreated = Schemas['PasskeyCreated']
+export type TotpSetupResponse = Schemas['TotpSetupResponse']
+export type RecoveryCodesResponse = Schemas['RecoveryCodesResponse']
+export type SudoResponse = Schemas['SudoResponse']
+export type WebAuthnOptions = Schemas['WebAuthnOptions']
+export type Session = Schemas['Session']
+export type User = Schemas['User']
+export type Server = Schemas['Server']
+export type PermissionGrant = Schemas['PermissionGrant']
+export type UserPermissions = Schemas['UserPermissions']
+export type AuditEntry = Schemas['AuditEntry']
+export type AuditPage = Schemas['AuditPage']
+export type AuditVerify = Schemas['AuditVerify']
+export type AuditResult = Schemas['AuditEntry']['result']
+export type SeriesPoint = Schemas['SeriesPoint']
+export type NewDeviceLogin = Schemas['NewDeviceLogin']
+export type SecurityOverview = Schemas['SecurityOverview']
+export type SecurityRange = Schemas['SecurityOverview']['range']
+export type LoginAttempt = Schemas['LoginAttempt']
+export type AttemptStage = Schemas['LoginAttempt']['stage']
+export type LoginAttemptPage = Schemas['LoginAttemptPage']
+export type Jail = Schemas['Jail']
+export type IPRule = Schemas['IPRule']
+export type IPRuleKind = Schemas['IPRule']['kind']
+export type SecuritySettings = Schemas['SecuritySettings']
+export type SecuritySettingsResponse = Schemas['SecuritySettingsResponse']
+export type Notifier = Schemas['Notifier']
+export type NotifierKind = Schemas['Notifier']['kind']
+export type AgentStatus = Schemas['AgentStatus']
+export type PowerAction = Schemas['PowerRequest']['action']
+
+export const ALL_PERMISSIONS: readonly Permission[] = [
+  'server.view',
+  'server.power',
+  'server.console',
+  'server.files',
+  'server.plugins',
+  'server.backups',
+]
