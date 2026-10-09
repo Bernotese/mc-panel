@@ -22,6 +22,14 @@ var (
 	ErrUsernameTaken   = errors.New("username already taken")
 )
 
+// ValidateUsername reports whether name is acceptable as a username (ErrInvalidUsername if not).
+func ValidateUsername(name string) error {
+	if !usernameRe.MatchString(name) {
+		return ErrInvalidUsername
+	}
+	return nil
+}
+
 func validRole(role string) bool {
 	return role == string(principal.RoleAdmin) || role == string(principal.RoleUser)
 }
@@ -46,8 +54,8 @@ func isUniqueViolation(err error) bool {
 // newUser validates the input, hashes the password and inserts the user with a fresh 32-byte
 // WebAuthn user handle. Shared by POST /users and `panel admin create`.
 func newUser(ctx context.Context, q *store.Queries, now time.Time, username, pw, role string) (store.User, error) {
-	if !usernameRe.MatchString(username) {
-		return store.User{}, ErrInvalidUsername
+	if err := ValidateUsername(username); err != nil {
+		return store.User{}, err
 	}
 	if !validRole(role) {
 		return store.User{}, ErrInvalidRole
