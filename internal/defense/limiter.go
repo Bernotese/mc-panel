@@ -23,12 +23,20 @@ type limiterEntry struct {
 // time explicitly so tests can use clock.Fake.
 type keyedLimiter struct {
 	limit   Limit
+	max     int // maximum number of distinct buckets before the shared overflow bucket is used
 	mu      sync.Mutex
 	entries map[string]*limiterEntry
 }
 
+// maxLimiterEntries bounds memory against key rotation (e.g. many IPv6 /64s).
+const maxLimiterEntries = 100_000
+
+// overflowKey is the shared bucket used once the cap is reached. It cannot
+// collide with real keys (they never contain a NUL byte).
+const overflowKey = "\x00overflow"
+
 func newKeyedLimiter(l Limit) *keyedLimiter {
-	return &keyedLimiter{limit: l, entries: make(map[string]*limiterEntry)}
+	return &keyedLimiter{limit: l, max: maxLimiterEntries, entries: make(map[string]*limiterEntry)}
 }
 
 // take consumes one token for key. It returns 0 if the request is allowed,
@@ -38,6 +46,11 @@ func (k *keyedLimiter) take(key string, now time.Time) time.Duration {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	e, ok := k.entries[key]
+	if !ok && len(k.entries) >= k.max {
+		// fail closed for this dimension: all further new keys share one bucket
+		key = overflowKey
+		e, ok = k.entries[key]
+	}
 	if !ok {
 		e = &limiterEntry{lim: rate.NewLimiter(rate.Every(k.limit.Every), k.limit.Burst)}
 		k.entries[key] = e

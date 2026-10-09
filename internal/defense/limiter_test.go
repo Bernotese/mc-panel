@@ -56,3 +56,27 @@ func TestRetryAfterSeconds(t *testing.T) {
 		}
 	}
 }
+
+func TestKeyedLimiterCapsEntriesAndFailsClosed(t *testing.T) {
+	k := newKeyedLimiter(Limit{Every: time.Minute, Burst: 1})
+	k.max = 3
+	for _, key := range []string{"a", "b", "c"} {
+		if d := k.take(key, limT0); d != 0 {
+			t.Fatalf("%s denied: %v", key, d)
+		}
+	}
+	// beyond the cap, new keys share one overflow bucket
+	if d := k.take("d", limT0); d != 0 {
+		t.Fatalf("first overflow take denied: %v", d)
+	}
+	if d := k.take("e", limT0); d == 0 {
+		t.Fatal("second new key must hit the shared overflow bucket")
+	}
+	if k.size() > k.max+1 {
+		t.Fatalf("size = %d, want at most %d", k.size(), k.max+1)
+	}
+	// existing keys keep their own bucket
+	if d := k.take("a", limT0.Add(time.Minute+time.Second)); d != 0 {
+		t.Fatalf("existing key must keep working: %v", d)
+	}
+}
