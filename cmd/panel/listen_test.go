@@ -49,7 +49,7 @@ func serveUnix(t *testing.T) (*http.Client, config.Panel, *sql.DB, string) {
 	}
 	t.Cleanup(a.Close)
 
-	l, err := listen(cfg)
+	l, err := listen(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestServeOverUnixSocket(t *testing.T) {
 func TestListenTCP(t *testing.T) {
 	cfg := config.DevPanel(t.TempDir())
 	cfg.Listen = "127.0.0.1:0"
-	l, err := listen(cfg)
+	l, err := listen(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

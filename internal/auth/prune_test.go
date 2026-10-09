@@ -46,6 +46,9 @@ func TestPruneSessions(t *testing.T) {
 		_ = rows.Scan(&s)
 		left = append(left, s)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	if len(left) != 3 || left[0] != "active" || left[1] != "expired-recently" || left[2] != "revoked-recently" {
 		t.Fatalf("remaining = %v", left)
 	}
