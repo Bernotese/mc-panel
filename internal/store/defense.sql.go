@@ -128,6 +128,37 @@ func (q *Queries) DefenseDeleteAttemptsBefore(ctx context.Context, before int64)
 	return result.RowsAffected()
 }
 
+const defenseDeleteIPRule = `-- name: DefenseDeleteIPRule :execrows
+DELETE FROM ip_rules WHERE id = ?1
+`
+
+func (q *Queries) DefenseDeleteIPRule(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, defenseDeleteIPRule, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const defenseGetIPRule = `-- name: DefenseGetIPRule :one
+SELECT id, cidr, kind, comment, expires_at, created_by, created_at FROM ip_rules WHERE id = ?1
+`
+
+func (q *Queries) DefenseGetIPRule(ctx context.Context, id int64) (IpRule, error) {
+	row := q.db.QueryRowContext(ctx, defenseGetIPRule, id)
+	var i IpRule
+	err := row.Scan(
+		&i.ID,
+		&i.Cidr,
+		&i.Kind,
+		&i.Comment,
+		&i.ExpiresAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const defenseGetJail = `-- name: DefenseGetJail :one
 SELECT id, ip_key, reason, level, manual, created_at, expires_at, lifted_at, lifted_by, fw_banned_at, fw_unbanned_at FROM jails WHERE id = ?1
 `
