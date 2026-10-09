@@ -110,3 +110,71 @@ func TestAgentConfig(t *testing.T) {
 		t.Fatal("unknown firewall must be invalid")
 	}
 }
+
+func TestLoadPanelFileCannotEnableDevMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "panel.toml")
+	content := "dev = true\npublic_url = \"http://panel.example.com\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := config.LoadPanel(path, false, "")
+	if err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("expected https error when file sets dev=true and dev flag is false, got %v", err)
+	}
+}
+
+func TestLoadPanelCLIDevWinsOverFileDev(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "panel.toml")
+	content := "dev = false\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := config.LoadPanel(path, true, "/repo")
+	if err != nil {
+		t.Fatalf("LoadPanel: %v", err)
+	}
+	if !p.Dev || p.PublicURL != "http://localhost:5173" {
+		t.Fatalf("dev flag must win over file: %+v", p)
+	}
+}
+
+func TestLoadAgentRejectsUnknownKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.toml")
+	content := "panel_uid = 998\nbogus_key = \"x\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.LoadAgent(path, false, ""); err == nil || !strings.Contains(err.Error(), "bogus_key") {
+		t.Fatalf("expected unknown key error, got %v", err)
+	}
+}
+
+func TestLoadAgentFromFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.toml")
+	content := "panel_uid = 998\nfirewall = \"nftables\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := config.LoadAgent(path, false, "")
+	if err != nil {
+		t.Fatalf("LoadAgent: %v", err)
+	}
+	if a.PanelUID != 998 || a.Firewall != "nftables" || a.Socket != "/run/mc-panel/agent.sock" || a.Dev {
+		t.Fatalf("agent = %+v", a)
+	}
+}
+
+func TestLoadAgentFileCannotEnableDevMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.toml")
+	content := "dev = true\npanel_uid = 998\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := config.LoadAgent(path, false, "")
+	if err != nil {
+		t.Fatalf("LoadAgent: %v", err)
+	}
+	if a.Dev {
+		t.Fatalf("file must not enable dev mode: %+v", a)
+	}
+}
