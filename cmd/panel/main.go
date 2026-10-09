@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -142,27 +141,6 @@ func commonFlags(args []string) (config.Panel, []string, error) {
 	return cfg, rest, err
 }
 
-// adminCreateUsername parses the admin-create arguments exactly like users.RunAdminCreate
-// does, so a bad invocation fails before the password prompt.
-func adminCreateUsername(args []string) (string, error) {
-	fs := flag.NewFlagSet("admin create", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	username := fs.String("username", "", "username of the new admin")
-	if err := fs.Parse(args); err != nil {
-		return "", fmt.Errorf("admin create: %w", err)
-	}
-	if fs.NArg() > 0 {
-		return "", fmt.Errorf("admin create: unexpected arguments: %s", strings.Join(fs.Args(), " "))
-	}
-	if *username == "" {
-		return "", errors.New("admin create: -username is required")
-	}
-	if err := users.ValidateUsername(*username); err != nil {
-		return "", fmt.Errorf("admin create: %w", err)
-	}
-	return *username, nil
-}
-
 // openDB creates/tightens the data directory, opens and migrates the database. Directory and
 // database files are forced to 0700/0600 before and after opening (WAL/SHM appear on open);
 // a remaining group/other bit refuses the start.
@@ -203,7 +181,7 @@ func runCLI(cmd string, args []string, stdin *os.File, stdout, stderr io.Writer)
 	rec := audit.NewSQLRecorder(db, clk)
 	switch cmd {
 	case "admin create":
-		if _, err := adminCreateUsername(rest); err != nil {
+		if _, err := users.ParseAdminCreateArgs(rest); err != nil {
 			return err
 		}
 		pw, err := readPassword(stdin, stderr)
