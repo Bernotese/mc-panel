@@ -132,7 +132,7 @@ func TestUpdatePassword(t *testing.T) {
 	if got := sessionRevokedAt(t, e.db, sess); got != (sql.NullInt64{Int64: t0.UnixMilli(), Valid: true}) {
 		t.Fatalf("session revoked_at = %+v", got)
 	}
-	if e.rec.Entries[0].Details["password_changed"] != true {
+	if changed, _ := e.rec.Entries[0].Details["password_changed"].(bool); !changed {
 		t.Fatalf("audit details = %+v", e.rec.Entries[0].Details)
 	}
 	if n := len(e.notes.Events); n != 0 {
