@@ -32,12 +32,17 @@ import (
 // version is set at link time via -ldflags "-X main.version=...".
 var version = "dev"
 
+// defaultConfigPath is read when neither -config nor -dev is given (a var for tests).
+var defaultConfigPath = "/etc/mc-panel/panel.toml"
+
 const usageText = `usage:
   panel serve        [-config path] [-dev]
   panel admin create [-config path] [-dev] -username NAME   (password from stdin)
   panel admin unlock [-config path] [-dev]
   panel audit verify [-config path] [-dev]
-  panel version`
+  panel version
+
+  -config defaults to /etc/mc-panel/panel.toml unless -dev is given.`
 
 func main() { os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
 
@@ -125,6 +130,9 @@ func commonFlags(args []string) (config.Panel, []string, error) {
 		default:
 			rest = append(rest, arg)
 		}
+	}
+	if cfgPath == "" && !dev {
+		cfgPath = defaultConfigPath
 	}
 	root, err := os.Getwd()
 	if err != nil {
