@@ -12,6 +12,7 @@ import (
 
 	"mcpanel/internal/audit"
 	"mcpanel/internal/clock"
+	"mcpanel/internal/password"
 	"mcpanel/internal/principal"
 	"mcpanel/internal/store"
 )
@@ -55,7 +56,9 @@ func RunAdminCreate(ctx context.Context, db *sql.DB, c clock.Clock, rec audit.Re
 // readPasswordLine returns the first line of r without the trailing line terminator.
 // Spaces are significant and kept.
 func readPasswordLine(r io.Reader) (string, error) {
-	line, err := bufio.NewReader(r).ReadString('\n')
+	// A password has at most password.MaxLength runes (up to 4 bytes each) plus the line
+	// terminator; never read more, so a missing newline cannot make this block or grow.
+	line, err := bufio.NewReader(io.LimitReader(r, password.MaxLength*4+2)).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
 	}
