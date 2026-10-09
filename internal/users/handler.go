@@ -37,6 +37,7 @@ func NewHandler(db *sql.DB, c clock.Clock, rec audit.Recorder, n notify.Notifier
 func (h *Handler) Routes(api *rbac.Router) {
 	h.userRoutes(api)
 	h.manageRoutes(api)
+	h.permissionRoutes(api)
 }
 
 // pathID parses the {id} URL parameter; false for non-numeric or non-positive values.
