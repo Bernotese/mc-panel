@@ -19,6 +19,9 @@ var t0 = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
 // fakeGeo maps normalized IP strings to country codes.
 type fakeGeo map[string]string
 
+// JSON-decoded booleans arrive as any; named values avoid bool literals in comparisons.
+var jsonTrue, jsonFalse any = true, false
+
 func (g fakeGeo) Country(ip netip.Addr) string { return g[normalizeIP(ip).String()] }
 
 type env struct {

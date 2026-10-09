@@ -12,14 +12,14 @@ import (
 	"mcpanel/internal/store"
 )
 
-func wantRateLimited(t *testing.T, err error, max time.Duration) {
+func wantRateLimited(t *testing.T, err error, limit time.Duration) {
 	t.Helper()
 	var rl *RateLimitError
 	if !errors.As(err, &rl) {
 		t.Fatalf("err = %v, want *RateLimitError", err)
 	}
-	if rl.RetryAfter <= 0 || rl.RetryAfter > max {
-		t.Fatalf("RetryAfter = %v, want (0, %v]", rl.RetryAfter, max)
+	if rl.RetryAfter <= 0 || rl.RetryAfter > limit {
+		t.Fatalf("RetryAfter = %v, want (0, %v]", rl.RetryAfter, limit)
 	}
 }
 

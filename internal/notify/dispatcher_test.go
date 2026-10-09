@@ -27,6 +27,9 @@ type dispEnv struct {
 	d   *Dispatcher
 }
 
+// JSON-decoded booleans arrive as any; named values avoid bool literals in comparisons.
+var jsonTrue any = true
+
 func testBox(t *testing.T) *secretbox.Box {
 	t.Helper()
 	b, err := secretbox.New(bytes.Repeat([]byte{9}, secretbox.KeySize))

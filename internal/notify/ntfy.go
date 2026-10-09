@@ -38,7 +38,7 @@ func (n *ntfySender) Send(ctx context.Context, e Event) error {
 	if err != nil {
 		return &PermanentError{Err: errors.New("notify: ntfy: invalid server URL")}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(body)) //nolint:gosec // G704: target is admin-configured, validated by ValidateConfig and dialed via the restricted client
 	if err != nil {
 		return &PermanentError{Err: errors.New("notify: ntfy: invalid server URL")}
 	}
@@ -51,7 +51,7 @@ func (n *ntfySender) Send(ctx context.Context, e Event) error {
 	if n.token != "" {
 		req.Header.Set("Authorization", "Bearer "+n.token)
 	}
-	resp, err := n.client.Do(req)
+	resp, err := n.client.Do(req) //nolint:gosec // G704: target is admin-configured, validated by ValidateConfig and dialed via the restricted client
 	if err != nil {
 		return requestError(KindNtfy, err)
 	}
