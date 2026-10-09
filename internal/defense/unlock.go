@@ -70,17 +70,17 @@ func Unlock(ctx context.Context, db *sql.DB, rec audit.Recorder, c clock.Clock, 
 		}
 	}
 
-	fmt.Fprintf(out, "Lifted %d active jail(s).\n", n)
+	_, _ = fmt.Fprintf(out, "Lifted %d active jail(s).\n", n)
 	if res.AdminAllowlistDisabled {
-		fmt.Fprintln(out, `Disabled "admin login only from allowlist".`)
+		_, _ = fmt.Fprintln(out, `Disabled "admin login only from allowlist".`)
 	} else {
-		fmt.Fprintln(out, `"Admin login only from allowlist" was already disabled.`)
+		_, _ = fmt.Fprintln(out, `"Admin login only from allowlist" was already disabled.`)
 	}
 	if res.CountryFilterCleared {
-		fmt.Fprintf(out, "Cleared country filter (was: %s).\n", strings.Join(before.AllowedCountries, ", "))
+		_, _ = fmt.Fprintf(out, "Cleared country filter (was: %s).\n", strings.Join(before.AllowedCountries, ", "))
 	} else {
-		fmt.Fprintln(out, "Country filter was already empty.")
+		_, _ = fmt.Fprintln(out, "Country filter was already empty.")
 	}
-	fmt.Fprintln(out, "Deny rules were not changed. A running panel applies these changes within 30 seconds; firewall bans are removed by the next sync.")
+	_, _ = fmt.Fprintln(out, "Deny rules were not changed. A running panel applies these changes within 30 seconds; firewall bans are removed by the next sync.")
 	return res, nil
 }
