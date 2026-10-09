@@ -14,6 +14,8 @@
 
 **Abweichung von der Spec (bewusst):** Migrationen liegen in `internal/store/migrations/` statt `migrations/` (für `go:embed`). Das eingebettete Frontend liegt in `internal/webui/dist/` (Vite-`outDir`), nicht in `web/dist/`, damit `web/` keine Go-Dateien enthält. `web/go.mod` (leeres Modul) schließt `web/node_modules` aus `go ./...` aus.
 
+**Formatierung:** Die Go-Snippets in diesem Plan sind inhaltlich verbindlich, aber nicht garantiert gofmt-konform ausgerichtet. Nach dem Schreiben jeder Go-Datei und vor jedem Commit `gofmt -w <geänderte .go-Dateien>` ausführen; `gofmt -l .` muss vor dem Tag `phase0` leer sein.
+
 ## Eigentum (für Streams schreibgeschützt)
 
 `go.mod`, `go.sum`, `Makefile`, `sqlc.yaml`, `.gitignore`, `scripts/dev.sh`, `internal/deps/`, `internal/clock/`, `internal/config/`, `internal/httpx/`, `internal/secretbox/`, `internal/principal/`, `internal/store/open.go`, `internal/store/settings.go`, `internal/store/migrations/`, `internal/store/queries/common.sql`, `internal/store/storetest/`, sqlc-Basisdateien (`internal/store/db.go`, `internal/store/models.go`), `internal/rbac/rule.go`, `internal/rbac/router.go`, `internal/audit/types.go`, `internal/audit/memory.go`, `internal/notify/notify.go`, `internal/defense/guard.go`, `internal/defense/fake.go`, `internal/agent/agentapi/`, `internal/password/`, `internal/webui/`, `cmd/panel/main.go` (bis Phase 2), `api/openapi.yaml`, `web/go.mod`, `web/package.json`/`package-lock.json` (nur Stream E darf Frontend-Pakete ergänzen).
@@ -2983,7 +2985,7 @@ components:
 | POST /auth/sudo/webauthn/finish | finishSudoWebAuthn | Authenticated | WebAuthnAssertion | 200 SudoResponse | Unauthorized (invalid_code), TooManyRequests | A |
 | PATCH /me | updateMe | Authenticated | UpdateMeRequest | 200 Me | BadRequest | A |
 | POST /me/password | changePassword | Authenticated | PasswordChangeRequest | 204 | BadRequest (validation_failed), Unauthorized (invalid_credentials) | A |
-| POST /me/totp/setup | setupTotp | Authenticated, Stages setup/full (Handler verlangt Sudo, wenn schon 2FA aktiv) | – | 200 TotpSetupResponse | Forbidden (sudo_required) | A |
+| POST /me/totp/setup | setupTotp | Authenticated, Stages setup/full (Handler verlangt Sudo, wenn schon 2FA aktiv) | – | 200 TotpSetupResponse | Forbidden (sudo_required), Conflict (TOTP already enabled) | A |
 | POST /me/totp/enable | enableTotp | Authenticated, Stages setup/full | CodeRequest | 200 RecoveryCodesResponse | Unauthorized (invalid_code), Conflict (no setup pending) | A |
 | DELETE /me/totp | disableTotp | Authenticated + Sudo | – | 204 | Conflict (last 2FA method of admin / enforced) | A |
 | POST /me/passkeys/begin | beginPasskeyRegistration | Authenticated, Stages setup/full (Sudo, wenn schon 2FA aktiv) | – | 200 WebAuthnOptions | Forbidden | A |
@@ -3025,7 +3027,7 @@ components:
 | POST /security/notifiers | createNotifier | Admin + Sudo | CreateNotifierRequest | 201 Notifier | BadRequest, Conflict | B |
 | PATCH /security/notifiers/{id} | updateNotifier | Admin + Sudo | UpdateNotifierRequest | 200 Notifier | BadRequest, NotFound | B |
 | DELETE /security/notifiers/{id} | deleteNotifier | Admin + Sudo | – | 204 | NotFound | B |
-| POST /security/notifiers/{id}/test | testNotifier | Admin | – | 204 | NotFound | B |
+| POST /security/notifiers/{id}/test | testNotifier | Admin | – | 204 | BadRequest (validation_failed: delivery failed), NotFound | B |
 | GET /security/agent | getAgentStatus | Admin | – | 200 AgentStatus | – | B |
 
 Pfadparameter `{id}` immer über `#/components/parameters/IdPath`. Array-Antworten (`Passkey[]` usw.) als `type: array, items: $ref`.
