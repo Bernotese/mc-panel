@@ -112,12 +112,18 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := h.clock.Now().UnixMilli()
-	if err := h.q.AuthChangePassword(ctx, store.AuthChangePasswordParams{PasswordHash: hash, Now: now, ID: user.ID}); err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
-	revoked, err := h.q.AuthRevokeOtherSessions(ctx, store.AuthRevokeOtherSessionsParams{
-		RevokedAt: sql.NullInt64{Int64: now, Valid: true}, UserID: user.ID, KeepID: p.SessionID,
+	// The new password and the revocation of every other session commit together: a failure
+	// must not leave a changed password with the old sessions still alive (or vice versa).
+	var revoked int64
+	err = h.withTx(ctx, func(q *store.Queries) error {
+		if err := q.AuthChangePassword(ctx, store.AuthChangePasswordParams{PasswordHash: hash, Now: now, ID: user.ID}); err != nil {
+			return err
+		}
+		var err error
+		revoked, err = q.AuthRevokeOtherSessions(ctx, store.AuthRevokeOtherSessionsParams{
+			RevokedAt: sql.NullInt64{Int64: now, Valid: true}, UserID: user.ID, KeepID: p.SessionID,
+		})
+		return err
 	})
 	if err != nil {
 		httpx.Internal(w, r, err)

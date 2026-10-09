@@ -104,3 +104,33 @@ func TestRegenerateRecoveryCodes(t *testing.T) {
 		t.Fatalf("audit = %v", e.audit.Actions())
 	}
 }
+
+// Password update and revocation of the other sessions commit together: if revoking fails,
+// the old password stays valid.
+func TestChangePasswordIsAtomic(t *testing.T) {
+	e := newTestEnv(t)
+	e.createUser("alice", "user")
+	c := e.newClient("203.0.113.10")
+	if res := c.login("alice", testPassword); res.code != 200 {
+		t.Fatalf("login = %d", res.code)
+	}
+	if res := e.newClient("203.0.113.12").login("alice", testPassword); res.code != 200 { // another session to revoke
+		t.Fatalf("second login = %d", res.code)
+	}
+	if _, err := e.db.Exec(`CREATE TRIGGER fail_revoke BEFORE UPDATE OF revoked_at ON sessions
+		BEGIN SELECT RAISE(ABORT, 'revoke failed'); END`); err != nil {
+		t.Fatal(err)
+	}
+	res := c.do(http.MethodPost, "/api/me/password", map[string]string{
+		"current_password": testPassword, "new_password": "a brand new passphrase",
+	})
+	if res.code != http.StatusInternalServerError {
+		t.Fatalf("change = %d %s, want 500", res.code, res.body)
+	}
+	if _, err := e.db.Exec(`DROP TRIGGER fail_revoke`); err != nil {
+		t.Fatal(err)
+	}
+	if res := e.newClient("203.0.113.11").login("alice", testPassword); res.code != 200 {
+		t.Fatalf("old password must still work after the failed change: %d", res.code)
+	}
+}
