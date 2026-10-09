@@ -133,3 +133,7 @@ WHERE id < sqlc.arg(before_id)
   AND (sqlc.arg(any_ip) = 1 OR ip = sqlc.arg(ip) OR ip_key = sqlc.arg(ip_key))
 ORDER BY id DESC
 LIMIT sqlc.arg(lim);
+
+-- name: DefenseLiftAllActiveJails :execrows
+UPDATE jails SET lifted_at = sqlc.arg(lifted_at), lifted_by = sqlc.arg(lifted_by)
+WHERE lifted_at IS NULL AND expires_at > sqlc.arg(now);
