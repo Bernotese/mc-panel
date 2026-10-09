@@ -15,7 +15,7 @@ export default defineConfig({
   projects: [
     {
       name: 'mock',
-      testMatch: /(totp|smoke)\.spec\.ts$/,
+      testMatch: /(?<![\w-])(totp|smoke)\.spec\.ts$/,
       use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${MOCK_PORT}`, locale: 'de-DE' },
     },
     ...(realBaseURL
