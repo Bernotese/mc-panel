@@ -148,17 +148,19 @@ func TestNFTablesSetupIsIdempotentAndScoped(t *testing.T) {
 		t.Fatalf("got %d rules, want exactly 2", len(rules))
 	}
 	for i, want := range []string{firewall.Set4Name, firewall.Set6Name} {
-		var lookup, drop bool
+		var ctState, lookup, drop bool
 		for _, e := range rules[i].Exprs {
 			switch e := e.(type) {
+			case *expr.Ct:
+				ctState = e.Key == expr.CtKeySTATE
 			case *expr.Lookup:
 				lookup = e.SetName == want
 			case *expr.Verdict:
 				drop = e.Kind == expr.VerdictDrop
 			}
 		}
-		if !lookup || !drop {
-			t.Errorf("rule %d does not drop @%s: %#v", i, want, rules[i].Exprs)
+		if !ctState || !lookup || !drop {
+			t.Errorf("rule %d does not drop new connections from @%s: %#v", i, want, rules[i].Exprs)
 		}
 	}
 
@@ -166,14 +168,14 @@ func TestNFTablesSetupIsIdempotentAndScoped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !s4.HasTimeout || s4.Interval || s4.KeyType.Name != nftables.TypeIPAddr.Name {
+	if !s4.HasTimeout || s4.Interval || s4.KeyType.Name != nftables.TypeIPAddr.Name || s4.Size != firewall.SetSize {
 		t.Errorf("set4 = %+v", s4)
 	}
 	s6, err := c.GetSetByName(table, firewall.Set6Name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !s6.HasTimeout || !s6.Interval || s6.KeyType.Name != nftables.TypeIP6Addr.Name {
+	if !s6.HasTimeout || !s6.Interval || s6.KeyType.Name != nftables.TypeIP6Addr.Name || s6.Size != firewall.SetSize {
 		t.Errorf("set6 = %+v", s6)
 	}
 }
@@ -312,4 +314,33 @@ func TestNFTablesBansSurviveAgentRestart(t *testing.T) {
 	}
 	restarted := newBackend(t, fd) // setup flushes only the chain, never the sets
 	assertPrefixes(t, listBans(t, restarted), []string{"203.0.113.7/32"})
+}
+
+// Sets created by an older agent without a size limit are recreated on startup.
+func TestNFTablesMigratesUnsizedSets(t *testing.T) {
+	fd := newNetNS(t)
+	c := rawConn(t, fd)
+	table := c.AddTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: firewall.TableName})
+	old4 := &nftables.Set{Table: table, Name: firewall.Set4Name, KeyType: nftables.TypeIPAddr, HasTimeout: true}
+	old6 := &nftables.Set{Table: table, Name: firewall.Set6Name, KeyType: nftables.TypeIP6Addr, HasTimeout: true, Interval: true}
+	if err := c.AddSet(old4, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.AddSet(old6, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Flush(); err != nil {
+		t.Fatalf("create old sets: %v", err)
+	}
+	newBackend(t, fd)
+	for _, name := range []string{firewall.Set4Name, firewall.Set6Name} {
+		s, err := c.GetSetByName(table, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Size != firewall.SetSize {
+			t.Fatalf("%s size = %d, want %d", name, s.Size, firewall.SetSize)
+		}
+	}
+	newBackend(t, fd) // and a restart with current sets is a no-op
 }

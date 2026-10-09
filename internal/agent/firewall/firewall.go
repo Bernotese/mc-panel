@@ -20,6 +20,8 @@ const (
 	Set6Name      = "mcpanel_jail6"
 	ChainName     = "input"
 	ChainPriority = -10
+	// SetSize bounds each jail set so a flood of bans cannot exhaust kernel memory.
+	SetSize = 65536
 )
 
 // entry is a ban as seen by a backend: prefix plus remaining lifetime.
