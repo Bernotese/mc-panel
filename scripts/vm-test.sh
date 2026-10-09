@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Acceptance check 5 (spec §12), nftables part: five failed logins from the test client
 # namespace (192.0.2.2) must put that IP into `nft list set inet mcpanel mcpanel_jail4`.
-# Needs the Phase-2-integrated panel (jail -> agent wiring). Redeploys and resets the VM
-# state via scripts/vm-setup.sh --no-build first, so every run starts without jails.
+# Redeploys and resets the VM state via scripts/vm-setup.sh --no-build first, so every run
+# starts without jails.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

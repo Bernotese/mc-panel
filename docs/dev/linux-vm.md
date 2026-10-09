@@ -16,6 +16,7 @@ scripts/vm-test.sh ────────▶  netns mcpanel-client 192.0.2.2 �
 ```
 
 - Das panel läuft **ohne** `-dev`. `public_url = "https://mcpanel.test"` erfüllt die Prod-Validierung; TLS terminiert in Produktion Caddy, nicht das panel. Der Test sendet deshalb `Origin: https://mcpanel.test`.
+- Produktions-Default ist `listen = "unix:/run/mc-panel/panel.sock"` (hinter Caddy). Die VM-`panel.toml` setzt stattdessen `listen = "192.0.2.1:8080"`, damit der Testclient im Namespace das panel direkt per TCP erreicht.
 - Der agent läuft ohne `-dev`, also mit `firewall = "nftables"` und `panel_uid` = UID von `mcpanel`.
 - Testclient ist ein eigener Netz-Namespace mit `192.0.2.2`: Loopback-Adressen dürfen nicht gebannt werden, und über Lima-Portweiterleitungen käme jede Anfrage als `127.0.0.1` an.
 - Lima mountet das Home-Verzeichnis des Hosts schreibgeschützt (read-only) in die VM; die Skripte kopieren das Archiv deshalb per `limactl copy` in eine mit `mktemp` erzeugte Datei unter `/tmp` der VM (wird am Ende wieder gelöscht) und schreiben nie in den Host-Mount.
@@ -29,7 +30,7 @@ brew install lima
 scripts/vm-setup.sh --provision-only   # VM anlegen (erstes Mal: Ubuntu-Image ~600 MB), Pakete, User, Testnetz
 make release                           # Snapshot-Archive nach dist/
 scripts/vm-setup.sh --no-build         # installieren + agent und panel starten
-scripts/vm-test.sh                     # Abnahmekriterium 5 (benötigt Phase 2)
+scripts/vm-test.sh                     # Abnahmekriterium 5 (nftables-Teil)
 ```
 
 `scripts/vm-setup.sh` ohne Flags führt `make release` selbst aus. Erwartete Ausgabe am Ende von `vm-setup.sh`:
@@ -43,7 +44,7 @@ nftables: table inet mcpanel present
 == done: agent + panel running in VM mcpanel (panel at http://192.0.2.1:8080 inside the VM)
 ```
 
-`scripts/vm-test.sh` endet mit `PASS: acceptance check 5 (nftables part)` und zeigt vorher das Set mit `192.0.2.2`. Es funktioniert erst nach der Phase-2-Integration (Jail → agent-Ban); vorher bricht es beim Warten auf das Set mit `FAIL: 192.0.2.2 not in inet mcpanel mcpanel_jail4 after 30s` ab.
+`scripts/vm-test.sh` endet mit `PASS: acceptance check 5 (nftables part)` und zeigt vorher das Set mit `192.0.2.2`. Die nftables-Regel verwirft nur neue Verbindungen (`ct state new`) von gebannten Adressen; die anschließende Anfrage aus dem Namespace läuft deshalb ins Timeout (`OK: request … was dropped by nftables`).
 
 ## OrbStack statt Lima
 
@@ -75,6 +76,6 @@ limactl delete --force mcpanel                                # VM komplett entf
 | `… found 2` | alte Snapshots in `dist/`: `make clean && make release` |
 | `agent socket /run/mc-panel/agent.sock missing` | agent-Log steht direkt darüber; häufig falscher `panel_uid` oder fehlende Root-Rechte |
 | `panel health check failed` | panel-Log steht darüber; häufig Validierungsfehler in `/etc/mc-panel/panel.toml` |
-| `WARNING: table inet mcpanel not present yet` | agent legt Tabelle/Sets beim Start an (Stream C); vor dessen Merge erwartbar |
+| `table inet mcpanel missing` | agent legt Tabelle/Sets beim Start an; agent-Log steht darüber (häufig fehlendes nftables-Kernelmodul oder Rechte) |
 | Login liefert `403` statt `401` | CSRF/Origin-Prüfung: `public_url` in `panel.toml` und `Origin`-Header in `vm-test.sh` müssen übereinstimmen |
 | Jail aus früherem Lauf blockiert | `scripts/vm-setup.sh --no-build` setzt DB und Sets zurück (macht `vm-test.sh` automatisch) |
