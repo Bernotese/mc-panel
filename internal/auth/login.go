@@ -52,6 +52,23 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
+	// Admin network restriction before the password check: a caller outside the allowlist must
+	// not learn whether the password was right (same work, same generic 401).
+	if principal.Role(user.Role) == principal.RoleAdmin {
+		if err := h.guard.CheckAdminNetwork(ctx, ip); err != nil {
+			if !errors.Is(err, defense.ErrAdminNetwork) {
+				h.guardError(w, r, err)
+				return
+			}
+			if errors.Is(password.DummyVerifyContext(ctx, req.Password), password.ErrBusy) {
+				busy(w, r)
+				return
+			}
+			h.recordAttempt(r, user.Username, user.ID, defense.StagePassword, false, reasonAdminNetwork)
+			invalidCredentials(w, r)
+			return
+		}
+	}
 	ok, rehash, err := password.VerifyContext(ctx, req.Password, user.PasswordHash)
 	if errors.Is(err, password.ErrMalformedHash) {
 		// Unusable hash (e.g. "!" from user creation without password): equalise timing.
@@ -66,15 +83,6 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		h.recordAttempt(r, user.Username, user.ID, defense.StagePassword, false, reasonBadPassword)
 		invalidCredentials(w, r)
 		return
-	}
-	if principal.Role(user.Role) == principal.RoleAdmin {
-		if err := h.guard.CheckAdminNetwork(ctx, ip); err != nil {
-			if errors.Is(err, defense.ErrAdminNetwork) {
-				h.recordAttempt(r, user.Username, user.ID, defense.StagePassword, false, reasonAdminNetwork)
-			}
-			h.guardError(w, r, err)
-			return
-		}
 	}
 	if rehash {
 		h.rehashPassword(r, user, req.Password)
