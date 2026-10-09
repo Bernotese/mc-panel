@@ -104,7 +104,7 @@ func (h *Handler) promoteSetup(w http.ResponseWriter, r *http.Request, p princip
 		return nil
 	}
 	ctx := r.Context()
-	sess, err := h.q.AuthGetSessionByID(ctx, p.SessionID)
+	sess, err := h.presentedSession(ctx, p)
 	if err != nil {
 		return err
 	}
@@ -130,7 +130,9 @@ func (h *Handler) promoteSetupBestEffort(w http.ResponseWriter, r *http.Request,
 // guardAddFactor runs inside the write transaction that adds a second factor. If the user already
 // has any factor, adding another needs fresh sudo (a setup-stage session can never hold sudo, so a
 // session that raced with another enrolment is locked out). Otherwise this is the first factor and
-// all other pending (preauth/setup) sessions of the user are revoked.
+// ALL other sessions of the user are revoked: each of them was authenticated by password only, and
+// even a stored "full" session may only look harmless (the loader downgrades it to setup when 2FA
+// is mandatory), so it must not regain access without presenting a second factor.
 func (h *Handler) guardAddFactor(ctx context.Context, q *store.Queries, p principal.Principal, userID int64) error {
 	u, err := q.AuthGetUserByID(ctx, userID)
 	if err != nil {
@@ -146,7 +148,7 @@ func (h *Handler) guardAddFactor(ctx context.Context, q *store.Queries, p princi
 		}
 		return nil
 	}
-	_, err = q.AuthRevokeOtherPendingSessions(ctx, store.AuthRevokeOtherPendingSessionsParams{
+	_, err = q.AuthRevokeOtherSessions(ctx, store.AuthRevokeOtherSessionsParams{
 		RevokedAt: sql.NullInt64{Int64: h.clock.Now().UnixMilli(), Valid: true}, UserID: userID, KeepID: p.SessionID,
 	})
 	return err

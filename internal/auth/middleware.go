@@ -13,6 +13,9 @@ import (
 	"mcpanel/internal/store"
 )
 
+// presentedTokenKey carries the token hash of the cookie the session loader authenticated.
+type presentedTokenKey struct{}
+
 const (
 	csrfHeader = "X-CSRF-Token"
 	loginPath  = "/api/auth/login"
@@ -69,6 +72,7 @@ func (s *Sessions) Middleware(next http.Handler) http.Handler {
 		if sess.SudoUntil > 0 {
 			p.SudoUntil = time.UnixMilli(sess.SudoUntil)
 		}
+		ctx = context.WithValue(ctx, presentedTokenKey{}, sess.TokenHash)
 		next.ServeHTTP(w, r.WithContext(principal.With(ctx, p)))
 	})
 }

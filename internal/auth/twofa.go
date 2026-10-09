@@ -123,9 +123,9 @@ func (h *Handler) verifyRecovery(w http.ResponseWriter, r *http.Request) {
 // derives new-device notifications from it), token + CSRF rotation, audit, Me response.
 func (h *Handler) completeSecondFactor(w http.ResponseWriter, r *http.Request, p principal.Principal, u store.User, stage defense.AttemptStage, method string) {
 	ctx := r.Context()
-	sess, err := h.q.AuthGetSessionByID(ctx, p.SessionID)
+	sess, err := h.presentedSession(ctx, p)
 	if err != nil {
-		httpx.Internal(w, r, err)
+		sessionError(w, r, err)
 		return
 	}
 	if sess.Stage != string(principal.StagePreAuth) { // a concurrent request already completed it

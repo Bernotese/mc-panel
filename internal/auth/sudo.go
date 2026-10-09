@@ -50,9 +50,9 @@ func (h *Handler) sudoFailed(r *http.Request, u store.User, method, reason strin
 // grantSudo sets sudo_until = now + cfg.Session.Sudo and rotates the session token.
 func (h *Handler) grantSudo(w http.ResponseWriter, r *http.Request, p principal.Principal, u store.User, method string) {
 	ctx := r.Context()
-	sess, err := h.q.AuthGetSessionByID(ctx, p.SessionID)
+	sess, err := h.presentedSession(ctx, p)
 	if err != nil {
-		httpx.Internal(w, r, err)
+		sessionError(w, r, err)
 		return
 	}
 	until := h.clock.Now().Add(h.cfg.Session.Sudo.Duration).UnixMilli()
