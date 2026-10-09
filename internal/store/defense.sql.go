@@ -454,6 +454,25 @@ func (q *Queries) DefenseLastJailCreatedAt(ctx context.Context, ipKey string) (i
 	return last_created_at, err
 }
 
+const defenseLiftAllActiveJails = `-- name: DefenseLiftAllActiveJails :execrows
+UPDATE jails SET lifted_at = ?1, lifted_by = ?2
+WHERE lifted_at IS NULL AND expires_at > ?3
+`
+
+type DefenseLiftAllActiveJailsParams struct {
+	LiftedAt sql.NullInt64
+	LiftedBy sql.NullString
+	Now      int64
+}
+
+func (q *Queries) DefenseLiftAllActiveJails(ctx context.Context, arg DefenseLiftAllActiveJailsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, defenseLiftAllActiveJails, arg.LiftedAt, arg.LiftedBy, arg.Now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const defenseLiftJail = `-- name: DefenseLiftJail :execrows
 UPDATE jails SET lifted_at = ?1, lifted_by = ?2
 WHERE id = ?3 AND lifted_at IS NULL
