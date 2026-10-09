@@ -34,6 +34,11 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 		return false
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			WriteError(w, r, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, "request body too large")
+			return false
+		}
 		WriteError(w, r, http.StatusBadRequest, CodeBadRequest, "unexpected data after JSON body")
 		return false
 	}

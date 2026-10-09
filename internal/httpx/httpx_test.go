@@ -125,6 +125,67 @@ func TestRealIP(t *testing.T) {
 	}
 }
 
+func TestRealIPXFFVariants(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32"), netip.MustParsePrefix("::1/128")}
+	cases := []struct {
+		name, remote string
+		xff          []string
+		want         string
+	}{
+		{"zoned XFF entry from trusted peer loses zone", "127.0.0.1:5000", []string{"fe80::1%en0"}, "fe80::1"},
+		{"zoned peer loses zone", "[fe80::1%en0]:5000", nil, "fe80::1"},
+		{"multiple XFF lines, rightmost untrusted wins", "127.0.0.1:5000", []string{"6.6.6.6", "203.0.113.9"}, "203.0.113.9"},
+		{"multiple XFF lines, trusted hop on last line skipped", "127.0.0.1:5000", []string{"203.0.113.9", "127.0.0.1"}, "203.0.113.9"},
+		{"all XFF entries trusted falls back to peer", "127.0.0.1:5000", []string{"127.0.0.1", "::1"}, "127.0.0.1"},
+		{"all XFF entries trusted falls back to v6 peer", "[::1]:5000", []string{"::1"}, "::1"},
+		{"IPv4-mapped XFF entry unmapped", "127.0.0.1:5000", []string{"::ffff:198.51.100.1"}, "198.51.100.1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got netip.Addr
+			h := httpx.RealIP(trusted)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = httpx.ClientIP(r.Context())
+			}))
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = tc.remote
+			for _, line := range tc.xff {
+				req.Header.Add("X-Forwarded-For", line)
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			if got.Zone() != "" {
+				t.Fatalf("ClientIP %s carries zone %q", got, got.Zone())
+			}
+			if got.String() != tc.want {
+				t.Fatalf("ClientIP = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDecodeJSONTrailingTooLarge(t *testing.T) {
+	type in struct {
+		Name string `json:"name"`
+	}
+	var got in
+	var ok bool
+	h := httpx.BodyLimit(1024)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ok = httpx.DecodeJSON(w, r, &got)
+	}))
+	rec := httptest.NewRecorder()
+	body := `{"name":"a"}` + strings.Repeat(" ", 2000)
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)))
+	if ok {
+		t.Fatal("ok=true, want false")
+	}
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d want 413 (body %s)", rec.Code, rec.Body)
+	}
+	var eb httpx.ErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &eb); err != nil || eb.Error != httpx.CodePayloadTooLarge {
+		t.Fatalf("error code=%q err=%v body=%s", eb.Error, err, rec.Body)
+	}
+}
+
 func TestSecurityHeaders(t *testing.T) {
 	h := httpx.SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	rec := httptest.NewRecorder()
