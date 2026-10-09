@@ -47,6 +47,13 @@ type Rotation struct {
 	SudoUntil int64
 }
 
+// withQueries returns a Sessions that runs its statements on q (typically a transaction).
+func (s *Sessions) withQueries(q *store.Queries) *Sessions {
+	c := *s
+	c.q = q
+	return &c
+}
+
 func (s *Sessions) expiresAt(stage principal.Stage, createdAt int64) int64 {
 	if stage == principal.StagePreAuth {
 		return createdAt + s.cfg.PreAuth.Milliseconds()
