@@ -137,3 +137,35 @@ func TestPermissionsUnknownUser(t *testing.T) {
 		t.Fatalf("PUT: %d", rec.Code)
 	}
 }
+
+// OpenAPI requires grants (and permissions per grant): a body without them must not wipe the set.
+func TestSetPermissionsRequiresGrantsAndPermissions(t *testing.T) {
+	e := newEnv(t)
+	admin := e.admin()
+	alice := storetest.CreateUser(t, e.db, "alice", "user")
+	a := storetest.CreateServer(t, e.db, "alpha")
+	path := fmt.Sprintf("/users/%d/permissions", alice)
+	if rec := e.do(http.MethodPut, path, grantsBody(grant(a, "server.power")), &admin); rec.Code != http.StatusOK {
+		t.Fatalf("initial PUT: %d %s", rec.Code, rec.Body)
+	}
+	for name, body := range map[string]any{
+		"empty object":       map[string]any{},
+		"null grants":        map[string]any{"grants": nil},
+		"missing permission": map[string]any{"grants": []map[string]any{{"server_id": a}}},
+		"null permissions":   map[string]any{"grants": []map[string]any{{"server_id": a, "permissions": nil}}},
+	} {
+		rec := e.do(http.MethodPut, path, body, &admin)
+		if rec.Code != http.StatusBadRequest || errCode(t, rec) != "validation_failed" {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	want := permsResp{Grants: []grantResp{{ServerID: a, Permissions: []string{"server.view", "server.power"}}}}
+	if got := decode[permsResp](t, e.do(http.MethodGet, path, nil, &admin)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("permissions changed by rejected PUTs: %+v", got)
+	}
+	// An explicit empty list still clears everything.
+	rec := e.do(http.MethodPut, path, grantsBody(), &admin)
+	if got := decode[permsResp](t, rec); rec.Code != http.StatusOK || len(got.Grants) != 0 {
+		t.Fatalf("explicit empty grants: %d %s", rec.Code, rec.Body)
+	}
+}
