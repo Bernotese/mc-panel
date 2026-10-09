@@ -10,7 +10,7 @@ import { errorMessage, useErrorToast } from '@/lib/error-message'
 import { useFormat } from '@/lib/format'
 import { SectionCard } from './section-card'
 import { buildSessionColumns, useDeviceLabel } from './session-columns'
-import { allSessionsKey } from './session-keys'
+import { allSessionsKey } from './query-keys'
 
 export function AdminSessionsCard() {
   const { t } = useTranslation()

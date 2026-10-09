@@ -13,6 +13,7 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as Setup2faRouteImport } from './routes/setup-2fa'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
+import { Route as AppProfileRouteImport } from './routes/_app/profile'
 import { Route as AppSecurityRouteImport } from './routes/_app/security'
 import { Route as LoginIndexRouteImport } from './routes/login/index'
 import { Route as Login2faRouteImport } from './routes/login/2fa'
@@ -36,6 +37,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppAuditRoute = AppAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProfileRoute = AppProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSecurityRoute = AppSecurityRouteImport.update({
@@ -68,6 +74,7 @@ export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/setup-2fa': typeof Setup2faRoute
   '/audit': typeof AppAuditRoute
+  '/profile': typeof AppProfileRoute
   '/security': typeof AppSecurityRoute
   '/login/2fa': typeof Login2faRoute
   '/login/': typeof LoginIndexRoute
@@ -77,6 +84,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/setup-2fa': typeof Setup2faRoute
   '/audit': typeof AppAuditRoute
+  '/profile': typeof AppProfileRoute
   '/security': typeof AppSecurityRoute
   '/login/2fa': typeof Login2faRoute
   '/': typeof AppIndexRoute
@@ -89,6 +97,7 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/setup-2fa': typeof Setup2faRoute
   '/_app/audit': typeof AppAuditRoute
+  '/_app/profile': typeof AppProfileRoute
   '/_app/security': typeof AppSecurityRoute
   '/login/2fa': typeof Login2faRoute
   '/_app/': typeof AppIndexRoute
@@ -102,6 +111,7 @@ export interface FileRouteTypes {
     | '/'
     | '/setup-2fa'
     | '/audit'
+    | '/profile'
     | '/security'
     | '/login/2fa'
     | '/login/'
@@ -111,6 +121,7 @@ export interface FileRouteTypes {
   to:
     | '/setup-2fa'
     | '/audit'
+    | '/profile'
     | '/security'
     | '/login/2fa'
     | '/'
@@ -122,6 +133,7 @@ export interface FileRouteTypes {
     | '/_app'
     | '/setup-2fa'
     | '/_app/audit'
+    | '/_app/profile'
     | '/_app/security'
     | '/login/2fa'
     | '/_app/'
@@ -167,6 +179,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAuditRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/profile': {
+      id: '/_app/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof AppProfileRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/security': {
       id: '/_app/security'
       path: '/security'
@@ -207,6 +226,7 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppAuditRoute: typeof AppAuditRoute
+  AppProfileRoute: typeof AppProfileRoute
   AppSecurityRoute: typeof AppSecurityRoute
   AppIndexRoute: typeof AppIndexRoute
   AppUsersIndexRoute: typeof AppUsersIndexRoute
@@ -215,6 +235,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAuditRoute: AppAuditRoute,
+  AppProfileRoute: AppProfileRoute,
   AppSecurityRoute: AppSecurityRoute,
   AppIndexRoute: AppIndexRoute,
   AppUsersIndexRoute: AppUsersIndexRoute,
