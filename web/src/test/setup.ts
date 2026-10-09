@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll } from 'vitest'
+import { afterAll, afterEach, beforeAll, vi } from 'vitest'
 import { setCsrfToken } from '@/api/csrf'
 import { resetApiHandlers } from '@/api/handlers'
 import { resetSudoStore } from '@/features/sudo/sudo-store'
@@ -18,6 +18,8 @@ globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObse
 Element.prototype.scrollIntoView ??= function scrollIntoView() {}
 Element.prototype.hasPointerCapture ??= () => false
 Element.prototype.releasePointerCapture ??= () => {}
+// jsdom only reports "Not implemented" for scrollTo; the router calls it on navigation.
+window.scrollTo = vi.fn() as unknown as typeof window.scrollTo
 
 installMatchMedia()
 await i18nReady

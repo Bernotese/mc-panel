@@ -28,7 +28,6 @@ dev:
 
 web-build:
 	cd web && npm run build
-	touch internal/webui/dist/.gitkeep
 
 build: web-build
 	mkdir -p bin

@@ -21,6 +21,21 @@ function stripMswWorker(): Plugin {
   }
 }
 
+/** emptyOutDir wipes internal/webui/dist, including the tracked .gitkeep that keeps the go:embed directory in git; recreate it. */
+function keepGitkeep(): Plugin {
+  let outDir = ''
+  return {
+    name: 'mcpanel-keep-gitkeep',
+    apply: 'build',
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir)
+    },
+    closeBundle() {
+      fs.writeFileSync(path.join(outDir, '.gitkeep'), '')
+    },
+  }
+}
+
 /** A production bundle with the mock layer enabled would silently serve fake data; refuse to build it. */
 function forbidMswInBuild(): Plugin {
   return {
@@ -35,7 +50,7 @@ function forbidMswInBuild(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [tanstackRouter({ target: 'react', autoCodeSplitting: true, routeFileIgnorePattern: '\\.test\\.' }), react(), tailwindcss(), forbidMswInBuild(), stripMswWorker()],
+  plugins: [tanstackRouter({ target: 'react', autoCodeSplitting: true, routeFileIgnorePattern: '\\.test\\.' }), react(), tailwindcss(), forbidMswInBuild(), stripMswWorker(), keepGitkeep()],
   resolve: { alias: { '@': path.resolve(import.meta.dirname, './src') } },
   server: {
     port: 5173,

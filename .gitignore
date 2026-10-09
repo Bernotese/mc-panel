@@ -7,6 +7,7 @@
 /internal/webui/dist/*
 !/internal/webui/dist/.gitkeep
 web/node_modules/
+web/.tanstack/
 web/test-results/
 web/playwright-report/
 .DS_Store
