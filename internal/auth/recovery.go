@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"math/big"
@@ -50,7 +51,13 @@ func normalizeRecoveryCode(s string) string {
 	}, s)
 }
 
-func hashRecoveryCode(s string) []byte {
-	sum := sha256.Sum256([]byte(normalizeRecoveryCode(s)))
-	return sum[:]
+// recoveryKeyPurpose names the secretbox subkey under which recovery codes are hashed.
+const recoveryKeyPurpose = "recovery-codes"
+
+// hashRecoveryCode returns HMAC-SHA256(recovery key, normalized code). The key is derived from
+// the secretbox key, so a leaked database alone does not allow an offline search of the codes.
+func (h *Handler) hashRecoveryCode(s string) []byte {
+	m := hmac.New(sha256.New, h.recoveryKey)
+	m.Write([]byte(normalizeRecoveryCode(s)))
+	return m.Sum(nil)
 }

@@ -159,7 +159,7 @@ func TestRecoveryCodeLogin(t *testing.T) {
 	ctx := context.Background()
 	c, uid, _ := e.preauthClient("alice", "user", "203.0.113.10")
 	for _, code := range []string{"abcde-fghjk", "mnpqr-stuvw"} {
-		if err := e.q.AuthInsertRecoveryCode(ctx, store.AuthInsertRecoveryCodeParams{UserID: uid, CodeHash: hashRecoveryCode(code), CreatedAt: 1}); err != nil {
+		if err := e.q.AuthInsertRecoveryCode(ctx, store.AuthInsertRecoveryCodeParams{UserID: uid, CodeHash: e.h.hashRecoveryCode(code), CreatedAt: 1}); err != nil {
 			t.Fatal(err)
 		}
 	}

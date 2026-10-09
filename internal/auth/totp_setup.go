@@ -64,7 +64,7 @@ func (h *Handler) requireSudoIf2FA(w http.ResponseWriter, r *http.Request, p pri
 	return true
 }
 
-func replaceRecoveryCodes(ctx context.Context, q *store.Queries, userID int64, now int64) ([]string, error) {
+func (h *Handler) replaceRecoveryCodes(ctx context.Context, q *store.Queries, userID int64, now int64) ([]string, error) {
 	codes, err := generateRecoveryCodes()
 	if err != nil {
 		return nil, err
@@ -74,7 +74,7 @@ func replaceRecoveryCodes(ctx context.Context, q *store.Queries, userID int64, n
 	}
 	for _, c := range codes {
 		if err := q.AuthInsertRecoveryCode(ctx, store.AuthInsertRecoveryCodeParams{
-			UserID: userID, CodeHash: hashRecoveryCode(c), CreatedAt: now,
+			UserID: userID, CodeHash: h.hashRecoveryCode(c), CreatedAt: now,
 		}); err != nil {
 			return nil, err
 		}
@@ -84,7 +84,7 @@ func replaceRecoveryCodes(ctx context.Context, q *store.Queries, userID int64, n
 
 // issueRecoveryCodesIfNone issues a fresh set when the user has no unused codes
 // (first 2FA method); otherwise it returns an empty list.
-func issueRecoveryCodesIfNone(ctx context.Context, q *store.Queries, userID int64, now int64) ([]string, error) {
+func (h *Handler) issueRecoveryCodesIfNone(ctx context.Context, q *store.Queries, userID int64, now int64) ([]string, error) {
 	n, err := q.AuthCountUnusedRecoveryCodes(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func issueRecoveryCodesIfNone(ctx context.Context, q *store.Queries, userID int6
 	if n > 0 {
 		return []string{}, nil
 	}
-	return replaceRecoveryCodes(ctx, q, userID, now)
+	return h.replaceRecoveryCodes(ctx, q, userID, now)
 }
 
 // promoteSetup upgrades a setup-stage session to full once a 2FA method exists.
@@ -278,7 +278,7 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 		if n != 1 {
 			return errNotEnabled
 		}
-		codes, err = issueRecoveryCodesIfNone(ctx, q, user.ID, now)
+		codes, err = h.issueRecoveryCodesIfNone(ctx, q, user.ID, now)
 		return err
 	})
 	if errors.Is(err, ErrNoSession) {

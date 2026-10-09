@@ -68,6 +68,8 @@ type Handler struct {
 	notifier notify.Notifier
 	sessions *Sessions
 	wa       *webauthn.WebAuthn
+	// recoveryKey is the HMAC key for recovery codes (derived from the secretbox key).
+	recoveryKey []byte
 
 	// afterStageDecision is a test seam (nil in production): it runs in the login flow after the
 	// session stage was decided and before the session row is inserted.
@@ -97,6 +99,7 @@ func New(d Deps) (*Handler, error) {
 	return &Handler{
 		db: d.DB, q: q, cfg: d.Config, clock: d.Clock, box: d.Box, guard: d.Guard, geo: d.Geo,
 		audit: d.Audit, notifier: d.Notifier, sessions: NewSessions(q, d.Clock, d.Config.Session), wa: wa,
+		recoveryKey: d.Box.DeriveKey(recoveryKeyPurpose),
 	}, nil
 }
 
