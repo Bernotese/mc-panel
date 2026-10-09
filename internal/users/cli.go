@@ -48,7 +48,7 @@ func RunAdminCreate(ctx context.Context, db *sql.DB, c clock.Clock, rec audit.Re
 	}); err != nil {
 		return fmt.Errorf("admin create: user %q created, but writing the audit entry failed: %w", u.Username, err)
 	}
-	fmt.Fprintf(stdout, "created admin user %q (id %d); two-factor setup is required at first login\n", u.Username, u.ID)
+	_, _ = fmt.Fprintf(stdout, "created admin user %q (id %d); two-factor setup is required at first login\n", u.Username, u.ID)
 	return nil
 }
 

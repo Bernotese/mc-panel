@@ -19,9 +19,9 @@ func RunAuditVerify(ctx context.Context, db *sql.DB, stdout io.Writer) error {
 		return fmt.Errorf("audit verify: %w", err)
 	}
 	if rep.OK {
-		fmt.Fprintf(stdout, "audit chain OK (%d entries)\n", rep.Checked)
+		_, _ = fmt.Fprintf(stdout, "audit chain OK (%d entries)\n", rep.Checked)
 		return nil
 	}
-	fmt.Fprintf(stdout, "audit chain BROKEN at entry id %d (%d entries verified before it)\n", rep.FirstBadID, rep.Checked)
+	_, _ = fmt.Fprintf(stdout, "audit chain BROKEN at entry id %d (%d entries verified before it)\n", rep.FirstBadID, rep.Checked)
 	return fmt.Errorf("%w at entry id %d", ErrChainBroken, rep.FirstBadID)
 }

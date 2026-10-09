@@ -78,11 +78,7 @@ func (r *SQLRecorder) Record(ctx context.Context, e Entry) error {
 	}
 	row.Hash = ComputeHash(row.PrevHash, row)
 
-	if err := q.AuditInsert(ctx, store.AuditInsertParams{
-		ID: row.ID, Ts: row.Ts, ActorType: row.ActorType, ActorID: row.ActorID, ActorName: row.ActorName,
-		Action: row.Action, Target: row.Target, Ip: row.Ip, Result: row.Result, Details: row.Details,
-		PrevHash: row.PrevHash, Hash: row.Hash,
-	}); err != nil {
+	if err := q.AuditInsert(ctx, store.AuditInsertParams(row)); err != nil {
 		return fmt.Errorf("audit: insert: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

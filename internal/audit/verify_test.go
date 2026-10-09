@@ -46,11 +46,7 @@ func insertChain(t *testing.T, db *sql.DB, n int) {
 			Action: audit.ActionJailAuto, Result: "success", Details: "{}", PrevHash: prev,
 		}
 		row.Hash = audit.ComputeHash(prev, row)
-		if err := q.AuditInsert(ctx, store.AuditInsertParams{
-			ID: row.ID, Ts: row.Ts, ActorType: row.ActorType, ActorID: row.ActorID, ActorName: row.ActorName,
-			Action: row.Action, Target: row.Target, Ip: row.Ip, Result: row.Result, Details: row.Details,
-			PrevHash: row.PrevHash, Hash: row.Hash,
-		}); err != nil {
+		if err := q.AuditInsert(ctx, store.AuditInsertParams(row)); err != nil {
 			t.Fatal(err)
 		}
 		prev = row.Hash
