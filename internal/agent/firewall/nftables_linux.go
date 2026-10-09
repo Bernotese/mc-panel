@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/nftables"
+	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
 	"golang.org/x/sys/unix"
 
@@ -19,9 +20,10 @@ import (
 )
 
 // NFTables manages the table "inet mcpanel" with the sets mcpanel_jail4
-// (ipv4_addr, timeout) and mcpanel_jail6 (ipv6_addr, interval+timeout) and a
-// filter chain on the input hook at priority -10. It never touches any other
-// table.
+// (ipv4_addr, timeout) and mcpanel_jail6 (ipv6_addr, interval+timeout), both
+// limited to SetSize elements, and a filter chain on the input hook at priority
+// -10 that drops new connections from jailed sources. It never touches any
+// other table.
 type NFTables struct {
 	mu    sync.Mutex // serialises read-modify-write sequences (list -> delete/add)
 	opts  []nftables.ConnOption
@@ -37,36 +39,41 @@ var _ agentapi.Firewall = (*NFTables)(nil)
 // passed to every nftables.New call (tests use nftables.WithNetNSFd).
 func NewNFTables(log *slog.Logger, opts ...nftables.ConnOption) (*NFTables, error) {
 	table := &nftables.Table{Family: nftables.TableFamilyINet, Name: TableName}
-	n := &NFTables{
-		opts:  opts,
-		log:   log,
-		table: table,
-		set4:  &nftables.Set{Table: table, Name: Set4Name, KeyType: nftables.TypeIPAddr, HasTimeout: true},
-		set6:  &nftables.Set{Table: table, Name: Set6Name, KeyType: nftables.TypeIP6Addr, HasTimeout: true, Interval: true},
-	}
+	set4, set6 := newSets(table)
+	n := &NFTables{opts: opts, log: log, table: table, set4: set4, set6: set6}
 	if err := n.setup(); err != nil {
 		return nil, fmt.Errorf("nftables: setup: %w", err)
 	}
 	return n, nil
 }
 
+// newSets returns the definitions of the two jail sets.
+func newSets(table *nftables.Table) (set4, set6 *nftables.Set) {
+	set4 = &nftables.Set{Table: table, Name: Set4Name, KeyType: nftables.TypeIPAddr, HasTimeout: true, Size: SetSize}
+	set6 = &nftables.Set{Table: table, Name: Set6Name, KeyType: nftables.TypeIP6Addr, HasTimeout: true, Interval: true, Size: SetSize}
+	return set4, set6
+}
+
 func (n *NFTables) Name() string { return "nftables" }
 
 // setup creates table, sets and chain if missing and replaces the chain's
 // rules with exactly the two drop rules, atomically in one batch. Existing
-// set elements (active bans) are kept.
+// set elements (active bans) are kept, except when a set from an older
+// version has a different definition (e.g. no size limit): it is recreated in
+// the same batch and the panel's firewall sync re-adds the active bans.
 func (n *NFTables) setup() error {
 	c, err := nftables.New(n.opts...)
 	if err != nil {
 		return err
 	}
+	var stale []*nftables.Set
+	for _, want := range []*nftables.Set{n.set4, n.set6} {
+		// An error means the table or set does not exist yet: nothing to migrate.
+		if have, err := c.GetSetByName(n.table, want.Name); err == nil && have.Size != want.Size {
+			stale = append(stale, have)
+		}
+	}
 	c.AddTable(n.table)
-	if err := c.AddSet(n.set4, nil); err != nil {
-		return err
-	}
-	if err := c.AddSet(n.set6, nil); err != nil {
-		return err
-	}
 	policy := nftables.ChainPolicyAccept
 	chain := c.AddChain(&nftables.Chain{
 		Name:     ChainName,
@@ -76,17 +83,34 @@ func (n *NFTables) setup() error {
 		Priority: nftables.ChainPriorityRef(ChainPriority),
 		Policy:   &policy,
 	})
-	c.FlushChain(chain)
+	c.FlushChain(chain) // drops the rules referencing the sets, so stale sets can be deleted
+	for _, s := range stale {
+		n.log.Warn("nftables: recreating set with a new definition; the panel re-syncs active bans", "set", s.Name)
+		c.DelSet(s)
+	}
+	if err := c.AddSet(n.set4, nil); err != nil {
+		return err
+	}
+	if err := c.AddSet(n.set6, nil); err != nil {
+		return err
+	}
 	c.AddRule(&nftables.Rule{Table: n.table, Chain: chain, Exprs: dropExprs(unix.NFPROTO_IPV4, 12, 4, n.set4)})
 	c.AddRule(&nftables.Rule{Table: n.table, Chain: chain, Exprs: dropExprs(unix.NFPROTO_IPV6, 8, 16, n.set6)})
 	return c.Flush()
 }
 
-// dropExprs builds "meta nfproto <proto> <ip|ip6> saddr @set counter drop".
-// offset/length address the source address in the network header
-// (IPv4: 12/4, IPv6: 8/16).
+// dropExprs builds "ct state new meta nfproto <proto> <ip|ip6> saddr @set counter drop".
+// Only new connections are dropped, so replies to the host's own outbound
+// connections to a jailed address still arrive. offset/length address the
+// source address in the network header (IPv4: 12/4, IPv6: 8/16).
 func dropExprs(proto byte, offset, length uint32, set *nftables.Set) []expr.Any {
 	return []expr.Any{
+		&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
+		&expr.Bitwise{
+			SourceRegister: 1, DestRegister: 1, Len: 4,
+			Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitNEW), Xor: []byte{0, 0, 0, 0},
+		},
+		&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: []byte{0, 0, 0, 0}},
 		&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}},
 		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: offset, Len: length},
