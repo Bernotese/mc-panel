@@ -128,6 +128,29 @@ func (q *Queries) DefenseDeleteAttemptsBefore(ctx context.Context, before int64)
 	return result.RowsAffected()
 }
 
+const defenseGetJail = `-- name: DefenseGetJail :one
+SELECT id, ip_key, reason, level, manual, created_at, expires_at, lifted_at, lifted_by, fw_banned_at, fw_unbanned_at FROM jails WHERE id = ?1
+`
+
+func (q *Queries) DefenseGetJail(ctx context.Context, id int64) (Jail, error) {
+	row := q.db.QueryRowContext(ctx, defenseGetJail, id)
+	var i Jail
+	err := row.Scan(
+		&i.ID,
+		&i.IpKey,
+		&i.Reason,
+		&i.Level,
+		&i.Manual,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LiftedAt,
+		&i.LiftedBy,
+		&i.FwBannedAt,
+		&i.FwUnbannedAt,
+	)
+	return i, err
+}
+
 const defenseInsertAttempt = `-- name: DefenseInsertAttempt :exec
 INSERT INTO login_attempts (ts, ip, ip_key, username, user_id, stage, success, reason, user_agent, country)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -333,6 +356,25 @@ func (q *Queries) DefenseLastJailCreatedAt(ctx context.Context, ipKey string) (i
 	return last_created_at, err
 }
 
+const defenseLiftJail = `-- name: DefenseLiftJail :execrows
+UPDATE jails SET lifted_at = ?1, lifted_by = ?2
+WHERE id = ?3 AND lifted_at IS NULL
+`
+
+type DefenseLiftJailParams struct {
+	LiftedAt sql.NullInt64
+	LiftedBy sql.NullString
+	ID       int64
+}
+
+func (q *Queries) DefenseLiftJail(ctx context.Context, arg DefenseLiftJailParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, defenseLiftJail, arg.LiftedAt, arg.LiftedBy, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const defenseListActiveJails = `-- name: DefenseListActiveJails :many
 SELECT id, ip_key, reason, level, manual, created_at, expires_at, lifted_at, lifted_by, fw_banned_at, fw_unbanned_at FROM jails
 WHERE lifted_at IS NULL AND expires_at > ?1
@@ -397,6 +439,45 @@ func (q *Queries) DefenseListIPRules(ctx context.Context) ([]IpRule, error) {
 			&i.ExpiresAt,
 			&i.CreatedBy,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const defenseListJails = `-- name: DefenseListJails :many
+SELECT id, ip_key, reason, level, manual, created_at, expires_at, lifted_at, lifted_by, fw_banned_at, fw_unbanned_at FROM jails ORDER BY created_at DESC, id DESC LIMIT ?1
+`
+
+func (q *Queries) DefenseListJails(ctx context.Context, lim int64) ([]Jail, error) {
+	rows, err := q.db.QueryContext(ctx, defenseListJails, lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Jail{}
+	for rows.Next() {
+		var i Jail
+		if err := rows.Scan(
+			&i.ID,
+			&i.IpKey,
+			&i.Reason,
+			&i.Level,
+			&i.Manual,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.LiftedAt,
+			&i.LiftedBy,
+			&i.FwBannedAt,
+			&i.FwUnbannedAt,
 		); err != nil {
 			return nil, err
 		}
