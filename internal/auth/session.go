@@ -144,7 +144,9 @@ func (s *Sessions) Rotate(ctx context.Context, sess store.Session, rot Rotation)
 		ExpiresAt:  s.expiresAt(rot.Stage, sess.CreatedAt),
 		LastSeenAt: now,
 		ID:         sess.ID,
-		// Compare-and-swap: only the holder of the presented token/stage may rotate it.
+		// Compare-and-swap on the token hash and stage in sess: callers that act for a request pass
+		// the hash the client presented (see Handler.presentedSession), not a fresh DB read, so a
+		// request whose token was superseded meanwhile cannot rotate the session again.
 		OldTokenHash: sess.TokenHash,
 		OldStage:     sess.Stage,
 	}

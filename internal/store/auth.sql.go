@@ -567,27 +567,6 @@ func (q *Queries) AuthRehashPassword(ctx context.Context, arg AuthRehashPassword
 	return err
 }
 
-const authRevokeOtherPendingSessions = `-- name: AuthRevokeOtherPendingSessions :execrows
-UPDATE sessions SET revoked_at = ?1
-WHERE user_id = ?2 AND id != ?3 AND stage IN ('preauth', 'setup') AND revoked_at IS NULL
-`
-
-type AuthRevokeOtherPendingSessionsParams struct {
-	RevokedAt sql.NullInt64
-	UserID    int64
-	KeepID    int64
-}
-
-// Used when the first second factor is established: setup/preauth sessions of the user (possibly an
-// attacker's who knows the password) must not survive it.
-func (q *Queries) AuthRevokeOtherPendingSessions(ctx context.Context, arg AuthRevokeOtherPendingSessionsParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, authRevokeOtherPendingSessions, arg.RevokedAt, arg.UserID, arg.KeepID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
 const authRevokeOtherSessions = `-- name: AuthRevokeOtherSessions :execrows
 UPDATE sessions SET revoked_at = ?1
 WHERE user_id = ?2 AND id != ?3 AND revoked_at IS NULL

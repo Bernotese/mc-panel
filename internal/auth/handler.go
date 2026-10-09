@@ -298,6 +298,23 @@ func invalidCredentials(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeInvalidCredentials, "invalid username or password")
 }
 
+// presentedSession returns the current session row of the request's principal with TokenHash
+// replaced by the hash of the token the client actually presented (recorded by the session
+// loader). Passing it to Sessions.Rotate binds the rotation to that token: if the token was
+// superseded after the loader ran, the compare-and-swap fails with ErrNoSession.
+func (h *Handler) presentedSession(ctx context.Context, p principal.Principal) (store.Session, error) {
+	sess, err := h.q.AuthGetSessionByID(ctx, p.SessionID)
+	if err != nil {
+		return store.Session{}, err
+	}
+	hash, ok := ctx.Value(presentedTokenKey{}).([]byte)
+	if !ok {
+		return store.Session{}, ErrNoSession
+	}
+	sess.TokenHash = hash
+	return sess, nil
+}
+
 // sessionGone is the response when the session was revoked or rotated while the request ran.
 func sessionGone(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeUnauthorized, "authentication required")

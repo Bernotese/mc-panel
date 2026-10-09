@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -104,7 +105,7 @@ func TestFirstFactorRevokesOtherPendingSessions(t *testing.T) {
 	}
 }
 
-func TestFirstFactorKeepsOtherFullSessions(t *testing.T) {
+func TestFirstFactorRevokesAllOtherSessions(t *testing.T) {
 	e := newTestEnv(t)
 	e.createUser("alice", "user") // no enforcement: full session without 2FA
 	f1, f2 := e.newClient("198.51.100.1"), e.newClient("203.0.113.10")
@@ -113,8 +114,48 @@ func TestFirstFactorKeepsOtherFullSessions(t *testing.T) {
 	if _, res := e.registerPasskey(f2, "key"); res.code != 201 {
 		t.Fatalf("register = %d", res.code)
 	}
-	if res := f1.do(http.MethodGet, "/api/auth/me", nil); res.code != 200 {
-		t.Fatalf("other full session must survive, got %d", res.code)
+	// Every other session was authenticated by password only; none may outlive the first factor.
+	if res := f1.do(http.MethodGet, "/api/auth/me", nil); res.code != 401 {
+		t.Fatalf("other password-only session must be revoked, got %d", res.code)
+	}
+	if res := f2.do(http.MethodGet, "/api/auth/me", nil); res.code != 200 {
+		t.Fatalf("enrolling session must survive, got %d", res.code)
+	}
+}
+
+func TestDowngradedFullSessionIsRevokedByFirstFactor(t *testing.T) {
+	for _, tc := range []string{"promoted to admin", "enforcement switched on"} {
+		for _, method := range []string{"passkey", "totp"} {
+			t.Run(tc+"/"+method, func(t *testing.T) {
+				e := newTestEnv(t)
+				uid := e.createUser("alice", "user")
+				old, fresh := e.newClient("198.51.100.1"), e.newClient("203.0.113.10")
+				old.login("alice", testPassword) // stored stage: full
+				if tc == "promoted to admin" {
+					if _, err := e.db.Exec(`UPDATE users SET role = 'admin' WHERE id = ?`, uid); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					e.enforce2FAForUsers()
+				}
+				if m := fresh.login("alice", testPassword).me(t); m.Stage != "setup" {
+					t.Fatalf("fresh stage = %s", m.Stage)
+				}
+				if method == "passkey" {
+					if _, res := e.registerPasskey(fresh, "key"); res.code != 201 {
+						t.Fatalf("register = %d %s", res.code, res.body)
+					}
+				} else {
+					secret := totpSetupSecret(t, fresh)
+					if res := fresh.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)}); res.code != 200 {
+						t.Fatalf("enable = %d %s", res.code, res.body)
+					}
+				}
+				if res := old.do(http.MethodGet, "/api/auth/me", nil); res.code != 401 {
+					t.Fatalf("stored-full session must not regain access without a second factor, got %d %s", res.code, res.body)
+				}
+			})
+		}
 	}
 }
 
@@ -495,5 +536,73 @@ func TestUserAgentTruncatesAtRuneBoundary(t *testing.T) {
 	r.Header.Set("User-Agent", "short")
 	if userAgent(r) != "short" {
 		t.Fatal("short user agents must stay unchanged")
+	}
+}
+
+// --- fix round 2: rotation is bound to the token the client presented ---
+
+func TestRotationBoundToPresentedToken(t *testing.T) {
+	t.Run("second factor", func(t *testing.T) {
+		e := newTestEnv(t)
+		c, uid, _ := e.preauthClient("alice", "user", "203.0.113.10")
+		if err := e.q.AuthInsertRecoveryCode(context.Background(), store.AuthInsertRecoveryCodeParams{
+			UserID: uid, CodeHash: hashRecoveryCode("abcde-fghjk"), CreatedAt: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		e.guard.hook = func(key string) { e.rotateSessionBehindTheLoader(key) }
+		res := c.do(http.MethodPost, "/api/auth/2fa/recovery", map[string]string{"code": "abcde-fghjk"})
+		if res.code != 401 || res.errCode() != "unauthorized" {
+			t.Fatalf("second factor with a superseded token = %d %s", res.code, res.body)
+		}
+		for _, a := range e.guard.Recorded() {
+			if a.Reason == "complete" {
+				t.Fatalf("no complete attempt expected: %+v", a)
+			}
+		}
+	})
+	t.Run("sudo", func(t *testing.T) {
+		e := newTestEnv(t)
+		c, _, secret := e.fullClient("root", "admin", "203.0.113.10")
+		e.clock.Advance(30 * time.Second)
+		e.guard.hook = func(key string) { e.rotateSessionBehindTheLoader(key) }
+		res := c.do(http.MethodPost, "/api/auth/sudo/totp", map[string]string{"code": e.code(secret)})
+		if res.code != 401 || res.errCode() != "unauthorized" {
+			t.Fatalf("sudo with a superseded token = %d %s", res.code, res.body)
+		}
+	})
+	t.Run("setup promotion", func(t *testing.T) {
+		e := newTestEnv(t)
+		e.createUser("root", "admin")
+		c := e.newClient("203.0.113.10")
+		c.login("root", testPassword)
+		secret := totpSetupSecret(t, c)
+		e.guard.hook = func(key string) { e.rotateSessionBehindTheLoader(key) }
+		res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)})
+		if res.code != 200 {
+			t.Fatalf("enable = %d %s (codes must still be returned)", res.code, res.body)
+		}
+		if strings.Contains(res.header.Get("Set-Cookie"), CookieName+"=") && c.cookie != "" {
+			t.Fatal("a superseded token must not receive a promoted session cookie")
+		}
+	})
+}
+
+// rotateSessionBehindTheLoader simulates a concurrent request that rotated the session token
+// after this request's loader had already authenticated it.
+func (e *testEnv) rotateSessionBehindTheLoader(key string) {
+	e.t.Helper()
+	id, err := strconv.ParseInt(key, 10, 64)
+	if err != nil {
+		e.t.Error(err)
+		return
+	}
+	sess, err := e.q.AuthGetSessionByID(context.Background(), id)
+	if err != nil {
+		e.t.Error(err)
+		return
+	}
+	if _, _, err := e.h.Sessions().Rotate(context.Background(), sess, Rotation{Stage: principal.Stage(sess.Stage), SudoUntil: sess.SudoUntil}); err != nil {
+		e.t.Error(err)
 	}
 }

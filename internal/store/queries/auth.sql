@@ -116,12 +116,6 @@ UPDATE sessions SET revoked_at = sqlc.arg(revoked_at) WHERE id = sqlc.arg(id) AN
 UPDATE sessions SET revoked_at = sqlc.arg(revoked_at)
 WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND revoked_at IS NULL;
 
--- name: AuthRevokeOtherPendingSessions :execrows
--- Used when the first second factor is established: setup/preauth sessions of the user (possibly an
--- attacker's who knows the password) must not survive it.
-UPDATE sessions SET revoked_at = sqlc.arg(revoked_at)
-WHERE user_id = sqlc.arg(user_id) AND id != sqlc.arg(keep_id) AND stage IN ('preauth', 'setup') AND revoked_at IS NULL;
-
 -- name: AuthRevokeOtherSessions :execrows
 UPDATE sessions SET revoked_at = sqlc.arg(revoked_at)
 WHERE user_id = sqlc.arg(user_id) AND id != sqlc.arg(keep_id) AND revoked_at IS NULL;
