@@ -166,6 +166,20 @@ func TestRealIPXFFVariants(t *testing.T) {
 	}
 }
 
+func TestHSTSOnlyOutsideDev(t *testing.T) {
+	noop := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	rec := httptest.NewRecorder()
+	httpx.SecurityHeaders(false)(noop).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if got := rec.Header().Get("Strict-Transport-Security"); got != "max-age=31536000" {
+		t.Fatalf("prod HSTS = %q, want max-age=31536000", got)
+	}
+	rec = httptest.NewRecorder()
+	httpx.SecurityHeaders(true)(noop).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if got := rec.Header().Get("Strict-Transport-Security"); got != "" {
+		t.Fatalf("dev must not send HSTS (http://localhost), got %q", got)
+	}
+}
+
 func TestDecodeJSONTrailingTooLarge(t *testing.T) {
 	type in struct {
 		Name string `json:"name"`
@@ -191,7 +205,7 @@ func TestDecodeJSONTrailingTooLarge(t *testing.T) {
 }
 
 func TestSecurityHeaders(t *testing.T) {
-	h := httpx.SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	h := httpx.SecurityHeaders(false)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/health", nil))
 	for k, want := range map[string]string{

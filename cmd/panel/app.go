@@ -80,7 +80,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 	mux.Use(
 		httpx.RequestID,
 		httpx.RealIP(cfg.TrustedPrefixes()),
-		httpx.SecurityHeaders,
+		httpx.SecurityHeaders(cfg.Dev),
 		httpx.BodyLimit(1<<20),
 		svc.IPFilter,
 		authH.Sessions().Middleware,
