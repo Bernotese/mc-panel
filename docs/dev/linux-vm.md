@@ -18,6 +18,7 @@ scripts/vm-test.sh ────────▶  netns mcpanel-client 192.0.2.2 �
 - Das panel läuft **ohne** `-dev`. `public_url = "https://mcpanel.test"` erfüllt die Prod-Validierung; TLS terminiert in Produktion Caddy, nicht das panel. Der Test sendet deshalb `Origin: https://mcpanel.test`.
 - Der agent läuft ohne `-dev`, also mit `firewall = "nftables"` und `panel_uid` = UID von `mcpanel`.
 - Testclient ist ein eigener Netz-Namespace mit `192.0.2.2`: Loopback-Adressen dürfen nicht gebannt werden, und über Lima-Portweiterleitungen käme jede Anfrage als `127.0.0.1` an.
+- Lima mountet das Home-Verzeichnis des Hosts schreibgeschützt (read-only) in die VM; die Skripte kopieren das Archiv deshalb per `limactl copy` in eine mit `mktemp` erzeugte Datei unter `/tmp` der VM (wird am Ende wieder gelöscht) und schreiben nie in den Host-Mount.
 - Jeder Lauf von `vm-setup.sh` (ohne `--provision-only`) setzt den Zustand zurück: DB gelöscht, Jail-Sets geleert, Units neu gestartet.
 - Die Units sind transient (`systemd-run`) und verschwinden beim VM-Neustart; danach `scripts/vm-setup.sh --no-build` erneut ausführen. Dauerhafte Units liefert später der Installer (Teilprojekt 6).
 

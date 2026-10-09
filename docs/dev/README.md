@@ -12,7 +12,7 @@ brew install go node sqlc goose golangci-lint goreleaser jq shellcheck lima
 | Werkzeug | Version | Hinweis |
 |---|---|---|
 | Go | laut `go.mod` | CI liest dieselbe Datei (`go-version-file`) |
-| Node.js | aktuelles LTS | CI nutzt `lts/*` |
+| Node.js | 24 (Active LTS) | CI pinnt die Hauptversion `24`; Node 26 wird erst am 2026-10-28 LTS. Beim Wechsel auf die nächste LTS-Linie alle `node-version`-Einträge in `.github/workflows/*.yml` gemeinsam anheben |
 | golangci-lint | v2.14.0 | CI-Version; exakt dieselbe lokal: `GOBIN="$PWD/.dev/tools" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0` |
 | GoReleaser | v2.18.2 (CI), lokal ≥ v2.8 | `make release` nutzt das lokal installierte `goreleaser` |
 | sqlc | Version im Header von `internal/store/db.go` | CI installiert genau diese Version; wer mit einer neueren Version generiert, committet den geänderten Header mit |
@@ -57,8 +57,10 @@ Linux-spezifische Dateien lokal linten: `GOOS=linux .dev/tools/golangci-lint run
 
 - Die Konfiguration steht in `.golangci.yml`; gosec läuft als Teil von golangci-lint.
 - Ausnahmen gehören gezielt in `.golangci.yml` (Pfad + Linter + Text, mit Begründung) oder als `//nolint:<linter> // <Begründung>` direkt an die Zeile. Nie einen Linter global abschalten.
+- Aktive Exclusion-Presets: nur `std-error-handling` (ignoriert ungeprüfte Fehler von `Close`, `Flush`, `os.Remove`, `fmt.Fprint*` u. Ä.). `common-false-positives` ist bewusst **nicht** aktiv: gosec G103 (`unsafe`), G204 (Subprozess mit Variable) und G304 (Datei-Pfad aus Variable) bleiben sichtbar und brauchen im Einzelfall eine gezielte Regel oder `//nolint:gosec // Begründung`.
+- Global abgeschaltete gosec-Regeln (`linters.settings.gosec.excludes`): G104 (ungeprüfte Fehler, macht errcheck), G115 (Integer-Konvertierung, feuert bei jeder `uint32(len(x))`/`int(uid)`-Konvertierung; Grenzen werden dort geprüft, wo Eingaben nicht vertrauenswürdig sind) und G117 (Feldnamen wie `password`/`secret` in API-DTOs sind Teil des OpenAPI-Vertrags).
 - Requests und DB-Zugriffe immer mit Kontext: `http.NewRequestWithContext`, `QueryContext`/`ExecContext`/`PingContext`. Ausnahme ist `net.Listen` im agent (`cmd/agent/`, `internal/agent/`).
-- Dateimodus `0660` (agent-Socket, Spec §3) ist für gosec G302 freigegeben, sofern er als Literal (`0o660`) in der Zeile steht; andere Modi über `0600` brauchen eine Begründung.
+- Dateimodus `0660` (agent-Socket, Spec §3) ist nur in `cmd/agent/` und `internal/agent/` für gosec G302 freigegeben, sofern er als Literal (`0o660`) in der Zeile steht; überall sonst und für andere Modi über `0600` ist eine Begründung nötig.
 - In Tests sind feste Test-Passwörter, `math/rand` und lockere Dateimodi erlaubt.
 - Formatierung: `gofmt` + `goimports` mit lokalem Präfix `mcpanel` (`golangci-lint fmt ./...`).
 
@@ -71,7 +73,7 @@ git tag -a v0.1.0 -m "mc-panel v0.1.0"
 git push origin v0.1.0
 ```
 
-Der Workflow `.github/workflows/release.yml` testet, baut das Frontend und veröffentlicht mit GoReleaser:
+Der Workflow `.github/workflows/release.yml` prüft zuerst, dass der getaggte Commit in `main` enthalten ist (sonst Abbruch), führt `make lint`, `make test` und `make test-race` aus, baut das Frontend und veröffentlicht mit GoReleaser (nur dieser letzte Schritt sieht `GITHUB_TOKEN`):
 
 - `mc-panel_<version>_linux_amd64.tar.gz`, `mc-panel_<version>_linux_arm64.tar.gz` (je `panel` und `agent`, ohne Unterordner)
 - `checksums.txt` (SHA-256, Format `<hash>  <datei>`)
