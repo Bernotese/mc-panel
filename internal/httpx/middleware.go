@@ -27,21 +27,28 @@ const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inl
 	"img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; " +
 	"base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 
-func SecurityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("Content-Security-Policy", csp)
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Referrer-Policy", "same-origin")
-		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
-		h.Set("Cross-Origin-Opener-Policy", "same-origin")
-		h.Set("Cross-Origin-Resource-Policy", "same-origin")
-		h.Set("X-Frame-Options", "DENY")
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			h.Set("Cache-Control", "no-store")
-		}
-		next.ServeHTTP(w, r)
-	})
+// SecurityHeaders sets the panel's own security headers (independent of the reverse proxy).
+// Outside dev mode it also sends HSTS: production is always served over https.
+func SecurityHeaders(dev bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := w.Header()
+			h.Set("Content-Security-Policy", csp)
+			h.Set("X-Content-Type-Options", "nosniff")
+			h.Set("Referrer-Policy", "same-origin")
+			h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+			h.Set("Cross-Origin-Opener-Policy", "same-origin")
+			h.Set("Cross-Origin-Resource-Policy", "same-origin")
+			h.Set("X-Frame-Options", "DENY")
+			if !dev {
+				h.Set("Strict-Transport-Security", "max-age=31536000")
+			}
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				h.Set("Cache-Control", "no-store")
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func BodyLimit(n int64) func(http.Handler) http.Handler {
