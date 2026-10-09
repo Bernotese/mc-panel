@@ -78,6 +78,12 @@ func writeValidation(w http.ResponseWriter, r *http.Request, msg string) {
 	httpx.WriteError(w, r, http.StatusBadRequest, httpx.CodeValidation, msg)
 }
 
+// writeBusy answers when the password hash could not get an argon2 slot in time (password.ErrBusy).
+func writeBusy(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Retry-After", "1")
+	httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "server busy, try again shortly")
+}
+
 func writeNotFound(w http.ResponseWriter, r *http.Request, what string) {
 	httpx.WriteError(w, r, http.StatusNotFound, httpx.CodeNotFound, what+" not found")
 }

@@ -333,6 +333,13 @@ func sessionError(w http.ResponseWriter, r *http.Request, err error) {
 	httpx.Internal(w, r, err)
 }
 
+// busy answers a request whose password check could not get an argon2 slot in time
+// (password.ErrBusy). Known and unknown usernames get the identical response.
+func busy(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Retry-After", "1")
+	httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "server busy, try again shortly")
+}
+
 func invalidCode(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeInvalidCode, "invalid code")
 }

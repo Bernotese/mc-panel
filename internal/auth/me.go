@@ -85,7 +85,11 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		h.guardError(w, r, err)
 		return
 	}
-	valid, _, err := password.Verify(req.CurrentPassword, user.PasswordHash)
+	valid, _, err := password.VerifyContext(ctx, req.CurrentPassword, user.PasswordHash)
+	if errors.Is(err, password.ErrBusy) {
+		busy(w, r)
+		return
+	}
 	if err != nil {
 		valid = false
 	}
@@ -98,7 +102,11 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, http.StatusBadRequest, httpx.CodeValidation, passwordPolicyMessage(err))
 		return
 	}
-	hash, err := password.Hash(req.NewPassword)
+	hash, err := password.HashContext(ctx, req.NewPassword)
+	if errors.Is(err, password.ErrBusy) {
+		busy(w, r)
+		return
+	}
 	if err != nil {
 		httpx.Internal(w, r, err)
 		return

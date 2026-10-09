@@ -104,7 +104,11 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			writeValidation(w, r, err.Error())
 			return
 		}
-		if newHash, err = password.Hash(*req.Password); err != nil {
+		if newHash, err = password.HashContext(ctx, *req.Password); err != nil {
+			if errors.Is(err, password.ErrBusy) {
+				writeBusy(w, r)
+				return
+			}
 			httpx.Internal(w, r, err)
 			return
 		}

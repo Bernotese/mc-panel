@@ -4,15 +4,19 @@ package password
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	_ "embed"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
@@ -35,7 +39,53 @@ var (
 	ErrCommon           = errors.New("password: too common")
 	ErrContainsUsername = errors.New("password: must not contain the username")
 	ErrMalformedHash    = errors.New("password: malformed hash")
+	// ErrBusy is returned when no argon2 slot became free within the wait budget (or the
+	// context ended first). Handlers answer 429 rate_limited with Retry-After: 1.
+	ErrBusy = errors.New("password: too many concurrent password operations")
 )
+
+// limiter bounds the number of concurrent argon2id computations process-wide. Each one
+// allocates 64 MiB and burns CPU; without a bound a login flood could exhaust memory and
+// get the OOM killer to pick a Minecraft JVM on the same host.
+type limiter struct {
+	slots        chan struct{}
+	wait         time.Duration
+	active, peak atomic.Int64 // observability for tests
+}
+
+func newLimiter(slots int, wait time.Duration) *limiter {
+	return &limiter{slots: make(chan struct{}, slots), wait: wait}
+}
+
+// DefaultWaitBudget is how long a caller waits for a free argon2 slot before ErrBusy.
+const DefaultWaitBudget = 2 * time.Second
+
+var lim = newLimiter(max(2, runtime.NumCPU()/2), DefaultWaitBudget)
+
+// acquire takes a slot, waiting at most the wait budget. The returned release must be called.
+func (l *limiter) acquire(ctx context.Context) (release func(), err error) {
+	select {
+	case l.slots <- struct{}{}:
+	default:
+		t := time.NewTimer(l.wait)
+		defer t.Stop()
+		select {
+		case l.slots <- struct{}{}:
+		case <-t.C:
+			return nil, ErrBusy
+		case <-ctx.Done():
+			return nil, ErrBusy
+		}
+	}
+	n := l.active.Add(1)
+	for {
+		p := l.peak.Load()
+		if n <= p || l.peak.CompareAndSwap(p, n) {
+			break
+		}
+	}
+	return func() { l.active.Add(-1); <-l.slots }, nil
+}
 
 //go:embed common.txt
 var commonRaw []byte
@@ -69,7 +119,21 @@ func Validate(pw, username string) error {
 	return nil
 }
 
-func Hash(pw string) (string, error) {
+// Hash is HashContext with context.Background().
+func Hash(pw string) (string, error) { return HashContext(context.Background(), pw) }
+
+// HashContext hashes pw with the current parameters. It returns ErrBusy if no argon2 slot
+// became free within the wait budget.
+func HashContext(ctx context.Context, pw string) (string, error) {
+	release, err := lim.acquire(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	return hashUnlimited(pw)
+}
+
+func hashUnlimited(pw string) (string, error) {
 	salt := make([]byte, saltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
@@ -120,7 +184,14 @@ func parseField(s, prefix string, bitSize int) (uint64, bool) {
 	return v, true
 }
 
+// Verify is VerifyContext with context.Background().
 func Verify(pw, encoded string) (ok, needsRehash bool, err error) {
+	return VerifyContext(context.Background(), pw, encoded)
+}
+
+// VerifyContext checks pw against a PHC-encoded argon2id hash. A malformed hash is rejected
+// before any KDF work; otherwise ErrBusy is returned if no argon2 slot became free in time.
+func VerifyContext(ctx context.Context, pw, encoded string) (ok, needsRehash bool, err error) {
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" {
 		return false, false, ErrMalformedHash
@@ -152,16 +223,21 @@ func Verify(pw, encoded string) (ok, needsRehash bool, err error) {
 		len(want) < minKeyLen || len(want) > maxKeyLen {
 		return false, false, ErrMalformedHash
 	}
+	release, err := lim.acquire(ctx)
+	if err != nil {
+		return false, false, err
+	}
 	got := argon2.IDKey([]byte(pw), salt, t, m, p, uint32(len(want)))
+	release()
 	ok = subtle.ConstantTimeCompare(got, want) == 1
 	needsRehash = ok && (m != memory || t != iterations || p != threads || uint32(len(want)) != keyLen)
 	return ok, needsRehash, nil
 }
 
-// dummyHash is computed lazily on first use. A failure to produce it panics rather
-// than silently disabling timing equalisation.
+// dummyHash is computed lazily on first use (outside the limiter, so it can never fail with
+// ErrBusy). A failure to produce it panics rather than silently disabling timing equalisation.
 var dummyHash = sync.OnceValue(func() string {
-	h, err := Hash("dummy password for timing equalisation")
+	h, err := hashUnlimited("dummy password for timing equalisation")
 	if err != nil {
 		panic("password: cannot generate dummy hash: " + err.Error())
 	}
@@ -173,4 +249,22 @@ var dummyHash = sync.OnceValue(func() string {
 func Warmup() { _ = dummyHash() }
 
 // DummyVerify burns the same CPU/memory as a real Verify (used for unknown usernames).
-func DummyVerify(pw string) { _, _, _ = Verify(pw, dummyHash()) }
+func DummyVerify(pw string) { _ = DummyVerifyContext(context.Background(), pw) }
+
+// DummyVerifyContext is DummyVerify that reports ErrBusy like VerifyContext, so callers can
+// answer an unknown username exactly like a known one when the limiter is saturated.
+func DummyVerifyContext(ctx context.Context, pw string) error {
+	_, _, err := VerifyContext(ctx, pw, dummyHash())
+	return err
+}
+
+// BlockForTesting replaces the process-wide limiter with one whose only slot is taken and whose
+// wait budget is wait, so every Hash/Verify returns ErrBusy after wait. unblock restores the
+// previous limiter. Test-only: other packages' handler tests use it to exercise the 429 path.
+func BlockForTesting(wait time.Duration) (unblock func()) {
+	old := lim
+	l := newLimiter(1, wait)
+	l.slots <- struct{}{}
+	lim = l
+	return func() { lim = old }
+}

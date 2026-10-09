@@ -68,7 +68,7 @@ func newUser(ctx context.Context, q *store.Queries, now time.Time, username, pw,
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return store.User{}, err
 	}
-	hash, err := password.Hash(pw)
+	hash, err := password.HashContext(ctx, pw)
 	if err != nil {
 		return store.User{}, err
 	}
