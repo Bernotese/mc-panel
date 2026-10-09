@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -85,5 +86,37 @@ func TestRunAdminCreateErrors(t *testing.T) {
 	}
 	if n := countRows(t, db, `SELECT count(*) FROM users WHERE username = 'jannes'`); n != 0 {
 		t.Fatalf("user created despite errors")
+	}
+}
+
+// countingReader serves 'a' bytes without ever sending a newline, up to total bytes.
+type countingReader struct{ read, total int }
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	if c.read >= c.total {
+		return 0, io.EOF
+	}
+	n := min(len(p), c.total-c.read)
+	for i := range n {
+		p[i] = 'a'
+	}
+	c.read += n
+	return n, nil
+}
+
+func TestRunAdminCreateBoundsStdin(t *testing.T) {
+	db := storetest.Open(t)
+	rec := &audit.MemoryRecorder{}
+	in := &countingReader{total: 64 << 20}
+	err := users.RunAdminCreate(context.Background(), db, clock.NewFake(t0), rec,
+		[]string{"-username", "jannes"}, in, io.Discard)
+	if !errors.Is(err, password.ErrTooLong) {
+		t.Fatalf("err = %v, want password.ErrTooLong", err)
+	}
+	if limit := password.MaxLength*4 + 2; in.read > limit {
+		t.Fatalf("read %d bytes from stdin, want at most %d", in.read, limit)
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM users`); n != 0 || len(rec.Entries) != 0 {
+		t.Fatalf("users=%d audit=%d, want none", n, len(rec.Entries))
 	}
 }
