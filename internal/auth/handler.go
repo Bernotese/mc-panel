@@ -104,6 +104,9 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Post("/auth/login", rbac.Public(), h.login)
 	api.Get("/auth/me", anyStage, h.getMe)
 	api.Post("/auth/logout", anyStage, h.logout)
+	preAuth := rbac.Authenticated().AllowStages(principal.StagePreAuth)
+	api.Post("/auth/2fa/totp", preAuth, h.verifyTOTP)
+	api.Post("/auth/2fa/recovery", preAuth, h.verifyRecovery)
 }
 
 type factors struct {
