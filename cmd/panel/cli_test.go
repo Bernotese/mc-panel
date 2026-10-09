@@ -59,6 +59,38 @@ func TestCommonFlags(t *testing.T) {
 	}
 }
 
+// Without -dev and -config the production file is read (like cmd/agent).
+func TestCommonFlagsDefaultConfigPath(t *testing.T) {
+	if defaultConfigPath != "/etc/mc-panel/panel.toml" {
+		t.Fatalf("defaultConfigPath = %q", defaultConfigPath)
+	}
+	old := defaultConfigPath
+	t.Cleanup(func() { defaultConfigPath = old })
+
+	defaultConfigPath = filepath.Join(t.TempDir(), "panel.toml")
+	if err := os.WriteFile(defaultConfigPath, []byte("listen = \"127.0.0.1:9998\"\npublic_url = \"https://panel.example.com\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := commonFlags(nil)
+	if err != nil || cfg.Listen != "127.0.0.1:9998" || cfg.Dev {
+		t.Fatalf("prod default: cfg=%+v err=%v", cfg, err)
+	}
+	// -dev without -config does not read the production file.
+	if cfg, _, err := commonFlags([]string{"-dev"}); err != nil || cfg.Listen != "127.0.0.1:8080" {
+		t.Fatalf("dev: listen=%q err=%v", cfg.Listen, err)
+	}
+	defaultConfigPath = filepath.Join(t.TempDir(), "missing.toml")
+	if _, _, err := commonFlags(nil); err == nil || !strings.Contains(err.Error(), "missing.toml") {
+		t.Fatalf("missing default file: err = %v", err)
+	}
+}
+
+func TestUsageMentionsDefaultConfig(t *testing.T) {
+	if !strings.Contains(usageText, "/etc/mc-panel/panel.toml") {
+		t.Fatalf("usage does not document the default config path:\n%s", usageText)
+	}
+}
+
 func TestAdminCreateUsername(t *testing.T) {
 	tests := []struct {
 		args    []string
