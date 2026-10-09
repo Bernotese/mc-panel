@@ -107,6 +107,10 @@ func (h *Handler) Routes(api *rbac.Router) {
 	preAuth := rbac.Authenticated().AllowStages(principal.StagePreAuth)
 	api.Post("/auth/2fa/totp", preAuth, h.verifyTOTP)
 	api.Post("/auth/2fa/recovery", preAuth, h.verifyRecovery)
+	setupOrFull := rbac.Authenticated().AllowStages(principal.StageSetup, principal.StageFull)
+	api.Post("/me/totp/setup", setupOrFull, h.setupTOTP)
+	api.Post("/me/totp/enable", setupOrFull, h.enableTOTP)
+	api.Delete("/me/totp", rbac.Authenticated().WithSudo(), h.disableTOTP)
 }
 
 type factors struct {
