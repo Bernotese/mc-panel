@@ -46,6 +46,9 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	case len(args) >= 2 && (args[0] == "admin" || args[0] == "audit"):
 		cmd, args = args[0]+" "+args[1], args[2:]
 	}
+	if cmd != "" && cmd != "version" {
+		restrictUmask() // before any file (database, WAL/SHM, secret key) is created
+	}
 	var err error
 	switch cmd {
 	case "version":
@@ -149,8 +152,14 @@ func adminCreateUsername(args []string) (string, error) {
 	return *username, nil
 }
 
+// openDB creates/tightens the data directory, opens and migrates the database. Directory and
+// database files are forced to 0700/0600 before and after opening (WAL/SHM appear on open);
+// a remaining group/other bit refuses the start.
 func openDB(ctx context.Context, cfg config.Panel) (*sql.DB, error) {
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
+		return nil, err
+	}
+	if err := secureDataDir(cfg.DataDir); err != nil {
 		return nil, err
 	}
 	db, err := store.Open(cfg.DBPath())
@@ -158,6 +167,10 @@ func openDB(ctx context.Context, cfg config.Panel) (*sql.DB, error) {
 		return nil, err
 	}
 	if err := store.Migrate(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := secureDataDir(cfg.DataDir); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
