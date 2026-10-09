@@ -69,6 +69,9 @@ func (r Rule) AllowStages(s ...principal.Stage) Rule {
 	if r.kind == kindPublic {
 		panic("rbac: public routes have no stages")
 	}
+	if len(s) == 0 {
+		panic("rbac: AllowStages requires at least one stage")
+	}
 	r.stages = slices.Clone(s)
 	return r
 }

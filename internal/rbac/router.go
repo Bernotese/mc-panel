@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -62,7 +63,16 @@ func (rt *Router) handle(method, p string, rule Rule, h http.HandlerFunc) {
 	if rule.kind == kindInvalid {
 		panic("rbac: route " + method + " " + rt.prefix + p + " registered without a rule")
 	}
-	*rt.reg = append(*rt.reg, RouteInfo{Method: method, Pattern: rt.prefix + p, Rule: rule})
+	full := rt.prefix + p
+	if rule.kind == kindServer && !strings.Contains(full, "{"+rule.param+"}") {
+		panic("rbac: route " + method + " " + full + " has no path parameter {" + rule.param + "}")
+	}
+	for _, ri := range *rt.reg {
+		if ri.Method == method && ri.Pattern == full {
+			panic("rbac: duplicate route " + method + " " + full)
+		}
+	}
+	*rt.reg = append(*rt.reg, RouteInfo{Method: method, Pattern: full, Rule: rule})
 	rt.mux.Method(method, p, rt.enforce(rule, h))
 }
 
