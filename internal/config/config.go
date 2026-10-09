@@ -96,6 +96,8 @@ func LoadPanel(path string, dev bool, root string) (Panel, error) {
 			return Panel{}, fmt.Errorf("config: unknown keys: %s", strings.Join(keys, ", "))
 		}
 	}
+	// The CLI flag is authoritative: the file must not be able to enable or disable dev mode.
+	p.Dev = dev
 	if err := p.Validate(); err != nil {
 		return Panel{}, err
 	}
@@ -117,7 +119,7 @@ func (p *Panel) Validate() error {
 	if p.DataDir == "" || p.AgentSocket == "" {
 		errs = append(errs, errors.New("data_dir and agent_socket must be set"))
 	}
-	p.trusted = p.trusted[:0]
+	p.trusted = make([]netip.Prefix, 0, len(p.TrustedProxies))
 	for _, s := range p.TrustedProxies {
 		pf, err := netip.ParsePrefix(s)
 		if err != nil {
@@ -190,6 +192,8 @@ func LoadAgent(path string, dev bool, root string) (Agent, error) {
 			return Agent{}, fmt.Errorf("config: unknown keys: %v", und)
 		}
 	}
+	// The CLI flag is authoritative: the file must not be able to enable or disable dev mode.
+	a.Dev = dev
 	if err := a.Validate(); err != nil {
 		return Agent{}, err
 	}
