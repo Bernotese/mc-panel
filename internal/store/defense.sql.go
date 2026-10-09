@@ -207,6 +207,18 @@ func (q *Queries) DefenseDeleteIPRule(ctx context.Context, id int64) (int64, err
 	return result.RowsAffected()
 }
 
+const defenseDeleteNotifier = `-- name: DefenseDeleteNotifier :execrows
+DELETE FROM notifiers WHERE id = ?1
+`
+
+func (q *Queries) DefenseDeleteNotifier(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, defenseDeleteNotifier, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const defenseGetIPRule = `-- name: DefenseGetIPRule :one
 SELECT id, cidr, kind, comment, expires_at, created_by, created_at FROM ip_rules WHERE id = ?1
 `
@@ -762,6 +774,41 @@ func (q *Queries) DefenseListJails(ctx context.Context, lim int64) ([]Jail, erro
 	return items, nil
 }
 
+const defenseListNotifiers = `-- name: DefenseListNotifiers :many
+SELECT id, kind, name, config_enc, enabled, created_at, updated_at FROM notifiers ORDER BY name
+`
+
+func (q *Queries) DefenseListNotifiers(ctx context.Context) ([]Notifier, error) {
+	rows, err := q.db.QueryContext(ctx, defenseListNotifiers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Notifier{}
+	for rows.Next() {
+		var i Notifier
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Name,
+			&i.ConfigEnc,
+			&i.Enabled,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const defenseMarkJailBanned = `-- name: DefenseMarkJailBanned :exec
 UPDATE jails SET fw_banned_at = ?1 WHERE id = ?2
 `
@@ -913,4 +960,40 @@ func (q *Queries) DefenseTopFailingIPs(ctx context.Context, since int64) ([]Defe
 		return nil, err
 	}
 	return items, nil
+}
+
+const defenseUpdateNotifier = `-- name: DefenseUpdateNotifier :one
+UPDATE notifiers
+SET name = ?1, config_enc = ?2, enabled = ?3, updated_at = ?4
+WHERE id = ?5
+RETURNING id, kind, name, config_enc, enabled, created_at, updated_at
+`
+
+type DefenseUpdateNotifierParams struct {
+	Name      string
+	ConfigEnc []byte
+	Enabled   int64
+	UpdatedAt int64
+	ID        int64
+}
+
+func (q *Queries) DefenseUpdateNotifier(ctx context.Context, arg DefenseUpdateNotifierParams) (Notifier, error) {
+	row := q.db.QueryRowContext(ctx, defenseUpdateNotifier,
+		arg.Name,
+		arg.ConfigEnc,
+		arg.Enabled,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	var i Notifier
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.Name,
+		&i.ConfigEnc,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

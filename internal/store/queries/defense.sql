@@ -148,3 +148,15 @@ SELECT * FROM notifiers WHERE id = sqlc.arg(id);
 INSERT INTO notifiers (kind, name, config_enc, enabled, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
 RETURNING *;
+
+-- name: DefenseListNotifiers :many
+SELECT * FROM notifiers ORDER BY name;
+
+-- name: DefenseUpdateNotifier :one
+UPDATE notifiers
+SET name = sqlc.arg(name), config_enc = sqlc.arg(config_enc), enabled = sqlc.arg(enabled), updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: DefenseDeleteNotifier :execrows
+DELETE FROM notifiers WHERE id = sqlc.arg(id);
