@@ -2,6 +2,7 @@ package defense
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -180,5 +181,36 @@ func TestAPIRateLimitInvalidIPUsesSharedBucket(t *testing.T) {
 	}
 	if c := req(); c != http.StatusTooManyRequests {
 		t.Fatalf("invalid IPs must be limited in one dedicated bucket: code=%d", c)
+	}
+}
+
+func TestAPIRateLimitAllowlistedBypassesOverflowBucket(t *testing.T) {
+	e := newEnv(t)
+	e.addRule(t, "192.0.2.0/24", "allow", nil)
+	e.svc.api.max = 3
+	// foreign keys fill the map and drain the shared overflow bucket
+	for i := 1; i <= 3; i++ {
+		if rec := e.apiReq("/api/x", 0, fmt.Sprintf("198.51.100.%d", i)); rec.Code != http.StatusNoContent {
+			t.Fatalf("fill %d: %d", i, rec.Code)
+		}
+	}
+	limited := false
+	for i := 0; i < 70 && !limited; i++ {
+		limited = e.apiReq("/api/x", 0, "203.0.113.200").Code == http.StatusTooManyRequests
+	}
+	if !limited {
+		t.Fatal("precondition: the overflow bucket must be exhausted")
+	}
+	if rec := e.apiReq("/api/x", 0, "203.0.113.201"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("other new keys share the drained overflow bucket: %d", rec.Code)
+	}
+	// an allowlisted admin (anonymous or with a fresh session) is not affected
+	for i := 0; i < 100; i++ {
+		if rec := e.apiReq("/api/x", 0, "192.0.2.7"); rec.Code != http.StatusNoContent {
+			t.Fatalf("allowlisted anonymous request %d: %d", i, rec.Code)
+		}
+		if rec := e.apiReq("/api/x", 4242, "192.0.2.7"); rec.Code != http.StatusNoContent {
+			t.Fatalf("allowlisted session request %d: %d", i, rec.Code)
+		}
 	}
 }

@@ -157,7 +157,7 @@ func TestInvalidIPFailsClosed(t *testing.T) {
 	}
 }
 
-func TestAllowlistedIPSkipsLoginRateLimits(t *testing.T) {
+func TestAllowlistedIPSkipsOnlyUsernameBucket(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	e.addRule(t, "192.0.2.0/24", "allow", nil)
@@ -168,11 +168,14 @@ func TestAllowlistedIPSkipsLoginRateLimits(t *testing.T) {
 		}
 	}
 	wantRateLimited(t, e.svc.CheckLogin(ctx, addr("198.51.100.99"), "admin"), 12*time.Second)
-	for i := 0; i < 20; i++ {
+	// the allowlisted address is not blocked by the exhausted username bucket ...
+	for i := 0; i < 5; i++ {
 		if err := e.svc.CheckLogin(ctx, addr("192.0.2.7"), "admin"); err != nil {
-			t.Fatalf("allowlisted login %d must not be rate limited: %v", i, err)
+			t.Fatalf("allowlisted login %d must not be blocked by the username bucket: %v", i, err)
 		}
 	}
+	// ... but the per-IP limiter still bounds brute force from the allowlisted network
+	wantRateLimited(t, e.svc.CheckLogin(ctx, addr("192.0.2.7"), "admin"), 6*time.Second)
 }
 
 func TestLoginUsernameBucketKeyIsCapped(t *testing.T) {

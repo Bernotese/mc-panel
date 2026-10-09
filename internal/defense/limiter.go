@@ -43,10 +43,23 @@ func newKeyedLimiter(l Limit) *keyedLimiter {
 // otherwise the duration until a token becomes available; in that case no
 // token is consumed.
 func (k *keyedLimiter) take(key string, now time.Time) time.Duration {
+	return k.takeOpt(key, now, false)
+}
+
+// takeExempt is like take, but a trusted (allowlisted) caller is never put into
+// the shared overflow bucket: if the map is full and the key is new, it passes.
+func (k *keyedLimiter) takeExempt(key string, now time.Time) time.Duration {
+	return k.takeOpt(key, now, true)
+}
+
+func (k *keyedLimiter) takeOpt(key string, now time.Time, exempt bool) time.Duration {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	e, ok := k.entries[key]
 	if !ok && len(k.entries) >= k.max {
+		if exempt {
+			return 0
+		}
 		// fail closed for this dimension: all further new keys share one bucket
 		key = overflowKey
 		e, ok = k.entries[key]
