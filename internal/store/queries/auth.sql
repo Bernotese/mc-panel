@@ -132,3 +132,8 @@ SELECT s.id, s.user_id, u.username, s.ip, s.country, s.user_agent, s.created_at,
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.revoked_at IS NULL AND s.expires_at > sqlc.arg(now) AND s.last_seen_at > sqlc.arg(idle_cutoff)
 ORDER BY s.last_seen_at DESC, s.id DESC;
+
+-- name: AuthPruneSessions :execrows
+-- Removes sessions that ended (revoked or expired) before the cutoff.
+DELETE FROM sessions
+WHERE expires_at < sqlc.arg(cutoff) OR (revoked_at IS NOT NULL AND revoked_at < sqlc.arg(cutoff));

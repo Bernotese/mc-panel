@@ -190,3 +190,12 @@ func clearSessionCookie(w http.ResponseWriter) {
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
 }
+
+// SessionRetention is how long ended (revoked or expired) sessions are kept for investigation.
+const SessionRetention = 30 * 24 * time.Hour
+
+// PruneSessions deletes sessions that were revoked or expired more than SessionRetention ago.
+// cmd/panel calls it periodically from its background loop.
+func (h *Handler) PruneSessions(ctx context.Context) (int64, error) {
+	return h.q.AuthPruneSessions(ctx, h.clock.Now().Add(-SessionRetention).UnixMilli())
+}
