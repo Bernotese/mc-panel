@@ -1,4 +1,4 @@
-package audit_test
+package auditapi_test
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"mcpanel/internal/audit"
+	"mcpanel/internal/audit/auditapi"
 	"mcpanel/internal/clock"
 	"mcpanel/internal/httpx"
 	"mcpanel/internal/notify"
@@ -43,7 +44,7 @@ func newAuditEnv(t *testing.T) *auditEnv {
 	notes := &notify.Recording{}
 	mux := chi.NewRouter()
 	rt := rbac.NewRouter(mux, rbac.NewDBChecker(db), clk)
-	audit.NewHandler(db, clk, notes).Routes(rt)
+	auditapi.NewHandler(db, clk, notes).Routes(rt)
 
 	rec := audit.NewSQLRecorder(db, clk)
 	entries := []struct {
