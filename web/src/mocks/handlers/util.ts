@@ -1,7 +1,7 @@
 import { HttpResponse, type HttpHandler } from 'msw'
 import type { ErrorCode, Permission, Stage } from '@/api/types'
 import { ALL_PERMISSIONS } from '@/api/types'
-import { currentSession, db, findUser, type MockSession, type MockUser } from '../db'
+import { currentSession, db, findUser, hasSecondFactor, type MockSession, type MockUser } from '../db'
 
 /** Wildcard origin: matches in jsdom (http://localhost:3000) and in the browser worker. */
 export const API = '*/api'
@@ -40,6 +40,11 @@ export function guard(request: Request, opts: GuardOptions = {}): Authed | Error
   if (!session || !user) return apiError(401, 'unauthorized', 'authentication required')
   if (request.method !== 'GET' && request.headers.get('X-CSRF-Token') !== session.csrf) {
     return apiError(403, 'csrf_invalid', 'missing or invalid CSRF token')
+  }
+  // Like the real middleware: a full session is downgraded to `setup` as soon as 2FA became mandatory for the user
+  // (admin without factor, or enforce_2fa_for_users with a plain user without factor).
+  if (session.stage === 'full' && !hasSecondFactor(user) && (user.role === 'admin' || db.settings.enforce_2fa_for_users)) {
+    session.stage = 'setup'
   }
   const stages = opts.stages ?? ['full']
   if (!stages.includes(session.stage)) {
