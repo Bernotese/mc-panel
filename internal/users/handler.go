@@ -36,6 +36,7 @@ func NewHandler(db *sql.DB, c clock.Clock, rec audit.Recorder, n notify.Notifier
 // Routes registers all stream-D user, permission and server routes (paths relative to /api).
 func (h *Handler) Routes(api *rbac.Router) {
 	h.userRoutes(api)
+	h.manageRoutes(api)
 }
 
 // pathID parses the {id} URL parameter; false for non-numeric or non-positive values.
