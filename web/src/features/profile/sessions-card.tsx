@@ -13,7 +13,7 @@ import { errorMessage, useErrorToast } from '@/lib/error-message'
 import { useFormat } from '@/lib/format'
 import { SectionCard } from './section-card'
 import { buildSessionColumns, useDeviceLabel } from './session-columns'
-import { mySessionsKey } from './session-keys'
+import { mySessionsKey } from './query-keys'
 
 export function SessionsCard() {
   const { t } = useTranslation()
