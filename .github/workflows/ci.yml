@@ -146,6 +146,72 @@ jobs:
       - name: Redocly lint
         run: npx --yes @redocly/cli@2.54.2 lint api/openapi.yaml --extends=minimal
 
+  e2e:
+    name: E2E (Playwright, real backend)
+    needs:
+      - go
+      - web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build binaries
+        run: |
+          mkdir -p .dev/bin
+          go build -o .dev/bin/ ./cmd/...
+
+      - name: Start stack
+        run: |
+          .dev/bin/agent -dev > agent.log 2>&1 &
+          .dev/bin/panel serve -dev > panel.log 2>&1 &
+          (cd web && npx vite --port 5173 --strictPort > ../vite.log 2>&1 &)
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/api/health > /dev/null && break
+            sleep 1
+          done
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:5173/api/health > /dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:5173/api/health
+          printf '%s\n' 'ci e2e admin password 1' | .dev/bin/panel admin create -dev -username e2e-admin
+
+      - name: Playwright
+        working-directory: web
+        env:
+          E2E_BASE_URL: http://localhost:5173
+          E2E_ADMIN_USER: e2e-admin
+          E2E_ADMIN_PASSWORD: ci e2e admin password 1
+        run: |
+          npx playwright install --with-deps chromium
+          npm run e2e:real
+          npm run e2e
+
+      - name: Logs on failure
+        if: failure()
+        run: tail -n 200 agent.log panel.log vite.log
+
   nftables:
     name: nftables integration (root)
     runs-on: ubuntu-24.04
@@ -277,13 +343,8 @@ jobs:
               # Go >= 1.27 no longer records -ldflags in the build info, so check the linked
               # version string itself (needs "var version" in package main, set via -X).
               if ! grep -aqF -- "${version}" "${path}"; then
-                if [ "${name}" = panel ]; then
-                  # TODO(phase 2): cmd/panel gets "var version"; then make this an error.
-                  echo "::warning::${path} does not contain version ${version} (main.version missing in cmd/panel)"
-                else
-                  echo "::error::${path} does not contain version ${version} (declare 'var version' in package main)"
-                  exit 1
-                fi
+                echo "::error::${path} does not contain version ${version} (declare 'var version' in package main)"
+                exit 1
               fi
               if [ "${name}" = panel ]; then
                 grep -aq '/assets/index-' "${path}"
