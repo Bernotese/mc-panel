@@ -3,6 +3,7 @@ package users
 import (
 	"database/sql"
 	"errors"
+	"math"
 	"net/http"
 	"regexp"
 	"slices"
@@ -185,6 +186,13 @@ func (h *Handler) handleServerPower(w http.ResponseWriter, r *http.Request) {
 	}
 	s, ok := h.loadServer(w, r)
 	if !ok {
+		return
+	}
+	p, _ := principal.From(ctx) // guaranteed by the rbac rule
+	if d := h.power.take(p.UserID, h.clock.Now()); d > 0 {
+		secs := int(math.Ceil(d.Seconds()))
+		w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
+		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "too many power actions, try again later")
 		return
 	}
 	h.record(ctx, audit.ActionServerPower, serverTarget(s.ID), audit.ResultSuccess,

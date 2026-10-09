@@ -26,11 +26,12 @@ type Handler struct {
 	clock    clock.Clock
 	rec      audit.Recorder
 	notifier notify.Notifier
+	power    *powerLimiter
 }
 
 // NewHandler expects db from store.Open (BEGIN IMMEDIATE transactions).
 func NewHandler(db *sql.DB, c clock.Clock, rec audit.Recorder, n notify.Notifier) *Handler {
-	return &Handler{db: db, q: store.New(db), clock: c, rec: rec, notifier: n}
+	return &Handler{db: db, q: store.New(db), clock: c, rec: rec, notifier: n, power: newPowerLimiter()}
 }
 
 // Routes registers all stream-D user, permission and server routes (paths relative to /api).
