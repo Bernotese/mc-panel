@@ -3,6 +3,7 @@ import { cleanup } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { setCsrfToken } from '@/api/csrf'
 import { resetApiHandlers } from '@/api/handlers'
+import { resetSudoStore } from '@/features/sudo/sudo-store'
 import i18n, { i18nReady } from '@/i18n'
 import { resetDb } from '@/mocks/db'
 import { server } from '@/mocks/node'
@@ -28,6 +29,7 @@ afterEach(async () => {
   server.resetHandlers()
   resetDb()
   resetApiHandlers()
+  resetSudoStore()
   setCsrfToken('')
   setViewport('desktop')
   setPrefersDark(false)
