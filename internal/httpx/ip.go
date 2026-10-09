@@ -65,12 +65,15 @@ func peerIP(remote string) netip.Addr {
 	return netip.Addr{}
 }
 
+// fromXFF walks the header from the right and returns the first untrusted entry. An
+// unparsable entry reached before that yields an invalid address (fail closed: the IP filter
+// rejects it) instead of attributing the request to the proxy.
 func fromXFF(header string, trusted []netip.Prefix, fallback netip.Addr) netip.Addr {
 	parts := strings.Split(header, ",")
 	for i := len(parts) - 1; i >= 0; i-- {
 		a, err := netip.ParseAddr(strings.TrimSpace(parts[i]))
 		if err != nil {
-			return fallback
+			return netip.Addr{}
 		}
 		a = a.Unmap().WithZone("")
 		if !isTrusted(a, trusted) {

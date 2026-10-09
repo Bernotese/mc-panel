@@ -103,7 +103,10 @@ func TestRealIP(t *testing.T) {
 		{"trusted proxy uses XFF", "127.0.0.1:5000", "203.0.113.9", "203.0.113.9"},
 		{"rightmost untrusted wins (spoofed left entry)", "127.0.0.1:5000", "6.6.6.6, 203.0.113.9", "203.0.113.9"},
 		{"mapped v4 unmapped", "[::ffff:198.51.100.1]:5000", "", "198.51.100.1"},
-		{"garbage XFF falls back to peer", "127.0.0.1:5000", "not-an-ip", "127.0.0.1"},
+		{"garbage XFF fails closed", "127.0.0.1:5000", "not-an-ip", "invalid IP"},
+		{"garbage right of a trusted hop fails closed", "127.0.0.1:5000", "203.0.113.9, junk, 127.0.0.1", "invalid IP"},
+		{"empty XFF entry fails closed", "127.0.0.1:5000", "203.0.113.9, ", "invalid IP"},
+		{"garbage left of the rightmost untrusted entry is irrelevant", "127.0.0.1:5000", "junk, 203.0.113.9", "203.0.113.9"},
 		{"v6 trusted proxy", "[::1]:5000", "2001:db8::5", "2001:db8::5"},
 	}
 	for _, tc := range cases {
