@@ -181,6 +181,7 @@ export const de = {
     title: 'Benutzer',
     description: 'Konten verwalten, Rollen und Rechte vergeben.',
     caption: 'Benutzerliste',
+    empty: 'Keine Benutzer vorhanden.',
     create: 'Benutzer anlegen',
     create_description: 'Neue Konten haben keine Rechte, bis du sie vergibst.',
     username: 'Benutzername',

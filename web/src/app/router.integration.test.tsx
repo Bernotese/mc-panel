@@ -55,6 +55,13 @@ describe('app router with the real guards', () => {
     expect(router.state.location.pathname).toBe('/setup-2fa')
   })
 
+  it('renders the 404 page for a malformed user id in the permissions route', async () => {
+    const queryClient = createTestQueryClient()
+    applyMe(queryClient, loginAs('admin'))
+    await mountApp('/users/abc/permissions', queryClient)
+    expect(await screen.findByText('Seite nicht gefunden')).toBeInTheDocument()
+  })
+
   it('shows a translated error screen with retry when a guard request fails', async () => {
     server.use(http.get('*/api/auth/me', () => HttpResponse.json({ error: 'jailed', message: 'ip jailed' }, { status: 403 })))
     await mountApp('/')

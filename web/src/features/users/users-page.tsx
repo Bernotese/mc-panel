@@ -157,7 +157,7 @@ export function UsersPage() {
           {errorMessage(users.error, t)}
         </p>
       ) : null}
-      {users.data ? <DataList items={users.data} columns={columns} rowKey={(u) => u.id} caption={t('users.caption')} empty={t('common.loading')} /> : null}
+      {users.data ? <DataList items={users.data} columns={columns} rowKey={(u) => u.id} caption={t('users.caption')} empty={t('users.empty')} /> : null}
       <CreateUserDialog open={creating} onOpenChange={setCreating} />
       <ConfirmDialog
         open={deleting !== null}
