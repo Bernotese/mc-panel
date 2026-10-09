@@ -144,6 +144,9 @@ func (s *Sessions) Rotate(ctx context.Context, sess store.Session, rot Rotation)
 		ExpiresAt:  s.expiresAt(rot.Stage, sess.CreatedAt),
 		LastSeenAt: now,
 		ID:         sess.ID,
+		// Compare-and-swap: only the holder of the presented token/stage may rotate it.
+		OldTokenHash: sess.TokenHash,
+		OldStage:     sess.Stage,
 	}
 	n, err := s.q.AuthRotateSession(ctx, p)
 	if err != nil {

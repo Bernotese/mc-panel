@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
@@ -167,6 +168,10 @@ func (h *Handler) factors(ctx context.Context, q *store.Queries, u store.User) (
 
 // twoFactorMandatory: admins always; users when enforcement is switched on.
 func (h *Handler) twoFactorMandatory(ctx context.Context, q *store.Queries, u store.User) (bool, error) {
+	return twoFactorMandatory(ctx, q, u)
+}
+
+func twoFactorMandatory(ctx context.Context, q *store.Queries, u store.User) (bool, error) {
 	if principal.Role(u.Role) == principal.RoleAdmin {
 		return true, nil
 	}
@@ -280,13 +285,31 @@ func (h *Handler) auditLog(ctx context.Context, userID int64, username, action, 
 func userAgent(r *http.Request) string {
 	ua := r.UserAgent()
 	if len(ua) > maxUserAgent {
-		ua = ua[:maxUserAgent]
+		cut := maxUserAgent
+		for cut > 0 && !utf8.RuneStart(ua[cut]) { // never cut inside a multi-byte rune
+			cut--
+		}
+		ua = ua[:cut]
 	}
 	return ua
 }
 
 func invalidCredentials(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeInvalidCredentials, "invalid username or password")
+}
+
+// sessionGone is the response when the session was revoked or rotated while the request ran.
+func sessionGone(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeUnauthorized, "authentication required")
+}
+
+// sessionError maps a Sessions.Rotate error to a response.
+func sessionError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, ErrNoSession) {
+		sessionGone(w, r)
+		return
+	}
+	httpx.Internal(w, r, err)
 }
 
 func invalidCode(w http.ResponseWriter, r *http.Request) {

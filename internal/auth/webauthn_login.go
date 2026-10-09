@@ -80,7 +80,7 @@ func (h *Handler) verifyAssertion(ctx context.Context, p principal.Principal, u 
 	}
 	parsed, err := protocol.ParseCredentialRequestResponseBytes(raw)
 	if err != nil {
-		return reasonBadAssertion, nil
+		return reasonBadAssertion, nil //nolint:nilerr // a malformed assertion is a failed attempt, not a server error
 	}
 	wu, rows, err := h.loadWAUser(ctx, u)
 	if err != nil {
@@ -99,7 +99,7 @@ func (h *Handler) verifyAssertion(ctx context.Context, p principal.Principal, u 
 	prevCount := wu.creds[idx].Authenticator.SignCount
 	cred, err := h.wa.ValidateLogin(wu, data, parsed)
 	if err != nil {
-		return reasonBadAssertion, nil
+		return reasonBadAssertion, nil //nolint:nilerr // a failed validation is a failed attempt, not a server error
 	}
 	newCount := parsed.Response.AuthenticatorData.Counter
 	if cred.Authenticator.CloneWarning || ((newCount != 0 || prevCount != 0) && newCount <= prevCount) {
@@ -109,12 +109,19 @@ func (h *Handler) verifyAssertion(ctx context.Context, p principal.Principal, u 
 	if err != nil {
 		return "", err
 	}
-	if err := h.q.AuthUpdateCredentialUse(ctx, store.AuthUpdateCredentialUseParams{
-		CredentialJson: string(b),
-		LastUsedAt:     sql.NullInt64{Int64: h.clock.Now().UnixMilli(), Valid: true},
-		ID:             rows[idx].ID,
-	}); err != nil {
+	// Conditional on the counter state we validated against: a concurrent assertion with the same
+	// counter loses and is treated like a replay.
+	n, err := h.q.AuthUpdateCredentialUse(ctx, store.AuthUpdateCredentialUseParams{
+		CredentialJson:    string(b),
+		OldCredentialJson: rows[idx].CredentialJson,
+		LastUsedAt:        sql.NullInt64{Int64: h.clock.Now().UnixMilli(), Valid: true},
+		ID:                rows[idx].ID,
+	})
+	if err != nil {
 		return "", err
+	}
+	if n != 1 {
+		return reasonCloneWarning, nil
 	}
 	return "", nil
 }

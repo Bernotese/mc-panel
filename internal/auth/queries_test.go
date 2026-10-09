@@ -78,11 +78,11 @@ func TestAuthQueries(t *testing.T) {
 		if err != nil || state.String != `{"kind":"login"}` {
 			t.Fatalf("get = %v, %v", state, err)
 		}
-		clear := store.AuthClearWebAuthnStateParams{ID: s.ID, State: state}
-		if n, err := q.AuthClearWebAuthnState(ctx, clear); err != nil || n != 1 {
+		clearArg := store.AuthClearWebAuthnStateParams{ID: s.ID, State: state}
+		if n, err := q.AuthClearWebAuthnState(ctx, clearArg); err != nil || n != 1 {
 			t.Fatalf("first clear n=%d err=%v", n, err)
 		}
-		if n, _ := q.AuthClearWebAuthnState(ctx, clear); n != 0 {
+		if n, _ := q.AuthClearWebAuthnState(ctx, clearArg); n != 0 {
 			t.Fatal("second clear of the same state must affect no row")
 		}
 		if got, _ := q.AuthGetWebAuthnState(ctx, s.ID); got.Valid {

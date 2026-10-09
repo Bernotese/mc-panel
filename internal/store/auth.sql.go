@@ -185,18 +185,27 @@ func (q *Queries) AuthDisableTOTP(ctx context.Context, arg AuthDisableTOTPParams
 }
 
 const authEnableTOTP = `-- name: AuthEnableTOTP :execrows
-UPDATE users SET totp_enabled = 1, totp_last_step = ?1, updated_at = ?2
-WHERE id = ?3 AND totp_enabled = 0 AND totp_secret_enc IS NOT NULL AND totp_last_step < ?1
+UPDATE users SET totp_enabled = 1, totp_secret_enc = ?1, totp_last_step = ?2, updated_at = ?3
+WHERE id = ?4 AND totp_enabled = 0 AND totp_secret_enc = ?5 AND totp_last_step < ?2
 `
 
 type AuthEnableTOTPParams struct {
-	Step int64
-	Now  int64
-	ID   int64
+	SecretEnc  []byte
+	Step       int64
+	Now        int64
+	ID         int64
+	PendingEnc []byte
 }
 
+// Compare-and-swap on the pending blob: a concurrent setup that replaced the secret makes this a no-op.
 func (q *Queries) AuthEnableTOTP(ctx context.Context, arg AuthEnableTOTPParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, authEnableTOTP, arg.Step, arg.Now, arg.ID)
+	result, err := q.db.ExecContext(ctx, authEnableTOTP,
+		arg.SecretEnc,
+		arg.Step,
+		arg.Now,
+		arg.ID,
+		arg.PendingEnc,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -558,6 +567,27 @@ func (q *Queries) AuthRehashPassword(ctx context.Context, arg AuthRehashPassword
 	return err
 }
 
+const authRevokeOtherPendingSessions = `-- name: AuthRevokeOtherPendingSessions :execrows
+UPDATE sessions SET revoked_at = ?1
+WHERE user_id = ?2 AND id != ?3 AND stage IN ('preauth', 'setup') AND revoked_at IS NULL
+`
+
+type AuthRevokeOtherPendingSessionsParams struct {
+	RevokedAt sql.NullInt64
+	UserID    int64
+	KeepID    int64
+}
+
+// Used when the first second factor is established: setup/preauth sessions of the user (possibly an
+// attacker's who knows the password) must not survive it.
+func (q *Queries) AuthRevokeOtherPendingSessions(ctx context.Context, arg AuthRevokeOtherPendingSessionsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, authRevokeOtherPendingSessions, arg.RevokedAt, arg.UserID, arg.KeepID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const authRevokeOtherSessions = `-- name: AuthRevokeOtherSessions :execrows
 UPDATE sessions SET revoked_at = ?1
 WHERE user_id = ?2 AND id != ?3 AND revoked_at IS NULL
@@ -618,19 +648,23 @@ UPDATE sessions
 SET token_hash = ?1, stage = ?2, csrf_token = ?3,
     sudo_until = ?4, expires_at = ?5, last_seen_at = ?6,
     webauthn_state = NULL
-WHERE id = ?7 AND revoked_at IS NULL
+WHERE id = ?7 AND revoked_at IS NULL AND token_hash = ?8 AND stage = ?9
 `
 
 type AuthRotateSessionParams struct {
-	TokenHash  []byte
-	Stage      string
-	CsrfToken  string
-	SudoUntil  int64
-	ExpiresAt  int64
-	LastSeenAt int64
-	ID         int64
+	TokenHash    []byte
+	Stage        string
+	CsrfToken    string
+	SudoUntil    int64
+	ExpiresAt    int64
+	LastSeenAt   int64
+	ID           int64
+	OldTokenHash []byte
+	OldStage     string
 }
 
+// Compare-and-swap on the presented token hash and stage: concurrent rotations of one session
+// (e.g. two second-factor completions) yield exactly one winner.
 func (q *Queries) AuthRotateSession(ctx context.Context, arg AuthRotateSessionParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, authRotateSession,
 		arg.TokenHash,
@@ -640,6 +674,8 @@ func (q *Queries) AuthRotateSession(ctx context.Context, arg AuthRotateSessionPa
 		arg.ExpiresAt,
 		arg.LastSeenAt,
 		arg.ID,
+		arg.OldTokenHash,
+		arg.OldStage,
 	)
 	if err != nil {
 		return 0, err
@@ -694,20 +730,31 @@ func (q *Queries) AuthTouchSession(ctx context.Context, arg AuthTouchSessionPara
 	return err
 }
 
-const authUpdateCredentialUse = `-- name: AuthUpdateCredentialUse :exec
+const authUpdateCredentialUse = `-- name: AuthUpdateCredentialUse :execrows
 UPDATE webauthn_credentials SET credential_json = ?1, last_used_at = ?2
-WHERE id = ?3
+WHERE id = ?3 AND credential_json = ?4
 `
 
 type AuthUpdateCredentialUseParams struct {
-	CredentialJson string
-	LastUsedAt     sql.NullInt64
-	ID             int64
+	CredentialJson    string
+	LastUsedAt        sql.NullInt64
+	ID                int64
+	OldCredentialJson string
 }
 
-func (q *Queries) AuthUpdateCredentialUse(ctx context.Context, arg AuthUpdateCredentialUseParams) error {
-	_, err := q.db.ExecContext(ctx, authUpdateCredentialUse, arg.CredentialJson, arg.LastUsedAt, arg.ID)
-	return err
+// Conditional on the previous credential_json: of two assertions that were validated against the
+// same stored sign counter exactly one wins.
+func (q *Queries) AuthUpdateCredentialUse(ctx context.Context, arg AuthUpdateCredentialUseParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, authUpdateCredentialUse,
+		arg.CredentialJson,
+		arg.LastUsedAt,
+		arg.ID,
+		arg.OldCredentialJson,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const authUpdateLocale = `-- name: AuthUpdateLocale :exec

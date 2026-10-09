@@ -2,9 +2,12 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"mcpanel/internal/audit"
 	"mcpanel/internal/httpx"
@@ -17,7 +20,11 @@ var (
 	errLastSecondFactor = errors.New("auth: would remove the last mandatory second factor")
 	errNotEnabled       = errors.New("auth: method not enabled")
 	errNotFound         = errors.New("auth: not found")
+	errSudoRequired     = errors.New("auth: sudo required to add another second factor")
 )
+
+// pendingTOTPTTL is how long a secret from POST /me/totp/setup can be activated.
+const pendingTOTPTTL = 10 * time.Minute
 
 type totpSetupResponse struct {
 	Secret     string `json:"secret"`
@@ -90,6 +97,8 @@ func issueRecoveryCodesIfNone(ctx context.Context, q *store.Queries, userID int6
 
 // promoteSetup upgrades a setup-stage session to full once a 2FA method exists.
 // The token rotates; the CSRF token is kept (the response is not a Me object).
+// A session whose stored stage is already full (downgraded to setup only by the loader because
+// 2FA became mandatory) needs no rotation.
 func (h *Handler) promoteSetup(w http.ResponseWriter, r *http.Request, p principal.Principal) error {
 	if p.Stage != principal.StageSetup {
 		return nil
@@ -99,12 +108,48 @@ func (h *Handler) promoteSetup(w http.ResponseWriter, r *http.Request, p princip
 	if err != nil {
 		return err
 	}
+	if sess.Stage != string(principal.StageSetup) {
+		return nil
+	}
 	tok, _, err := h.sessions.Rotate(ctx, sess, Rotation{Stage: principal.StageFull, SudoUntil: sess.SudoUntil})
 	if err != nil {
 		return err
 	}
 	setSessionCookie(w, tok)
 	return nil
+}
+
+// promoteSetupBestEffort runs after the factor transaction committed. A failure must never hide the
+// freshly issued recovery codes, so it is only logged; the user simply logs in again.
+func (h *Handler) promoteSetupBestEffort(w http.ResponseWriter, r *http.Request, p principal.Principal) {
+	if err := h.promoteSetup(w, r, p); err != nil {
+		slog.ErrorContext(r.Context(), "promote setup session", "err", err, "session_id", p.SessionID)
+	}
+}
+
+// guardAddFactor runs inside the write transaction that adds a second factor. If the user already
+// has any factor, adding another needs fresh sudo (a setup-stage session can never hold sudo, so a
+// session that raced with another enrolment is locked out). Otherwise this is the first factor and
+// all other pending (preauth/setup) sessions of the user are revoked.
+func (h *Handler) guardAddFactor(ctx context.Context, q *store.Queries, p principal.Principal, userID int64) error {
+	u, err := q.AuthGetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	passkeys, err := q.AuthCountCredentials(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if u.TotpEnabled == 1 || passkeys > 0 {
+		if !h.clock.Now().Before(p.SudoUntil) {
+			return errSudoRequired
+		}
+		return nil
+	}
+	_, err = q.AuthRevokeOtherPendingSessions(ctx, store.AuthRevokeOtherPendingSessionsParams{
+		RevokedAt: sql.NullInt64{Int64: h.clock.Now().UnixMilli(), Valid: true}, UserID: userID, KeepID: p.SessionID,
+	})
+	return err
 }
 
 func (h *Handler) factorRemovalError(w http.ResponseWriter, r *http.Request, err error) bool {
@@ -148,7 +193,7 @@ func (h *Handler) setupTOTP(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	enc, err := sealTOTPSecret(h.box, user.ID, secret)
+	enc, err := sealPendingTOTPSecret(h.box, user.ID, secret, h.clock.Now())
 	if err != nil {
 		httpx.Internal(w, r, err)
 		return
@@ -185,7 +230,11 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 		h.guardError(w, r, err)
 		return
 	}
-	secret, err := openTOTPSecret(h.box, user.ID, user.TotpSecretEnc)
+	secret, created, err := openPendingTOTPSecret(h.box, user.ID, user.TotpSecretEnc)
+	if errors.Is(err, errNoPendingTOTP) || (err == nil && h.clock.Now().Sub(created) > pendingTOTPTTL) {
+		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "no TOTP setup pending or it expired; start again")
+		return
+	}
 	if err != nil {
 		httpx.Internal(w, r, err)
 		return
@@ -195,10 +244,20 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 		invalidCode(w, r)
 		return
 	}
+	enc, err := sealTOTPSecret(h.box, user.ID, secret)
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
 	now := h.clock.Now().UnixMilli()
 	var codes []string
 	err = h.withTx(ctx, func(q *store.Queries) error {
-		n, err := q.AuthEnableTOTP(ctx, store.AuthEnableTOTPParams{Step: step, Now: now, ID: user.ID})
+		if err := h.guardAddFactor(ctx, q, p, user.ID); err != nil {
+			return err
+		}
+		n, err := q.AuthEnableTOTP(ctx, store.AuthEnableTOTPParams{
+			SecretEnc: enc, PendingEnc: user.TotpSecretEnc, Step: step, Now: now, ID: user.ID,
+		})
 		if err != nil {
 			return err
 		}
@@ -208,6 +267,10 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 		codes, err = issueRecoveryCodesIfNone(ctx, q, user.ID, now)
 		return err
 	})
+	if errors.Is(err, errSudoRequired) {
+		httpx.WriteError(w, r, http.StatusForbidden, httpx.CodeSudoRequired, "re-authentication required")
+		return
+	}
 	if errors.Is(err, errNotEnabled) {
 		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "no TOTP setup pending")
 		return
@@ -216,10 +279,7 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	if err := h.promoteSetup(w, r, p); err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
+	h.promoteSetupBestEffort(w, r, p)
 	h.auditLog(ctx, user.ID, user.Username, audit.ActionTOTPEnable, user.Username, audit.ResultSuccess, nil)
 	h.notify2FAChanged(ctx, user, "TOTP enabled")
 	httpx.WriteJSON(w, http.StatusOK, recoveryCodesResponse{Codes: codes})

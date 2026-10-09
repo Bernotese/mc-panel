@@ -123,17 +123,22 @@ func (h *Handler) verifyRecovery(w http.ResponseWriter, r *http.Request) {
 // derives new-device notifications from it), token + CSRF rotation, audit, Me response.
 func (h *Handler) completeSecondFactor(w http.ResponseWriter, r *http.Request, p principal.Principal, u store.User, stage defense.AttemptStage, method string) {
 	ctx := r.Context()
-	h.recordAttempt(r, u.Username, u.ID, stage, true, reasonComplete)
 	sess, err := h.q.AuthGetSessionByID(ctx, p.SessionID)
 	if err != nil {
 		httpx.Internal(w, r, err)
 		return
 	}
-	tok, sess, err := h.sessions.Rotate(ctx, sess, Rotation{Stage: principal.StageFull, NewCSRF: true})
-	if err != nil {
-		httpx.Internal(w, r, err)
+	if sess.Stage != string(principal.StagePreAuth) { // a concurrent request already completed it
+		sessionGone(w, r)
 		return
 	}
+	tok, sess, err := h.sessions.Rotate(ctx, sess, Rotation{Stage: principal.StageFull, NewCSRF: true})
+	if err != nil {
+		sessionError(w, r, err)
+		return
+	}
+	// Only after the rotation succeeded: stream B derives the new-device notification from "complete".
+	h.recordAttempt(r, u.Username, u.ID, stage, true, reasonComplete)
 	setSessionCookie(w, tok)
 	h.auditLog(ctx, u.ID, u.Username, audit.ActionLogin, u.Username, audit.ResultSuccess, map[string]any{"method": method})
 	h.writeMe(w, r, u, sess)

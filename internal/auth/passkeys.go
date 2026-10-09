@@ -121,6 +121,9 @@ func (h *Handler) finishPasskeyRegistration(w http.ResponseWriter, r *http.Reque
 	var row store.WebauthnCredential
 	var codes []string
 	err = h.withTx(ctx, func(q *store.Queries) error {
+		if err := h.guardAddFactor(ctx, q, p, user.ID); err != nil {
+			return err
+		}
 		var err error
 		row, err = q.AuthInsertCredential(ctx, store.AuthInsertCredentialParams{
 			UserID: user.ID, CredentialID: cred.ID, Name: name, CredentialJson: string(credJSON), CreatedAt: now,
@@ -131,17 +134,27 @@ func (h *Handler) finishPasskeyRegistration(w http.ResponseWriter, r *http.Reque
 		codes, err = issueRecoveryCodesIfNone(ctx, q, user.ID, now)
 		return err
 	})
-	if err != nil {
+	switch {
+	case errors.Is(err, errSudoRequired):
+		httpx.WriteError(w, r, http.StatusForbidden, httpx.CodeSudoRequired, "re-authentication required")
+		return
+	case isUniqueViolation(err):
+		httpx.WriteError(w, r, http.StatusBadRequest, httpx.CodeBadRequest, "this passkey is already registered")
+		return
+	case err != nil:
 		httpx.Internal(w, r, err)
 		return
 	}
-	if err := h.promoteSetup(w, r, p); err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
+	h.promoteSetupBestEffort(w, r, p)
 	h.auditLog(ctx, user.ID, user.Username, audit.ActionPasskeyAdd, name, audit.ResultSuccess, map[string]any{"passkey_id": row.ID})
 	h.notify2FAChanged(ctx, user, "passkey added: "+name)
 	httpx.WriteJSON(w, http.StatusCreated, passkeyCreatedResponse{Passkey: toPasskeyJSON(row), RecoveryCodes: codes})
+}
+
+// isUniqueViolation reports a SQLite UNIQUE constraint failure (here: a credential id that is
+// already registered, possibly for another user).
+func isUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 func (h *Handler) listPasskeys(w http.ResponseWriter, r *http.Request) {

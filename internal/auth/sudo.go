@@ -58,7 +58,7 @@ func (h *Handler) grantSudo(w http.ResponseWriter, r *http.Request, p principal.
 	until := h.clock.Now().Add(h.cfg.Session.Sudo.Duration).UnixMilli()
 	tok, _, err := h.sessions.Rotate(ctx, sess, Rotation{Stage: principal.Stage(sess.Stage), SudoUntil: until})
 	if err != nil {
-		httpx.Internal(w, r, err)
+		sessionError(w, r, err)
 		return
 	}
 	setSessionCookie(w, tok)

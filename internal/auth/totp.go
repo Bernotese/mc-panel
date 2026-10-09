@@ -2,7 +2,9 @@ package auth
 
 import (
 	"crypto/subtle"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,4 +83,35 @@ func openTOTPSecret(box *secretbox.Box, userID int64, enc []byte) (string, error
 		return "", err
 	}
 	return string(pt), nil
+}
+
+// A secret created by POST /me/totp/setup is stored sealed as "p1|<created unix ms>|<secret>" until
+// it is activated; activation re-seals the bare secret. The creation time lets activation expire
+// (pendingTOTPTTL) without a schema change.
+const pendingTOTPPrefix = "p1|"
+
+var errNoPendingTOTP = errors.New("auth: no pending TOTP secret")
+
+func sealPendingTOTPSecret(box *secretbox.Box, userID int64, secret string, now time.Time) ([]byte, error) {
+	return sealTOTPSecret(box, userID, fmt.Sprintf("%s%d|%s", pendingTOTPPrefix, now.UnixMilli(), secret))
+}
+
+func openPendingTOTPSecret(box *secretbox.Box, userID int64, enc []byte) (secret string, created time.Time, err error) {
+	pt, err := openTOTPSecret(box, userID, enc)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	rest, ok := strings.CutPrefix(pt, pendingTOTPPrefix)
+	if !ok {
+		return "", time.Time{}, errNoPendingTOTP
+	}
+	ms, secret, ok := strings.Cut(rest, "|")
+	if !ok || secret == "" {
+		return "", time.Time{}, errNoPendingTOTP
+	}
+	n, err := strconv.ParseInt(ms, 10, 64)
+	if err != nil {
+		return "", time.Time{}, errNoPendingTOTP
+	}
+	return secret, time.UnixMilli(n), nil
 }
