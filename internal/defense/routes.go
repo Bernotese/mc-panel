@@ -10,4 +10,6 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Get("/security/ip-rules", rbac.Admin(), h.listIPRules)
 	api.Post("/security/ip-rules", rbac.Admin().WithSudo(), h.createIPRule)
 	api.Delete("/security/ip-rules/{id}", rbac.Admin().WithSudo(), h.deleteIPRule)
+	api.Get("/security/settings", rbac.Admin(), h.getSettings)
+	api.Put("/security/settings", rbac.Admin().WithSudo(), h.putSettings)
 }
