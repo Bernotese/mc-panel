@@ -10,6 +10,92 @@ import (
 	"database/sql"
 )
 
+const defenseCountFailuresSince = `-- name: DefenseCountFailuresSince :one
+SELECT count(*) FROM login_attempts
+WHERE ip_key = ?1 AND success = 0 AND ts >= ?2
+`
+
+type DefenseCountFailuresSinceParams struct {
+	IpKey string
+	Since int64
+}
+
+func (q *Queries) DefenseCountFailuresSince(ctx context.Context, arg DefenseCountFailuresSinceParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, defenseCountFailuresSince, arg.IpKey, arg.Since)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const defenseCountFullLoginsFrom = `-- name: DefenseCountFullLoginsFrom :one
+SELECT count(*) FROM login_attempts
+WHERE user_id = ?1 AND ip_key = ?2 AND success = 1
+  AND reason = 'complete'
+`
+
+type DefenseCountFullLoginsFromParams struct {
+	UserID sql.NullInt64
+	IpKey  string
+}
+
+func (q *Queries) DefenseCountFullLoginsFrom(ctx context.Context, arg DefenseCountFullLoginsFromParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, defenseCountFullLoginsFrom, arg.UserID, arg.IpKey)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const defenseCountJailsSince = `-- name: DefenseCountJailsSince :one
+SELECT count(*) FROM jails
+WHERE ip_key = ?1 AND created_at >= ?2
+`
+
+type DefenseCountJailsSinceParams struct {
+	IpKey string
+	Since int64
+}
+
+func (q *Queries) DefenseCountJailsSince(ctx context.Context, arg DefenseCountJailsSinceParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, defenseCountJailsSince, arg.IpKey, arg.Since)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const defenseInsertAttempt = `-- name: DefenseInsertAttempt :exec
+INSERT INTO login_attempts (ts, ip, ip_key, username, user_id, stage, success, reason, user_agent, country)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type DefenseInsertAttemptParams struct {
+	Ts        int64
+	Ip        string
+	IpKey     string
+	Username  string
+	UserID    sql.NullInt64
+	Stage     string
+	Success   int64
+	Reason    string
+	UserAgent string
+	Country   string
+}
+
+func (q *Queries) DefenseInsertAttempt(ctx context.Context, arg DefenseInsertAttemptParams) error {
+	_, err := q.db.ExecContext(ctx, defenseInsertAttempt,
+		arg.Ts,
+		arg.Ip,
+		arg.IpKey,
+		arg.Username,
+		arg.UserID,
+		arg.Stage,
+		arg.Success,
+		arg.Reason,
+		arg.UserAgent,
+		arg.Country,
+	)
+	return err
+}
+
 const defenseInsertIPRule = `-- name: DefenseInsertIPRule :one
 INSERT INTO ip_rules (cidr, kind, comment, expires_at, created_by, created_at)
 VALUES (?, ?, ?, ?, ?, ?)
@@ -86,6 +172,17 @@ func (q *Queries) DefenseInsertJail(ctx context.Context, arg DefenseInsertJailPa
 		&i.FwUnbannedAt,
 	)
 	return i, err
+}
+
+const defenseLastJailCreatedAt = `-- name: DefenseLastJailCreatedAt :one
+SELECT CAST(COALESCE(MAX(created_at), 0) AS INTEGER) AS last_created_at FROM jails WHERE ip_key = ?
+`
+
+func (q *Queries) DefenseLastJailCreatedAt(ctx context.Context, ipKey string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, defenseLastJailCreatedAt, ipKey)
+	var last_created_at int64
+	err := row.Scan(&last_created_at)
+	return last_created_at, err
 }
 
 const defenseListActiveJails = `-- name: DefenseListActiveJails :many
