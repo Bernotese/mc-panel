@@ -68,6 +68,10 @@ type Handler struct {
 	notifier notify.Notifier
 	sessions *Sessions
 	wa       *webauthn.WebAuthn
+
+	// afterStageDecision is a test seam (nil in production): it runs in the login flow after the
+	// session stage was decided and before the session row is inserted.
+	afterStageDecision func()
 }
 
 func New(d Deps) (*Handler, error) {

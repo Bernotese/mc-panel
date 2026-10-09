@@ -134,6 +134,18 @@ func (h *Handler) promoteSetupBestEffort(w http.ResponseWriter, r *http.Request,
 // even a stored "full" session may only look harmless (the loader downgrades it to setup when 2FA
 // is mandatory), so it must not regain access without presenting a second factor.
 func (h *Handler) guardAddFactor(ctx context.Context, q *store.Queries, p principal.Principal, userID int64) error {
+	// The enrolling session must still be active: a session revoked (or expired) after the loader
+	// authenticated the request must not be able to establish a permanent factor.
+	sess, err := q.AuthGetSessionByID(ctx, p.SessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNoSession
+	}
+	if err != nil {
+		return err
+	}
+	if sess.UserID != userID || !h.sessions.valid(sess) {
+		return ErrNoSession
+	}
 	u, err := q.AuthGetUserByID(ctx, userID)
 	if err != nil {
 		return err
@@ -269,6 +281,10 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 		codes, err = issueRecoveryCodesIfNone(ctx, q, user.ID, now)
 		return err
 	})
+	if errors.Is(err, ErrNoSession) {
+		sessionGone(w, r)
+		return
+	}
 	if errors.Is(err, errSudoRequired) {
 		httpx.WriteError(w, r, http.StatusForbidden, httpx.CodeSudoRequired, "re-authentication required")
 		return

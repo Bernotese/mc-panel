@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -338,11 +339,7 @@ func TestEnableTOTPReturnsCodesEvenIfPromotionFails(t *testing.T) {
 	c := e.newClient("203.0.113.10")
 	c.login("root", testPassword)
 	secret := totpSetupSecret(t, c)
-	e.guard.hook = func(key string) { // revoke the session between the factor commit and the promotion
-		if _, err := e.db.Exec(`UPDATE sessions SET revoked_at = 1 WHERE id = ?`, key); err != nil {
-			t.Error(err)
-		}
-	}
+	e.guard.hook = func(key string) { e.rotateSessionBehindTheLoader(key) } // promotion will lose the CAS
 	res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)})
 	var rc recoveryCodesResponse
 	if res.code != 200 || json.Unmarshal(res.body, &rc) != nil || len(rc.Codes) != 10 {
@@ -605,4 +602,93 @@ func (e *testEnv) rotateSessionBehindTheLoader(key string) {
 	if _, _, err := e.h.Sessions().Rotate(context.Background(), sess, Rotation{Stage: principal.Stage(sess.Stage), SudoUntil: sess.SudoUntil}); err != nil {
 		e.t.Error(err)
 	}
+}
+
+// --- fix round 3 ---
+
+func TestLoginStageDecisionAndInsertAreAtomicWithEnrolment(t *testing.T) {
+	e := newTestEnv(t)
+	uid := e.createUser("alice", "user") // not enforced: a password-only login yields a full session
+	enrolling := e.newClient("198.51.100.1")
+	enrolling.login("alice", testPassword)
+	a := newSoftAuthenticator(t, e.cfg.RPID(), e.cfg.Origin())
+	begin := enrolling.do(http.MethodPost, "/api/me/passkeys/begin", nil)
+	if begin.code != 200 {
+		t.Fatalf("begin = %d", begin.code)
+	}
+	cred := a.register(begin.body)
+	var wg sync.WaitGroup
+	e.h.afterStageDecision = func() { // the first factor is enrolled while the login is deciding
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if res := enrolling.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "key", "credential": cred}); res.code != 201 {
+				t.Errorf("enrolment = %d %s", res.code, res.body)
+			}
+		}()
+		time.Sleep(200 * time.Millisecond) // give the enrolment every chance to run first
+	}
+	c := e.newClient("203.0.113.10")
+	res := c.login("alice", testPassword)
+	e.h.afterStageDecision = nil
+	wg.Wait()
+	if res.code != 200 {
+		t.Fatalf("login = %d %s", res.code, res.body)
+	}
+	if n, _ := e.q.AuthCountCredentials(context.Background(), uid); n != 1 {
+		t.Fatalf("enrolment did not happen: %d", n)
+	}
+	// A password-only session must never survive the enrolment as a usable full session.
+	if res := c.do(http.MethodGet, "/api/me/sessions", nil); res.code == 200 {
+		t.Fatalf("password-only session usable after enrolment: %s", res.body)
+	}
+}
+
+func TestEnrolmentRequiresActiveSession(t *testing.T) {
+	t.Run("totp enable on revoked session", func(t *testing.T) {
+		e := newTestEnv(t)
+		uid := e.createUser("root", "admin")
+		c := e.newClient("203.0.113.10")
+		c.login("root", testPassword)
+		secret := totpSetupSecret(t, c)
+		e.guard.hook = func(key string) { // revoked after the loader authenticated the request
+			if _, err := e.db.Exec(`UPDATE sessions SET revoked_at = 1 WHERE id = ?`, key); err != nil {
+				t.Error(err)
+			}
+		}
+		res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)})
+		if res.code != 401 || res.errCode() != "unauthorized" {
+			t.Fatalf("enable on revoked session = %d %s", res.code, res.body)
+		}
+		var enabled int
+		if err := e.db.QueryRow(`SELECT totp_enabled FROM users WHERE id = ?`, uid).Scan(&enabled); err != nil || enabled != 0 {
+			t.Fatalf("no factor may be written, enabled=%d err=%v", enabled, err)
+		}
+	})
+	t.Run("guardAddFactor", func(t *testing.T) {
+		e := newTestEnv(t)
+		uid := e.createUser("alice", "user")
+		c := e.newClient("203.0.113.10")
+		c.login("alice", testPassword)
+		p := principal.Principal{UserID: uid, SessionID: c.sessionID(), Stage: principal.StageFull}
+		check := func() error {
+			return e.h.withTx(context.Background(), func(q *store.Queries) error {
+				return e.h.guardAddFactor(context.Background(), q, p, uid)
+			})
+		}
+		if err := check(); err != nil {
+			t.Fatalf("active session: %v", err)
+		}
+		e.clock.Advance(13 * time.Hour) // absolute lifetime over
+		if err := check(); !errors.Is(err, ErrNoSession) {
+			t.Fatalf("expired session: err = %v, want ErrNoSession", err)
+		}
+		e.clock.Advance(-13 * time.Hour)
+		if _, err := e.db.Exec(`UPDATE sessions SET revoked_at = 1 WHERE id = ?`, p.SessionID); err != nil {
+			t.Fatal(err)
+		}
+		if err := check(); !errors.Is(err, ErrNoSession) {
+			t.Fatalf("revoked session: err = %v, want ErrNoSession", err)
+		}
+	})
 }

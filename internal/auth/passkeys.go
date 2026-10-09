@@ -135,6 +135,9 @@ func (h *Handler) finishPasskeyRegistration(w http.ResponseWriter, r *http.Reque
 		return err
 	})
 	switch {
+	case errors.Is(err, ErrNoSession):
+		sessionGone(w, r)
+		return
 	case errors.Is(err, errSudoRequired):
 		httpx.WriteError(w, r, http.StatusForbidden, httpx.CodeSudoRequired, "re-authentication required")
 		return
