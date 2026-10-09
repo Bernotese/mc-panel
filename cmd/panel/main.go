@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -68,29 +69,55 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 }
 
 // commonFlags extracts -config/-dev and returns the remaining args for the subcommand
-// (e.g. -username), which parse their own flags.
+// (e.g. -username), which parse their own flags. Only arguments that start with a dash are
+// treated as flags; a positional "config" or "dev" (e.g. a username) is left alone.
 func commonFlags(args []string) (config.Panel, []string, error) {
 	var cfgPath string
+	cfgSet := false
 	dev := false
 	var rest []string
-	for i := 0; i < len(args); i++ {
-		a := strings.TrimPrefix(args[i], "-")
-		a = strings.TrimPrefix(a, "-")
+	setConfig := func(v string) error {
 		switch {
-		case a == "config":
-			if i+1 >= len(args) {
-				return config.Panel{}, nil, errors.New("-config needs a value")
+		case cfgSet:
+			return errors.New("-config given more than once")
+		case v == "":
+			return errors.New("-config needs a non-empty value")
+		case strings.HasPrefix(v, "-"):
+			return fmt.Errorf("-config value %q looks like a flag", v)
+		}
+		cfgPath, cfgSet = v, true
+		return nil
+	}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") {
+			rest = append(rest, arg)
+			continue
+		}
+		name, val, hasVal := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(arg, "-"), "-"), "=")
+		switch name {
+		case "config":
+			if !hasVal {
+				if i+1 >= len(args) {
+					return config.Panel{}, nil, errors.New("-config needs a value")
+				}
+				i++
+				val = args[i]
 			}
-			cfgPath = args[i+1]
-			i++
-		case strings.HasPrefix(a, "config=") && strings.HasPrefix(args[i], "-"):
-			cfgPath = strings.TrimPrefix(a, "config=")
-		case a == "dev" && strings.HasPrefix(args[i], "-"):
-			dev = true
-		case (a == "dev=true" || a == "dev=false") && strings.HasPrefix(args[i], "-"):
-			dev = a == "dev=true"
+			if err := setConfig(val); err != nil {
+				return config.Panel{}, nil, err
+			}
+		case "dev":
+			switch {
+			case !hasVal || val == "true":
+				dev = true
+			case val == "false":
+				dev = false
+			default:
+				return config.Panel{}, nil, fmt.Errorf("invalid value %q for -dev", val)
+			}
 		default:
-			rest = append(rest, args[i])
+			rest = append(rest, arg)
 		}
 	}
 	root, err := os.Getwd()
@@ -99,6 +126,27 @@ func commonFlags(args []string) (config.Panel, []string, error) {
 	}
 	cfg, err := config.LoadPanel(cfgPath, dev, root)
 	return cfg, rest, err
+}
+
+// adminCreateUsername parses the admin-create arguments exactly like users.RunAdminCreate
+// does, so a bad invocation fails before the password prompt.
+func adminCreateUsername(args []string) (string, error) {
+	fs := flag.NewFlagSet("admin create", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	username := fs.String("username", "", "username of the new admin")
+	if err := fs.Parse(args); err != nil {
+		return "", fmt.Errorf("admin create: %w", err)
+	}
+	if fs.NArg() > 0 {
+		return "", fmt.Errorf("admin create: unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if *username == "" {
+		return "", errors.New("admin create: -username is required")
+	}
+	if err := users.ValidateUsername(*username); err != nil {
+		return "", fmt.Errorf("admin create: %w", err)
+	}
+	return *username, nil
 }
 
 func openDB(ctx context.Context, cfg config.Panel) (*sql.DB, error) {
@@ -131,6 +179,9 @@ func runCLI(cmd string, args []string, stdin *os.File, stdout, stderr io.Writer)
 	rec := audit.NewSQLRecorder(db, clk)
 	switch cmd {
 	case "admin create":
+		if _, err := adminCreateUsername(rest); err != nil {
+			return err
+		}
 		pw, err := readPassword(stdin, stderr)
 		if err != nil {
 			return err
@@ -203,11 +254,16 @@ func serve(args []string) error {
 		}
 	case <-ctx.Done():
 	}
+	stop() // a second SIGINT/SIGTERM during shutdown gets the default (terminating) handling
 	// 1. stop HTTP, 2. cancel background loops, 3. wait for them, 4. (deferred) close DB.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil && serveErr == nil {
-		serveErr = err
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("http shutdown failed, closing connections", "err", err)
+		_ = srv.Close()
+		if serveErr == nil {
+			serveErr = err
+		}
 	}
 	cancelBg()
 	<-bgDone
