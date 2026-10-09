@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { loginAs, MOCK_TOTP_CODE } from '@/mocks/db'
@@ -23,6 +23,32 @@ describe('DashboardPage', () => {
     const survival = await screen.findByRole('article', { name: 'survival' })
     await user.click(within(survival).getByRole('button', { name: 'Neu starten' }))
     expect(await screen.findByText('Neustart für „survival“ angefordert.')).toBeInTheDocument()
+  })
+
+  it('asks for confirmation before stopping a server', async () => {
+    const user = userEvent.setup()
+    await renderWithProviders(<DashboardPage />, { me: loginAs('alice') })
+    const survival = await screen.findByRole('article', { name: 'survival' })
+    await user.click(within(survival).getByRole('button', { name: 'Stoppen' }))
+    const confirm = screen.getByRole('dialog', { name: 'Server „survival“ stoppen?' })
+    expect(screen.queryByText('Stopp für „survival“ angefordert.')).not.toBeInTheDocument()
+    await user.click(within(confirm).getByRole('button', { name: 'Stoppen' }))
+    expect(await screen.findByText('Stopp für „survival“ angefordert.')).toBeInTheDocument()
+  })
+
+  it('shows no error toast after the user cancelled the sudo dialog', async () => {
+    const user = userEvent.setup()
+    await renderWithProviders(<DashboardPage />, { me: loginAs('admin') })
+    const lobby = await screen.findByRole('article', { name: 'lobby' })
+    await user.click(within(lobby).getByRole('button', { name: 'lobby löschen' }))
+    await user.click(within(screen.getByRole('dialog', { name: 'Server „lobby“ löschen?' })).getByRole('button', { name: 'Löschen' }))
+    const sudo = await screen.findByRole('dialog', { name: 'Aktion bestätigen' })
+    await user.click(within(sudo).getByRole('button', { name: 'Abbrechen' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Aktion bestätigen' })).not.toBeInTheDocument())
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByText('Diese Aktion muss bestätigt werden.')).not.toBeInTheDocument()
+    // the confirmation stays open so the user can retry or back out
+    expect(screen.getByRole('dialog', { name: 'Server „lobby“ löschen?' })).toBeInTheDocument()
   })
 
   it('lets an admin create a server after confirming sudo', async () => {

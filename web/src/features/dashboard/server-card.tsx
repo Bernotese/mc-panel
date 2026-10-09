@@ -20,6 +20,7 @@ export function ServerCard({ server, canDelete }: { server: Server; canDelete: b
   const queryClient = useQueryClient()
   const notifyError = useErrorToast()
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmStop, setConfirmStop] = useState(false)
   const canPower = server.permissions.includes('server.power')
 
   const power = useMutation({
@@ -28,6 +29,7 @@ export function ServerCard({ server, canDelete }: { server: Server; canDelete: b
     onSuccess: (_data, action) =>
       toast.success(t('dashboard.power_requested', { action: t(`dashboard.power_noun.${action}`), name: server.name })),
     onError: notifyError,
+    onSettled: () => setConfirmStop(false),
   })
   const remove = useMutation({
     mutationFn: () => unwrapVoid(api.DELETE('/servers/{id}', { params: { path: { id: server.id } } })),
@@ -65,7 +67,7 @@ export function ServerCard({ server, canDelete }: { server: Server; canDelete: b
                   size="sm"
                   variant={action === 'stop' ? 'outline' : 'secondary'}
                   disabled={power.isPending}
-                  onClick={() => power.mutate(action)}
+                  onClick={() => (action === 'stop' ? setConfirmStop(true) : power.mutate(action))}
                 >
                   {t(`dashboard.power.${action}`)}
                 </Button>
@@ -88,6 +90,16 @@ export function ServerCard({ server, canDelete }: { server: Server; canDelete: b
           ) : null}
         </CardContent>
       </Card>
+      <ConfirmDialog
+        open={confirmStop}
+        onOpenChange={setConfirmStop}
+        title={t('dashboard.stop_title', { name: server.name })}
+        description={t('dashboard.stop_description')}
+        confirmLabel={t('dashboard.power.stop')}
+        destructive
+        pending={power.isPending}
+        onConfirm={() => power.mutate('stop')}
+      />
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}

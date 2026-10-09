@@ -1,5 +1,6 @@
 import createClient, { type Middleware } from 'openapi-fetch'
 import { getCsrfToken, setCsrfToken } from './csrf'
+import { markSudoCancelled } from './errors'
 import { apiHandlers } from './handlers'
 import type { paths } from './schema'
 import type { Me } from './types'
@@ -126,7 +127,7 @@ export function createApiClient(baseUrl: string = `${window.location.origin}/api
       }
       if (code === 'sudo_required' && !schemaPath.startsWith('/auth/')) {
         const confirmed = await apiHandlers().requestSudo()
-        return confirmed ? retryOnce(copy, schemaPath) : response
+        return confirmed ? retryOnce(copy, schemaPath) : markSudoCancelled(response)
       }
       return response
     },

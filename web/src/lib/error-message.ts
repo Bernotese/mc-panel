@@ -2,7 +2,7 @@ import type { TFunction } from 'i18next'
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { isApiError } from '@/api/errors'
+import { isApiError, isSudoCancelled } from '@/api/errors'
 
 const DETAIL_CODES: ReadonlySet<string> = new Set(['bad_request', 'validation_failed', 'conflict'])
 
@@ -27,6 +27,7 @@ export function errorMessage(err: unknown, t: TFunction): string {
 export function useErrorToast(): (err: unknown) => void {
   const { t } = useTranslation()
   return useCallback((err: unknown) => {
+    if (isSudoCancelled(err)) return // the user dismissed the sudo dialog on purpose
     toast.error(errorMessage(err, t))
   }, [t])
 }
