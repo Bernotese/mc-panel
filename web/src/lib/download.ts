@@ -9,5 +9,6 @@ export function downloadText(filename: string, content: string): void {
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()
-  URL.revokeObjectURL(url)
+  // Revoking synchronously can cancel the download in some browsers (notably Safari/Firefox); give it time to start.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }

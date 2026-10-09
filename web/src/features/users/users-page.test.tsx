@@ -1,11 +1,20 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { db, loginAs, MOCK_TOTP_CODE } from '@/mocks/db'
+import { server } from '@/mocks/node'
 import { renderWithProviders } from '@/test/render'
 import { UsersPage } from './users-page'
 
 describe('UsersPage', () => {
+  it('shows a dedicated empty state instead of the loading text', async () => {
+    server.use(http.get('*/api/users', () => HttpResponse.json([])))
+    await renderWithProviders(<UsersPage />, { me: loginAs('admin') })
+    expect(await screen.findByText('Keine Benutzer vorhanden.')).toBeInTheDocument()
+    expect(screen.queryByText('Lädt …')).not.toBeInTheDocument()
+  })
+
   it('lists users with role, 2FA state and marks the current user', async () => {
     await renderWithProviders(<UsersPage />, { me: loginAs('admin') })
     const table = await screen.findByRole('table', { name: 'Benutzerliste' })

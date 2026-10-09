@@ -183,6 +183,7 @@ export const en: Messages = {
     title: 'Users',
     description: 'Manage accounts, roles and permissions.',
     caption: 'User list',
+    empty: 'No users yet.',
     create: 'Create user',
     create_description: 'New accounts have no permissions until you grant them.',
     username: 'Username',
