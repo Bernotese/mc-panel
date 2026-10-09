@@ -136,8 +136,7 @@ func (h *Handler) finishWebAuthnLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if err := h.guard.CheckSecondFactor(ctx, httpx.ClientIP(ctx), secondFactorKey(p)); err != nil {
-		h.guardError(w, r, err)
+	if !h.checkSecondFactor(w, r, p, user) {
 		return
 	}
 	reason, err := h.verifyAssertion(ctx, p, user, ceremonyLogin, raw)
@@ -163,8 +162,7 @@ func (h *Handler) finishSudoWebAuthn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if err := h.guard.CheckSecondFactor(ctx, httpx.ClientIP(ctx), secondFactorKey(p)); err != nil {
-		h.guardError(w, r, err)
+	if !h.checkSecondFactor(w, r, p, user) {
 		return
 	}
 	reason, err := h.verifyAssertion(ctx, p, user, ceremonySudo, raw)
