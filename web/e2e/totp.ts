@@ -32,3 +32,21 @@ export function hotp(key: Buffer, counter: number, digits = 6): string {
 export function totp(secretBase32: string, timeMs: number = Date.now(), stepSeconds = 30, digits = 6): string {
   return hotp(base32Decode(secretBase32), Math.floor(timeMs / 1000 / stepSeconds), digits)
 }
+
+/** The 30-s TOTP time step at timeMs. */
+export function totpStep(timeMs: number = Date.now(), stepSeconds = 30): number {
+  return Math.floor(timeMs / 1000 / stepSeconds)
+}
+
+/**
+ * Returns the code for step lastStep+1, the earliest step the server still accepts after
+ * lastStep was consumed (replay protection). The server tolerates ±1 step, so this waits until
+ * the current step has reached lastStep.
+ */
+export async function nextTotp(secretBase32: string, lastStep: number): Promise<{ code: string; step: number }> {
+  while (totpStep() < lastStep) {
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  const step = lastStep + 1
+  return { code: hotp(base32Decode(secretBase32), step), step }
+}
