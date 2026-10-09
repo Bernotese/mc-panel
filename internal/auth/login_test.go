@@ -146,7 +146,7 @@ func TestLoginGuardErrors(t *testing.T) {
 		{"jailed", "user", defense.ErrJailed, nil, 403, "jailed", ""},
 		{"ip blocked", "user", defense.ErrIPBlocked, nil, 403, "ip_blocked", ""},
 		{"rate limited", "user", &defense.RateLimitError{RetryAfter: 1500 * time.Millisecond}, nil, 429, "rate_limited", "2"},
-		{"admin outside allowlist", "admin", nil, defense.ErrAdminNetwork, 403, "forbidden", ""},
+		{"admin outside allowlist", "admin", nil, defense.ErrAdminNetwork, 401, "invalid_credentials", ""},
 		{"admin network only applies to admins", "user", nil, defense.ErrAdminNetwork, 200, "", ""},
 	}
 	for _, tc := range cases {
@@ -163,10 +163,36 @@ func TestLoginGuardErrors(t *testing.T) {
 			if tc.code != 200 && c.cookie != "" {
 				t.Fatal("blocked login must not create a session")
 			}
-			if tc.errCode == "forbidden" && e.guard.last().Reason != "admin_network" {
+			if tc.admin != nil && tc.role == "admin" && e.guard.last().Reason != "admin_network" {
 				t.Fatalf("attempt = %+v", e.guard.last())
 			}
 		})
+	}
+}
+
+// The admin-network check runs before the password is verified, so an attacker outside the
+// allowlist learns nothing about the password: right and wrong passwords get the same 401.
+func TestLoginAdminNetworkIsNoPasswordOracle(t *testing.T) {
+	e := newTestEnv(t)
+	uid := e.createUser("root", "admin")
+	e.guard.AdminNetErr = defense.ErrAdminNetwork
+	c := e.newClient("203.0.113.10")
+	right := c.login("root", testPassword)
+	wrong := c.login("root", "wrong password 123")
+	if right.code != 401 || wrong.code != 401 || right.errCode() != "invalid_credentials" || !bytes.Equal(right.body, wrong.body) {
+		t.Fatalf("right=%d %s wrong=%d %s", right.code, right.body, wrong.code, wrong.body)
+	}
+	att := e.guard.Recorded()
+	if len(att) != 2 {
+		t.Fatalf("attempts = %+v", att)
+	}
+	for _, a := range att {
+		if a.Success || a.Reason != "admin_network" || a.UserID == nil || *a.UserID != uid {
+			t.Fatalf("attempt = %+v", a)
+		}
+	}
+	if c.cookie != "" {
+		t.Fatal("no session may be created")
 	}
 }
 
