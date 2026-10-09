@@ -118,7 +118,7 @@ func TestGeoIPWithMMDBFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenGeoIP: %v", err)
 	}
-	defer g.Close()
+	defer func() { _ = g.Close() }()
 	cases := map[string]string{
 		"203.0.113.7":        "DE",
 		"::ffff:203.0.113.7": "DE",
@@ -208,7 +208,7 @@ func TestGeoIPRealDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer g.Close()
+	defer func() { _ = g.Close() }()
 	code := regexp.MustCompile(`^[A-Z]{2}$`)
 	for _, ip := range []string{"8.8.8.8", "2001:4860:4860::8888", "::ffff:8.8.8.8"} {
 		if got := g.Country(addr(ip)); !code.MatchString(got) {

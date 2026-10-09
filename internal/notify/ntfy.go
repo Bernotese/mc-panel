@@ -55,6 +55,6 @@ func (n *ntfySender) Send(ctx context.Context, e Event) error {
 	if err != nil {
 		return requestError(KindNtfy, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return checkStatus(KindNtfy, resp)
 }

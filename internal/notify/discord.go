@@ -35,6 +35,6 @@ func (d *discordSender) Send(ctx context.Context, e Event) error {
 	if err != nil {
 		return requestError(KindDiscord, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return checkStatus(KindDiscord, resp)
 }
