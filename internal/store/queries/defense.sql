@@ -137,3 +137,14 @@ LIMIT sqlc.arg(lim);
 -- name: DefenseLiftAllActiveJails :execrows
 UPDATE jails SET lifted_at = sqlc.arg(lifted_at), lifted_by = sqlc.arg(lifted_by)
 WHERE lifted_at IS NULL AND expires_at > sqlc.arg(now);
+
+-- name: DefenseListEnabledNotifiers :many
+SELECT * FROM notifiers WHERE enabled = 1 ORDER BY id;
+
+-- name: DefenseGetNotifier :one
+SELECT * FROM notifiers WHERE id = sqlc.arg(id);
+
+-- name: DefenseInsertNotifier :one
+INSERT INTO notifiers (kind, name, config_enc, enabled, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING *;

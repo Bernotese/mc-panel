@@ -249,6 +249,25 @@ func (q *Queries) DefenseGetJail(ctx context.Context, id int64) (Jail, error) {
 	return i, err
 }
 
+const defenseGetNotifier = `-- name: DefenseGetNotifier :one
+SELECT id, kind, name, config_enc, enabled, created_at, updated_at FROM notifiers WHERE id = ?1
+`
+
+func (q *Queries) DefenseGetNotifier(ctx context.Context, id int64) (Notifier, error) {
+	row := q.db.QueryRowContext(ctx, defenseGetNotifier, id)
+	var i Notifier
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.Name,
+		&i.ConfigEnc,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const defenseInsertAttempt = `-- name: DefenseInsertAttempt :exec
 INSERT INTO login_attempts (ts, ip, ip_key, username, user_id, stage, success, reason, user_agent, country)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -357,6 +376,43 @@ func (q *Queries) DefenseInsertJail(ctx context.Context, arg DefenseInsertJailPa
 		&i.LiftedBy,
 		&i.FwBannedAt,
 		&i.FwUnbannedAt,
+	)
+	return i, err
+}
+
+const defenseInsertNotifier = `-- name: DefenseInsertNotifier :one
+INSERT INTO notifiers (kind, name, config_enc, enabled, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id, kind, name, config_enc, enabled, created_at, updated_at
+`
+
+type DefenseInsertNotifierParams struct {
+	Kind      string
+	Name      string
+	ConfigEnc []byte
+	Enabled   int64
+	CreatedAt int64
+	UpdatedAt int64
+}
+
+func (q *Queries) DefenseInsertNotifier(ctx context.Context, arg DefenseInsertNotifierParams) (Notifier, error) {
+	row := q.db.QueryRowContext(ctx, defenseInsertNotifier,
+		arg.Kind,
+		arg.Name,
+		arg.ConfigEnc,
+		arg.Enabled,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i Notifier
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.Name,
+		&i.ConfigEnc,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -581,6 +637,41 @@ func (q *Queries) DefenseListAttempts(ctx context.Context, arg DefenseListAttemp
 			&i.Reason,
 			&i.UserAgent,
 			&i.Country,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const defenseListEnabledNotifiers = `-- name: DefenseListEnabledNotifiers :many
+SELECT id, kind, name, config_enc, enabled, created_at, updated_at FROM notifiers WHERE enabled = 1 ORDER BY id
+`
+
+func (q *Queries) DefenseListEnabledNotifiers(ctx context.Context) ([]Notifier, error) {
+	rows, err := q.db.QueryContext(ctx, defenseListEnabledNotifiers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Notifier{}
+	for rows.Next() {
+		var i Notifier
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Name,
+			&i.ConfigEnc,
+			&i.Enabled,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
