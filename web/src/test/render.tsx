@@ -6,6 +6,7 @@ import type { Me } from '@/api/types'
 import { routerNavigator, wireApi } from '@/app/wire-api'
 import { AppToaster } from '@/components/app-toaster'
 import { applyMe } from '@/features/auth/me'
+import { SudoDialog } from '@/features/sudo/sudo-dialog'
 
 export function createTestQueryClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { retry: false } } })
@@ -16,6 +17,7 @@ function createTestRouter(ui: ReactNode, path: string) {
     component: () => (
       <>
         <Outlet />
+        <SudoDialog />
         <AppToaster />
       </>
     ),
