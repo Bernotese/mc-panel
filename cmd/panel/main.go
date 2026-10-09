@@ -98,8 +98,15 @@ func commonFlags(args []string) (config.Panel, []string, error) {
 		cfgPath, cfgSet = v, true
 		return nil
 	}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
+	configPending := false // "-config" seen, its value is the next argument
+	for _, arg := range args {
+		if configPending {
+			configPending = false
+			if err := setConfig(arg); err != nil {
+				return config.Panel{}, nil, err
+			}
+			continue
+		}
 		if !strings.HasPrefix(arg, "-") {
 			rest = append(rest, arg)
 			continue
@@ -108,11 +115,8 @@ func commonFlags(args []string) (config.Panel, []string, error) {
 		switch name {
 		case "config":
 			if !hasVal {
-				if i+1 >= len(args) {
-					return config.Panel{}, nil, errors.New("-config needs a value")
-				}
-				i++
-				val = args[i]
+				configPending = true
+				continue
 			}
 			if err := setConfig(val); err != nil {
 				return config.Panel{}, nil, err
@@ -129,6 +133,9 @@ func commonFlags(args []string) (config.Panel, []string, error) {
 		default:
 			rest = append(rest, arg)
 		}
+	}
+	if configPending {
+		return config.Panel{}, nil, errors.New("-config needs a value")
 	}
 	if cfgPath == "" && !dev {
 		cfgPath = defaultConfigPath
@@ -230,7 +237,7 @@ func serve(args []string) error {
 	}
 	defer a.Close()
 
-	l, err := listen(cfg) // closed by srv.Serve / srv.Shutdown (a unix socket file is removed)
+	l, err := listen(ctx, cfg) // closed by srv.Serve / srv.Shutdown (a unix socket file is removed)
 	if err != nil {
 		return err
 	}
@@ -273,11 +280,11 @@ func serve(args []string) error {
 // listen opens the configured listener: "unix:/path" (production default, behind the reverse
 // proxy; a stale socket is replaced only if nobody accepts on it, mode 0660 so the proxy's
 // group can connect) or host:port.
-func listen(cfg config.Panel) (net.Listener, error) {
+func listen(ctx context.Context, cfg config.Panel) (net.Listener, error) {
 	if path, ok := cfg.ListenUnix(); ok {
 		return unixsock.Listen(path, 0o660, -1)
 	}
-	return net.Listen("tcp", cfg.Listen)
+	return (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Listen)
 }
 
 // newHTTPServer returns the panel's HTTP server. UnixConnContext marks connections from the

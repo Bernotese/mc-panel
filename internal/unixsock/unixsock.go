@@ -29,7 +29,8 @@ func Listen(path string, mode os.FileMode, gid int) (net.Listener, error) {
 	if err := removeStale(path); err != nil {
 		return nil, err
 	}
-	l, err := net.Listen("unix", path)
+	// The listener lives for the whole process; the context only bounds the listen call itself.
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", path)
 	if err != nil {
 		return nil, fmt.Errorf("unixsock: listen on %s: %w", path, err)
 	}

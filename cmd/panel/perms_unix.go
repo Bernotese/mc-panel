@@ -18,7 +18,7 @@ func restrictUmask() { syscall.Umask(0o077) }
 // secureDataDir chmods the data directory to 0700 and the database files that exist to 0600,
 // then verifies that none of them is accessible by group/others (refusing to start otherwise).
 func secureDataDir(dir string) error {
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // G302: 0700 is the owner-only mode of a directory
 		return fmt.Errorf("data dir: %w", err)
 	}
 	if err := checkPrivate(dir); err != nil {
