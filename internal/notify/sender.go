@@ -41,12 +41,32 @@ func NewHTTPClient() *http.Client {
 
 var errBlockedDestination = errors.New("destination address is not allowed")
 
+// blockedPrefixes are special-purpose ranges that net/netip does not classify
+// as private: CGNAT (incl. cloud metadata 100.100.100.200), "this network",
+// benchmarking, reserved/broadcast and the NAT64 prefixes.
+var blockedPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+}
+
 // blockedDestination reports addresses notifiers must never connect to
-// (loopback, private, link-local, unspecified, multicast).
+// (loopback, private, link-local, unspecified, multicast and the ranges above).
 func blockedDestination(a netip.Addr) bool {
 	a = a.Unmap().WithZone("")
-	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
-		a.IsMulticast() || a.IsUnspecified()
+	if a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
+		a.IsMulticast() || a.IsUnspecified() {
+		return true
+	}
+	for _, p := range blockedPrefixes {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
 }
 
 // NewRestrictedHTTPClient is like NewHTTPClient but refuses to connect to
