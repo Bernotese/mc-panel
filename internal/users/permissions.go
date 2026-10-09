@@ -27,6 +27,15 @@ type userPermissionsJSON struct {
 	Grants []grantJSON `json:"grants"`
 }
 
+// setPermissionsRequest is the PUT body; pointers detect missing (required) fields so that
+// a body like {} cannot silently wipe all permissions.
+type setPermissionsRequest struct {
+	Grants *[]struct {
+		ServerID    int64              `json:"server_id"`
+		Permissions *[]rbac.Permission `json:"permissions"`
+	} `json:"grants"`
+}
+
 type unknownServerError struct{ id int64 }
 
 func (e unknownServerError) Error() string { return fmt.Sprintf("unknown server_id %d", e.id) }
@@ -129,11 +138,23 @@ func (h *Handler) handleSetPermissions(w http.ResponseWriter, r *http.Request) {
 		writeNotFound(w, r, "user")
 		return
 	}
-	var req userPermissionsJSON
+	var req setPermissionsRequest
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
-	want, err := normalizeGrants(req.Grants)
+	if req.Grants == nil {
+		writeValidation(w, r, "grants is required")
+		return
+	}
+	in := make([]grantJSON, 0, len(*req.Grants))
+	for _, g := range *req.Grants {
+		if g.Permissions == nil {
+			writeValidation(w, r, "permissions is required for every grant")
+			return
+		}
+		in = append(in, grantJSON{ServerID: g.ServerID, Permissions: *g.Permissions})
+	}
+	want, err := normalizeGrants(in)
 	if err != nil {
 		writeValidation(w, r, err.Error())
 		return
