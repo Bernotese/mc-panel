@@ -101,7 +101,7 @@ func (f *fakeAgent) Bans(context.Context) ([]agentapi.Ban, error) {
 
 func (e *env) pending(t *testing.T) int64 {
 	t.Helper()
-	n, err := e.q.DefenseCountPendingSync(context.Background(), e.clk.Now().UnixMilli())
+	n, err := e.svc.pendingSync(context.Background(), e.clk.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,5 +377,21 @@ func TestReconcileAcceptsBareAddressesFromAgent(t *testing.T) {
 	}
 	if bans, _, _ := fa.calls(); len(bans) != 1 {
 		t.Fatalf("a ban listed as bare address is present and must not be re-banned: %v", bans)
+	}
+}
+
+func TestPendingSyncIgnoresUnbannableJails(t *testing.T) {
+	fa := newFakeAgent()
+	fa.setBanErr(errors.New("agent: 409 conflict: overlapping ban"))
+	e := newEnv(t, withAgent(fa))
+	e.insertJail(t, "203.0.113.7/32", t0, t0.Add(time.Hour))
+	if n := e.pending(t); n != 1 {
+		t.Fatalf("pending = %d, want 1", n)
+	}
+	if err := e.svc.SyncOnce(context.Background()); err != nil { // marks the jail unbannable
+		t.Fatal(err)
+	}
+	if n := e.pending(t); n != 0 {
+		t.Fatalf("permanently failed jails are not retried and must not count as pending, got %d", n)
 	}
 }

@@ -59,11 +59,6 @@ UPDATE jails SET fw_banned_at = sqlc.arg(fw_banned_at) WHERE id = sqlc.arg(id);
 -- name: DefenseMarkJailUnbanned :exec
 UPDATE jails SET fw_unbanned_at = sqlc.arg(fw_unbanned_at) WHERE id = sqlc.arg(id);
 
--- name: DefenseCountPendingSync :one
-SELECT count(*) FROM jails
-WHERE (fw_banned_at IS NULL AND lifted_at IS NULL AND expires_at > sqlc.arg(now))
-   OR (lifted_at IS NOT NULL AND fw_banned_at IS NOT NULL AND fw_unbanned_at IS NULL);
-
 -- name: DefenseDeleteAttemptsBefore :execrows
 DELETE FROM login_attempts WHERE ts < sqlc.arg(before);
 
