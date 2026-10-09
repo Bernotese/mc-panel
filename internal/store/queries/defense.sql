@@ -66,3 +66,13 @@ WHERE (fw_banned_at IS NULL AND lifted_at IS NULL AND expires_at > sqlc.arg(now)
 
 -- name: DefenseDeleteAttemptsBefore :execrows
 DELETE FROM login_attempts WHERE ts < sqlc.arg(before);
+
+-- name: DefenseListJails :many
+SELECT * FROM jails ORDER BY created_at DESC, id DESC LIMIT sqlc.arg(lim);
+
+-- name: DefenseGetJail :one
+SELECT * FROM jails WHERE id = sqlc.arg(id);
+
+-- name: DefenseLiftJail :execrows
+UPDATE jails SET lifted_at = sqlc.arg(lifted_at), lifted_by = sqlc.arg(lifted_by)
+WHERE id = sqlc.arg(id) AND lifted_at IS NULL;
