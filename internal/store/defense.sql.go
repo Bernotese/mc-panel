@@ -51,6 +51,62 @@ func (q *Queries) DefenseActiveBannedJails(ctx context.Context, now int64) ([]Ja
 	return items, nil
 }
 
+const defenseAttemptSeries = `-- name: DefenseAttemptSeries :many
+SELECT CAST((ts - ?1) / ?2 AS INTEGER) AS bucket,
+       count(CASE WHEN success = 1 THEN 1 END) AS successes,
+       count(CASE WHEN success = 0 THEN 1 END) AS failures
+FROM login_attempts
+WHERE ts >= ?3
+GROUP BY bucket
+ORDER BY bucket
+`
+
+type DefenseAttemptSeriesParams struct {
+	Start    int64
+	BucketMs int64
+	Since    int64
+}
+
+type DefenseAttemptSeriesRow struct {
+	Bucket    int64
+	Successes int64
+	Failures  int64
+}
+
+func (q *Queries) DefenseAttemptSeries(ctx context.Context, arg DefenseAttemptSeriesParams) ([]DefenseAttemptSeriesRow, error) {
+	rows, err := q.db.QueryContext(ctx, defenseAttemptSeries, arg.Start, arg.BucketMs, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DefenseAttemptSeriesRow{}
+	for rows.Next() {
+		var i DefenseAttemptSeriesRow
+		if err := rows.Scan(&i.Bucket, &i.Successes, &i.Failures); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const defenseCountActiveJails = `-- name: DefenseCountActiveJails :one
+SELECT count(*) FROM jails WHERE lifted_at IS NULL AND expires_at > ?1
+`
+
+func (q *Queries) DefenseCountActiveJails(ctx context.Context, now int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, defenseCountActiveJails, now)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const defenseCountFailuresSince = `-- name: DefenseCountFailuresSince :one
 SELECT count(*) FROM login_attempts
 WHERE ip_key = ?1 AND success = 0 AND ts >= ?2
@@ -63,6 +119,17 @@ type DefenseCountFailuresSinceParams struct {
 
 func (q *Queries) DefenseCountFailuresSince(ctx context.Context, arg DefenseCountFailuresSinceParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, defenseCountFailuresSince, arg.IpKey, arg.Since)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const defenseCountFailuresTotal = `-- name: DefenseCountFailuresTotal :one
+SELECT count(*) FROM login_attempts WHERE success = 0 AND ts >= ?1
+`
+
+func (q *Queries) DefenseCountFailuresTotal(ctx context.Context, since int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, defenseCountFailuresTotal, since)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -447,6 +514,68 @@ func (q *Queries) DefenseListActiveJails(ctx context.Context, now int64) ([]Jail
 	return items, nil
 }
 
+const defenseListAttempts = `-- name: DefenseListAttempts :many
+SELECT id, ts, ip, ip_key, username, user_id, stage, success, reason, user_agent, country FROM login_attempts
+WHERE id < ?1
+  AND (?2 = 1 OR success = ?3)
+  AND (?4 = 1 OR ip = ?5 OR ip_key = ?6)
+ORDER BY id DESC
+LIMIT ?7
+`
+
+type DefenseListAttemptsParams struct {
+	BeforeID   int64
+	AnySuccess interface{}
+	Success    int64
+	AnyIp      interface{}
+	Ip         string
+	IpKey      string
+	Lim        int64
+}
+
+func (q *Queries) DefenseListAttempts(ctx context.Context, arg DefenseListAttemptsParams) ([]LoginAttempt, error) {
+	rows, err := q.db.QueryContext(ctx, defenseListAttempts,
+		arg.BeforeID,
+		arg.AnySuccess,
+		arg.Success,
+		arg.AnyIp,
+		arg.Ip,
+		arg.IpKey,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LoginAttempt{}
+	for rows.Next() {
+		var i LoginAttempt
+		if err := rows.Scan(
+			&i.ID,
+			&i.Ts,
+			&i.Ip,
+			&i.IpKey,
+			&i.Username,
+			&i.UserID,
+			&i.Stage,
+			&i.Success,
+			&i.Reason,
+			&i.UserAgent,
+			&i.Country,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const defenseListIPRules = `-- name: DefenseListIPRules :many
 
 SELECT id, cidr, kind, comment, expires_at, created_by, created_at FROM ip_rules ORDER BY kind, cidr
@@ -549,4 +678,129 @@ type DefenseMarkJailUnbannedParams struct {
 func (q *Queries) DefenseMarkJailUnbanned(ctx context.Context, arg DefenseMarkJailUnbannedParams) error {
 	_, err := q.db.ExecContext(ctx, defenseMarkJailUnbanned, arg.FwUnbannedAt, arg.ID)
 	return err
+}
+
+const defenseNewDeviceLogins = `-- name: DefenseNewDeviceLogins :many
+SELECT a.ts, a.username, a.ip, a.country, a.user_agent
+FROM login_attempts a
+WHERE a.success = 1 AND a.reason = 'complete' AND a.user_id IS NOT NULL
+  AND a.ts >= ?1
+  AND NOT EXISTS (
+      SELECT 1 FROM login_attempts b
+      WHERE b.user_id = a.user_id AND b.ip_key = a.ip_key AND b.success = 1
+        AND b.reason = 'complete' AND b.id < a.id)
+ORDER BY a.ts DESC, a.id DESC
+LIMIT 50
+`
+
+type DefenseNewDeviceLoginsRow struct {
+	Ts        int64
+	Username  string
+	Ip        string
+	Country   string
+	UserAgent string
+}
+
+func (q *Queries) DefenseNewDeviceLogins(ctx context.Context, since int64) ([]DefenseNewDeviceLoginsRow, error) {
+	rows, err := q.db.QueryContext(ctx, defenseNewDeviceLogins, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DefenseNewDeviceLoginsRow{}
+	for rows.Next() {
+		var i DefenseNewDeviceLoginsRow
+		if err := rows.Scan(
+			&i.Ts,
+			&i.Username,
+			&i.Ip,
+			&i.Country,
+			&i.UserAgent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const defenseTopFailingCountries = `-- name: DefenseTopFailingCountries :many
+SELECT country, count(*) AS failures
+FROM login_attempts
+WHERE success = 0 AND ts >= ?1 AND country <> ''
+GROUP BY country
+ORDER BY failures DESC, country
+LIMIT 10
+`
+
+type DefenseTopFailingCountriesRow struct {
+	Country  string
+	Failures int64
+}
+
+func (q *Queries) DefenseTopFailingCountries(ctx context.Context, since int64) ([]DefenseTopFailingCountriesRow, error) {
+	rows, err := q.db.QueryContext(ctx, defenseTopFailingCountries, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DefenseTopFailingCountriesRow{}
+	for rows.Next() {
+		var i DefenseTopFailingCountriesRow
+		if err := rows.Scan(&i.Country, &i.Failures); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const defenseTopFailingIPs = `-- name: DefenseTopFailingIPs :many
+SELECT ip_key, CAST(MAX(country) AS TEXT) AS country, count(*) AS failures
+FROM login_attempts
+WHERE success = 0 AND ts >= ?1
+GROUP BY ip_key
+ORDER BY failures DESC, ip_key
+LIMIT 10
+`
+
+type DefenseTopFailingIPsRow struct {
+	IpKey    string
+	Country  string
+	Failures int64
+}
+
+func (q *Queries) DefenseTopFailingIPs(ctx context.Context, since int64) ([]DefenseTopFailingIPsRow, error) {
+	rows, err := q.db.QueryContext(ctx, defenseTopFailingIPs, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DefenseTopFailingIPsRow{}
+	for rows.Next() {
+		var i DefenseTopFailingIPsRow
+		if err := rows.Scan(&i.IpKey, &i.Country, &i.Failures); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
