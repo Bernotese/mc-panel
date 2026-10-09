@@ -23,6 +23,8 @@ export default defineConfig({
           {
             name: 'real',
             testMatch: /login-totp\.spec\.ts$/,
+            // The spec needs a fresh admin without 2FA, so a retry could only fail on a different screen and hide the cause.
+            retries: 0,
             use: { ...devices['Desktop Chrome'], baseURL: realBaseURL, locale: 'de-DE' },
           },
         ]

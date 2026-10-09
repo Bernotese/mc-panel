@@ -197,20 +197,37 @@ jobs:
           curl -sf http://localhost:5173/api/health
           printf '%s\n' 'ci e2e admin password 1' | .dev/bin/panel admin create -dev -username e2e-admin
 
-      - name: Playwright
+      - name: Install Playwright browsers
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright (real backend)
         working-directory: web
         env:
           E2E_BASE_URL: http://localhost:5173
           E2E_ADMIN_USER: e2e-admin
           E2E_ADMIN_PASSWORD: ci e2e admin password 1
-        run: |
-          npx playwright install --with-deps chromium
-          npm run e2e:real
-          npm run e2e
+        run: npm run e2e:real
+
+      - name: Playwright (mock backend)
+        if: success() || failure()
+        working-directory: web
+        run: npm run e2e
 
       - name: Logs on failure
         if: failure()
         run: tail -n 200 agent.log panel.log vite.log
+
+      - name: Upload Playwright results
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-results
+          path: |
+            web/test-results
+            web/playwright-report
+          if-no-files-found: ignore
+          retention-days: 7
 
   nftables:
     name: nftables integration (root)
