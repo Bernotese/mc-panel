@@ -155,8 +155,13 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := h.q.RbacDeleteServer(ctx, s.ID); err != nil {
+	n, err := h.q.RbacDeleteServer(ctx, s.ID)
+	if err != nil {
 		httpx.Internal(w, r, err)
+		return
+	}
+	if n == 0 { // deleted concurrently between lookup and delete
+		writeNotFound(w, r, "server")
 		return
 	}
 	h.record(ctx, audit.ActionServerDelete, serverTarget(s.ID), audit.ResultSuccess, map[string]any{"name": s.Name})

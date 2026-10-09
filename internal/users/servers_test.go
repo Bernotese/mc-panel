@@ -134,3 +134,20 @@ func TestServerPowerUnknownServerAsAdmin(t *testing.T) {
 		t.Fatalf("get: %d", rec.Code)
 	}
 }
+
+// If the row vanishes between the lookup and the delete (concurrent delete), the handler must
+// answer 404 and not audit a deletion that did not happen. A BEFORE DELETE trigger with
+// RAISE(IGNORE) makes the DELETE affect 0 rows deterministically.
+func TestDeleteServerZeroRowsIs404(t *testing.T) {
+	e := newEnv(t)
+	admin := e.admin()
+	id := storetest.CreateServer(t, e.db, "alpha")
+	mustExec(t, e.db, `CREATE TRIGGER servers_ignore_delete BEFORE DELETE ON servers BEGIN SELECT RAISE(IGNORE); END`)
+	rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", id), nil, &admin)
+	if rec.Code != http.StatusNotFound || errCode(t, rec) != "not_found" {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	if got := e.rec.Actions(); slices.Contains(got, audit.ActionServerDelete) {
+		t.Fatalf("unexpected audit entries: %v", got)
+	}
+}
