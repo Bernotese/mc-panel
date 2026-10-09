@@ -40,6 +40,11 @@ func NewHandler(fsys fs.FS) http.Handler {
 			return
 		}
 		if info, err := fs.Stat(fsys, name); err != nil || info.IsDir() {
+			if name == "assets" || strings.HasPrefix(name, "assets/") {
+				// a missing hashed asset (old chunk after a deploy) must not get index.html
+				http.NotFound(w, r)
+				return
+			}
 			serveIndex(w, r, files)
 			return
 		}
