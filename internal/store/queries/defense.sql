@@ -17,3 +17,23 @@ ORDER BY created_at DESC, id DESC;
 INSERT INTO jails (ip_key, reason, level, manual, created_at, expires_at)
 VALUES (?, ?, ?, ?, ?, ?)
 RETURNING *;
+
+-- name: DefenseInsertAttempt :exec
+INSERT INTO login_attempts (ts, ip, ip_key, username, user_id, stage, success, reason, user_agent, country)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: DefenseCountFullLoginsFrom :one
+SELECT count(*) FROM login_attempts
+WHERE user_id = sqlc.arg(user_id) AND ip_key = sqlc.arg(ip_key) AND success = 1
+  AND reason = 'complete';
+
+-- name: DefenseLastJailCreatedAt :one
+SELECT CAST(COALESCE(MAX(created_at), 0) AS INTEGER) AS last_created_at FROM jails WHERE ip_key = ?;
+
+-- name: DefenseCountFailuresSince :one
+SELECT count(*) FROM login_attempts
+WHERE ip_key = sqlc.arg(ip_key) AND success = 0 AND ts >= sqlc.arg(since);
+
+-- name: DefenseCountJailsSince :one
+SELECT count(*) FROM jails
+WHERE ip_key = sqlc.arg(ip_key) AND created_at >= sqlc.arg(since);
