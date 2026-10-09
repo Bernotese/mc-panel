@@ -105,7 +105,7 @@ func (n *NFTables) Ban(_ context.Context, p netip.Prefix, d time.Duration) error
 	}
 	spec, err := elementFor(p)
 	if err != nil {
-		return fmt.Errorf("%w: %v", banrules.ErrInvalid, err)
+		return fmt.Errorf("%w: %w", banrules.ErrInvalid, err)
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -145,7 +145,7 @@ func (n *NFTables) Unban(_ context.Context, p netip.Prefix) error {
 	}
 	spec, err := elementFor(p)
 	if err != nil {
-		return fmt.Errorf("%w: %v", banrules.ErrInvalid, err)
+		return fmt.Errorf("%w: %w", banrules.ErrInvalid, err)
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()

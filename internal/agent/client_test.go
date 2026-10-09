@@ -310,3 +310,71 @@ func TestServerShutdownRemovesSocket(t *testing.T) {
 		t.Fatalf("socket still present after Shutdown: %v", err)
 	}
 }
+
+func TestStatusErrorMapping(t *testing.T) {
+	cases := []struct {
+		code                           int
+		unavailable, invalid, conflict bool
+	}{
+		{code: 100, unavailable: true},
+		{code: 302, unavailable: true},
+		{code: 400, invalid: true},
+		{code: 404, invalid: true},
+		{code: 409, conflict: true},
+		{code: 413, invalid: true},
+		{code: 500, unavailable: true},
+		{code: 503, unavailable: true},
+	}
+	for _, tc := range cases {
+		err := error(&agent.StatusError{StatusCode: tc.code, Message: "x"})
+		if errors.Is(err, agentapi.ErrUnavailable) != tc.unavailable ||
+			errors.Is(err, agent.ErrInvalid) != tc.invalid ||
+			errors.Is(err, agent.ErrConflict) != tc.conflict {
+			t.Errorf("status %d: unavailable=%v invalid=%v conflict=%v", tc.code,
+				errors.Is(err, agentapi.ErrUnavailable), errors.Is(err, agent.ErrInvalid), errors.Is(err, agent.ErrConflict))
+		}
+	}
+}
+
+// rawServer answers every request on a Unix socket with the given raw HTTP response.
+func rawServer(t *testing.T, response string) string {
+	t.Helper()
+	path := socketPath(t)
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer func() { _ = c.Close() }()
+				buf := make([]byte, 4096)
+				_, _ = c.Read(buf)
+				_, _ = io.WriteString(c, response)
+			}()
+		}
+	}()
+	return path
+}
+
+func TestClientRedirectIsUnavailable(t *testing.T) {
+	path := rawServer(t, "HTTP/1.1 302 Found\r\nLocation: http://evil/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+	_, err := agent.NewClient(path).Health(context.Background())
+	if !errors.Is(err, agentapi.ErrUnavailable) || errors.Is(err, agent.ErrInvalid) {
+		t.Fatalf("Health over 302 = %v, want ErrUnavailable only", err)
+	}
+}
+
+func TestClientHealthRequiresStatusOK(t *testing.T) {
+	for _, body := range []string{`{"status":"degraded","version":"x","firewall":"noop"}`, `{}`} {
+		path := rawServer(t, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "+fmt.Sprint(len(body))+"\r\nConnection: close\r\n\r\n"+body)
+		if _, err := agent.NewClient(path).Health(context.Background()); !errors.Is(err, agentapi.ErrUnavailable) {
+			t.Errorf("Health(%s) = %v, want ErrUnavailable", body, err)
+		}
+	}
+}
