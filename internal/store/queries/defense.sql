@@ -37,3 +37,32 @@ WHERE ip_key = sqlc.arg(ip_key) AND success = 0 AND ts >= sqlc.arg(since);
 -- name: DefenseCountJailsSince :one
 SELECT count(*) FROM jails
 WHERE ip_key = sqlc.arg(ip_key) AND created_at >= sqlc.arg(since);
+
+-- name: DefenseJailsToBan :many
+SELECT * FROM jails
+WHERE fw_banned_at IS NULL AND lifted_at IS NULL AND expires_at > sqlc.arg(now)
+ORDER BY id;
+
+-- name: DefenseJailsToUnban :many
+SELECT * FROM jails
+WHERE lifted_at IS NOT NULL AND fw_banned_at IS NOT NULL AND fw_unbanned_at IS NULL
+ORDER BY id;
+
+-- name: DefenseActiveBannedJails :many
+SELECT * FROM jails
+WHERE fw_banned_at IS NOT NULL AND lifted_at IS NULL AND expires_at > sqlc.arg(now)
+ORDER BY id;
+
+-- name: DefenseMarkJailBanned :exec
+UPDATE jails SET fw_banned_at = sqlc.arg(fw_banned_at) WHERE id = sqlc.arg(id);
+
+-- name: DefenseMarkJailUnbanned :exec
+UPDATE jails SET fw_unbanned_at = sqlc.arg(fw_unbanned_at) WHERE id = sqlc.arg(id);
+
+-- name: DefenseCountPendingSync :one
+SELECT count(*) FROM jails
+WHERE (fw_banned_at IS NULL AND lifted_at IS NULL AND expires_at > sqlc.arg(now))
+   OR (lifted_at IS NOT NULL AND fw_banned_at IS NOT NULL AND fw_unbanned_at IS NULL);
+
+-- name: DefenseDeleteAttemptsBefore :execrows
+DELETE FROM login_attempts WHERE ts < sqlc.arg(before);
