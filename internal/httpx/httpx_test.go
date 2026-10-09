@@ -3,6 +3,7 @@ package httpx_test
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -225,5 +226,58 @@ func TestSecurityHeaders(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
 	if rec.Header().Get("Cache-Control") == "no-store" {
 		t.Error("static assets must not get no-store")
+	}
+}
+
+// Requests that arrived over the panel's unix socket come from the reverse proxy: their
+// RemoteAddr is "@" or "", so trust is carried by a context flag set in ConnContext.
+func TestRealIPUnixSocketPeer(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32"), netip.MustParsePrefix("::1/128")}
+	cases := []struct {
+		name, remote string
+		xff          []string
+		want         string
+	}{
+		{"single XFF entry", "@", []string{"203.0.113.9"}, "203.0.113.9"},
+		{"empty remote addr", "", []string{"203.0.113.9"}, "203.0.113.9"},
+		{"rightmost untrusted wins", "@", []string{"6.6.6.6, 203.0.113.9"}, "203.0.113.9"},
+		{"trusted hops skipped", "@", []string{"203.0.113.9, 127.0.0.1"}, "203.0.113.9"},
+		{"all entries trusted: leftmost (the original client)", "@", []string{"127.0.0.1"}, "127.0.0.1"},
+		{"no XFF fails closed", "@", nil, "invalid IP"},
+		{"garbage XFF fails closed", "@", []string{"junk"}, "invalid IP"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got netip.Addr
+			h := httpx.RealIP(trusted)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = httpx.ClientIP(r.Context())
+			}))
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = tc.remote
+			for _, line := range tc.xff {
+				req.Header.Add("X-Forwarded-For", line)
+			}
+			req = req.WithContext(httpx.UnixConnContext(req.Context(), &net.UnixConn{}))
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			if got.String() != tc.want {
+				t.Fatalf("ClientIP = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUnixConnContextIgnoresTCP(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}
+	var got netip.Addr
+	h := httpx.RealIP(trusted)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = httpx.ClientIP(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "198.51.100.1:5000"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	req = req.WithContext(httpx.UnixConnContext(req.Context(), &net.TCPConn{}))
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if got.String() != "198.51.100.1" {
+		t.Fatalf("ClientIP = %s, want the untrusted TCP peer", got)
 	}
 }

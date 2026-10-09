@@ -55,7 +55,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 	disp := notify.NewDispatcher(db, box, d.Clock, notify.DispatcherOptions{Dev: cfg.Dev})
 	svc, err := defense.NewService(ctx, defense.Deps{
 		DB: db, Clock: d.Clock, Geo: geo, GeoAvailable: geoOK,
-		Audit: auditRec, Notifier: disp, Agent: d.Agent,
+		Audit: auditRec, Notifier: disp, Agent: d.Agent, Dev: cfg.Dev,
 	})
 	if err != nil {
 		_ = closeGeo()

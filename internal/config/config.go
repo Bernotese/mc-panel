@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"os"
@@ -56,9 +57,14 @@ func defaultSession() Session {
 	}
 }
 
+// UnixListenPrefix marks a listen value as a unix socket path ("unix:/abs/path").
+const UnixListenPrefix = "unix:"
+
+// DefaultPanel is the production profile. The panel listens on a unix socket that only the
+// reverse proxy (Caddy) can reach; requests arriving over it are treated as proxied.
 func DefaultPanel() Panel {
 	return Panel{
-		Listen:         "127.0.0.1:8080",
+		Listen:         UnixListenPrefix + "/run/mc-panel/panel.sock",
 		DataDir:        "/var/lib/mc-panel",
 		AgentSocket:    "/run/mc-panel/agent.sock",
 		GeoIPPath:      "/var/lib/mc-panel/dbip-country-lite.mmdb",
@@ -70,6 +76,7 @@ func DefaultPanel() Panel {
 func DevPanel(root string) Panel {
 	p := DefaultPanel()
 	p.Dev = true
+	p.Listen = "127.0.0.1:8080"
 	p.PublicURL = "http://localhost:5173"
 	p.DataDir = filepath.Join(root, ".dev", "data")
 	p.AgentSocket = filepath.Join(root, ".dev", "agent.sock")
@@ -106,8 +113,8 @@ func LoadPanel(path string, dev bool, root string) (Panel, error) {
 
 func (p *Panel) Validate() error {
 	var errs []error
-	if p.Listen == "" {
-		errs = append(errs, errors.New("listen must be set"))
+	if err := validateListen(p.Listen); err != nil {
+		errs = append(errs, err)
 	}
 	u, err := url.Parse(p.PublicURL)
 	switch {
@@ -140,6 +147,24 @@ func (p *Panel) Validate() error {
 		return fmt.Errorf("config: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+func validateListen(l string) error {
+	if path, ok := strings.CutPrefix(l, UnixListenPrefix); ok {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsRune(path, 0) {
+			return fmt.Errorf("listen: %q must be unix: followed by a clean absolute path", l)
+		}
+		return nil
+	}
+	if _, _, err := net.SplitHostPort(l); err != nil || l == "" {
+		return fmt.Errorf("listen: %q must be host:port or unix:/absolute/path", l)
+	}
+	return nil
+}
+
+// ListenUnix returns the socket path if the panel listens on a unix socket.
+func (p Panel) ListenUnix() (string, bool) {
+	return strings.CutPrefix(p.Listen, UnixListenPrefix)
 }
 
 func (p Panel) DBPath() string        { return filepath.Join(p.DataDir, "panel.db") }

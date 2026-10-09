@@ -78,7 +78,11 @@ func TestPutSettingsRejectsSelfLockout(t *testing.T) {
 		e := newEnv(t)
 		wantStatus(t, e.call(t, http.MethodPut, "/security/settings", settingsBody(false, true, []string{}), callerIP),
 			http.StatusConflict, httpx.CodeConflict)
+		// production: loopback is not exempt from the admin allowlist
 		wantStatus(t, e.call(t, http.MethodPut, "/security/settings", settingsBody(false, true, []string{}), "127.0.0.1"),
+			http.StatusConflict, httpx.CodeConflict)
+		dev := newEnv(t, func(d *Deps) { d.Dev = true })
+		wantStatus(t, dev.call(t, http.MethodPut, "/security/settings", settingsBody(false, true, []string{}), "127.0.0.1"),
 			http.StatusOK, "")
 	})
 	t.Run("admin allowlist with own rule", func(t *testing.T) {

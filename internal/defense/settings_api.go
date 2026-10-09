@@ -88,7 +88,7 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	now := h.s.clock.Now()
-	if reason := h.s.snap.Load().withSettings(st).locksOut(httpx.ClientIP(ctx), now, h.s.geo); reason != "" {
+	if reason := h.s.snap.Load().withSettings(st).locksOut(httpx.ClientIP(ctx), now, h.s.geo, h.s.dev); reason != "" {
 		conflict(w, r, lockoutMessage(reason))
 		return
 	}

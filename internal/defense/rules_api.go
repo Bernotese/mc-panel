@@ -116,7 +116,7 @@ func (h *Handler) createIPRule(w http.ResponseWriter, r *http.Request) {
 		exp = sql.NullInt64{Int64: *req.ExpiresAt, Valid: true}
 		entry.expires = time.UnixMilli(*req.ExpiresAt)
 	}
-	if reason := h.s.snap.Load().withRule(req.Kind, entry).locksOut(httpx.ClientIP(ctx), now, h.s.geo); reason != "" {
+	if reason := h.s.snap.Load().withRule(req.Kind, entry).locksOut(httpx.ClientIP(ctx), now, h.s.geo, h.s.dev); reason != "" {
 		conflict(w, r, lockoutMessage(reason))
 		return
 	}
@@ -159,7 +159,7 @@ func (h *Handler) deleteIPRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := h.s.clock.Now()
-	if reason := h.s.snap.Load().withoutRule(id).locksOut(httpx.ClientIP(ctx), now, h.s.geo); reason != "" {
+	if reason := h.s.snap.Load().withoutRule(id).locksOut(httpx.ClientIP(ctx), now, h.s.geo, h.s.dev); reason != "" {
 		conflict(w, r, lockoutMessage(reason))
 		return
 	}
