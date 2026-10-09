@@ -129,3 +129,25 @@ func TestVerifyDetectsDeletedRow(t *testing.T) {
 		t.Fatalf("report = %+v", rep)
 	}
 }
+
+// A row whose stored text is not valid UTF-8 must not verify: encoding/json hashes invalid
+// bytes like U+FFFD, so swapping U+FFFD for raw bytes would otherwise keep the hash valid.
+func TestVerifyRejectsInvalidUTF8(t *testing.T) {
+	db := storetest.Open(t)
+	rec := audit.NewSQLRecorder(db, clock.NewFake(t0))
+	for _, target := range []string{"a", "t\uFFFD", "c"} {
+		if err := rec.Record(userCtx(1, "root"), audit.Entry{
+			Action: audit.ActionUserCreate, Target: target, Result: audit.ResultSuccess,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rep := verify(t, db); !rep.OK {
+		t.Fatalf("baseline report = %+v", rep)
+	}
+	mustExec(t, db, "DROP TRIGGER audit_log_no_update")
+	mustExec(t, db, "UPDATE audit_log SET target = CAST(x'74ff' AS TEXT) WHERE id = 2")
+	if rep := verify(t, db); rep.OK || rep.Checked != 1 || rep.FirstBadID != 2 {
+		t.Fatalf("report = %+v", rep)
+	}
+}

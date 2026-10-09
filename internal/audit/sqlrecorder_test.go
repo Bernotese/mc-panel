@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"mcpanel/internal/audit"
 	"mcpanel/internal/clock"
@@ -170,4 +171,33 @@ func TestRecordConcurrentAcrossConnections(t *testing.T) {
 		t.Fatalf("got %d rows, want %d", len(rows), len(recorders)*perRecorder)
 	}
 	assertChain(t, rows)
+}
+
+// Invalid UTF-8 must be replaced before storing: encoding/json would otherwise hash
+// differently-tampered bytes identically.
+func TestRecordStoresValidUTF8(t *testing.T) {
+	db := storetest.Open(t)
+	rec := audit.NewSQLRecorder(db, clock.NewFake(t0))
+	if err := rec.Record(context.Background(), audit.Entry{
+		Action: "x.y\xff", Target: "t\xfe", IP: "1.2.3.4\xc3", ActorType: audit.ActorCLI, ActorName: "n\xff",
+		Result: audit.ResultSuccess, Details: map[string]any{"k\xff": "v\xff"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows := readAll(t, db)
+	assertChain(t, rows)
+	r := rows[0]
+	for name, s := range map[string]string{
+		"action": r.Action, "target": r.Target, "ip": r.Ip, "actor_name": r.ActorName, "details": r.Details,
+	} {
+		if !utf8.ValidString(s) {
+			t.Errorf("%s = %q is not valid UTF-8", name, s)
+		}
+	}
+	if r.Action != "x.y�" || r.Target != "t�" || r.ActorName != "n�" {
+		t.Fatalf("row = %+v", r)
+	}
+	if rep := verify(t, db); !rep.OK {
+		t.Fatalf("report = %+v", rep)
+	}
 }
