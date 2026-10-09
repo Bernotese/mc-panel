@@ -23,7 +23,7 @@ func TestSessionMiddleware(t *testing.T) {
 		got, ok = principal.Principal{}, false
 		req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 		if cookie != "" {
-			req.AddCookie(&http.Cookie{Name: CookieName, Value: cookie})
+			req.AddCookie(&http.Cookie{Name: CookieName, Value: cookie}) //nolint:gosec // G124: request cookie, attributes are response-only
 		}
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)

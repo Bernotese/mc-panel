@@ -23,8 +23,9 @@ UPDATE users SET totp_secret_enc = sqlc.arg(totp_secret_enc), updated_at = sqlc.
 WHERE id = sqlc.arg(id) AND totp_enabled = 0;
 
 -- name: AuthEnableTOTP :execrows
-UPDATE users SET totp_enabled = 1, totp_last_step = sqlc.arg(step), updated_at = sqlc.arg(now)
-WHERE id = sqlc.arg(id) AND totp_enabled = 0 AND totp_secret_enc IS NOT NULL AND totp_last_step < sqlc.arg(step);
+-- Compare-and-swap on the pending blob: a concurrent setup that replaced the secret makes this a no-op.
+UPDATE users SET totp_enabled = 1, totp_secret_enc = sqlc.arg(secret_enc), totp_last_step = sqlc.arg(step), updated_at = sqlc.arg(now)
+WHERE id = sqlc.arg(id) AND totp_enabled = 0 AND totp_secret_enc = sqlc.arg(pending_enc) AND totp_last_step < sqlc.arg(step);
 
 -- name: AuthDisableTOTP :execrows
 UPDATE users SET totp_enabled = 0, totp_secret_enc = NULL, updated_at = sqlc.arg(now)
@@ -45,9 +46,11 @@ INSERT INTO webauthn_credentials (user_id, credential_id, name, credential_json,
 VALUES (sqlc.arg(user_id), sqlc.arg(credential_id), sqlc.arg(name), sqlc.arg(credential_json), sqlc.arg(created_at))
 RETURNING *;
 
--- name: AuthUpdateCredentialUse :exec
+-- name: AuthUpdateCredentialUse :execrows
+-- Conditional on the previous credential_json: of two assertions that were validated against the
+-- same stored sign counter exactly one wins.
 UPDATE webauthn_credentials SET credential_json = sqlc.arg(credential_json), last_used_at = sqlc.arg(last_used_at)
-WHERE id = sqlc.arg(id);
+WHERE id = sqlc.arg(id) AND credential_json = sqlc.arg(old_credential_json);
 
 -- name: AuthGetCredential :one
 SELECT * FROM webauthn_credentials WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id);
@@ -82,11 +85,13 @@ SELECT * FROM sessions WHERE token_hash = sqlc.arg(token_hash);
 SELECT * FROM sessions WHERE id = sqlc.arg(id);
 
 -- name: AuthRotateSession :execrows
+-- Compare-and-swap on the presented token hash and stage: concurrent rotations of one session
+-- (e.g. two second-factor completions) yield exactly one winner.
 UPDATE sessions
 SET token_hash = sqlc.arg(token_hash), stage = sqlc.arg(stage), csrf_token = sqlc.arg(csrf_token),
     sudo_until = sqlc.arg(sudo_until), expires_at = sqlc.arg(expires_at), last_seen_at = sqlc.arg(last_seen_at),
     webauthn_state = NULL
-WHERE id = sqlc.arg(id) AND revoked_at IS NULL;
+WHERE id = sqlc.arg(id) AND revoked_at IS NULL AND token_hash = sqlc.arg(old_token_hash) AND stage = sqlc.arg(old_stage);
 
 -- name: AuthTouchSession :exec
 UPDATE sessions SET last_seen_at = sqlc.arg(last_seen_at) WHERE id = sqlc.arg(id);
@@ -110,6 +115,12 @@ UPDATE sessions SET revoked_at = sqlc.arg(revoked_at) WHERE id = sqlc.arg(id) AN
 -- name: AuthRevokeUserSession :execrows
 UPDATE sessions SET revoked_at = sqlc.arg(revoked_at)
 WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND revoked_at IS NULL;
+
+-- name: AuthRevokeOtherPendingSessions :execrows
+-- Used when the first second factor is established: setup/preauth sessions of the user (possibly an
+-- attacker's who knows the password) must not survive it.
+UPDATE sessions SET revoked_at = sqlc.arg(revoked_at)
+WHERE user_id = sqlc.arg(user_id) AND id != sqlc.arg(keep_id) AND stage IN ('preauth', 'setup') AND revoked_at IS NULL;
 
 -- name: AuthRevokeOtherSessions :execrows
 UPDATE sessions SET revoked_at = sqlc.arg(revoked_at)

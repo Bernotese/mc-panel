@@ -43,6 +43,16 @@ var testPasswordHash = sync.OnceValue(func() string {
 // testGuard is defense.FakeGuard plus a helper for the most recent attempt.
 type testGuard struct {
 	defense.FakeGuard
+	// hook, if set, runs at the start of CheckSecondFactor (key = decimal session id).
+	// Tests use it to interleave another action deterministically with a request.
+	hook func(key string)
+}
+
+func (g *testGuard) CheckSecondFactor(ctx context.Context, ip netip.Addr, key string) error {
+	if g.hook != nil {
+		g.hook(key)
+	}
+	return g.FakeGuard.CheckSecondFactor(ctx, ip, key)
 }
 
 func (g *testGuard) last() defense.Attempt {
@@ -205,7 +215,8 @@ func (c *client) doWith(method, path string, body any, mutate func(*http.Request
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			c.env.t.Fatal(err)
+			c.env.t.Error(err) // not Fatal: do() is also used from goroutines
+			return response{code: -1}
 		}
 		rdr = bytes.NewReader(b)
 	}
@@ -223,7 +234,7 @@ func (c *client) doWith(method, path string, body any, mutate func(*http.Request
 		}
 	}
 	if c.cookie != "" {
-		req.AddCookie(&http.Cookie{Name: CookieName, Value: c.cookie})
+		req.AddCookie(&http.Cookie{Name: CookieName, Value: c.cookie}) //nolint:gosec // G124: request cookie, attributes are response-only
 	}
 	if mutate != nil {
 		mutate(req)

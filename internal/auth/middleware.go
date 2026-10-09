@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/subtle"
 	"database/sql"
 	"errors"
@@ -9,6 +10,7 @@ import (
 
 	"mcpanel/internal/httpx"
 	"mcpanel/internal/principal"
+	"mcpanel/internal/store"
 )
 
 const (
@@ -51,11 +53,16 @@ func (s *Sessions) Middleware(next http.Handler) http.Handler {
 			httpx.Internal(w, r, err)
 			return
 		}
+		stage, err := s.effectiveStage(ctx, user, sess)
+		if err != nil {
+			httpx.Internal(w, r, err)
+			return
+		}
 		p := principal.Principal{
 			UserID:    user.ID,
 			Username:  user.Username,
 			Role:      principal.Role(user.Role),
-			Stage:     principal.Stage(sess.Stage),
+			Stage:     stage,
 			SessionID: sess.ID,
 			CSRFToken: sess.CsrfToken,
 		}
@@ -106,4 +113,26 @@ func sameOrigin(r *http.Request, origin string) bool {
 		return false
 	}
 	return true
+}
+
+// effectiveStage downgrades a stored full session to setup when 2FA is mandatory for the user
+// (admin, or user under enforcement) but the user has no method: a user promoted to admin or
+// newly under enforcement must set up 2FA before using the panel.
+func (s *Sessions) effectiveStage(ctx context.Context, user store.User, sess store.Session) (principal.Stage, error) {
+	stage := principal.Stage(sess.Stage)
+	if stage != principal.StageFull || user.TotpEnabled == 1 {
+		return stage, nil
+	}
+	passkeys, err := s.q.AuthCountCredentials(ctx, user.ID)
+	if err != nil || passkeys > 0 {
+		return stage, err
+	}
+	mandatory, err := twoFactorMandatory(ctx, s.q, user)
+	if err != nil {
+		return stage, err
+	}
+	if mandatory {
+		return principal.StageSetup, nil
+	}
+	return stage, nil
 }

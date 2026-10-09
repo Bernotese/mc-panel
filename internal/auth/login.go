@@ -100,7 +100,6 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	if stage != principal.StagePreAuth {
 		reason = reasonComplete // stream B derives new-device notifications from this attempt
 	}
-	h.recordAttempt(r, user.Username, user.ID, defense.StagePassword, true, reason)
 	tok, sess, err := h.sessions.Create(ctx, NewSession{
 		UserID: user.ID, Stage: stage, IP: ip, UserAgent: userAgent(r), Country: h.geo.Country(ip),
 	})
@@ -108,6 +107,8 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
+	// Only after the session exists: stream B derives the new-device notification from "complete".
+	h.recordAttempt(r, user.Username, user.ID, defense.StagePassword, true, reason)
 	setSessionCookie(w, tok)
 	if stage != principal.StagePreAuth {
 		h.auditLog(ctx, user.ID, user.Username, audit.ActionLogin, user.Username, audit.ResultSuccess,
@@ -138,6 +139,7 @@ func (h *Handler) getMe(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
+	sess.Stage = string(p.Stage) // the effective stage (mandatory 2FA may downgrade a stored full session)
 	h.writeMe(w, r, user, sess)
 }
 
@@ -149,6 +151,8 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clearSessionCookie(w)
-	h.auditLog(ctx, p.UserID, p.Username, audit.ActionLogout, p.Username, audit.ResultSuccess, nil)
+	if p.Stage != principal.StagePreAuth { // a password holder must not be able to flood the audit chain
+		h.auditLog(ctx, p.UserID, p.Username, audit.ActionLogout, p.Username, audit.ResultSuccess, nil)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
