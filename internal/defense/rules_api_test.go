@@ -107,7 +107,16 @@ func TestDeleteIPRuleRejectsSelfLockout(t *testing.T) {
 		t.Fatalf("audit = %v", e.audit.Actions())
 	}
 	wantStatus(t, e.call(t, http.MethodDelete, "/security/ip-rules/999", nil, callerIP), http.StatusNotFound, httpx.CodeNotFound)
-	// from loopback the admin can always remove the rule
+	// production: loopback is not exempt from the admin allowlist, so it cannot remove the rule
+	wantStatus(t, e.call(t, http.MethodDelete, fmt.Sprintf("/security/ip-rules/%d", own), nil, "127.0.0.1"),
+		http.StatusConflict, httpx.CodeConflict)
+}
+
+func TestDeleteIPRuleFromLoopbackInDev(t *testing.T) {
+	e := newEnv(t, func(d *Deps) { d.Dev = true })
+	own := e.addRule(t, callerIP+"/32", "allow", nil)
+	e.saveSettings(t, store.SecuritySettings{AdminAllowlistOnly: true, AllowedCountries: []string{}})
+	// dev: from loopback the admin can always remove the rule
 	wantStatus(t, e.call(t, http.MethodDelete, fmt.Sprintf("/security/ip-rules/%d", own), nil, "127.0.0.1"),
 		http.StatusNoContent, "")
 	if rules, _ := e.q.DefenseListIPRules(t.Context()); len(rules) != 0 {
@@ -117,7 +126,7 @@ func TestDeleteIPRuleRejectsSelfLockout(t *testing.T) {
 
 func TestLockoutCheckFailsClosedWithoutCallerIP(t *testing.T) {
 	e := newEnv(t)
-	if r := e.svc.snap.Load().locksOut(netip.Addr{}, e.clk.Now(), e.geo); r == "" {
+	if r := e.svc.snap.Load().locksOut(netip.Addr{}, e.clk.Now(), e.geo, true); r == "" {
 		t.Fatal("an unknown caller IP cannot be proven safe; locksOut must report a reason")
 	}
 }

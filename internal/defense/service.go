@@ -52,6 +52,9 @@ type Deps struct {
 	Notifier     notify.Notifier
 	Agent        agentapi.Client
 	Logger       *slog.Logger
+	// Dev enables development conveniences: loopback client IPs are exempt from the admin
+	// allowlist only in dev mode (in production the panel sits behind a reverse proxy).
+	Dev bool
 }
 
 // Service implements LoginGuard, the IP filter, the API rate limit,
@@ -66,6 +69,7 @@ type Service struct {
 	notifier     notify.Notifier
 	agent        agentapi.Client
 	log          *slog.Logger
+	dev          bool
 
 	loginIP      *keyedLimiter
 	loginUser    *keyedLimiter
@@ -97,7 +101,7 @@ func NewService(ctx context.Context, d Deps) (*Service, error) {
 	}
 	s := &Service{
 		db: d.DB, q: store.New(d.DB), clock: d.Clock, geo: d.Geo, geoAvailable: d.GeoAvailable,
-		audit: d.Audit, notifier: d.Notifier, agent: d.Agent, log: d.Logger,
+		audit: d.Audit, notifier: d.Notifier, agent: d.Agent, log: d.Logger, dev: d.Dev,
 		loginIP:      newKeyedLimiter(LoginPerIPLimit),
 		loginUser:    newKeyedLimiter(LoginPerUserLimit),
 		secondFactor: newKeyedLimiter(SecondFactorLimit),

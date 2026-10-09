@@ -20,8 +20,9 @@ func (s *snapshot) allowedPermanently(ip netip.Addr, now time.Time) bool {
 	return false
 }
 
-// locksOut reports why ip would be locked out of the panel under this snapshot.
-func (s *snapshot) locksOut(ip netip.Addr, now time.Time, geo GeoResolver) string {
+// locksOut reports why ip would be locked out of the panel under this snapshot. loopbackAdmin
+// mirrors CheckAdminNetwork: loopback is exempt from the admin allowlist only in dev mode.
+func (s *snapshot) locksOut(ip netip.Addr, now time.Time, geo GeoResolver, loopbackAdmin bool) string {
 	ip = normalizeIP(ip)
 	if !ip.IsValid() {
 		return "unknown_client_ip" // fail closed: cannot prove the caller stays reachable
@@ -29,7 +30,7 @@ func (s *snapshot) locksOut(ip netip.Addr, now time.Time, geo GeoResolver) strin
 	if r := s.blockReason(ip, now, geo); r != "" {
 		return r
 	}
-	if s.settings.AdminAllowlistOnly && !ip.IsLoopback() && !s.allowedPermanently(ip, now) {
+	if s.settings.AdminAllowlistOnly && !(loopbackAdmin && ip.IsLoopback()) && !s.allowedPermanently(ip, now) {
 		// a rule that expires would silently lock the admin out later
 		return "admin_allowlist"
 	}

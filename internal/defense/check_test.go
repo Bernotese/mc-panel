@@ -127,9 +127,20 @@ func TestCheckAdminNetwork(t *testing.T) {
 		t.Fatalf("not allowlisted: err = %v", err)
 	}
 	for _, lo := range []string{"127.0.0.1", "::1"} {
-		if err := e.svc.CheckAdminNetwork(ctx, addr(lo)); err != nil {
-			t.Fatalf("loopback %s must always be allowed: %v", lo, err)
+		// production: the panel sits behind a proxy, a loopback client IP is not trustworthy
+		if err := e.svc.CheckAdminNetwork(ctx, addr(lo)); !errors.Is(err, ErrAdminNetwork) {
+			t.Fatalf("prod: loopback %s must not be exempt: %v", lo, err)
 		}
+	}
+	dev := newEnv(t, func(d *Deps) { d.Dev = true })
+	dev.saveSettings(t, store.SecuritySettings{AdminAllowlistOnly: true, AllowedCountries: []string{}})
+	for _, lo := range []string{"127.0.0.1", "::1"} {
+		if err := dev.svc.CheckAdminNetwork(ctx, addr(lo)); err != nil {
+			t.Fatalf("dev: loopback %s must be allowed: %v", lo, err)
+		}
+	}
+	if err := dev.svc.CheckAdminNetwork(ctx, public); !errors.Is(err, ErrAdminNetwork) {
+		t.Fatalf("dev: public IP must still be checked: %v", err)
 	}
 	e.addRule(t, "203.0.113.0/24", "allow", nil)
 	if err := e.svc.CheckAdminNetwork(ctx, public); err != nil {

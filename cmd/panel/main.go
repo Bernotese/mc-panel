@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,8 +22,10 @@ import (
 	"mcpanel/internal/clock"
 	"mcpanel/internal/config"
 	"mcpanel/internal/defense"
+	"mcpanel/internal/httpx"
 	"mcpanel/internal/password"
 	"mcpanel/internal/store"
+	"mcpanel/internal/unixsock"
 	"mcpanel/internal/users"
 )
 
@@ -241,23 +244,21 @@ func serve(args []string) error {
 	}
 	defer a.Close()
 
+	l, err := listen(cfg) // closed by srv.Serve / srv.Shutdown (a unix socket file is removed)
+	if err != nil {
+		return err
+	}
+
 	// Background loops get their own context so they outlive the signal until HTTP is drained.
 	bgCtx, cancelBg := context.WithCancel(context.Background())
 	bgDone := make(chan struct{})
 	go func() { a.Run(bgCtx); close(bgDone) }()
 
-	srv := &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           a.Handler,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       120 * time.Second,
-	}
+	srv := newHTTPServer(a.Handler)
 	errCh := make(chan error, 1)
 	go func() {
 		slog.Info("panel listening", "addr", cfg.Listen, "dev", cfg.Dev, "version", version)
-		errCh <- srv.ListenAndServe()
+		errCh <- srv.Serve(l)
 	}()
 	var serveErr error
 	select {
@@ -281,6 +282,29 @@ func serve(args []string) error {
 	cancelBg()
 	<-bgDone
 	return serveErr
+}
+
+// listen opens the configured listener: "unix:/path" (production default, behind the reverse
+// proxy; a stale socket is replaced only if nobody accepts on it, mode 0660 so the proxy's
+// group can connect) or host:port.
+func listen(cfg config.Panel) (net.Listener, error) {
+	if path, ok := cfg.ListenUnix(); ok {
+		return unixsock.Listen(path, 0o660, -1)
+	}
+	return net.Listen("tcp", cfg.Listen)
+}
+
+// newHTTPServer returns the panel's HTTP server. UnixConnContext marks connections from the
+// unix socket so RealIP treats them as coming from the trusted reverse proxy.
+func newHTTPServer(h http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           h,
+		ConnContext:       httpx.UnixConnContext,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 }
 
 func setupLogging(dev bool) {

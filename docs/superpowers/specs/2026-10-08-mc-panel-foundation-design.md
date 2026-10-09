@@ -51,7 +51,7 @@ Docker/Minecraft-Instanzen, Installer, Caddy-Konfiguration, Backups, Monitoring.
 ## 3. Architektur
 
 ```
-Internet ─443─▶ Caddy ─▶ 127.0.0.1:8080  panel  (User mcpanel, SQLite, React via go:embed)
+Internet ─443─▶ Caddy ─▶ /run/mc-panel/panel.sock  panel  (User mcpanel, SQLite, React via go:embed)
                                             │  Unix-Socket (0660, Gruppe mcpanel)
                                             │  + Peer-UID-Prüfung
                                             ▼
@@ -63,7 +63,7 @@ Internet ─443─▶ Caddy ─▶ 127.0.0.1:8080  panel  (User mcpanel, SQLite,
 
 ### 3.1 Prozesse
 
-- **panel**: öffentliche Web-App + API. Läuft unprivilegiert, lauscht nur auf `127.0.0.1`. Kennt den Docker-Socket nicht.
+- **panel**: öffentliche Web-App + API. Läuft unprivilegiert, lauscht in Prod auf dem Unix-Socket `/run/mc-panel/panel.sock` (0660, nur Caddy erreicht ihn; `listen = "unix:…"`, Dev: `127.0.0.1:8080`). Kennt den Docker-Socket nicht.
 - **agent**: kleine, privilegierte Komponente mit enger, strikt validierter JSON-API über Unix-Socket. Akzeptiert nur Verbindungen von der konfigurierten panel-UID (Peer-Credentials). Jede Anfrage wird gegen ein Schema validiert; unbekannte Felder werden abgelehnt.
 - Ziel: Eine Schwachstelle im panel führt nicht direkt zu Root auf dem Host.
 
@@ -104,7 +104,7 @@ Linux-spezifisches liegt hinter Interfaces, Implementierungen per Build-Tag:
 - Prod: `/etc/mc-panel/panel.toml`, `/etc/mc-panel/agent.toml`, Daten unter `/var/lib/mc-panel/`, Socket `/run/mc-panel/agent.sock`.
 - Dev (`--dev`): alles unter `./.dev/`, Socket `./.dev/agent.sock`, Logs als Text.
 - Secrets (z. B. Webhook-URLs) werden in der DB gespeichert, im UI nur maskiert angezeigt.
-- `trusted_proxies`: standardmäßig nur `127.0.0.1/32` und `::1/128`; nur von dort wird `X-Forwarded-For` übernommen.
+- `trusted_proxies`: standardmäßig nur `127.0.0.1/32` und `::1/128`; nur von dort wird `X-Forwarded-For` übernommen. Verbindungen über den Unix-Socket gelten immer als vom Proxy kommend (X-Forwarded-For, rechtester nicht vertrauenswürdiger Eintrag; ohne verwertbares X-Forwarded-For wird der Request abgewiesen). Loopback ist nur im Dev-Modus von der Admin-Allowlist ausgenommen.
 
 ### 3.5 Entwicklung und Release
 

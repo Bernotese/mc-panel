@@ -178,3 +178,62 @@ func TestLoadAgentFileCannotEnableDevMode(t *testing.T) {
 		t.Fatalf("file must not enable dev mode: %+v", a)
 	}
 }
+
+func TestListenDefaults(t *testing.T) {
+	p := config.DefaultPanel()
+	if p.Listen != "unix:/run/mc-panel/panel.sock" {
+		t.Fatalf("prod listen = %q", p.Listen)
+	}
+	if path, ok := p.ListenUnix(); !ok || path != "/run/mc-panel/panel.sock" {
+		t.Fatalf("ListenUnix = %q, %v", path, ok)
+	}
+	d := config.DevPanel("/repo")
+	if d.Listen != "127.0.0.1:8080" {
+		t.Fatalf("dev listen = %q", d.Listen)
+	}
+	if _, ok := d.ListenUnix(); ok {
+		t.Fatal("dev listen must be TCP")
+	}
+}
+
+func TestListenValidation(t *testing.T) {
+	cases := []struct {
+		listen string
+		ok     bool
+	}{
+		{"unix:/run/mc-panel/panel.sock", true},
+		{"unix:/tmp/x.sock", true},
+		{"127.0.0.1:8080", true},
+		{"[::1]:8080", true},
+		{"192.0.2.1:8080", true},
+		{"unix:relative.sock", false},
+		{"unix:", false},
+		{"unix:/run/../etc/x.sock", false},
+		{"unix:/run/x\x00.sock", false},
+		{"8080", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		p := config.DefaultPanel()
+		p.PublicURL = "https://panel.example.com"
+		p.Listen = tc.listen
+		err := p.Validate()
+		if (err == nil) != tc.ok {
+			t.Errorf("listen %q: err = %v, want ok=%v", tc.listen, err, tc.ok)
+		}
+	}
+}
+
+func TestLoadPanelUnixListenFromFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "panel.toml")
+	if err := os.WriteFile(path, []byte("public_url = \"https://x.org\"\nlisten = \"unix:/srv/panel.sock\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := config.LoadPanel(path, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sock, ok := p.ListenUnix(); !ok || sock != "/srv/panel.sock" {
+		t.Fatalf("ListenUnix = %q, %v", sock, ok)
+	}
+}

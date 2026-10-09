@@ -76,7 +76,7 @@ func (s *Service) CheckAdminNetwork(_ context.Context, ip netip.Addr) error {
 		return ErrAdminNetwork // fail closed
 	}
 	ip = normalizeIP(ip)
-	if ip.IsLoopback() || snap.allowed(ip, s.clock.Now()) {
+	if (s.dev && ip.IsLoopback()) || snap.allowed(ip, s.clock.Now()) {
 		return nil
 	}
 	return ErrAdminNetwork
