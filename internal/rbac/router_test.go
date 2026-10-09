@@ -123,3 +123,47 @@ func TestZeroRulePanics(t *testing.T) {
 	rt := rbac.NewRouter(chi.NewRouter(), fakeChecker{}, clock.Real{})
 	rt.Get("/x", rbac.Rule{}, func(http.ResponseWriter, *http.Request) {})
 }
+
+func mustPanic(t *testing.T, what string, fn func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("%s: expected panic", what)
+		}
+	}()
+	fn()
+}
+
+func TestServerRuleParamMissingFromPatternPanics(t *testing.T) {
+	mustPanic(t, "server rule with param not in pattern", func() {
+		rt := rbac.NewRouter(chi.NewRouter(), fakeChecker{}, clock.Real{})
+		rt.Route("/api", func(api *rbac.Router) {
+			api.Post("/servers/{idx}/power", rbac.Server(rbac.PermServerPower, "id"), func(http.ResponseWriter, *http.Request) {})
+		})
+	})
+}
+
+func TestDuplicateRoutePanics(t *testing.T) {
+	mustPanic(t, "duplicate GET /x", func() {
+		rt := rbac.NewRouter(chi.NewRouter(), fakeChecker{}, clock.Real{})
+		h := func(http.ResponseWriter, *http.Request) {}
+		rt.Get("/x", rbac.Public(), h)
+		rt.Get("/x", rbac.Public(), h)
+	})
+}
+
+func TestSamePatternDifferentMethodAllowed(t *testing.T) {
+	rt := rbac.NewRouter(chi.NewRouter(), fakeChecker{}, clock.Real{})
+	h := func(http.ResponseWriter, *http.Request) {}
+	rt.Get("/x", rbac.Public(), h)
+	rt.Post("/x", rbac.Public(), h)
+	if n := len(rt.Routes()); n != 2 {
+		t.Fatalf("len(routes) = %d, want 2", n)
+	}
+}
+
+func TestAllowStagesEmptyPanics(t *testing.T) {
+	mustPanic(t, "AllowStages() with no stages", func() {
+		_ = rbac.Authenticated().AllowStages()
+	})
+}
