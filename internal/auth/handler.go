@@ -116,6 +116,10 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Post("/me/passkeys/finish", setupOrFull, h.finishPasskeyRegistration)
 	api.Get("/me/passkeys", rbac.Authenticated(), h.listPasskeys)
 	api.Delete("/me/passkeys/{id}", rbac.Authenticated().WithSudo(), h.deletePasskey)
+	api.Post("/auth/2fa/webauthn/begin", preAuth, h.beginWebAuthnLogin)
+	api.Post("/auth/2fa/webauthn/finish", preAuth, h.finishWebAuthnLogin)
+	api.Post("/auth/sudo/webauthn/begin", rbac.Authenticated(), h.beginSudoWebAuthn)
+	api.Post("/auth/sudo/webauthn/finish", rbac.Authenticated(), h.finishSudoWebAuthn)
 }
 
 type factors struct {
