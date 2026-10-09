@@ -243,7 +243,11 @@ func TestBlockedDestinations(t *testing.T) {
 	for ip, blocked := range map[string]bool{
 		"127.0.0.1": true, "::1": true, "10.1.2.3": true, "192.168.0.1": true, "172.16.0.1": true, "fd00::1": true,
 		"169.254.169.254": true, "fe80::1": true, "0.0.0.0": true, "224.0.0.1": true, "::ffff:127.0.0.1": true,
-		"203.0.113.7": false, "2001:db8::1": false, "8.8.8.8": false,
+		"100.64.0.1": true, "100.100.100.200": true, "100.127.255.255": true, "0.1.2.3": true,
+		"198.18.0.1": true, "198.19.255.255": true, "240.0.0.1": true, "255.255.255.255": true,
+		"64:ff9b::7f00:1": true, "64:ff9b::a00:1": true, "64:ff9b:1::1": true,
+		"100.63.255.255": false, "100.128.0.1": false, "198.17.255.255": false, "198.20.0.1": false,
+		"64:ff9b::808:808": true, "203.0.113.7": false, "2001:db8::1": false, "8.8.8.8": false,
 	} {
 		if got := blockedDestination(netip.MustParseAddr(ip)); got != blocked {
 			t.Errorf("blockedDestination(%s) = %v, want %v", ip, got, blocked)

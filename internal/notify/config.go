@@ -111,8 +111,7 @@ func isInternalHost(host string) bool {
 	if err != nil {
 		return false
 	}
-	a = a.Unmap()
-	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsUnspecified()
+	return blockedDestination(a)
 }
 
 // MaskTarget renders a notifier target without secrets (webhook token, topic, access token).
