@@ -131,7 +131,7 @@ func (h *Handler) finishPasskeyRegistration(w http.ResponseWriter, r *http.Reque
 		if err != nil {
 			return err
 		}
-		codes, err = issueRecoveryCodesIfNone(ctx, q, user.ID, now)
+		codes, err = h.issueRecoveryCodesIfNone(ctx, q, user.ID, now)
 		return err
 	})
 	switch {

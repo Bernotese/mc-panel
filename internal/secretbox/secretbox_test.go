@@ -63,3 +63,22 @@ func TestLoadOrCreateKey(t *testing.T) {
 		t.Fatal("expected error for world-readable key file")
 	}
 }
+
+func TestDeriveKey(t *testing.T) {
+	b1, _ := secretbox.New(bytes.Repeat([]byte{7}, secretbox.KeySize))
+	b1again, _ := secretbox.New(bytes.Repeat([]byte{7}, secretbox.KeySize))
+	b2, _ := secretbox.New(bytes.Repeat([]byte{8}, secretbox.KeySize))
+	k := b1.DeriveKey("recovery-codes")
+	if len(k) != 32 {
+		t.Fatalf("len = %d", len(k))
+	}
+	if !bytes.Equal(k, b1again.DeriveKey("recovery-codes")) {
+		t.Fatal("derivation must be deterministic")
+	}
+	if bytes.Equal(k, b1.DeriveKey("other")) || bytes.Equal(k, b2.DeriveKey("recovery-codes")) {
+		t.Fatal("derived keys must depend on purpose and master key")
+	}
+	if bytes.Equal(k, bytes.Repeat([]byte{7}, secretbox.KeySize)) {
+		t.Fatal("derived key must not be the master key")
+	}
+}

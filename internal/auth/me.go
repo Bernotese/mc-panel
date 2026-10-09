@@ -138,7 +138,7 @@ func (h *Handler) regenerateRecoveryCodes(w http.ResponseWriter, r *http.Request
 	var codes []string
 	err := h.withTx(ctx, func(q *store.Queries) error {
 		var err error
-		codes, err = replaceRecoveryCodes(ctx, q, user.ID, now)
+		codes, err = h.replaceRecoveryCodes(ctx, q, user.ID, now)
 		return err
 	})
 	if err != nil {

@@ -2,6 +2,8 @@ package auth
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"regexp"
 	"testing"
 )
@@ -33,13 +35,31 @@ func TestGenerateRecoveryCodes(t *testing.T) {
 }
 
 func TestRecoveryCodeNormalization(t *testing.T) {
+	e := newTestEnv(t)
 	if got := normalizeRecoveryCode(" ABCDE-fghjk \t"); got != "abcdefghjk" {
 		t.Fatalf("normalize = %q", got)
 	}
-	if !bytes.Equal(hashRecoveryCode("abcde-fghjk"), hashRecoveryCode("ABCDE FGHJK")) {
+	if !bytes.Equal(e.h.hashRecoveryCode("abcde-fghjk"), e.h.hashRecoveryCode("ABCDE FGHJK")) {
 		t.Fatal("hash must be computed over the normalized code")
 	}
-	if bytes.Equal(hashRecoveryCode("abcde-fghjk"), hashRecoveryCode("abcde-fghjm")) {
+	if bytes.Equal(e.h.hashRecoveryCode("abcde-fghjk"), e.h.hashRecoveryCode("abcde-fghjm")) {
 		t.Fatal("different codes must hash differently")
+	}
+}
+
+// Recovery codes are stored as HMAC-SHA256 under a key derived from the secretbox key, so a
+// leaked database alone does not allow an offline search of the (50-bit) code space.
+func TestRecoveryCodeHashIsKeyedHMAC(t *testing.T) {
+	e := newTestEnv(t)
+	got := e.h.hashRecoveryCode("ABCDE-fghjk")
+	key := e.h.box.DeriveKey("recovery-codes")
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte("abcdefghjk"))
+	if !bytes.Equal(got, m.Sum(nil)) {
+		t.Fatal("hash must be HMAC-SHA256(DeriveKey(\"recovery-codes\"), normalized code)")
+	}
+	plain := sha256.Sum256([]byte("abcdefghjk"))
+	if bytes.Equal(got, plain[:]) {
+		t.Fatal("hash must not be plain SHA-256")
 	}
 }

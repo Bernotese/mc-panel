@@ -76,7 +76,7 @@ func TestRegenerateRecoveryCodes(t *testing.T) {
 	e := newTestEnv(t)
 	ctx := context.Background()
 	c, uid, _ := e.fullClient("alice", "user", "203.0.113.10")
-	old := hashRecoveryCode("abcde-fghjk")
+	old := e.h.hashRecoveryCode("abcde-fghjk")
 	if err := e.q.AuthInsertRecoveryCode(ctx, store.AuthInsertRecoveryCodeParams{UserID: uid, CodeHash: old, CreatedAt: 1}); err != nil {
 		t.Fatal(err)
 	}

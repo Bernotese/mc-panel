@@ -104,7 +104,7 @@ func (h *Handler) verifyRecovery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n, err := h.q.AuthUseRecoveryCode(ctx, store.AuthUseRecoveryCodeParams{
-		UsedAt: sql.NullInt64{Int64: h.clock.Now().UnixMilli(), Valid: true}, UserID: user.ID, CodeHash: hashRecoveryCode(code),
+		UsedAt: sql.NullInt64{Int64: h.clock.Now().UnixMilli(), Valid: true}, UserID: user.ID, CodeHash: h.hashRecoveryCode(code),
 	})
 	if err != nil {
 		httpx.Internal(w, r, err)

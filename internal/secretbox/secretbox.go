@@ -2,9 +2,12 @@
 package secretbox
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -14,7 +17,10 @@ const KeySize = 32
 
 var ErrInvalid = errors.New("secretbox: invalid ciphertext")
 
-type Box struct{ aead cipher.AEAD }
+type Box struct {
+	aead cipher.AEAD
+	key  []byte
+}
 
 func New(key []byte) (*Box, error) {
 	if len(key) != KeySize {
@@ -28,7 +34,15 @@ func New(key []byte) (*Box, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Box{aead: aead}, nil
+	return &Box{aead: aead, key: bytes.Clone(key)}, nil
+}
+
+// DeriveKey returns a 32-byte subkey for purpose: HMAC-SHA256(master key, "mc-panel/" + purpose).
+// Used where a keyed hash is needed (e.g. recovery codes) without reusing the AEAD key itself.
+func (b *Box) DeriveKey(purpose string) []byte {
+	m := hmac.New(sha256.New, b.key)
+	m.Write([]byte("mc-panel/" + purpose))
+	return m.Sum(nil)
 }
 
 // Seal returns nonce||ciphertext. aad binds the ciphertext to its purpose (e.g. "totp:42").

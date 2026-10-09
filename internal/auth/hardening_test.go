@@ -265,7 +265,7 @@ func TestSecondFactorOnRevokedSessionYieldsNoSession(t *testing.T) {
 	e := newTestEnv(t)
 	c, uid, _ := e.preauthClient("alice", "user", "203.0.113.10")
 	if err := e.q.AuthInsertRecoveryCode(context.Background(), store.AuthInsertRecoveryCodeParams{
-		UserID: uid, CodeHash: hashRecoveryCode("abcde-fghjk"), CreatedAt: 1,
+		UserID: uid, CodeHash: e.h.hashRecoveryCode("abcde-fghjk"), CreatedAt: 1,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestConcurrentSecondFactorCompletionYieldsOneSession(t *testing.T) {
 		codes := []string{"abcde-fghjk", "mnpqr-stuvw"}
 		for _, code := range codes {
 			if err := e.q.AuthInsertRecoveryCode(context.Background(), store.AuthInsertRecoveryCodeParams{
-				UserID: uid, CodeHash: hashRecoveryCode(code), CreatedAt: 1,
+				UserID: uid, CodeHash: e.h.hashRecoveryCode(code), CreatedAt: 1,
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -543,7 +543,7 @@ func TestRotationBoundToPresentedToken(t *testing.T) {
 		e := newTestEnv(t)
 		c, uid, _ := e.preauthClient("alice", "user", "203.0.113.10")
 		if err := e.q.AuthInsertRecoveryCode(context.Background(), store.AuthInsertRecoveryCodeParams{
-			UserID: uid, CodeHash: hashRecoveryCode("abcde-fghjk"), CreatedAt: 1,
+			UserID: uid, CodeHash: e.h.hashRecoveryCode("abcde-fghjk"), CreatedAt: 1,
 		}); err != nil {
 			t.Fatal(err)
 		}

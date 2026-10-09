@@ -162,7 +162,7 @@ func TestDisableTOTPEnforcedUser(t *testing.T) {
 			e := newTestEnv(t)
 			c, uid, _ := e.fullClient("alice", "user", "203.0.113.10")
 			if err := e.q.AuthInsertRecoveryCode(context.Background(), store.AuthInsertRecoveryCodeParams{
-				UserID: uid, CodeHash: hashRecoveryCode("abcde-fghjk"), CreatedAt: 1,
+				UserID: uid, CodeHash: e.h.hashRecoveryCode("abcde-fghjk"), CreatedAt: 1,
 			}); err != nil {
 				t.Fatal(err)
 			}
