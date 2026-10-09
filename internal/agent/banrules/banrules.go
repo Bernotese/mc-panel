@@ -34,7 +34,7 @@ func invalidf(format string, args ...any) error {
 // prefixes, prefixes with host bits set, link-local and multicast prefixes.
 func CheckPrefix(p netip.Prefix) error {
 	if err := agentapi.ValidateBanPrefix(p); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalid, err)
+		return fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	a := p.Addr()
 	switch {

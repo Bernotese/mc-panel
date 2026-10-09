@@ -82,10 +82,6 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fw, err := firewall.New(cfg, clock.Real{}, log)
-	if err != nil {
-		return fmt.Errorf("firewall: %w", err)
-	}
 	mode, gid, err := socketPerms(cfg, user.LookupId)
 	if err != nil {
 		return err
@@ -95,9 +91,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 	}
+	// Listen first: it detects an already running agent, so a refused second
+	// start never touches the firewall.
 	l, err := agent.Listen(cfg.Socket, mode, gid)
 	if err != nil {
 		return err
+	}
+	fw, err := firewall.New(cfg, clock.Real{}, log)
+	if err != nil {
+		_ = l.Close() // removes the socket file again
+		return fmt.Errorf("firewall: %w", err)
 	}
 
 	srv := agent.NewServer(fw, version, log)

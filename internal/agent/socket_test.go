@@ -123,3 +123,13 @@ func TestListenRefusesSymlink(t *testing.T) {
 		t.Fatalf("symlink target was removed: %v", err)
 	}
 }
+
+func TestListenRefusesRelativeAndAbstractPaths(t *testing.T) {
+	for _, path := range []string{"agent.sock", "./agent.sock", "", "@mcpanel-agent", "\x00mcpanel"} {
+		l, err := agent.Listen(path, 0o600, -1)
+		if err == nil {
+			_ = l.Close()
+			t.Errorf("Listen(%q) succeeded, want error", path)
+		}
+	}
+}

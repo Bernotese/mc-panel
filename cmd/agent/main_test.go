@@ -189,3 +189,18 @@ func TestUIDFromConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestRunRefusesSecondStartBeforeTouchingFirewall(t *testing.T) {
+	sock := socketPath(t)
+	first, err := agent.Listen(sock, 0o600, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = first.Close() }()
+	// firewall = "nftables" would fail (or modify nftables on Linux) if it were set up first.
+	cfg := writeConfig(t, fmt.Sprintf("socket = %q\nfirewall = \"nftables\"\n", sock))
+	err = run(context.Background(), []string{"-dev", "-config", cfg}, io.Discard, io.Discard)
+	if !errors.Is(err, agent.ErrAlreadyRunning) {
+		t.Fatalf("run = %v, want ErrAlreadyRunning", err)
+	}
+}

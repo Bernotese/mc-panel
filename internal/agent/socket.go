@@ -1,11 +1,14 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net"
 	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -18,6 +21,9 @@ var ErrAlreadyRunning = errors.New("another agent is already listening on this s
 // to gid (gid < 0 leaves it unchanged) and its permissions to mode. Closing the
 // returned listener removes the socket file.
 func Listen(path string, mode os.FileMode, gid int) (net.Listener, error) {
+	if !filepath.IsAbs(path) || strings.ContainsRune(path, 0) {
+		return nil, fmt.Errorf("agent: socket path %q must be an absolute filesystem path", path)
+	}
 	if err := removeStale(path); err != nil {
 		return nil, err
 	}
@@ -25,17 +31,40 @@ func Listen(path string, mode os.FileMode, gid int) (net.Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent: listen on %s: %w", path, err)
 	}
+	if err := secure(path, mode, gid); err != nil {
+		_ = l.Close()
+		return nil, err
+	}
+	return l, nil
+}
+
+// secure applies group and mode to the socket and verifies afterwards that
+// path is still the socket we created, with the expected mode and group.
+func secure(path string, mode os.FileMode, gid int) error {
 	if gid >= 0 {
-		if err := os.Chown(path, -1, gid); err != nil {
-			_ = l.Close()
-			return nil, fmt.Errorf("agent: chown %s to gid %d: %w", path, gid, err)
+		if err := os.Lchown(path, -1, gid); err != nil {
+			return fmt.Errorf("agent: chown %s to gid %d: %w", path, gid, err)
 		}
 	}
 	if err := os.Chmod(path, mode); err != nil { //nolint:gosec // G302: 0600 (dev) or 0660 (prod, panel group) by design
-		_ = l.Close()
-		return nil, fmt.Errorf("agent: chmod %s: %w", path, err)
+		return fmt.Errorf("agent: chmod %s: %w", path, err)
 	}
-	return l, nil
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("agent: verify %s: %w", path, err)
+	}
+	if fi.Mode().Type() != fs.ModeSocket || fi.Mode().Perm() != mode.Perm() {
+		return fmt.Errorf("agent: %s is not the expected socket with mode %v (found %v)", path, mode.Perm(), fi.Mode())
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		if gid >= 0 && int(st.Gid) != gid {
+			return fmt.Errorf("agent: %s has gid %d, want %d", path, st.Gid, gid)
+		}
+		if int(st.Uid) != os.Geteuid() {
+			return fmt.Errorf("agent: %s is owned by uid %d, want %d", path, st.Uid, os.Geteuid())
+		}
+	}
+	return nil
 }
 
 // removeStale deletes path only if it is a socket nobody listens on.
@@ -51,7 +80,9 @@ func removeStale(path string) error {
 	if fi.Mode().Type() != fs.ModeSocket {
 		return fmt.Errorf("agent: %s exists and is not a socket (%v); refusing to remove it", path, fi.Mode().Type())
 	}
-	c, err := net.DialTimeout("unix", path, 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	c, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
 	if err == nil {
 		_ = c.Close()
 		return fmt.Errorf("%w: %s", ErrAlreadyRunning, path)

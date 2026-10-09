@@ -40,17 +40,18 @@ func (e *StatusError) Error() string {
 }
 
 // Is maps status codes to the sentinel errors: 409 -> ErrConflict, other 4xx
-// -> ErrInvalid, 5xx -> agentapi.ErrUnavailable.
+// -> ErrInvalid, everything else non-2xx -> agentapi.ErrUnavailable.
 func (e *StatusError) Is(target error) bool {
 	switch {
 	case e.StatusCode == http.StatusConflict:
 		return target == banrules.ErrConflict
-	case e.StatusCode >= 500:
-		return target == agentapi.ErrUnavailable
-	case e.StatusCode >= 400:
+	case e.StatusCode >= 400 && e.StatusCode < 500:
 		return target == banrules.ErrInvalid
+	default:
+		// 1xx, 3xx, 5xx and anything else the agent never sends: treat as
+		// a transient/unknown condition, never as a permanent rejection.
+		return target == agentapi.ErrUnavailable
 	}
-	return false
 }
 
 // Client talks to the agent over its Unix socket. It implements
@@ -87,8 +88,13 @@ func NewClientWithTimeout(socketPath string, timeout time.Duration) *Client {
 
 func (c *Client) Health(ctx context.Context) (agentapi.HealthResponse, error) {
 	var out agentapi.HealthResponse
-	err := c.do(ctx, http.MethodGet, agentapi.PathHealth, nil, &out)
-	return out, err
+	if err := c.do(ctx, http.MethodGet, agentapi.PathHealth, nil, &out); err != nil {
+		return agentapi.HealthResponse{}, err
+	}
+	if out.Status != "ok" {
+		return agentapi.HealthResponse{}, fmt.Errorf("%w: unexpected health status %q", agentapi.ErrUnavailable, out.Status)
+	}
+	return out, nil
 }
 
 func (c *Client) Ban(ctx context.Context, prefix netip.Prefix, d time.Duration) error {
