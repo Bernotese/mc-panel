@@ -138,7 +138,7 @@ func (h *Handler) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s, err := h.q.RbacCreateServer(ctx, store.RbacCreateServerParams{Name: req.Name, CreatedAt: h.clock.Now().UnixMilli()})
-	if isUniqueViolation(err) {
+	if store.IsUniqueViolation(err) {
 		writeConflict(w, r, "server name already taken")
 		return
 	}

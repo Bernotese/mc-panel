@@ -124,7 +124,7 @@ func (h *Handler) createIPRule(w http.ResponseWriter, r *http.Request) {
 		Cidr: p.String(), Kind: req.Kind, Comment: comment, ExpiresAt: exp,
 		CreatedBy: callerName(ctx), CreatedAt: now.UnixMilli(),
 	})
-	if isUniqueViolation(err) {
+	if store.IsUniqueViolation(err) {
 		conflict(w, r, "a rule for this network and kind already exists")
 		return
 	}

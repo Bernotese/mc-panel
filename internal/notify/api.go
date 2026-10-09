@@ -86,10 +86,6 @@ func notFound(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, r, http.StatusNotFound, httpx.CodeNotFound, "notifier not found")
 }
 
-func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
-}
-
 func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -174,7 +170,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	row, err := h.q.DefenseInsertNotifier(r.Context(), store.DefenseInsertNotifierParams{
 		Kind: string(kind), Name: name, ConfigEnc: enc, Enabled: boolInt(*req.Enabled), CreatedAt: now, UpdatedAt: now,
 	})
-	if isUniqueViolation(err) {
+	if store.IsUniqueViolation(err) {
 		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "a notifier with this name already exists")
 		return
 	}
@@ -265,7 +261,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	updated, err := h.q.DefenseUpdateNotifier(ctx, store.DefenseUpdateNotifierParams{
 		Name: name, ConfigEnc: enc, Enabled: enabled, UpdatedAt: h.clock.Now().UnixMilli(), ID: id,
 	})
-	if isUniqueViolation(err) {
+	if store.IsUniqueViolation(err) {
 		validation(w, r, "a notifier with this name already exists")
 		return
 	}
