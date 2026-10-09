@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { unwrapVoid } from '@/api/errors'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { dialogLock, guardClose } from '@/components/dialog-lock'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -56,8 +57,8 @@ export function TwoFactorCard() {
           {t('profile.totp.setup')}
         </Button>
       )}
-      <Dialog open={setupOpen} onOpenChange={(open) => (open ? setSetupOpen(true) : closeSetup())}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog open={setupOpen} onOpenChange={guardClose(codes !== null, (open) => (open ? setSetupOpen(true) : closeSetup()))}>
+        <DialogContent className="sm:max-w-lg" {...dialogLock(codes !== null)}>
           <DialogHeader>
             <DialogTitle>{t('profile.totp.setup_title')}</DialogTitle>
             <DialogDescription>{t('profile.totp.setup_description')}</DialogDescription>
