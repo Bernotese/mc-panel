@@ -1,4 +1,4 @@
-package audit
+package auditapi
 
 import (
 	"database/sql"
@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"mcpanel/internal/audit"
 	"mcpanel/internal/clock"
 	"mcpanel/internal/httpx"
 	"mcpanel/internal/notify"
@@ -90,7 +91,7 @@ func (h *Handler) handleList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleVerify(w http.ResponseWriter, r *http.Request) {
-	rep, err := Verify(r.Context(), h.db)
+	rep, err := audit.Verify(r.Context(), h.db)
 	if err != nil {
 		httpx.Internal(w, r, err)
 		return
@@ -157,8 +158,8 @@ func parseListQuery(v url.Values) (store.AuditListParams, int, string) {
 		action = globLiteral(s) + "*" // prefix match
 	}
 	if s := v.Get("result"); s != "" {
-		switch Result(s) {
-		case ResultSuccess, ResultFailure, ResultDenied:
+		switch audit.Result(s) {
+		case audit.ResultSuccess, audit.ResultFailure, audit.ResultDenied:
 			result = s
 		default:
 			return store.AuditListParams{}, 0, "result must be success, failure or denied"

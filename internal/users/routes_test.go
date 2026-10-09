@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"mcpanel/internal/audit"
+	"mcpanel/internal/audit/auditapi"
 	"mcpanel/internal/clock"
 	"mcpanel/internal/notify"
 	"mcpanel/internal/principal"
@@ -25,7 +26,7 @@ func TestRouteContract(t *testing.T) {
 	rt := rbac.NewRouter(mux, rbac.NewDBChecker(db), clk)
 	rt.Route("/api", func(api *rbac.Router) {
 		users.NewHandler(db, clk, &audit.MemoryRecorder{}, notify.Nop{}).Routes(api)
-		audit.NewHandler(db, clk, notify.Nop{}).Routes(api)
+		auditapi.NewHandler(db, clk, notify.Nop{}).Routes(api)
 	})
 	mux.Handle("/*", http.NotFoundHandler())
 
