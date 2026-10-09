@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -89,24 +90,66 @@ func encode(pw string, salt []byte, m, t uint32, p uint8) string {
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, m, t, p, b64.EncodeToString(salt), b64.EncodeToString(key))
 }
 
+// Accepted ranges for parameters read from a stored hash. Anything outside them is
+// treated as malformed, so a corrupted or hostile hash cannot make Verify allocate
+// unbounded memory or run for an unbounded time.
+const (
+	minStoredMemory  uint64 = 8
+	maxStoredMemory  uint64 = 256 * 1024
+	minStoredTime    uint64 = 1
+	maxStoredTime    uint64 = 10
+	minStoredThreads uint64 = 1
+	maxStoredThreads uint64 = 16
+	minSaltLen              = 8
+	maxSaltLen              = 64
+	minKeyLen               = 16
+	maxKeyLen               = 64
+)
+
+// parseField strips the expected prefix and parses the rest as a strict unsigned
+// decimal of the given bit size. Trailing junk, signs and empty values are rejected.
+func parseField(s, prefix string, bitSize int) (uint64, bool) {
+	rest, ok := strings.CutPrefix(s, prefix)
+	if !ok {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(rest, 10, bitSize)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
 func Verify(pw, encoded string) (ok, needsRehash bool, err error) {
 	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[1] != "argon2id" {
+	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" {
 		return false, false, ErrMalformedHash
 	}
-	var version int
-	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil || version != argon2.Version {
+	version, okVersion := parseField(parts[2], "v=", 32)
+	if !okVersion || version != uint64(argon2.Version) {
 		return false, false, ErrMalformedHash
 	}
-	var m, t uint32
-	var p uint8
-	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &m, &t, &p); err != nil || m == 0 || t == 0 || p == 0 {
+	params := strings.Split(parts[3], ",")
+	if len(params) != 3 {
 		return false, false, ErrMalformedHash
 	}
+	mem, okM := parseField(params[0], "m=", 64)
+	tim, okT := parseField(params[1], "t=", 64)
+	par, okP := parseField(params[2], "p=", 64)
+	if !okM || !okT || !okP ||
+		mem < minStoredMemory || mem > maxStoredMemory ||
+		tim < minStoredTime || tim > maxStoredTime ||
+		par < minStoredThreads || par > maxStoredThreads {
+		return false, false, ErrMalformedHash
+	}
+	m, t, p := uint32(mem), uint32(tim), uint8(par)
+
 	b64 := base64.RawStdEncoding
 	salt, err1 := b64.DecodeString(parts[4])
 	want, err2 := b64.DecodeString(parts[5])
-	if err1 != nil || err2 != nil || len(want) == 0 {
+	if err1 != nil || err2 != nil ||
+		len(salt) < minSaltLen || len(salt) > maxSaltLen ||
+		len(want) < minKeyLen || len(want) > maxKeyLen {
 		return false, false, ErrMalformedHash
 	}
 	got := argon2.IDKey([]byte(pw), salt, t, m, p, uint32(len(want)))
@@ -115,10 +158,19 @@ func Verify(pw, encoded string) (ok, needsRehash bool, err error) {
 	return ok, needsRehash, nil
 }
 
+// dummyHash is computed lazily on first use. A failure to produce it panics rather
+// than silently disabling timing equalisation.
 var dummyHash = sync.OnceValue(func() string {
-	h, _ := Hash("dummy password for timing equalisation")
+	h, err := Hash("dummy password for timing equalisation")
+	if err != nil {
+		panic("password: cannot generate dummy hash: " + err.Error())
+	}
 	return h
 })
+
+// Warmup precomputes the hash used by DummyVerify. Servers should call it once at
+// startup so the first unknown-username login costs the same as later ones.
+func Warmup() { _ = dummyHash() }
 
 // DummyVerify burns the same CPU/memory as a real Verify (used for unknown usernames).
 func DummyVerify(pw string) { _, _, _ = Verify(pw, dummyHash()) }
