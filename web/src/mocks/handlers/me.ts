@@ -52,7 +52,6 @@ export const meOperations: MockOperation[] = [
       if (next.length < 12 || next.length > 256) return apiError(400, 'validation_failed', 'password must be 12-256 characters')
       g.user.password = next
       db.sessions = db.sessions.filter((s) => s.userId !== g.user.id || s.id === g.session.id)
-      rotateSession(g.session)
       recordAudit(g.user, 'auth.password.change', g.user.username)
       return noContent()
     }),
