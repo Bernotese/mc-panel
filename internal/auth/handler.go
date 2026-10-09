@@ -111,6 +111,7 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Post("/me/totp/setup", setupOrFull, h.setupTOTP)
 	api.Post("/me/totp/enable", setupOrFull, h.enableTOTP)
 	api.Delete("/me/totp", rbac.Authenticated().WithSudo(), h.disableTOTP)
+	api.Post("/auth/sudo/totp", rbac.Authenticated(), h.sudoTOTP)
 }
 
 type factors struct {
