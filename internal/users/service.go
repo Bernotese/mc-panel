@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"regexp"
-	"strings"
 	"time"
 
 	"mcpanel/internal/password"
@@ -47,10 +46,6 @@ func isValidationError(err error) bool {
 	return false
 }
 
-func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
-}
-
 // newUser validates the input, hashes the password and inserts the user with a fresh 32-byte
 // WebAuthn user handle. Shared by POST /users and `panel admin create`.
 func newUser(ctx context.Context, q *store.Queries, now time.Time, username, pw, role string) (store.User, error) {
@@ -81,7 +76,7 @@ func newUser(ctx context.Context, q *store.Queries, now time.Time, username, pw,
 		Username: username, PasswordHash: hash, Role: role, WebauthnHandle: handle,
 		PasswordChangedAt: ms, CreatedAt: ms, UpdatedAt: ms,
 	})
-	if isUniqueViolation(err) {
+	if store.IsUniqueViolation(err) {
 		return store.User{}, ErrUsernameTaken
 	}
 	return u, err

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -36,11 +35,6 @@ func validation(w http.ResponseWriter, r *http.Request, msg string) {
 
 func conflict(w http.ResponseWriter, r *http.Request, msg string) {
 	httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, msg)
-}
-
-// isUniqueViolation detects SQLite UNIQUE constraint errors (modernc.org/sqlite message text).
-func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 func nullInt64Ptr(v sql.NullInt64) *int64 {
