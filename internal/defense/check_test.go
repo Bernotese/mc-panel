@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,5 +154,39 @@ func TestInvalidIPFailsClosed(t *testing.T) {
 	}
 	if !e.svc.jailed(zero, e.clk.Now()) {
 		t.Fatal("jailed(zero) must be true")
+	}
+}
+
+func TestAllowlistedIPSkipsLoginRateLimits(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.addRule(t, "192.0.2.0/24", "allow", nil)
+	// others exhaust the username bucket of the admin
+	for i := 0; i < 5; i++ {
+		if err := e.svc.CheckLogin(ctx, addr(fmt.Sprintf("198.51.100.%d", i+1)), "admin"); err != nil {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
+	}
+	wantRateLimited(t, e.svc.CheckLogin(ctx, addr("198.51.100.99"), "admin"), 12*time.Second)
+	for i := 0; i < 20; i++ {
+		if err := e.svc.CheckLogin(ctx, addr("192.0.2.7"), "admin"); err != nil {
+			t.Fatalf("allowlisted login %d must not be rate limited: %v", i, err)
+		}
+	}
+}
+
+func TestLoginUsernameBucketKeyIsCapped(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	long := strings.Repeat("a", 64)
+	for i := 0; i < 5; i++ {
+		if err := e.svc.CheckLogin(ctx, addr(fmt.Sprintf("198.51.100.%d", i+1)), long+fmt.Sprint(i)); err != nil {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
+	}
+	// names that only differ after 64 runes share a bucket
+	wantRateLimited(t, e.svc.CheckLogin(ctx, addr("198.51.100.99"), long+"zzz"), 12*time.Second)
+	if n := e.svc.loginUser.size(); n != 1 {
+		t.Fatalf("username buckets = %d, want 1", n)
 	}
 }
