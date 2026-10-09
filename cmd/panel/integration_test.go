@@ -210,7 +210,7 @@ func TestFullFlowPermissionsAndAudit(t *testing.T) {
 		t.Fatalf("GET /servers as maxUser = %d %v", code, list)
 	}
 	maxUser.must(202, "POST", fmt.Sprintf("/servers/%d/power", srvA), map[string]string{"action": "restart"})
-	if c, out := maxUser.do("POST", fmt.Sprintf("/servers/%d/power", srvB), map[string]string{"action": "restart"}); c != 403 {
+	if c, out := maxUser.do("POST", fmt.Sprintf("/servers/%d/power", srvB), map[string]string{"action": "restart"}); c != 403 || out["error"] != "forbidden" {
 		t.Fatalf("power on B = %d %v", c, out)
 	}
 	if c, _ := maxUser.do("GET", "/users", nil); c != 403 {
@@ -265,9 +265,11 @@ func TestCSRFRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var body map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&body)
 	resp.Body.Close()
-	if resp.StatusCode != 403 {
-		t.Fatalf("foreign Origin = %d, want 403", resp.StatusCode)
+	if resp.StatusCode != 403 || body["error"] != "csrf_invalid" {
+		t.Fatalf("foreign Origin = %d %v, want 403 csrf_invalid", resp.StatusCode, body)
 	}
 	admin.must(204, "POST", "/me/sessions/revoke-others", nil)
 }
@@ -340,6 +342,28 @@ func TestAgentDownStillWorks(t *testing.T) {
 	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/api/health", nil))
 	if rec.Code != 200 {
 		t.Fatalf("/api/health without agent = %d", rec.Code)
+	}
+	// The application-level jail works without the agent (the firewall sync just fails).
+	login := func() (int, string) {
+		req := httptest.NewRequest("POST", "/api/auth/login",
+			strings.NewReader(`{"username":"nobody","password":"wrong password!!"}`))
+		req.RemoteAddr = "203.0.113.60:4242"
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", cfg.Origin())
+		rec := httptest.NewRecorder()
+		a.Handler.ServeHTTP(rec, req)
+		var body map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+		code, _ := body["error"].(string)
+		return rec.Code, code
+	}
+	for i := 0; i < 5; i++ {
+		if c, code := login(); c != 401 || code != "invalid_credentials" {
+			t.Fatalf("attempt %d = %d %s", i+1, c, code)
+		}
+	}
+	if c, code := login(); c != 403 || code != "jailed" {
+		t.Fatalf("6th attempt without agent = %d %s, want 403 jailed", c, code)
 	}
 }
 
