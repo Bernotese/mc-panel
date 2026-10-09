@@ -124,6 +124,9 @@ func (h *Handler) createIPRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.s.reloadOrLog(ctx)
+	if req.Kind == "allow" {
+		h.s.kickSync() // firewall bans overlapping the new allow rule must be removed
+	}
 	h.record(ctx, audit.Entry{
 		Action: audit.ActionIPRuleCreate, Target: row.Cidr,
 		Details: map[string]any{"rule_id": row.ID, "kind": row.Kind, "comment": row.Comment, "expires_at": nullInt64Ptr(row.ExpiresAt)},
