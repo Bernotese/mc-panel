@@ -1,6 +1,5 @@
+// web/src/routes/_app/index.tsx
 import { createFileRoute } from '@tanstack/react-router'
+import { DashboardPage } from '@/features/dashboard/dashboard-page'
 
-// Temporary landing page; replaced by the dashboard in Task 11.
-export const Route = createFileRoute('/_app/')({
-  component: () => <p className="text-2xl font-semibold">mc-panel</p>,
-})
+export const Route = createFileRoute('/_app/')({ component: DashboardPage })
