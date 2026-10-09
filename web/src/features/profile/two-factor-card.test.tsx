@@ -24,6 +24,28 @@ describe('TwoFactorCard', () => {
     await waitFor(() => expect(within(card).getByText('Aktiv')).toBeInTheDocument())
   })
 
+  it('keeps the recovery codes on screen until they are confirmed', async () => {
+    const user = userEvent.setup()
+    await renderWithProviders(<TwoFactorCard />, { me: loginAs('alice') })
+    const card = screen.getByRole('region', { name: 'Authenticator-App (TOTP)' })
+    await user.click(within(card).getByRole('button', { name: 'Einrichten' }))
+    const dialog = screen.getByRole('dialog', { name: 'Authenticator-App einrichten' })
+    await user.click(within(dialog).getByRole('button', { name: 'Einrichtung starten' }))
+    await user.type(await within(dialog).findByLabelText('Code aus der Authenticator-App'), MOCK_TOTP_CODE)
+    await user.click(within(dialog).getByRole('button', { name: 'Aktivieren' }))
+    await within(dialog).findByRole('list', { name: 'Wiederherstellungscodes' })
+
+    expect(within(dialog).queryByRole('button', { name: /Schließen|Close/ })).not.toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await user.click(document.querySelector('[data-slot="dialog-overlay"]')!)
+    expect(screen.getByRole('dialog', { name: 'Authenticator-App einrichten' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('list', { name: 'Wiederherstellungscodes' })).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('checkbox', { name: 'Ich habe die Codes sicher gespeichert.' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Fertig' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
   it('disables TOTP after confirmation and sudo', async () => {
     const user = userEvent.setup()
     await renderWithProviders(<TwoFactorCard />, { me: loginAs('admin') })

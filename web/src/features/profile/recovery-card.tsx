@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { unwrap } from '@/api/errors'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { dialogLock, guardClose } from '@/components/dialog-lock'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { refreshMe, useMe } from '@/features/auth/me'
@@ -50,8 +51,8 @@ export function RecoveryCard() {
         pending={regenerate.isPending}
         onConfirm={() => regenerate.mutate()}
       />
-      <Dialog open={codes !== null} onOpenChange={(open) => !open && setCodes(null)}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog open={codes !== null} onOpenChange={guardClose(codes !== null, (open) => !open && setCodes(null))}>
+        <DialogContent className="sm:max-w-lg" {...dialogLock(codes !== null)}>
           <DialogHeader>
             <DialogTitle>{t('profile.recovery.new_codes_title')}</DialogTitle>
             <DialogDescription>{t('recovery.description')}</DialogDescription>

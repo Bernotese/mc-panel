@@ -6,6 +6,7 @@ import { api } from '@/api/client'
 import { unwrap, unwrapVoid } from '@/api/errors'
 import type { Passkey, PasskeyCreated } from '@/api/types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { dialogLock, guardClose } from '@/components/dialog-lock'
 import { DataList, type Column } from '@/components/data-list'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -104,8 +105,8 @@ export function PasskeysCard() {
       ) : (
         <DataList items={passkeys.data ?? []} columns={columns} rowKey={(p) => p.id} caption={t('profile.passkeys.caption')} empty={t('profile.passkeys.empty')} />
       )}
-      <Dialog open={adding} onOpenChange={(open) => (open ? setAdding(true) : closeAdd())}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog open={adding} onOpenChange={guardClose(codes !== null, (open) => (open ? setAdding(true) : closeAdd()))}>
+        <DialogContent className="sm:max-w-lg" {...dialogLock(codes !== null)}>
           <DialogHeader>
             <DialogTitle>{t('profile.passkeys.add')}</DialogTitle>
             <DialogDescription>{t('profile.passkeys.add_description')}</DialogDescription>
