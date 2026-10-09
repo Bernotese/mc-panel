@@ -200,7 +200,7 @@ func (s *Service) PruneOnce(ctx context.Context) (int64, error) {
 }
 
 func (s *Service) cleanupLimiters(now time.Time) {
-	for _, l := range []*keyedLimiter{s.loginIP, s.loginUser, s.secondFactor, s.api} {
+	for _, l := range []*keyedLimiter{s.loginIP, s.loginUser, s.secondFactor, s.api, s.apiAnon} {
 		l.cleanup(now, LimiterIdle)
 	}
 }

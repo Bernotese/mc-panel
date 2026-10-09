@@ -74,7 +74,8 @@ type Service struct {
 	loginIP      *keyedLimiter
 	loginUser    *keyedLimiter
 	secondFactor *keyedLimiter
-	api          *keyedLimiter
+	api          *keyedLimiter // per session
+	apiAnon      *keyedLimiter // per anonymous IP key: a flood here cannot overflow the session map
 
 	snap   atomic.Pointer[snapshot] // read lock-free by middleware
 	snapMu sync.Mutex               // serializes snapshot writers (Reload, addJail)
@@ -106,6 +107,7 @@ func NewService(ctx context.Context, d Deps) (*Service, error) {
 		loginUser:    newKeyedLimiter(LoginPerUserLimit),
 		secondFactor: newKeyedLimiter(SecondFactorLimit),
 		api:          newKeyedLimiter(APILimit),
+		apiAnon:      newKeyedLimiter(APILimit),
 		kick:         make(chan struct{}, 1),
 		unbannable:   make(map[int64]bool),
 	}

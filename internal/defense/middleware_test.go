@@ -189,6 +189,7 @@ func TestAPIRateLimitAllowlistedBypassesOverflowBucket(t *testing.T) {
 	e := newEnv(t)
 	e.addRule(t, "192.0.2.0/24", "allow", nil)
 	e.svc.api.max = 3
+	e.svc.apiAnon.max = 3
 	// foreign keys fill the map and drain the shared overflow bucket
 	for i := 1; i <= 3; i++ {
 		if rec := e.apiReq("/api/x", 0, fmt.Sprintf("198.51.100.%d", i)); rec.Code != http.StatusNoContent {
@@ -204,6 +205,12 @@ func TestAPIRateLimitAllowlistedBypassesOverflowBucket(t *testing.T) {
 	}
 	if rec := e.apiReq("/api/x", 0, "203.0.113.201"); rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("other new keys share the drained overflow bucket: %d", rec.Code)
+	}
+	// foreign sessions fill the (separate) session map as well
+	for sid := int64(1); sid <= 3; sid++ {
+		if rec := e.apiReq("/api/x", sid, "198.51.100.1"); rec.Code != http.StatusNoContent {
+			t.Fatalf("session fill %d: %d", sid, rec.Code)
+		}
 	}
 	// an allowlisted admin (anonymous or with a fresh session) is not affected
 	for i := 0; i < 100; i++ {
@@ -237,5 +244,32 @@ func TestCheckLoginAllowlistedBypassesIPOverflowBucket(t *testing.T) {
 	// a new allowlisted key is neither limited by the overflow bucket nor blocked
 	if err := e.svc.CheckLogin(ctx, addr("192.0.2.7"), "admin"); err != nil {
 		t.Fatalf("allowlisted admin login must pass while the map is full: %v", err)
+	}
+}
+
+// An anonymous flood from rotating IPv6 networks fills only the anonymous map: sessions keep
+// their own buckets and are never pushed into the shared overflow bucket by it.
+func TestAPIRateLimitAnonymousFloodDoesNotAffectSessions(t *testing.T) {
+	e := newEnv(t)
+	e.svc.apiAnon.max = 3
+	for i := 1; i <= 3; i++ {
+		if rec := e.apiReq("/api/x", 0, fmt.Sprintf("2001:db8:%x::1", i)); rec.Code != http.StatusNoContent {
+			t.Fatalf("fill %d: %d", i, rec.Code)
+		}
+	}
+	limited := false
+	for i := 0; i < 70 && !limited; i++ {
+		limited = e.apiReq("/api/x", 0, fmt.Sprintf("2001:db8:%x::1", 100+i)).Code == http.StatusTooManyRequests
+	}
+	if !limited {
+		t.Fatal("precondition: the anonymous overflow bucket must be exhausted")
+	}
+	for sid := int64(1); sid <= 5; sid++ {
+		if rec := e.apiReq("/api/x", sid, "203.0.113.7"); rec.Code != http.StatusNoContent {
+			t.Fatalf("new session %d hit the anonymous overflow bucket: %d", sid, rec.Code)
+		}
+	}
+	if n := e.svc.api.size(); n != 5 {
+		t.Fatalf("session buckets = %d, want 5", n)
 	}
 }
