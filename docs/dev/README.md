@@ -28,11 +28,77 @@ brew install go node sqlc goose golangci-lint goreleaser jq shellcheck lima
 make dev        # agent + panel (-dev) + Vite; UI unter http://localhost:5173
 ```
 
+`make dev` baut `.dev/bin/panel` und `.dev/bin/agent` und startet agent, `panel serve -dev` und Vite. Endet einer der drei Prozesse, beendet `scripts/dev.sh` die anderen und bricht mit Exit-Code ≠ 0 ab (die Ausgabe nennt den Prozess). Strg+C stoppt alles.
+
+## Erster Start
+
+Eine frische Entwicklungsumgebung hat noch keinen Benutzer. Den ersten Admin legt die CLI an (in einem zweiten Terminal, während `make dev` läuft):
+
+```bash
+printf '%s\n' '<passwort>' | .dev/bin/panel admin create -dev -username admin
+```
+
+Ohne Pipe fragt `admin create` das Passwort zweimal ohne Echo ab. Danach unter <http://localhost:5173> anmelden; Admins müssen beim ersten Login einen zweiten Faktor (Authenticator-App oder Passkey) einrichten und die Wiederherstellungscodes bestätigen. Alle Daten liegen unter `.dev/` (`make clean` setzt sie zurück).
+
+Weitere CLI-Befehle (wirken direkt auf die Datenbank, das panel darf laufen oder gestoppt sein):
+
+| Befehl | Wirkung |
+|---|---|
+| `.dev/bin/panel admin unlock -dev` | Notausgang bei Aussperrung: hebt alle aktiven Jails auf, schaltet „Admin-Login nur aus Allowlist“ ab und leert den Länderfilter (wird auditiert) |
+| `.dev/bin/panel audit verify -dev` | prüft die Hash-Kette des Audit-Logs und meldet den ersten fehlerhaften Eintrag (Exit-Code 1) |
+
+Ohne `-dev` lesen alle Befehle `/etc/mc-panel/panel.toml` (abweichend: `-config <pfad>`).
+
+## Frontend ohne Backend (Mock)
+
+```bash
+cd web && npm run dev:mock    # Vite mit MSW-Mock-API, kein Go-Prozess nötig
+```
+
+Der Mock deckt jede Operation aus `api/openapi.yaml` ab (`src/mocks/handlers.test.ts` prüft das). `npm run build` verweigert einen Build mit aktivem Mock.
+
+## End-to-End-Tests (Playwright)
+
+Einmalig den Browser installieren: `cd web && npx playwright install chromium`.
+
+| Befehl | Wirkung |
+|---|---|
+| `npm run e2e` | Projekt `mock`: startet selbst `vite --mode mock` auf Port 5174 und testet `e2e/smoke.spec.ts` und `e2e/totp.spec.ts` gegen die Mock-API |
+| `npm run e2e:real` | Projekt `real`: `e2e/login-totp.spec.ts` gegen ein laufendes `make dev`; braucht `E2E_BASE_URL`, `E2E_ADMIN_USER` und `E2E_ADMIN_PASSWORD` eines **frischen** Admins ohne 2FA |
+
+Der Real-Test richtet TOTP ein, meldet sich mit TOTP neu an, registriert über einen virtuellen Authenticator (Chrome DevTools Protocol, nur Chromium) einen Passkey im Profil (Sudo per TOTP) und meldet sich zuletzt mit dem Passkey an. Er wartet dabei ggf. auf den nächsten 30-s-TOTP-Schritt. Beispiel:
+
+```bash
+make dev   # Terminal 1
+printf '%s\n' 'e2e admin password 1' | .dev/bin/panel admin create -dev -username e2e-admin
+cd web && E2E_BASE_URL=http://localhost:5173 E2E_ADMIN_USER=e2e-admin E2E_ADMIN_PASSWORD='e2e admin password 1' npm run e2e:real
+```
+
+Ein zweiter Lauf braucht einen neuen Admin (anderer Benutzername) oder ein frisches `.dev/` (`make clean`).
+
+In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er baut die Binaries, startet agent, `panel serve -dev` und Vite, legt `e2e-admin` an, führt `npm run e2e:real` (ohne Retries) und danach `npm run e2e` aus und lädt bei einem Fehlschlag die Logs sowie `test-results`/`playwright-report` als Artefakt hoch.
+
+## Produktion: Listen-Adresse und Reverse Proxy
+
+- Standard ohne `-dev` ist `listen = "unix:/run/mc-panel/panel.sock"`: das panel lauscht nur auf einem Unix-Socket (Modus 0660, Gruppe = primäre Gruppe des panel-Benutzers `mcpanel`). Ein verwaister Socket wird beim Start nur entfernt, wenn niemand mehr darauf lauscht. Das Verzeichnis `/run/mc-panel` muss für `mcpanel` beschreibbar sein; die systemd-Units dafür liefert der Installer (Teilprojekt 6).
+- Caddy terminiert TLS und spricht den Socket an:
+
+  ```
+  panel.example.com {
+      reverse_proxy unix//run/mc-panel/panel.sock
+  }
+  ```
+
+  Der Caddy-Benutzer braucht Zugriff auf den Socket (z. B. `usermod -aG mcpanel caddy`). Der agent prüft die Peer-UID, Caddy kann den agent-Socket daher trotzdem nicht nutzen.
+- Requests über den Unix-Socket gelten als vom Proxy kommend: die Client-IP ist der rechteste nicht vertrauenswürdige Eintrag in `X-Forwarded-For` (Caddy setzt ihn). Fehlt ein verwertbarer Eintrag, wird der Request abgewiesen (`403 ip_blocked`); Health-Checks direkt am Socket brauchen deshalb einen Header, z. B. `curl --unix-socket /run/mc-panel/panel.sock -H 'X-Forwarded-For: 127.0.0.1' http://panel/api/health`.
+- TCP bleibt möglich (`listen = "127.0.0.1:8080"`); dann wird `X-Forwarded-For` nur von `trusted_proxies` übernommen. Loopback ist nur im Dev-Modus von „Admin-Login nur aus Allowlist“ ausgenommen.
+- Außerhalb des Dev-Modus sendet das panel `Strict-Transport-Security: max-age=31536000`.
+
 ## Make-Targets
 
 | Target | Wirkung |
 |---|---|
-| `make dev` | agent (falls gebaut) + `panel serve -dev` + Vite-Dev-Server, alles unter `./.dev/` |
+| `make dev` | baut agent und panel, startet agent + `panel serve -dev` + Vite-Dev-Server, alles unter `./.dev/`; endet ein Prozess, stoppt das Skript alle |
 | `make test` | Go-Tests (`test-go`) und Frontend-Tests (`test-web`) |
 | `make test-race` | Go-Tests mit Race-Detector (`CGO_ENABLED=1`) |
 | `make lint` | `golangci-lint run ./...` plus ESLint und TypeScript-Check im Frontend |
@@ -60,7 +126,7 @@ Linux-spezifische Dateien lokal linten: `GOOS=linux .dev/tools/golangci-lint run
 - Aktive Exclusion-Presets: nur `std-error-handling` (ignoriert ungeprüfte Fehler von `Close`, `Flush`, `os.Remove`, `fmt.Fprint*` u. Ä.). `common-false-positives` ist bewusst **nicht** aktiv: gosec G103 (`unsafe`), G204 (Subprozess mit Variable) und G304 (Datei-Pfad aus Variable) bleiben sichtbar und brauchen im Einzelfall eine gezielte Regel oder `//nolint:gosec // Begründung`.
 - Global abgeschaltete gosec-Regeln (`linters.settings.gosec.excludes`): G104 (ungeprüfte Fehler, macht errcheck), G115 (Integer-Konvertierung, feuert bei jeder `uint32(len(x))`/`int(uid)`-Konvertierung; Grenzen werden dort geprüft, wo Eingaben nicht vertrauenswürdig sind) und G117 (Feldnamen wie `password`/`secret` in API-DTOs sind Teil des OpenAPI-Vertrags).
 - Requests und DB-Zugriffe immer mit Kontext: `http.NewRequestWithContext`, `QueryContext`/`ExecContext`/`PingContext`. Ausnahme ist `net.Listen` im agent (`cmd/agent/`, `internal/agent/`).
-- Dateimodus `0660` (agent-Socket, Spec §3) ist nur in `cmd/agent/` und `internal/agent/` für gosec G302 freigegeben, sofern er als Literal (`0o660`) in der Zeile steht; überall sonst und für andere Modi über `0600` ist eine Begründung nötig.
+- Dateimodus `0660` (agent-Socket, Spec §3) ist nur in `cmd/agent/` und `internal/agent/` für gosec G302 freigegeben, sofern er als Literal (`0o660`) in der Zeile steht; überall sonst und für andere Modi über `0600` ist eine Begründung nötig (z. B. `internal/unixsock`, das den Modus der Sockets von agent und panel setzt).
 - In Tests sind feste Test-Passwörter, `math/rand` und lockere Dateimodi erlaubt.
 - Formatierung: `gofmt` + `goimports` mit lokalem Präfix `mcpanel` (`golangci-lint fmt ./...`).
 
