@@ -14,6 +14,8 @@ import { Route as Setup2faRouteImport } from './routes/setup-2fa'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as LoginIndexRouteImport } from './routes/login/index'
 import { Route as Login2faRouteImport } from './routes/login/2fa'
+import { Route as AppUsersIndexRouteImport } from './routes/_app/users/index'
+import { Route as AppUsersIdPermissionsRouteImport } from './routes/_app/users/$id.permissions'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -39,18 +41,32 @@ const Login2faRoute = Login2faRouteImport.update({
   path: '/login/2fa',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppUsersIndexRoute = AppUsersIndexRouteImport.update({
+  id: '/users/',
+  path: '/users/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppUsersIdPermissionsRoute = AppUsersIdPermissionsRouteImport.update({
+  id: '/users/$id/permissions',
+  path: '/users/$id/permissions',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/setup-2fa': typeof Setup2faRoute
   '/login/2fa': typeof Login2faRoute
   '/login/': typeof LoginIndexRoute
+  '/users/': typeof AppUsersIndexRoute
+  '/users/$id/permissions': typeof AppUsersIdPermissionsRoute
 }
 export interface FileRoutesByTo {
   '/setup-2fa': typeof Setup2faRoute
   '/login/2fa': typeof Login2faRoute
   '/': typeof AppIndexRoute
   '/login': typeof LoginIndexRoute
+  '/users': typeof AppUsersIndexRoute
+  '/users/$id/permissions': typeof AppUsersIdPermissionsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -59,13 +75,35 @@ export interface FileRoutesById {
   '/login/2fa': typeof Login2faRoute
   '/_app/': typeof AppIndexRoute
   '/login/': typeof LoginIndexRoute
+  '/_app/users/': typeof AppUsersIndexRoute
+  '/_app/users/$id/permissions': typeof AppUsersIdPermissionsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/setup-2fa' | '/login/2fa' | '/login/'
+  fullPaths:
+    | '/'
+    | '/setup-2fa'
+    | '/login/2fa'
+    | '/login/'
+    | '/users/'
+    | '/users/$id/permissions'
   fileRoutesByTo: FileRoutesByTo
-  to: '/setup-2fa' | '/login/2fa' | '/' | '/login'
-  id: '__root__' | '/_app' | '/setup-2fa' | '/login/2fa' | '/_app/' | '/login/'
+  to:
+    | '/setup-2fa'
+    | '/login/2fa'
+    | '/'
+    | '/login'
+    | '/users'
+    | '/users/$id/permissions'
+  id:
+    | '__root__'
+    | '/_app'
+    | '/setup-2fa'
+    | '/login/2fa'
+    | '/_app/'
+    | '/login/'
+    | '/_app/users/'
+    | '/_app/users/$id/permissions'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -112,15 +150,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof Login2faRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/users/': {
+      id: '/_app/users/'
+      path: '/users'
+      fullPath: '/users/'
+      preLoaderRoute: typeof AppUsersIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/users/$id/permissions': {
+      id: '/_app/users/$id/permissions'
+      path: '/users/$id/permissions'
+      fullPath: '/users/$id/permissions'
+      preLoaderRoute: typeof AppUsersIdPermissionsRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
+  AppUsersIndexRoute: typeof AppUsersIndexRoute
+  AppUsersIdPermissionsRoute: typeof AppUsersIdPermissionsRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
+  AppUsersIndexRoute: AppUsersIndexRoute,
+  AppUsersIdPermissionsRoute: AppUsersIdPermissionsRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
