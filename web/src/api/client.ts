@@ -25,13 +25,15 @@ export const ME_PATHS: ReadonlySet<string> = new Set([
   '/me',
 ])
 
-/** Endpoints after which the backend rotates the session (new id + CSRF token) without returning Me. */
+/**
+ * Endpoints after which the backend rotates the session token without returning Me (sudo grants, first-factor
+ * enrolment of a setup-stage session). /me/password only revokes the other sessions and keeps this one.
+ */
 export const ROTATING_PATHS: ReadonlySet<string> = new Set([
   '/auth/sudo/totp',
   '/auth/sudo/webauthn/finish',
   '/me/totp/enable',
   '/me/passkeys/finish',
-  '/me/password',
 ])
 
 function isMe(value: unknown): value is Me {

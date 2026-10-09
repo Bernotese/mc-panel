@@ -30,7 +30,7 @@ describe('PasswordCard', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Das aktuelle Passwort ist falsch.')
   })
 
-  it('changes the password, signs out other sessions and refreshes the CSRF token', async () => {
+  it('changes the password, signs out other sessions and keeps the current session', async () => {
     await renderWithProviders(<PasswordCard />, { me: loginAs('admin') })
     const user = await fill(MOCK_PASSWORD, 'brand-new-password', 'brand-new-password')
     await user.click(screen.getByRole('button', { name: 'Passwort ändern' }))
