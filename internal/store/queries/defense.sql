@@ -76,3 +76,9 @@ SELECT * FROM jails WHERE id = sqlc.arg(id);
 -- name: DefenseLiftJail :execrows
 UPDATE jails SET lifted_at = sqlc.arg(lifted_at), lifted_by = sqlc.arg(lifted_by)
 WHERE id = sqlc.arg(id) AND lifted_at IS NULL;
+
+-- name: DefenseGetIPRule :one
+SELECT * FROM ip_rules WHERE id = sqlc.arg(id);
+
+-- name: DefenseDeleteIPRule :execrows
+DELETE FROM ip_rules WHERE id = sqlc.arg(id);
