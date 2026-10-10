@@ -1,7 +1,7 @@
 # mc-panel – Teilprojekt 2: Instanzen-Lifecycle (Design-Spec)
 
 - **Datum:** 2026-10-10
-- **Status:** Entwurf, wartet auf Review
+- **Status:** umgesetzt (PRs #9–#16, 2026-10-11)
 - **Autor:** Jannes Göbel (mit Claude)
 - **Baut auf:** `2026-10-08-mc-panel-foundation-design.md` (Teilprojekt 1)
 
