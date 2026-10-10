@@ -10,7 +10,7 @@ import { DataList, type Column } from '@/components/data-list'
 import { PageHeader } from '@/components/page-header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { serversQueryOptions } from '@/features/dashboard/servers'
+import { serversQueryOptions } from '@/features/servers/api'
 import { errorMessage, useErrorToast } from '@/lib/error-message'
 import { fromMatrix, sameMatrix, toggle, toMatrix, type Matrix } from './permission-matrix'
 
