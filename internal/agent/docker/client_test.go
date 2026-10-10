@@ -148,7 +148,7 @@ func TestContainerLifecycle(t *testing.T) {
 		HostConfig: docker.HostConfig{
 			Binds: []string{"/srv/mc-panel/instances/1:/data"}, NetworkMode: "mcpanel-mc",
 			RestartPolicy: docker.RestartPolicy{Name: "unless-stopped"}, CapDrop: []string{"ALL"},
-			SecurityOpt: []string{"no-new-privileges:true"}, Memory: 5 << 30, MemorySwap: 5 << 30, PidsLimit: 1024,
+			SecurityOpt: []string{"no-new-privileges:true"}, Memory: 5 << 30, MemorySwap: 5 << 30, PidsLimit: 1024, CPUShares: 256,
 			LogConfig: docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
 		},
 		NetworkingConfig: docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{"mcpanel-mc": {}}},
