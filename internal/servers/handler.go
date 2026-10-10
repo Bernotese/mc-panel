@@ -66,7 +66,7 @@ func NewHandler(d Deps) *Handler {
 	return &Handler{
 		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst, catalog: cat, log: log,
 		power: newPowerLimiter(), kick: make(chan struct{}, 1),
-		reconcile: reconcileState{attempts: map[int64]attempt{}, warned: map[int64]bool{}},
+		reconcile: reconcileState{attempts: map[int64]attempt{}, warned: map[int64]bool{}, foreign: map[int64]bool{}},
 	}
 }
 

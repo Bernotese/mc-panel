@@ -52,6 +52,11 @@ export function ServerOverview({ server, instance }: { server: Server; instance:
             <p className="font-medium">{t('servers.overview.last_error')}</p>
             <p className="font-mono break-words">{status.last_error}</p>
           </div>
+        ) : status.state === 'error' ? (
+          // Only admins get the error text from the API (it can name host paths and Docker internals).
+          <div role="alert" className="border-destructive/50 mt-4 rounded-md border p-3 text-sm">
+            <p>{t('servers.overview.error_hidden')}</p>
+          </div>
         ) : null}
       </SectionCard>
       <SectionCard title={t('servers.overview.controls')}>

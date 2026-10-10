@@ -942,6 +942,25 @@ export interface components {
             /** @description All fields set (defaults resolved) */
             properties: components["schemas"]["ServerProperties"];
         };
+        /**
+         * @description Actual state of the instance as last reported by the agent (contract V4). `state` is the first matching row:
+         *
+         *     | Condition | state |
+         *     |---|---|
+         *     | no instance row | not_configured (desired_state null) |
+         *     | agent unreachable or Docker unavailable | unknown |
+         *     | container with the server's ID whose mcpanel.name label differs from the server's name (leftover of another server; never touched) | error |
+         *     | container missing, operation '', last_error set (ensure failed for good, or a reconcile error before the agent call, e.g. no base domain) | error |
+         *     | operation pulling/creating, or container missing | creating |
+         *     | operation starting | starting |
+         *     | operation stopping/removing | stopping |
+         *     | container restarting | restarting |
+         *     | container running | running |
+         *     | container exited/created, desired_state running, exit_code != 0 or last_error set | error |
+         *     | container exited/created | stopped |
+         *
+         *     `restart_required`: the container exists, runs, and its label revision is older than the stored revision.
+         */
         ServerStatus: {
             state: components["schemas"]["ServerState"];
             /** @enum {string|null} */
@@ -949,6 +968,7 @@ export interface components {
             restart_required: boolean;
             /** @enum {string} */
             operation: "" | "pulling" | "creating" | "starting" | "stopping" | "removing";
+            /** @description The agent's last error, otherwise a reconcile error of the panel; '' when there is none. Only admins get the text: for other users it is always '' (state still says error). */
             last_error: string;
             /**
              * Format: int64
@@ -1014,9 +1034,14 @@ export interface components {
             /** @description fabric: stable loader versions, newest first; all other types: [] */
             loaders: string[];
         };
+        /** @description A container with the mcpanel.instance label that no server in the database owns. Never touched by the panel. */
         UnknownContainer: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Server ID from the mcpanel.instance label
+             */
             id: number;
+            /** @description Server name from the mcpanel.name label of the container, not the container name mcpanel-mc-<id> */
             name: string;
         };
         ServerSettings: {
@@ -2432,7 +2457,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description conflict (server not configured) or base_domain_missing (restart) */
+            /** @description conflict (server not configured, or restart of a container that belongs to another server) or base_domain_missing (restart) */
             409: {
                 headers: {
                     [name: string]: unknown;

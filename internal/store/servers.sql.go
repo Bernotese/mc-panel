@@ -19,6 +19,15 @@ func (q *Queries) ServersBumpAllRevisions(ctx context.Context, updatedAt int64) 
 	return err
 }
 
+const serversBumpCurseForgeRevisions = `-- name: ServersBumpCurseForgeRevisions :exec
+UPDATE instances SET revision = revision + 1, updated_at = ? WHERE type = 'curseforge'
+`
+
+func (q *Queries) ServersBumpCurseForgeRevisions(ctx context.Context, updatedAt int64) error {
+	_, err := q.db.ExecContext(ctx, serversBumpCurseForgeRevisions, updatedAt)
+	return err
+}
+
 const serversCreateInstance = `-- name: ServersCreateInstance :one
 
 INSERT INTO instances (server_id, type, version, loader_version, modpack, java, memory_mib, properties,
@@ -69,6 +78,24 @@ func (q *Queries) ServersCreateInstance(ctx context.Context, arg ServersCreateIn
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
+	return i, err
+}
+
+const serversCreateServer = `-- name: ServersCreateServer :one
+INSERT INTO servers (id, name, created_at) VALUES (?, ?, ?)
+RETURNING id, name, created_at
+`
+
+type ServersCreateServerParams struct {
+	ID        int64
+	Name      string
+	CreatedAt int64
+}
+
+func (q *Queries) ServersCreateServer(ctx context.Context, arg ServersCreateServerParams) (Server, error) {
+	row := q.db.QueryRowContext(ctx, serversCreateServer, arg.ID, arg.Name, arg.CreatedAt)
+	var i Server
+	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
 	return i, err
 }
 
@@ -170,6 +197,21 @@ func (q *Queries) ServersListInstances(ctx context.Context) ([]ServersListInstan
 		return nil, err
 	}
 	return items, nil
+}
+
+const serversNextServerID = `-- name: ServersNextServerID :one
+UPDATE server_ids
+SET last_id = max(last_id, (SELECT COALESCE(MAX(id), 0) FROM servers)) + 1
+WHERE id = 1
+RETURNING last_id
+`
+
+// Allocates the ID of a new server: never one that was used before (see migration 00003).
+func (q *Queries) ServersNextServerID(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, serversNextServerID)
+	var last_id int64
+	err := row.Scan(&last_id)
+	return last_id, err
 }
 
 const serversSetDesiredState = `-- name: ServersSetDesiredState :execrows

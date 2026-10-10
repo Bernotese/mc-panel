@@ -286,6 +286,7 @@ export const en: Messages = {
       spawn_protection: 'Spawn protection (blocks)',
       seed: 'Seed',
       level_type: 'World type',
+      lists_sync_hint: 'The whitelist and operators are set to these lists on every restart. Changes made in the game (/op, /whitelist add …) are overwritten.',
       world_hint: 'Seed and world type only apply when a new world is generated.',
     },
     difficulty: {
@@ -338,6 +339,7 @@ export const en: Messages = {
       cpu: 'CPU',
       started: 'Started',
       last_error: 'Last error',
+      error_hidden: 'The server reports an error. An admin can see the details.',
       controls: 'Controls',
       unknown_hint: 'The agent is not responding. Shown is the last known desired state; actions are applied once it is reachable again.',
     },

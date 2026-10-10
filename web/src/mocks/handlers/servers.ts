@@ -50,7 +50,8 @@ function bumpRevision(s: MockServer): void {
   else s.runningRevision = s.revision
 }
 
-function toServer(s: MockServer, permissions: Permission[]): Server {
+/** Like the panel: only admins get the raw last_error, other users see the state only. */
+function toServer(s: MockServer, permissions: Permission[], admin = true): Server {
   const base = db.serverSettings.base_domain
   return {
     id: s.id,
@@ -58,7 +59,7 @@ function toServer(s: MockServer, permissions: Permission[]): Server {
     permissions,
     address: s.instance && base ? `${s.name}.${base}` : null,
     instance: s.instance,
-    status: s.status,
+    status: admin ? s.status : { ...s.status, last_error: '' },
   }
 }
 
@@ -71,7 +72,7 @@ export const serverOperations: MockOperation[] = [
       const visible = db.servers
         .map((s) => {
           settle(s)
-          return toServer(s, serverPermissions(g.user, s.id))
+          return toServer(s, serverPermissions(g.user, s.id), g.user.role === 'admin')
         })
         .filter((s) => s.permissions.length > 0)
       return HttpResponse.json<Server[]>(visible)
@@ -180,7 +181,7 @@ export const serverOperations: MockOperation[] = [
       const server = db.servers.find((s) => s.id === id)
       if (!server) return apiError(404, 'not_found', 'server not found')
       settle(server)
-      return HttpResponse.json<Server>(toServer(server, permissions))
+      return HttpResponse.json<Server>(toServer(server, permissions, g.user.role === 'admin'))
     }),
   ),
 
