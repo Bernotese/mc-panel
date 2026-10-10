@@ -75,6 +75,23 @@ describe('ServerDetailPage', () => {
     expect(screen.getByRole('link', { name: 'Zur Übersicht' })).toHaveAttribute('href', '/')
   })
 
+  it('stops showing a server that was deleted while the page was open', async () => {
+    const { queryClient } = await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
+    expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
+    db.servers = db.servers.filter((s) => s.id !== 1)
+    await queryClient.refetchQueries({ queryKey: ['servers', 1] })
+    expect(await screen.findByText('Diesen Server gibt es nicht (mehr).')).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Steuerung für survival' })).not.toBeInTheDocument()
+  })
+
+  it('stops showing a server after the view permission was revoked', async () => {
+    const { queryClient } = await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+    expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
+    db.grants.set(2, [])
+    await queryClient.refetchQueries({ queryKey: ['servers', 1] })
+    expect(await screen.findByText('Du hast keine Berechtigung, diesen Server anzusehen.')).toBeInTheDocument()
+  })
+
   it('explains a server that does not exist', async () => {
     await renderWithProviders(<ServerDetailPage serverId={999} />, { me: loginAs('admin') })
     expect(await screen.findByText('Diesen Server gibt es nicht (mehr).')).toBeInTheDocument()
