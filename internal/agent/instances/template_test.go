@@ -64,6 +64,7 @@ func TestInstanceContainerGolden(t *testing.T) {
 			Memory:        5120 << 20, // 4096 MiB × 1.25
 			MemorySwap:    5120 << 20,
 			PidsLimit:     1024,
+			CPUShares:     256, // cgroup v2 weight ≈ 10: a busy server never starves panel, agent or router
 			LogConfig:     docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
 		},
 		NetworkingConfig: docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{"mcpanel-mc": {}}},
