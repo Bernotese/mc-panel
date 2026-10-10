@@ -22,7 +22,7 @@ Die Aufgaben laufen **sequenziell** in dieser Reihenfolge (jede Aufgabe lässt `
 | `2026-10-10-instances-03-frontend.md` | 17–22 | Frontend: Grundlagen, Dashboard, Anlegen, Detailseite, Einstellungen, Playwright |
 | `2026-10-10-instances-04-vm-docs.md` | 23–25 | VM, `make dev` mit Docker, Doku, Abnahme und Reviews |
 
-Arbeitsbranch: `feat/instances` (von `main`, nachdem `docs/instances-spec` gemerged ist; die Spec- und Plan-Commits liegen auf `docs/instances-spec`).
+Arbeitsbranch: `feat/instances` (von `main`). Voraussetzung: `docs/claude-md` (CLAUDE.md), `chore/vm-browser-access` (Caddy-Zugang zur VM) und `docs/instances-spec` (Spec + Pläne) sind in `main` gemerged.
 
 ## Global Constraints
 
@@ -326,8 +326,8 @@ Neue/geänderte Operationen:
 | `GET /servers` | `listServers` | Authenticated | – | `200 Server[]` |
 | `POST /servers` | `createServer` | Admin + Sudo | `CreateServerRequest` | `201 Server`; 400, 409 (`conflict`, `base_domain_missing`) |
 | `GET /servers/{id}` | `getServer` | `server.view` | – | `200 Server` |
-| `PATCH /servers/{id}` | `updateServer` | Admin + Sudo | `UpdateServerRequest` | `200 Server`; 400, 404 |
-| `DELETE /servers/{id}` | `deleteServer` | Admin + Sudo | – | `204`; 404, 503 (`agent_unavailable`, `docker_unavailable`) |
+| `PATCH /servers/{id}` | `updateServer` | Admin + Sudo | `UpdateServerRequest` | `200 Server`; 400, 404, 409 (nicht eingerichtet) |
+| `DELETE /servers/{id}` | `deleteServer` | Admin + Sudo | – | `204`; 404, 429 (agent-Warteschlange voll), 503 (`agent_unavailable`, `docker_unavailable`; Response-Komponente `ServiceUnavailable`) |
 | `POST /servers/{id}/power` | `serverPower` | `server.power` | `PowerRequest` | `202 PowerResponse`; 400, 404, 409 (nicht eingerichtet), 429, 503 (nur `restart` ohne agent) |
 | `GET /servers/catalog/{type}` | `getServerCatalog` | Admin | Pfad `type: InstanceType` | `200 Catalog`; 404 (modrinth/curseforge), 502 `catalog_unavailable` |
 | `GET /servers/settings` | `getServerSettings` | Admin | – | `200 ServerSettings` |
@@ -335,7 +335,7 @@ Neue/geänderte Operationen:
 
 Damit steigt die Zahl der Operationen von 57 auf 61 (`web/src/mocks/handlers.test.ts`).
 
-**`ServerStatus.state` – Ableitung im panel (`internal/servers/state.go`, Aufgabe 14):**
+**`ServerStatus.state` – Ableitung im panel (`internal/servers/state.go` und Status-Cache, Aufgabe 13; der Abgleich aus Aufgabe 14 füllt den Cache):**
 
 | Bedingung (in dieser Reihenfolge) | `state` |
 |---|---|

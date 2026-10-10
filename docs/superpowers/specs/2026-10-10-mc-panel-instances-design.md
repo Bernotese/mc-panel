@@ -214,7 +214,7 @@ Eine Schleife läuft alle 10 s (über `clock.Clock`) und zusätzlich sofort nach
 | Soll | Ist | Aktion |
 |---|---|---|
 | beliebig | `missing` | `ensure` (recreate `false`), danach ggf. `start` |
-| `stopped` | ältere Revision, nicht laufend | `ensure` mit `recreate: true` |
+| beliebig | ältere Revision, nicht laufend | `ensure` mit `recreate: true` (ein Server startet nie mit alter Konfiguration; bei Soll `running` folgt im nächsten Durchlauf `start`) |
 | `running` | ältere Revision, laufend | nichts; `restart_required = true` |
 | `running` | `exited`/`created` | `power start` |
 | `stopped` | `running`/`restarting` | `power stop` |
@@ -223,6 +223,7 @@ Eine Schleife läuft alle 10 s (über `clock.Clock`) und zusätzlich sofort nach
 - „Neustart“ durch einen Nutzer: Ist die Revision aktuell → `power restart`; sonst `ensure` mit `recreate: true` (das startet wieder, weil der Container vorher lief).
 - Container mit `mcpanel.instance`-Label, die die DB nicht kennt: Log-Warnung und Anzeige in den Einstellungen; kein automatisches Löschen.
 - Fehler des agents (nicht erreichbar, `docker_unavailable`) brechen den Durchlauf ab und werden geloggt; der nächste Durchlauf versucht es erneut.
+- Hat ein Durchlauf etwas ausgelöst, folgt der nächste sofort (z. B. `ensure`, dann `start`). Wiederholt sich dieselbe Aktion für eine Instanz ohne Erfolg (dauerhafter `last_error`), wartet der Abgleich exponentiell: 10 s, 20 s, 40 s … höchstens 5 min.
 - Abstürze und automatische Neustarts erscheinen nur im Log, nicht im Audit-Log.
 
 ### 5.4 Container-Vorlage
@@ -309,7 +310,7 @@ Alle Routen über `*rbac.Router`, in `api/openapi.yaml` beschrieben, mit MSW-Moc
 | Route | Regel | Inhalt |
 |---|---|---|
 | `GET /servers` | Authenticated | wie bisher plus `type`, `version`, `state`, `address`, `restart_required`; `null`-Felder für nicht eingerichtete Server |
-| `POST /servers` | Admin + Sudo | Name + Instanz-Konfiguration + `eula_accepted: true` (Pflicht); `201` mit `state: "creating"`; `409 base_domain_missing` ohne Basisdomain, `409 conflict` bei vergebenem Namen |
+| `POST /servers` | Admin + Sudo | Name + Instanz-Konfiguration + `eula_accepted: true` (Pflicht); `201` mit `state: "creating"` (bzw. `"unknown"`, wenn der agent gerade nicht erreichbar ist); `409 base_domain_missing` ohne Basisdomain, `409 conflict` bei vergebenem Namen |
 | `GET /servers/{id}` | `server.view` | plus Konfiguration, `properties`, Ist-Zustand (`InstanceStatus` ohne interne Felder), `restart_required`, `last_error` |
 | `PATCH /servers/{id}` | Admin + Sudo | `version`, `loader_version`, `modpack`, `java`, `memory_mib`, `properties` (teilweise); erhöht `revision`; Antwort enthält `restart_required` |
 | `DELETE /servers/{id}` | Admin + Sudo | `remove` an den agent; DB-Zeilen weg, sobald der agent `202` geantwortet hat; Daten nach `deleted/` |
