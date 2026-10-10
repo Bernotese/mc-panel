@@ -18,6 +18,9 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/docker/dockertest"
+	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
 	"github.com/Bernotese/mc-panel/internal/config"
 )
 
@@ -30,6 +33,12 @@ func socketPath(t *testing.T) string {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return filepath.Join(dir, "a.sock")
+}
+
+// devConfig is a -dev config that never touches a real Docker daemon or ./.dev/mc.
+func devConfig(t *testing.T, sock, dockerSock string) string {
+	t.Helper()
+	return fmt.Sprintf("socket = %q\ndocker_socket = %q\ninstances_dir = %q\n", sock, dockerSock, t.TempDir())
 }
 
 func writeConfig(t *testing.T, content string) string {
@@ -77,7 +86,7 @@ func waitForSocket(t *testing.T, path string, done <-chan error) {
 
 func TestRunDevServesHealthAndShutsDown(t *testing.T) {
 	sock := socketPath(t)
-	cfg := writeConfig(t, fmt.Sprintf("socket = %q\n", sock))
+	cfg := writeConfig(t, devConfig(t, sock, filepath.Join(t.TempDir(), "no-docker.sock")))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var stdout, stderr syncBuffer
@@ -89,7 +98,7 @@ func TestRunDevServesHealthAndShutsDown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
-	if h.Status != "ok" || h.Firewall != "noop" || h.Version != version {
+	if h.Status != "ok" || h.Firewall != "noop" || h.Version != version || h.Docker != "unavailable" {
 		t.Fatalf("health = %+v", h)
 	}
 	if fi, err := os.Lstat(sock); err != nil || fi.Mode().Perm() != 0o600 {
@@ -138,7 +147,7 @@ func TestRunFailsWhenFirewallUnavailable(t *testing.T) {
 		t.Skip("as root this would modify the host firewall")
 	}
 	sock := socketPath(t)
-	cfg := writeConfig(t, fmt.Sprintf("socket = %q\nfirewall = \"nftables\"\n", sock))
+	cfg := writeConfig(t, devConfig(t, sock, filepath.Join(t.TempDir(), "no-docker.sock"))+"firewall = \"nftables\"\n")
 	err := run(context.Background(), []string{"-dev", "-config", cfg}, io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "firewall") {
 		t.Fatalf("run = %v, want firewall error", err)
@@ -198,7 +207,7 @@ func TestRunRefusesSecondStartBeforeTouchingFirewall(t *testing.T) {
 	}
 	defer func() { _ = first.Close() }()
 	// firewall = "nftables" would fail (or modify nftables on Linux) if it were set up first.
-	cfg := writeConfig(t, fmt.Sprintf("socket = %q\nfirewall = \"nftables\"\n", sock))
+	cfg := writeConfig(t, devConfig(t, sock, filepath.Join(t.TempDir(), "no-docker.sock"))+"firewall = \"nftables\"\n")
 	err = run(context.Background(), []string{"-dev", "-config", cfg}, io.Discard, io.Discard)
 	if !errors.Is(err, agent.ErrAlreadyRunning) {
 		t.Fatalf("run = %v, want ErrAlreadyRunning", err)
@@ -245,4 +254,63 @@ func TestMCUserIDs(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("dev may run as root (e.g. agent -dev under sudo): %v", err)
 	}
+}
+
+// TestRunDevManagesInstances runs the whole agent against the fake Docker daemon:
+// the background loop creates the router, and an ensure through the real client
+// creates the instance container.
+func TestRunDevManagesInstances(t *testing.T) {
+	d := dockertest.New(t)
+	sock := socketPath(t)
+	cfg := writeConfig(t, devConfig(t, sock, d.Socket))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, []string{"-dev", "-config", cfg}, io.Discard, io.Discard) }()
+	waitForSocket(t, sock, done)
+
+	c := agent.NewClient(sock)
+	waitFor(t, "router running", func() bool {
+		st, err := c.Instances(context.Background())
+		return err == nil && st.Docker == agentapi.DockerOK && st.Router.State == agentapi.StateRunning
+	})
+	if h, err := c.Health(context.Background()); err != nil || h.Docker != agentapi.DockerOK {
+		t.Fatalf("health = %+v, %v", h, err)
+	}
+	err := c.Ensure(context.Background(), agentapi.EnsureRequest{
+		ID: 1, Name: "survival", FQDN: "survival.mc.example.com", Revision: 1,
+		Spec: instancespec.Spec{Type: instancespec.TypePaper, Version: "1.21.4", Java: instancespec.Java21, MemoryMiB: 4096},
+	})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitFor(t, "instance created", func() bool {
+		st, err := c.Instances(context.Background())
+		return err == nil && len(st.Instances) == 1 && st.Instances[0].State == agentapi.StateCreated && st.Instances[0].Operation == ""
+	})
+	if ctr, ok := d.Container("mcpanel-mc-1"); !ok || ctr.Config.User != fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()) {
+		t.Fatalf("container = %+v, %v; dev mode runs it as the agent's own uid:gid", ctr, ok)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not return after cancel")
+	}
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for: %s", what)
 }

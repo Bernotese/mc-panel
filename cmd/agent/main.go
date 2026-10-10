@@ -1,6 +1,7 @@
 // Command agent is the privileged mc-panel helper. It serves a small, strictly
 // validated JSON API on a Unix socket that only the panel user (and root) may
-// connect to, and manages the nftables jail sets.
+// connect to, manages the nftables jail sets and is the only Docker client
+// (Minecraft containers and mc-router).
 package main
 
 import (
@@ -20,7 +21,9 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/agent/docker"
 	"github.com/Bernotese/mc-panel/internal/agent/firewall"
+	"github.com/Bernotese/mc-panel/internal/agent/instances"
 	"github.com/Bernotese/mc-panel/internal/agent/peercred"
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/config"
@@ -48,7 +51,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "", "path to agent.toml (default "+defaultConfigPath+" unless -dev)")
-	dev := fs.Bool("dev", false, "development mode: socket ./.dev/agent.sock (0600), noop firewall, text logs")
+	dev := fs.Bool("dev", false, "development mode: socket ./.dev/agent.sock (0600), noop firewall, Docker off unless MCPANEL_DEV_DOCKER=1, data in ./.dev/mc, text logs")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -107,7 +110,36 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("firewall: %w", err)
 	}
 
-	srv := agent.NewServer(fw, version, log)
+	// Without docker_socket (dev default) there is no instance manager: the server
+	// answers instance writes with 503 docker_unavailable and creates no containers.
+	var opts []agent.Option
+	stopInstances := func() {}
+	if cfg.DockerSocket != "" {
+		mgr := instances.New(instances.Config{
+			Docker:       docker.New(cfg.DockerSocket),
+			InstancesDir: cfg.InstancesDir,
+			UID:          mcUID,
+			GID:          mcGID,
+			Images:       cfg.Images,
+			Clock:        clock.Real{},
+			Log:          log,
+		})
+		runCtx, stopRun := context.WithCancel(ctx)
+		runDone := make(chan struct{})
+		go func() {
+			defer close(runDone)
+			mgr.Run(runCtx)
+		}()
+		// stopInstances ends the background loop and the queued operations.
+		stopInstances = func() {
+			stopRun()
+			<-runDone
+			mgr.Close()
+		}
+		opts = append(opts, agent.WithInstances(mgr))
+	}
+
+	srv := agent.NewServer(fw, version, log, opts...)
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(peercred.Wrap(l, peercred.AllowUIDs(panelUID, 0), log)) }()
 	log.Info("agent started", "version", version, "socket", cfg.Socket, "firewall", fw.Name(),
@@ -116,6 +148,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	select {
 	case err := <-errc:
+		stopInstances()
 		if err == nil {
 			err = errors.New("server stopped unexpectedly")
 		}
@@ -125,7 +158,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	log.Info("agent shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	err = srv.Shutdown(shutdownCtx)
+	stopInstances()
+	if err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return <-errc
