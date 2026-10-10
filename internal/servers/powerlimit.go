@@ -1,4 +1,4 @@
-package users
+package servers
 
 import (
 	"sync"

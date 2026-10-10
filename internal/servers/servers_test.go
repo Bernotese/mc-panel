@@ -1,4 +1,4 @@
-package users_test
+package servers_test
 
 import (
 	"fmt"
@@ -35,7 +35,7 @@ func TestServerCRUDAsAdmin(t *testing.T) {
 	if rec := e.do(http.MethodPost, "/servers", map[string]string{"name": "survival"}, &admin); rec.Code != http.StatusConflict {
 		t.Fatalf("duplicate: %d", rec.Code)
 	}
-	for _, bad := range []string{"-bad", "a", "Upper", "has_underscore", "with space", strings.Repeat("a", 33)} {
+	for _, bad := range []string{"-bad", "x-", "a", "Upper", "has_underscore", "with space", strings.Repeat("a", 33)} {
 		rec := e.do(http.MethodPost, "/servers", map[string]string{"name": bad}, &admin)
 		if rec.Code != http.StatusBadRequest || errCode(t, rec) != "validation_failed" {
 			t.Errorf("name %q: %d %s", bad, rec.Code, rec.Body)
@@ -69,13 +69,10 @@ func TestServerCRUDAsAdmin(t *testing.T) {
 // Spec §12.4: a restricted user with server.power on server A sees only A; B → 403.
 func TestServerVisibilityForRestrictedUser(t *testing.T) {
 	e := newEnv(t)
-	admin := e.admin()
 	alice := storetest.CreateUser(t, e.db, "alice", "user")
 	a := storetest.CreateServer(t, e.db, "alpha")
 	b := storetest.CreateServer(t, e.db, "beta")
-	if rec := e.do(http.MethodPut, fmt.Sprintf("/users/%d/permissions", alice), grantsBody(grant(a, "server.power")), &admin); rec.Code != http.StatusOK {
-		t.Fatalf("grant: %d %s", rec.Code, rec.Body)
-	}
+	grant(t, e.db, alice, a, "server.view", "server.power")
 	ap := userP(alice, "alice")
 
 	list := decode[[]serverResp](t, e.do(http.MethodGet, "/servers", nil, &ap))

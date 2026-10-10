@@ -12,7 +12,7 @@ import { errorMessage } from '@/lib/error-message'
 import { cn } from '@/lib/utils'
 import { serversKey } from './servers'
 
-const SERVER_NAME = /^[a-z0-9][a-z0-9-]{1,31}$/
+const SERVER_NAME = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/
 
 export function CreateServerDialog({ open, onOpenChange }: { open: boolean; onOpenChange(open: boolean): void }) {
   const { t } = useTranslation()
