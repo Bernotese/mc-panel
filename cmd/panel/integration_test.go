@@ -213,8 +213,8 @@ func TestFullFlowPermissionsAndAudit(t *testing.T) {
 	if code != 200 || len(list) != 1 || int64(list[0]["id"].(float64)) != srvA {
 		t.Fatalf("GET /servers as maxUser = %d %v", code, list)
 	}
-	maxUser.must(202, "POST", fmt.Sprintf("/servers/%d/power", srvA), map[string]string{"action": "restart"})
-	if c, out := maxUser.do("POST", fmt.Sprintf("/servers/%d/power", srvB), map[string]string{"action": "restart"}); c != 403 || out["error"] != "forbidden" {
+	maxUser.must(202, "POST", fmt.Sprintf("/servers/%d/power", srvA), map[string]string{"action": "stop"})
+	if c, out := maxUser.do("POST", fmt.Sprintf("/servers/%d/power", srvB), map[string]string{"action": "stop"}); c != 403 || out["error"] != "forbidden" {
 		t.Fatalf("power on B = %d %v", c, out)
 	}
 	if c, _ := maxUser.do("GET", "/users", nil); c != 403 {

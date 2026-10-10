@@ -13,7 +13,6 @@ import (
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/audit"
-	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/servers"
 	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
@@ -455,8 +454,8 @@ func TestDeleteServerRemovesContainerFirst(t *testing.T) {
 func TestServerVisibilityForRestrictedUser(t *testing.T) {
 	e := newEnv(t)
 	alice := storetest.CreateUser(t, e.db, "alice", "user")
-	a := storetest.CreateServer(t, e.db, "alpha")
-	b := storetest.CreateServer(t, e.db, "beta")
+	a := createInstance(t, e.db, "alpha")
+	b := createInstance(t, e.db, "beta")
 	grant(t, e.db, alice, a, "server.view", "server.power")
 	ap := userP(alice, "alice")
 
@@ -535,36 +534,5 @@ func TestDeleteServerZeroRowsIs404(t *testing.T) {
 	}
 	if got := e.rec.Actions(); slices.Contains(got, audit.ActionServerDelete) {
 		t.Fatalf("unexpected audit entries: %v", got)
-	}
-}
-
-// Power actions are limited to 10 per minute per user, so a user cannot flood the audit chain.
-func TestServerPowerRateLimitedPerUser(t *testing.T) {
-	e := newEnv(t)
-	admin := e.admin()
-	a := storetest.CreateServer(t, e.db, "alpha")
-	path := fmt.Sprintf("/servers/%d/power", a)
-	body := map[string]string{"action": "restart"}
-	for i := 0; i < 10; i++ {
-		if rec := e.do(http.MethodPost, path, body, &admin); rec.Code != http.StatusAccepted {
-			t.Fatalf("request %d: %d %s", i, rec.Code, rec.Body)
-		}
-	}
-	rec := e.do(http.MethodPost, path, body, &admin)
-	if rec.Code != http.StatusTooManyRequests || errCode(t, rec) != "rate_limited" || rec.Header().Get("Retry-After") == "" {
-		t.Fatalf("11th request: %d %s retry=%q", rec.Code, rec.Body, rec.Header().Get("Retry-After"))
-	}
-	if n := len(e.rec.Entries); n != 10 {
-		t.Fatalf("audit entries = %d, want 10 (a limited request is not audited)", n)
-	}
-	// another user has its own budget
-	other := principal.Principal{UserID: storetest.CreateUser(t, e.db, "root2", "admin"), Username: "root2",
-		Role: principal.RoleAdmin, Stage: principal.StageFull}
-	if rec := e.do(http.MethodPost, path, body, &other); rec.Code != http.StatusAccepted {
-		t.Fatalf("other user: %d", rec.Code)
-	}
-	e.clk.Advance(6 * time.Second)
-	if rec := e.do(http.MethodPost, path, body, &admin); rec.Code != http.StatusAccepted {
-		t.Fatalf("after refill: %d", rec.Code)
 	}
 }

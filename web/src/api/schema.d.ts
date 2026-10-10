@@ -978,6 +978,7 @@ export interface components {
             memory_mib?: number;
             properties?: components["schemas"]["ServerProperties"];
         };
+        /** @description start/stop set the desired state (applied by the reconcile loop, works without agent); restart needs the agent */
         PowerRequest: {
             /** @enum {string} */
             action: "start" | "stop" | "restart";
@@ -2362,7 +2363,17 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description conflict (server not configured) or base_domain_missing (restart) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listAudit: {

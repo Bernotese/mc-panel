@@ -116,6 +116,22 @@ describe('mock behaviour', () => {
     expect((await callApi('PATCH', '/servers/3', { body: { memory_mib: 2048 }, csrf: me.csrf_token })).status).toBe(409)
   })
 
+  it('applies power actions to the mock state', async () => {
+    const me = loginAs('admin', { sudo: true })
+    const power = (id: number, action: string) => callApi('POST', `/servers/${id}/power`, { body: { action }, csrf: me.csrf_token })
+    const status = async (id: number) => field((await callApi('GET', `/servers/${id}`)).body, 'status')
+    await callApi('PATCH', '/servers/1', { body: { memory_mib: 6144 }, csrf: me.csrf_token })
+    expect((await power(1, 'restart')).status).toBe(202)
+    expect(await status(1)).toMatchObject({ state: 'running', restart_required: false, memory_limit_bytes: 6144 * 1.25 * 1024 * 1024 })
+    await power(1, 'stop')
+    expect(await status(1)).toMatchObject({ state: 'stopped', desired_state: 'stopped', started_at: 0 })
+    await power(2, 'start')
+    expect(await status(2)).toMatchObject({ state: 'running', desired_state: 'running' })
+    const stub = await power(3, 'start')
+    expect(stub.status).toBe(409)
+    expect(field(stub.body, 'error')).toBe('conflict')
+  })
+
   it('buckets the overview series by range', async () => {
     loginAs('admin')
     expect(field((await callApi('GET', '/security/overview?range=24h')).body, 'series')).toHaveLength(24)

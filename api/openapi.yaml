@@ -509,7 +509,9 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'conflict (server not configured) or base_domain_missing (restart)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /audit:
     get:
       operationId: listAudit
@@ -926,6 +928,7 @@ components:
     PowerRequest:
       type: object
       required: [action]
+      description: 'start/stop set the desired state (applied by the reconcile loop, works without agent); restart needs the agent'
       properties: { action: { type: string, enum: [start, stop, restart] } }
     PowerResponse:
       type: object
