@@ -17,6 +17,7 @@ Es gelten alle Global Constraints aus `2026-10-10-instances-00-overview.md`. Zus
 | Thema | Wert |
 |---|---|
 | Zwischenstand VM | Ab Aufgabe 4 startet der agent in Produktion nur, wenn `mc_user` existiert; wer zwischen Aufgabe 4 und 23 in der VM testet, legt ihn vorher an: `limactl shell mcpanel sudo useradd --system --user-group --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin mcpanel-mc` |
+| Voraussetzung CLAUDE.md | Branch `docs/claude-md` ist in `main` gemerged (Aufgabe 24 ändert `CLAUDE.md`) |
 | Voraussetzung | Branch `chore/vm-browser-access` (Caddy-Zugang `https://mcpanel.localhost:8443`, `trusted_proxies = ["192.0.2.1/32"]`) ist in `main` gemerged, bevor `feat/instances` abzweigt |
 | Docker in der VM | Paket `docker.io`, Dienst `docker` aktiviert |
 | Minecraft-Benutzer | System-Benutzer `mcpanel-mc` (eigene Gruppe, kein Login, Home `/nonexistent`) |

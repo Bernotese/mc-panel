@@ -107,6 +107,7 @@ type Images struct {
 	Java25 string `toml:"java25"`
 	Router string `toml:"router"`
 }
+
 func DefaultImages() Images
 func (i Images) ByJava(java string) (string, bool) // "java8" … "java25"
 
@@ -2109,29 +2110,31 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 package instances
 
 const (
-	NetworkName     = "mcpanel-mc"
-	RouterName      = "mcpanel-router"
-	ContainerPrefix = "mcpanel-mc-"
-	LabelInstance   = "mcpanel.instance"
-	LabelRevision   = "mcpanel.revision"
-	LabelName       = "mcpanel.name"
-	LabelFQDN       = "mcpanel.fqdn"
-	LabelRouter     = "mcpanel.router"
-	LabelNetwork    = "mcpanel.network"
+	NetworkName        = "mcpanel-mc"
+	RouterName         = "mcpanel-router"
+	ContainerPrefix    = "mcpanel-mc-"
+	LabelInstance      = "mcpanel.instance"
+	LabelRevision      = "mcpanel.revision"
+	LabelName          = "mcpanel.name"
+	LabelFQDN          = "mcpanel.fqdn"
+	LabelRouter        = "mcpanel.router"
+	LabelNetwork       = "mcpanel.network"
 	MinecraftPort      = 25565
 	StopTimeoutSeconds = 60
 	PidsLimit          = 1024
 	RouterMemoryBytes  = 256 << 20
 )
+
 type Host struct {
 	InstancesDir string
 	UID, GID     int
 	Images       config.Images
 }
-func ContainerName(id int64) string           // "mcpanel-mc-<id>"
+
+func ContainerName(id int64) string                // "mcpanel-mc-<id>"
 func DataDir(instancesDir string, id int64) string // <dir>/instances/<id>
-func RouterDir(instancesDir string) string        // <dir>/router
-func DeletedDir(instancesDir string) string       // <dir>/deleted
+func RouterDir(instancesDir string) string         // <dir>/router
+func DeletedDir(instancesDir string) string        // <dir>/deleted
 func InstanceContainer(h Host, req agentapi.EnsureRequest) (docker.ContainerConfig, error)
 func RouterContainer(h Host) (docker.ContainerConfig, error)
 ```
@@ -2886,10 +2889,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 package instances
 
 const (
-	MaxOpenOperations   = 4   // per instance: running + waiting
+	MaxOpenOperations   = 4 // per instance: running + waiting
 	MaxTrackedInstances = 256
 	SampleInterval      = 10 * time.Second
 )
+
 type Config struct {
 	Docker       *docker.Client
 	InstancesDir string
@@ -2899,9 +2903,11 @@ type Config struct {
 	Log          *slog.Logger
 	Customize    func(name string, cfg *docker.ContainerConfig) // tests only
 }
-type Manager struct{ /* … */ }
+type Manager struct { /* … */
+}
+
 func New(cfg Config) *Manager
-func (m *Manager) Ensure(ctx context.Context, req agentapi.EnsureRequest) error            // ErrInvalid | ErrBusy | ErrDockerUnavailable | nil (queued)
+func (m *Manager) Ensure(ctx context.Context, req agentapi.EnsureRequest) error           // ErrInvalid | ErrBusy | ErrDockerUnavailable | nil (queued)
 func (m *Manager) Power(ctx context.Context, id int64, action agentapi.PowerAction) error // same
 func (m *Manager) Remove(ctx context.Context, id int64) error                             // same
 func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse
@@ -4467,6 +4473,7 @@ type Instances interface {
 	Remove(ctx context.Context, id int64) error
 }
 type Option func(*Server)
+
 func WithInstances(in Instances) Option
 func NewServer(fw agentapi.Firewall, version string, log *slog.Logger, opts ...Option) *Server // variadic: old calls compile
 ```
