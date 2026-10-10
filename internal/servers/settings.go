@@ -95,16 +95,24 @@ func (h *Handler) loadSettings(ctx context.Context) (instanceSettings, error) {
 	if err != nil {
 		return instanceSettings{}, err
 	}
-	out := instanceSettings{BaseDomain: nullString(row.BaseDomain)}
-	if len(row.CurseforgeApiKey) > 0 {
-		pt, err := h.box.Open(row.CurseforgeApiKey, []byte(curseForgeKeyAAD))
-		if err != nil {
-			return instanceSettings{}, fmt.Errorf("servers: open curseforge key: %w", err)
-		}
-		key := string(pt)
-		out.CurseForgeKey = &key
+	key, err := h.openKey(row.CurseforgeApiKey)
+	if err != nil {
+		return instanceSettings{}, err
 	}
-	return out, nil
+	return instanceSettings{BaseDomain: nullString(row.BaseDomain), CurseForgeKey: key}, nil
+}
+
+// openKey decrypts a stored CurseForge key; nil for none.
+func (h *Handler) openKey(sealed []byte) (*string, error) {
+	if len(sealed) == 0 {
+		return nil, nil
+	}
+	pt, err := h.box.Open(sealed, []byte(curseForgeKeyAAD))
+	if err != nil {
+		return nil, fmt.Errorf("servers: open curseforge key: %w", err)
+	}
+	key := string(pt)
+	return &key, nil
 }
 
 func (h *Handler) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +154,8 @@ func (h *Handler) settingsBody(ctx context.Context) (settingsJSON, error) {
 	}
 	if err == nil {
 		for _, st := range resp.Instances {
-			if !known[st.ID] {
+			// A "missing" entry is queued work or a remembered error, not a container.
+			if st.State != agentapi.StateMissing && !known[st.ID] {
 				out.UnknownContainers = append(out.UnknownContainers, unknownContainerJSON{ID: st.ID, Name: st.Name})
 			}
 		}
@@ -186,6 +195,7 @@ func (h *Handler) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var (
 		oldBase     *string
 		baseChanged bool
+		keyChanged  bool
 	)
 	now := h.clock.Now().UnixMilli()
 	err := h.inTx(ctx, func(q *store.Queries) error {
@@ -200,14 +210,20 @@ func (h *Handler) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.CurseForgeAPIKey.Set {
 			params.CurseforgeApiKey = sealed
+			old, err := h.openKey(cur.CurseforgeApiKey) // unreadable counts as a change
+			keyChanged = err != nil || !samePtr(old, req.CurseForgeAPIKey.Value)
 		}
 		baseChanged = params.BaseDomain != cur.BaseDomain
 		if err := q.ServersUpdateSettings(ctx, params); err != nil {
 			return err
 		}
-		if baseChanged {
+		switch {
+		case baseChanged:
 			// The FQDN is part of every container (label, route): all instances need a new revision.
 			return q.ServersBumpAllRevisions(ctx, now)
+		case keyChanged:
+			// The key is part of the spec of every CurseForge instance (CF_API_KEY).
+			return q.ServersBumpCurseForgeRevisions(ctx, now)
 		}
 		return nil
 	})
@@ -228,7 +244,7 @@ func (h *Handler) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if len(details) > 0 {
 		h.record(ctx, audit.ActionServerSettingsUpdate, settingsTarget, audit.ResultSuccess, details)
 	}
-	if baseChanged {
+	if baseChanged || keyChanged {
 		h.Trigger()
 	}
 	body, err := h.settingsBody(ctx)
@@ -237,4 +253,11 @@ func (h *Handler) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, body)
+}
+
+func samePtr(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
