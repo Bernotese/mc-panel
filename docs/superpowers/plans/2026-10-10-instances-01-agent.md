@@ -132,7 +132,7 @@ type Agent struct {
 func mcUserIDs(cfg config.Agent, lookup func(name string) (*user.User, error)) (uid, gid int, err error)
 ```
 
-- [ ] **Step 1: Failing tests schreiben**
+- [x] **Step 1: Failing tests schreiben**
 
 `internal/config/agent_instances_test.go`:
 
@@ -350,12 +350,12 @@ func TestMCUserIDs(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Tests laufen lassen (rot)**
+- [x] **Step 2: Tests laufen lassen (rot)**
 
 Run: `go test ./internal/config ./cmd/agent -count=1`
 Expected: FAIL beim Kompilieren, u. a. `a.DockerSocket undefined (type config.Agent has no field or method DockerSocket)`, `undefined: config.DefaultImages` und `undefined: mcUserIDs`.
 
-- [ ] **Step 3: `internal/config/config.go` erweitern**
+- [x] **Step 3: `internal/config/config.go` erweitern**
 
 Import `"regexp"` ergänzen (zwischen `"path/filepath"` und `"strings"`). Dann **alles ab der Zeile `type Agent struct {` bis zum Dateiende** durch folgenden Block ersetzen (`DefaultAgent`, `DevAgent`, `LoadAgent`, `Validate` ändern sich mit; `LoadAgent` bleibt inhaltlich gleich):
 
@@ -544,7 +544,7 @@ Hinweise:
 - `DevAgent` liest `$HOME` über `os.UserHomeDir`; der Test setzt `HOME` per `t.Setenv`.
 - Die bestehenden Tests in `config_test.go` und `internal/agent/firewall/factory_test.go` (Literal `config.Agent{…}` ohne neue Felder, ohne `Validate`) bleiben unverändert grün.
 
-- [ ] **Step 4: `cmd/agent/main.go` – `mc_user` auflösen**
+- [x] **Step 4: `cmd/agent/main.go` – `mc_user` auflösen**
 
 In `run` direkt nach dem Block `mode, gid, err := socketPerms(cfg, user.LookupId)` … `}` einfügen:
 
@@ -598,7 +598,7 @@ func mcUserIDs(cfg config.Agent, lookup func(name string) (*user.User, error)) (
 
 Damit startet ein Prod-agent ohne existierenden Benutzer `mcpanel-mc` nicht mehr (Fehlermeldung nennt den `useradd`-Befehl). Das betrifft den CI-Abnahmetest `scripts/ci-acceptance.sh` (startet den agent im Prod-Modus); er wird in dieser Aufgabe mit angepasst:
 
-- [ ] **Step 4b: `scripts/ci-acceptance.sh` anpassen**
+- [x] **Step 4b: `scripts/ci-acceptance.sh` anpassen**
 
 Nach dem Block, der `mcpanel` anlegt, einfügen:
 
@@ -622,17 +622,17 @@ EOF
 
 `shellcheck scripts/ci-acceptance.sh` muss sauber bleiben; ob der Abnahmetest weiter `PASS` meldet, zeigt der CI-Job `nftables` dieses PRs.
 
-- [ ] **Step 5: Tests laufen lassen (grün)**
+- [x] **Step 5: Tests laufen lassen (grün)**
 
 Run: `go test ./internal/config ./cmd/agent ./internal/agent/... -count=1`
 Expected: PASS (inkl. der bestehenden Config-, Firewall- und agent-Tests).
 
-- [ ] **Step 6: Lint**
+- [x] **Step 6: Lint**
 
 Run: `golangci-lint run ./internal/config/... ./cmd/agent/...`
 Expected: `0 issues.`
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/config/config.go internal/config/agent_instances_test.go cmd/agent/main.go cmd/agent/main_test.go
@@ -717,7 +717,7 @@ Entscheidungen:
 - **Nur gepinnte Images:** `ImageExists`/`PullImage` akzeptieren nur `…@sha256:<64 hex>` und arbeiten mit `repo@sha256:…` (`ImageRef.Pinned`), weil Docker einen Tag neben einem Digest ignoriert und der containerd-Image-Store die Form `name:tag@digest` beim Inspect nicht zuverlässig auflöst.
 - **Fake auf echtem Unix-Socket:** `dockertest.Daemon` implementiert genau die verwendeten Endpunkte inkl. Docker-Eigenheiten (Präfix `/v1.44` Pflicht, `304`, `409` bei Namenskonflikt/Kill auf gestopptem Container/Remove ohne `force`, `404` ohne Image/Netz, Label-Filter `key` bzw. `key=value`, `all=1`). Dekodiert `ContainerConfig` mit `DisallowUnknownFields`, damit Tests genau sehen, was Docker erhält. `Hold` blockiert einen Endpunkt, um Warteschlangen ohne `sleep` zu testen.
 
-- [ ] **Step 1: Failing test schreiben** – `internal/agent/docker/client_test.go`
+- [x] **Step 1: Failing test schreiben** – `internal/agent/docker/client_test.go`
 
 ```go
 package docker_test
@@ -1046,12 +1046,12 @@ func TestRequestShapeAndLimits(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test ./internal/agent/docker/... -count=1`
 Expected: FAIL beim Kompilieren (`package github.com/Bernotese/mc-panel/internal/agent/docker` bzw. `…/docker/dockertest` existiert nicht).
 
-- [ ] **Step 3: Typen implementieren** – `internal/agent/docker/types.go`
+- [x] **Step 3: Typen implementieren** – `internal/agent/docker/types.go`
 
 ```go
 package docker
@@ -1216,7 +1216,7 @@ func ParseImageRef(ref string) (ImageRef, error) {
 func (r ImageRef) Pinned() string { return r.Repo + "@" + r.Digest }
 ```
 
-- [ ] **Step 4: Client implementieren** – `internal/agent/docker/client.go`
+- [x] **Step 4: Client implementieren** – `internal/agent/docker/client.go`
 
 ```go
 // Package docker is a narrow client for the Docker Engine API over its Unix socket.
@@ -1566,7 +1566,7 @@ func checkStatus(resp *http.Response, method, path string) error {
 }
 ```
 
-- [ ] **Step 5: Fake-Daemon implementieren** – `internal/agent/docker/dockertest/daemon.go`
+- [x] **Step 5: Fake-Daemon implementieren** – `internal/agent/docker/dockertest/daemon.go`
 
 ```go
 // Package dockertest is an in-memory fake of the Docker Engine API subset used by
@@ -2114,17 +2114,17 @@ func (d *Daemon) container(w http.ResponseWriter, r *http.Request, op, ref strin
 
 `net.Listen("unix", …)` ist durch die bestehende Regel in `.golangci.yml` (noctx, Pfad `(cmd|internal)/agent/`, Text `net\.Listen`) abgedeckt; `ReadHeaderTimeout` verhindert gosec G112.
 
-- [ ] **Step 6: Tests laufen lassen (grün, auch mit `-race`)**
+- [x] **Step 6: Tests laufen lassen (grün, auch mit `-race`)**
 
 Run: `go test ./internal/agent/docker/... -count=1 && CGO_ENABLED=1 go test -race -count=3 ./internal/agent/docker/...`
 Expected: `ok  github.com/Bernotese/mc-panel/internal/agent/docker` (beide Läufe), `dockertest [no test files]`.
 
-- [ ] **Step 7: Lint**
+- [x] **Step 7: Lint**
 
 Run: `golangci-lint run ./internal/agent/docker/... && GOOS=linux golangci-lint run ./internal/agent/docker/...`
 Expected: `0 issues.` (zweimal)
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/agent/docker
@@ -2179,7 +2179,7 @@ func RouterContainer(h Host) (docker.ContainerConfig, error)
 
 Die Vorlage ist eine reine Funktion: sie validiert `req` erneut (der agent vertraut dem panel nicht), nimmt die Umgebung ausschließlich aus `instancespec.Env` und setzt alles andere fest. `Memory = memory_mib × 1.25 MiB` ist bei Vielfachen von 256 MiB exakt (`× 5 / 4`).
 
-- [ ] **Step 1: Failing test schreiben** – `internal/agent/instances/template_test.go`
+- [x] **Step 1: Failing test schreiben** – `internal/agent/instances/template_test.go`
 
 ```go
 package instances_test
@@ -2409,12 +2409,12 @@ func TestPaths(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test ./internal/agent/instances/ -count=1`
 Expected: FAIL beim Kompilieren (Paket `internal/agent/instances` existiert nicht).
 
-- [ ] **Step 3: Implementieren** – `internal/agent/instances/template.go`
+- [x] **Step 3: Implementieren** – `internal/agent/instances/template.go`
 
 ```go
 // Package instances runs the Minecraft containers on the agent side: a fixed,
@@ -2576,17 +2576,17 @@ func RouterContainer(h Host) (docker.ContainerConfig, error) {
 }
 ```
 
-- [ ] **Step 4: Tests laufen lassen (grün)**
+- [x] **Step 4: Tests laufen lassen (grün)**
 
 Run: `go test ./internal/agent/instances/ -count=1 -v -run 'Container|Paths'`
 Expected: PASS für `TestInstanceContainerGolden`, `TestRouterContainerGolden`, `TestInstanceContainerInvariants`, `TestInstanceContainerRejectsInvalidRequests`, `TestPaths`.
 
-- [ ] **Step 5: Lint**
+- [x] **Step 5: Lint**
 
 Run: `golangci-lint run ./internal/agent/instances/...`
 Expected: `0 issues.`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/instances/template.go internal/agent/instances/template_test.go
@@ -2616,7 +2616,7 @@ func managedID(labels map[string]string, names ...string) (int64, bool)
 
 Format nach mc-router 1.47.2: `{"mappings": {"<fqdn>": "<host>:<port>"}}`, `default-server` entfällt. `encoding/json` sortiert Map-Schlüssel – gleiche Routen ergeben byte-gleiche Dateien, sodass „unverändert“ ein einfacher Bytevergleich ist und kein unnötiges `SIGHUP` auslöst. Gestoppte Container behalten ihre Route (sonst flattert die Datei bei jedem Stop/Start).
 
-- [ ] **Step 1: Failing test schreiben** – `internal/agent/instances/router_test.go`
+- [x] **Step 1: Failing test schreiben** – `internal/agent/instances/router_test.go`
 
 ```go
 package instances_test
@@ -2741,12 +2741,12 @@ func assertFile(t *testing.T, path string, want []byte) {
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test ./internal/agent/instances/ -count=1`
 Expected: FAIL beim Kompilieren (`undefined: instances.Routes`, `instances.RenderRoutes`, `instances.WriteRoutes`).
 
-- [ ] **Step 3: Implementieren** – `internal/agent/instances/router.go`
+- [x] **Step 3: Implementieren** – `internal/agent/instances/router.go`
 
 ```go
 package instances
@@ -2893,17 +2893,17 @@ func syncDir(dir string) error {
 
 Die vier `//nolint:gosec`-Kommentare sind nötig (G301/G302: der Router läuft als UID 65532 und muss Verzeichnis und Datei lesen; G304: fester Dateiname unter dem konfigurierten `instances_dir`). `tmp.Chmod` (Methode auf `*os.File`) meldet gosec nicht.
 
-- [ ] **Step 4: Tests laufen lassen (grün)**
+- [x] **Step 4: Tests laufen lassen (grün)**
 
 Run: `go test ./internal/agent/instances/ -count=1`
 Expected: PASS (Vorlage- und Routen-Tests).
 
-- [ ] **Step 5: Lint**
+- [x] **Step 5: Lint**
 
 Run: `golangci-lint run ./internal/agent/instances/...`
 Expected: `0 issues.`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/instances/router.go internal/agent/instances/router_test.go
@@ -2974,7 +2974,7 @@ Ablauf und Entscheidungen (Spec §5.1):
 - **Stats:** `SampleStats` holt pro laufendem verwalteten Container einen One-Shot-Snapshot. One-Shot liefert kein `precpu_stats`, daher merkt sich der Manager den vorigen Snapshot pro Instanz: `CPU% = Δtotal_usage / Δsystem_cpu_usage × online_cpus × 100` (erster Snapshot: 0). RAM = `usage − inactive_file` (cgroup v2) bzw. `− cache` (v1). Nicht mehr laufende Container fallen aus dem Cache.
 - **Testbarkeit ohne `sleep`:** `Wait()` (Bedingungsvariable über die Zahl aktiver Worker) wartet, bis alles abgearbeitet ist; `Tick`/`SampleStats`/`RefreshRouter` sind direkt aufrufbar (wie `defense.SyncOnce`); `dockertest.Daemon.Hold` hält einen Docker-Aufruf an, um laufende Operationen und die Warteschlangengrenze zu beobachten. Zeit für Archivnamen kommt aus `clock.Fake`.
 
-- [ ] **Step 1: Failing test schreiben** – `internal/agent/instances/manager_test.go`
+- [x] **Step 1: Failing test schreiben** – `internal/agent/instances/manager_test.go`
 
 ```go
 package instances_test
@@ -3570,12 +3570,12 @@ func TestCloseRejectsNewWork(t *testing.T) {
 
 (`ptr` stammt aus `template_test.go`, gleiches Paket `instances_test`.)
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test ./internal/agent/instances/ -count=1`
 Expected: FAIL beim Kompilieren (`undefined: instances.New`, `instances.Config`, `instances.Manager`).
 
-- [ ] **Step 3: Warteschlange implementieren** – `internal/agent/instances/worker.go`
+- [x] **Step 3: Warteschlange implementieren** – `internal/agent/instances/worker.go`
 
 ```go
 package instances
@@ -3790,7 +3790,7 @@ func (m *Manager) Close() {
 }
 ```
 
-- [ ] **Step 4: Manager implementieren** – `internal/agent/instances/manager.go`
+- [x] **Step 4: Manager implementieren** – `internal/agent/instances/manager.go`
 
 ```go
 package instances
@@ -4384,7 +4384,7 @@ func (m *Manager) Run(ctx context.Context) {
 }
 ```
 
-- [ ] **Step 5: Datenverzeichnisse implementieren** – `internal/agent/instances/datadir.go`
+- [x] **Step 5: Datenverzeichnisse implementieren** – `internal/agent/instances/datadir.go`
 
 ```go
 package instances
@@ -4472,17 +4472,17 @@ func (m *Manager) archiveData(id int64, name string) error {
 
 `os.Chown` existiert auf Linux und macOS (Dev: Besitzer = eigener Benutzer, daher erlaubt); ein Build-Tag ist nicht nötig.
 
-- [ ] **Step 6: Tests laufen lassen (grün, auch mit `-race`)**
+- [x] **Step 6: Tests laufen lassen (grün, auch mit `-race`)**
 
 Run: `go test ./internal/agent/instances/ -count=1 && CGO_ENABLED=1 go test -race -count=5 ./internal/agent/instances/`
 Expected: PASS in beiden Läufen (u. a. `TestForeignContainersAreNeverTouched`, `TestQueueIsSerialAndBounded`, `TestLastErrorIsRedactedAndBounded`).
 
-- [ ] **Step 7: Lint**
+- [x] **Step 7: Lint**
 
 Run: `golangci-lint run ./internal/agent/... && GOOS=linux golangci-lint run ./internal/agent/...`
 Expected: `0 issues.` (zweimal)
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/agent/instances/worker.go internal/agent/instances/manager.go internal/agent/instances/datadir.go internal/agent/instances/manager_test.go
@@ -4532,7 +4532,7 @@ Draht (Spec §5.1, Übersicht „agent-Draht“):
 
 `power`/`remove` für eine Instanz ohne Container werden angenommen (`202`); das Ergebnis steht danach als `last_error` im Status (Spec: „fehlt er, setzt der Worker `last_error`“). Die Firewall-Endpunkte behalten ihr 4-KiB-Limit.
 
-- [ ] **Step 1: Failing tests schreiben**
+- [x] **Step 1: Failing tests schreiben**
 
 `internal/agent/server_instances_test.go`:
 
@@ -4860,12 +4860,12 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 }
 ```
 
-- [ ] **Step 2: Tests laufen lassen (rot)**
+- [x] **Step 2: Tests laufen lassen (rot)**
 
 Run: `go test ./internal/agent ./cmd/agent -count=1`
 Expected: FAIL beim Kompilieren (`undefined: agent.WithInstances`).
 
-- [ ] **Step 3: Server erweitern** – `internal/agent/server.go` vollständig ersetzen durch:
+- [x] **Step 3: Server erweitern** – `internal/agent/server.go` vollständig ersetzen durch:
 
 ```go
 // Package agent implements the privileged mc-panel agent: the HTTP server on
@@ -5192,7 +5192,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 Gegenüber TP1 geändert: `Instances`/`Option`/`WithInstances`/`noInstances`, variadisches `NewServer`, vier neue Routen, `health` mit `s.inst.DockerStatus()`, `decode`/`decodeError` mit Limit-Parameter (Firewall-Routen übergeben weiter `maxRequestBytes` = 4 KiB), `queued` (Fehlerabbildung) und `rejectCode` (setzt `ErrorResponse.Code`; `reject` ruft es mit leerem Code). Die Validierung im Server (`EnsureRequest.Validate`, Power-Aktion, `id > 0`) läuft vor dem Manager, damit ungültige Anfragen nie die Warteschlange erreichen; der Manager prüft trotzdem erneut.
 
-- [ ] **Step 4: `cmd/agent/main.go` verdrahten** – Datei vollständig ersetzen durch:
+- [x] **Step 4: `cmd/agent/main.go` verdrahten** – Datei vollständig ersetzen durch:
 
 ```go
 // Command agent is the privileged mc-panel helper. It serves a small, strictly
@@ -5429,17 +5429,17 @@ Reihenfolge beim Start: Listen → Firewall → Manager (`Run` startet sofort ei
 
 Hinweis: `make dev` startet den agent mit `-dev` und ohne `agent.toml`; Docker ist dann aus, es entstehen keine Container und kein `./.dev/mc`. Wer lokal echte Minecraft-Container will, startet bewusst `MCPANEL_DEV_DOCKER=1 make dev` (Docker Desktop/OrbStack; legt Netz `mcpanel-mc` und Container `mcpanel-router` auf Port 25565 an). Der CI-Job `e2e` bleibt dadurch ebenfalls ohne Docker-Seiteneffekte.
 
-- [ ] **Step 5: Tests laufen lassen (grün, auch mit `-race`)**
+- [x] **Step 5: Tests laufen lassen (grün, auch mit `-race`)**
 
 Run: `go test ./... -count=1 && CGO_ENABLED=1 go test -race -count=1 ./cmd/agent ./internal/agent/...`
 Expected: PASS (alle Pakete; `TestRunDevManagesInstances` legt Router und `mcpanel-mc-1` im Fake an).
 
-- [ ] **Step 6: Lint**
+- [x] **Step 6: Lint**
 
 Run: `make lint && GOOS=linux golangci-lint run ./...`
 Expected: keine Befunde.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/agent/server.go internal/agent/server_instances_test.go cmd/agent/main.go cmd/agent/main_test.go
@@ -5467,7 +5467,7 @@ Zwei Tests:
 - `TestIntegrationClientLifecycle` – eigene Namen (`mcpanel-it-<pid>`, Label `mcpanel.integration`, eigenes Netz), läuft überall: Pull, Netz idempotent, Create (Konflikt beim zweiten Mal), Start (zweimal), Inspect, Label-Filter, Kill SIGHUP (läuft weiter), Stats (Limit 64 MiB), Restart, Stop (zweimal), Remove, 404 danach.
 - `TestIntegrationManagerCycle` – der echte Manager mit den echten Namen (`mcpanel-mc-1`, `mcpanel-router`, Netz `mcpanel-mc`), Images per `[images]`-Override auf busybox, `Customize` setzt das Testkommando und entfernt beim Router die Portfreigabe (Port 25565 bleibt frei): ensure → Besitzer `65534:65534` und 0750 des Datenverzeichnisses, Route → start → Stats (Limit 1280 MiB) → restart → ensure mit `recreate` (neuer Container läuft wieder, Revision 2) → stop → remove (Archiv unter `deleted/it-…`, Route weg, Router läuft nach SIGHUP weiter). Existieren schon mc-panel-Ressourcen (z. B. auf einem Host mit laufendem agent), wird der Test übersprungen; mit `MCPANEL_IT_STRICT=1` (CI) schlägt er stattdessen fehl.
 
-- [ ] **Step 1: Integrationstest schreiben** – `internal/agent/docker/integration_linux_test.go`
+- [x] **Step 1: Integrationstest schreiben** – `internal/agent/docker/integration_linux_test.go`
 
 ```go
 //go:build linux && dockerintegration
@@ -5825,7 +5825,7 @@ func TestIntegrationManagerCycle(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Kompilieren und Lint ohne Docker (macOS)**
+- [x] **Step 2: Kompilieren und Lint ohne Docker (macOS)**
 
 `.golangci.yml`, Abschnitt `run`: den Kommentar und die Build-Tags ersetzen durch
 
@@ -5844,7 +5844,7 @@ GOOS=linux golangci-lint run ./internal/agent/... && golangci-lint run ./...
 ```
 Expected: keine Ausgabe von `go vet`, Kompilieren ohne Fehler, `0 issues.` (zweimal). Ohne das Tag (`go test ./...`) wird die Datei nicht gebaut.
 
-- [ ] **Step 3: Integrationstest in der CI ausführen lassen**
+- [x] **Step 3: Integrationstest in der CI ausführen lassen**
 
 Der Test braucht Linux, root und einen Docker-Daemon; er läuft nur in der CI (Schritt aus Step 4 im Job `nftables`), nie auf dem Mac. Nach dem Push auf den PR-Branch:
 ```bash
@@ -5853,7 +5853,7 @@ gh run view <run-id> --log | grep -E -- '--- (PASS|FAIL|SKIP): TestIntegration'
 ```
 Expected: `--- PASS: TestIntegrationClientLifecycle`, `--- PASS: TestIntegrationManagerCycle` (mit `MCPANEL_IT_STRICT=1` ist ein `SKIP` ein Fehler).
 
-- [ ] **Step 4: CI-Schritt ergänzen** – `.github/workflows/ci.yml`, Job `nftables` („nftables integration (root)“), direkt nach dem Schritt `Integration tests as root` anfügen:
+- [x] **Step 4: CI-Schritt ergänzen** – `.github/workflows/ci.yml`, Job `nftables` („nftables integration (root)“), direkt nach dem Schritt `Integration tests as root` anfügen:
 
 ```yaml
       # GitHub's Ubuntu runners ship a running Docker daemon. The tests pull a small,
@@ -5867,12 +5867,12 @@ Expected: `--- PASS: TestIntegrationClientLifecycle`, `--- PASS: TestIntegration
 
 Job-ID und -Name bleiben unverändert (eventuelle Branch-Protection-Regeln referenzieren den Namen). `go test -exec` zerlegt den Befehl in Felder; `sudo env VAR=1 <testbinary>` reicht die Variable trotz `env_reset` durch (lokal geprüft: `go test -exec "env MCPANEL_IT_STRICT=1" ./internal/clock` → `ok`). Die Testbinaries werden als Runner-Benutzer gebaut und nur als root ausgeführt, wie beim nftables-Schritt.
 
-- [ ] **Step 5: Gesamtprüfung**
+- [x] **Step 5: Gesamtprüfung**
 
 Run: `make test && make lint && GOOS=linux golangci-lint run ./...`
 Expected: alles grün.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/docker/integration_linux_test.go .golangci.yml .github/workflows/ci.yml
