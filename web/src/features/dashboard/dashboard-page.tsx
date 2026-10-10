@@ -64,6 +64,9 @@ export function DashboardPage() {
         <div role="status" className="mb-6 rounded-md border p-4 text-sm">
           <p className="font-medium">{t('dashboard.base_domain_missing_title')}</p>
           <p className="text-muted-foreground mt-1">{t('dashboard.base_domain_missing')}</p>
+          <Link to="/settings" className="text-primary mt-2 inline-block underline underline-offset-4">
+            {t('settings.link')}
+          </Link>
         </div>
       ) : null}
       {content}

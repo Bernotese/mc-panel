@@ -75,6 +75,7 @@ describe('CreateServerPage', () => {
     const onCreated = vi.fn()
     await renderWithProviders(<CreateServerPage onCreated={onCreated} />, { me: loginAs('admin', { sudo: true }) })
     expect(await screen.findByText('Keine Basisdomain festgelegt')).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Zu den Einstellungen' })[0]).toHaveAttribute('href', '/settings')
     await fillRequired(user, 'skyblock')
     expect(screen.getByText('Adresse: noch keine – erst wenn eine Basisdomain festgelegt ist.')).toBeInTheDocument()
     await screen.findByRole('option', { name: '26.2' })
@@ -104,7 +105,8 @@ describe('CreateServerPage', () => {
   it('offers CurseForge modpacks only with a stored API key', async () => {
     await renderWithProviders(<CreateServerPage onCreated={vi.fn()} />, { me: loginAs('admin') })
     expect(await screen.findByRole('radio', { name: 'CurseForge-Modpack' })).toBeDisabled()
-    expect(screen.getByText('Für CurseForge-Modpacks braucht mc-panel einen API-Key. Hinterlege ihn in den Einstellungen.')).toBeInTheDocument()
+    expect(screen.getByText(/^Für CurseForge-Modpacks braucht mc-panel einen API-Key\./)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Zu den Einstellungen' })).toHaveAttribute('href', '/settings')
   })
 
   it('asks for the CurseForge modpack once a key is stored', async () => {
@@ -114,7 +116,7 @@ describe('CreateServerPage', () => {
     await user.click(await screen.findByRole('radio', { name: 'CurseForge-Modpack' }))
     expect(screen.getByRole('textbox', { name: 'CurseForge-Modpack' })).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Minecraft-Version' })).not.toBeInTheDocument()
-    expect(screen.queryByText('Für CurseForge-Modpacks braucht mc-panel einen API-Key. Hinterlege ihn in den Einstellungen.')).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Für CurseForge-Modpacks braucht mc-panel einen API-Key\./)).not.toBeInTheDocument()
   })
 
   it('offers the fabric loader versions from the catalog', async () => {
