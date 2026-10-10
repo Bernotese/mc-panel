@@ -36,7 +36,8 @@ func managedID(labels map[string]string, names ...string) (int64, bool) {
 
 // Routes maps the FQDN of every managed container (running or not) to its
 // backend "mcpanel-mc-<id>:25565". Containers with labels that do not form a
-// valid name/FQDN pair are skipped; for a duplicate FQDN the lowest ID wins.
+// valid name/FQDN pair are skipped; for a duplicate FQDN the highest ID (the
+// newest server, e.g. after a leftover container of a deleted one) wins.
 func Routes(containers []docker.ContainerSummary) map[string]string {
 	sorted := slices.Clone(containers)
 	ids := make(map[string]int64, len(sorted))
@@ -44,7 +45,7 @@ func Routes(containers []docker.ContainerSummary) map[string]string {
 		id, _ := managedID(c.Labels, c.Names...)
 		ids[c.ID] = id
 	}
-	slices.SortFunc(sorted, func(a, b docker.ContainerSummary) int { return cmp.Compare(ids[a.ID], ids[b.ID]) })
+	slices.SortFunc(sorted, func(a, b docker.ContainerSummary) int { return cmp.Compare(ids[b.ID], ids[a.ID]) })
 	routes := map[string]string{}
 	for _, c := range sorted {
 		id, ok := managedID(c.Labels, c.Names...)
