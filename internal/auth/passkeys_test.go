@@ -10,8 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/notify"
 )
 
 func TestPasskeyRegistrationAndList(t *testing.T) {

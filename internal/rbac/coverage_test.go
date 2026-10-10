@@ -7,8 +7,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/rbac"
 )
 
 func noopHandler(http.ResponseWriter, *http.Request) {}

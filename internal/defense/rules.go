@@ -8,7 +8,7 @@ import (
 	"slices"
 	"time"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 type ruleEntry struct {

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mcpanel/internal/unixsock"
+	"github.com/Bernotese/mc-panel/internal/unixsock"
 )
 
 func sockPath(t *testing.T) string {

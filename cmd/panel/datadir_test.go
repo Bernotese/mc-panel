@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"testing"
 
-	"mcpanel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/config"
 )
 
 func mode(t *testing.T, path string) os.FileMode {

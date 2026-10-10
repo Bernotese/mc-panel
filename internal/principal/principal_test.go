@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"mcpanel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
 func TestContextRoundTrip(t *testing.T) {

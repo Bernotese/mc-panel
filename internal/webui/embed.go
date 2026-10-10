@@ -8,7 +8,7 @@ import (
 	"path"
 	"strings"
 
-	"mcpanel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/httpx"
 )
 
 //go:embed all:dist

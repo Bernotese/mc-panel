@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/principal"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
 )
 
 func TestListJails(t *testing.T) {

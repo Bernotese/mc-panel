@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func Open(t testing.TB) *sql.DB {

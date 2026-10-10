@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/rbac"
 )
 
 // TestRoutesDeclareRules pins every security route to the rule from the OpenAPI table.

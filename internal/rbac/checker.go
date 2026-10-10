@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // DBChecker answers per-server permission questions from the permissions table.

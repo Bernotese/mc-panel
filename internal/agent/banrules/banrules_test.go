@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
 )
 
 func TestMaxTimeoutSeconds(t *testing.T) {

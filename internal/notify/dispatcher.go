@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/secretbox"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const (

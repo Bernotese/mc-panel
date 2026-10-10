@@ -10,7 +10,7 @@ import (
 	"net/netip"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 var (

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 type rangeSpec struct{ total, bucket time.Duration }

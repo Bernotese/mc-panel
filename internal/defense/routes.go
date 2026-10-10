@@ -1,6 +1,6 @@
 package defense
 
-import "mcpanel/internal/rbac"
+import "github.com/Bernotese/mc-panel/internal/rbac"
 
 // Routes registers the security-center endpoints with full paths relative to /api.
 func (h *Handler) Routes(api *rbac.Router) {

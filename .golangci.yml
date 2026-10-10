@@ -163,7 +163,7 @@ formatters:
       simplify: true
     goimports:
       local-prefixes:
-        - mcpanel
+        - github.com/Bernotese/mc-panel
   exclusions:
     generated: strict
     paths:

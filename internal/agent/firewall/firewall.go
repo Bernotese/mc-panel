@@ -8,8 +8,8 @@ import (
 	"slices"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
 )
 
 // Names of the nftables objects owned by mc-panel. Nothing outside the table

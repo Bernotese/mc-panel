@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
-	"mcpanel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/clock"
 )
 
 // Noop keeps bans in memory and only logs them. No packet is ever dropped.

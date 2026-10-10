@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 type overviewJSON struct {

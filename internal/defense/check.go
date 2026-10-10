@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"mcpanel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/httpx"
 )
 
 func normalizeUsername(u string) string { return strings.ToLower(strings.TrimSpace(u)) }
