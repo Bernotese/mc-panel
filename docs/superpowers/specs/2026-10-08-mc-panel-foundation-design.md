@@ -109,7 +109,7 @@ Linux-spezifisches liegt hinter Interfaces, Implementierungen per Build-Tag:
 ### 3.5 Entwicklung und Release
 
 - `make dev`: startet agent + panel mit `--dev` und den Vite-Dev-Server (Proxy `/api` → panel). Browser behandeln `localhost` als sicheren Kontext, daher funktionieren `Secure`/`__Host-`-Cookies.
-- Linux-VM (OrbStack/Lima, Ubuntu LTS) für produktionsnahe Tests (nftables, systemd).
+- Produktionsnahe Tests (nftables, root) laufen in der CI auf Ubuntu (`scripts/ci-acceptance.sh`); die frühere Lima-VM wurde am 2026-10-10 entfernt.
 - `make release`: Frontend-Build → `go:embed` → GoReleaser für `linux/amd64` und `linux/arm64` mit SHA256-Checksums.
 
 ## 4. Authentifizierung und Sessions
@@ -238,7 +238,7 @@ Token-Bucket (In-Memory, pro Prozess):
 - **TDD** für alle Go-Pakete.
 - Unit: Passwort-Hashing/Policy, TOTP inkl. Replay, Recovery-Codes, Session-Ablauf (mit Fake-Clock), Rate-Limiter, Jail-Eskalation, CIDR-Regeln, Hash-Kette, RBAC-Entscheidungen, Notifier-Dedup.
 - Integration (`httptest` + echte SQLite-Datei): kompletter Login inkl. TOTP, CSRF-Ablehnung, `403` ohne Recht, Jail nach 5 Fehlversuchen, Sudo-Pflicht, Session-Widerruf, Route-ohne-Rechte-Check.
-- agent: Tests mit Fake-Firewall; nftables-Integrationstest nur unter Linux (Build-Tag, CI/VM).
+- agent: Tests mit Fake-Firewall; nftables-Integrationstest nur unter Linux (Build-Tag, CI).
 - Frontend: Vitest + Testing Library für Logik/Komponenten; Playwright-E2E für Login + TOTP-Setup gegen echtes Backend.
 - CI (GitHub Actions): `go test ./...`, `golangci-lint`, `govulncheck`, `gosec`, `npm ci && npm test && npm run build`, `npm audit --audit-level=high`.
 
@@ -265,6 +265,6 @@ Token-Bucket (In-Memory, pro Prozess):
 2. `make dev` auf macOS → UI unter `http://localhost:5173` erreichbar.
 3. `panel admin create` → erzwungenes 2FA-Setup → Login mit Passwort + TOTP und mit Passkey funktioniert.
 4. Eingeschränkter Benutzer mit `server.power` für Stub-Server A sieht nur Server A; Zugriff auf Server B → `403`.
-5. 5 falsche Logins → Jail im Security Center sichtbar, ntfy-/Discord-Testbenachrichtigung kommt an; in der Linux-VM zeigt `nft list set inet mcpanel mcpanel_jail4` (bzw. `mcpanel_jail6`) die IP.
+5. 5 falsche Logins → Jail im Security Center sichtbar, ntfy-/Discord-Testbenachrichtigung kommt an; in der CI (`scripts/ci-acceptance.sh`) zeigt `nft list set inet mcpanel mcpanel_jail4` (bzw. `mcpanel_jail6`) die IP.
 6. Alle Aktionen stehen im Audit-Log, `panel audit verify` meldet OK; nach manueller Manipulation einer Zeile schlägt `verify` fehl.
-7. `make release` erzeugt Linux-Binaries (amd64/arm64) mit eingebettetem Frontend; agent + panel starten in der Linux-VM.
+7. `make release` erzeugt Linux-Binaries (amd64/arm64) mit eingebettetem Frontend; agent + panel starten unter Linux (CI-Abnahmetest).

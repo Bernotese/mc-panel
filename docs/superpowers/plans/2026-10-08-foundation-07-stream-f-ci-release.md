@@ -61,7 +61,7 @@ Temporär (nie committen): `internal/lintprobe/`, `internal/agent/lintprobe/`, `
 **Files:**
 - Create: `.golangci.yml`
 
-- [ ] **Step 1: Ausgangszustand prüfen und Werkzeuge installieren**
+- [x] **Step 1: Ausgangszustand prüfen und Werkzeuge installieren**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -75,7 +75,7 @@ make test
 ```
 Expected: `golangci-lint has version 2.14.0 …`; `make test` grün. (`.dev/` ist per Phase-0-`.gitignore` ausgeschlossen.)
 
-- [ ] **Step 2: `.golangci.yml` schreiben**
+- [x] **Step 2: `.golangci.yml` schreiben**
 
 ```yaml
 # golangci-lint v2 configuration for mc-panel (spec §10).
@@ -235,7 +235,7 @@ issues:
   max-same-issues: 0
 ```
 
-- [ ] **Step 3: Konfiguration validieren**
+- [x] **Step 3: Konfiguration validieren**
 
 ```bash
 .dev/tools/golangci-lint config verify && echo CONFIG-OK
@@ -243,7 +243,7 @@ issues:
 ```
 Expected: `CONFIG-OK` (keine Schemafehler); die Liste „Enabled by your configuration linters“ enthält genau die 14 Linter aus `linters.enable`.
 
-- [ ] **Step 4: Gegen Phase-0-Code laufen lassen (macOS und Linux-Dateien)**
+- [x] **Step 4: Gegen Phase-0-Code laufen lassen (macOS und Linux-Dateien)**
 
 ```bash
 .dev/tools/golangci-lint run ./...
@@ -267,7 +267,7 @@ Wenn Befunde auftreten, gilt folgende verbindliche Reaktion (Code von Phase 0 wi
 
 Nach jeder Config-Änderung Step 3 und Step 4 wiederholen, bis alle drei Befehle sauber sind.
 
-- [ ] **Step 5: Nur falls `fmt --diff` Ausgaben hatte – Whitespace-Formatierung anwenden**
+- [x] **Step 5: Nur falls `fmt --diff` Ausgaben hatte – Whitespace-Formatierung anwenden**
 
 ```bash
 .dev/tools/golangci-lint fmt ./...
@@ -279,7 +279,7 @@ git commit -m "style: apply gofmt to phase-0 files" -m "Whitespace-only (verifie
 ```
 Expected: `WHITESPACE-ONLY`; zweiter `fmt --diff` ohne Ausgabe. Meldet `git diff -w` Unterschiede (z. B. Import-Umsortierung), **nicht** committen: `git checkout -- .` und den Befund an den Lead melden.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add .golangci.yml
@@ -296,7 +296,7 @@ Ziel: Nachweisen, dass typische, idiomatische Muster aus Streams A–D die Konfi
 - Temporär: `internal/agent/lintprobe/probe.go` (Stream C), `internal/notify/lintprobe/probe.go` (Stream B), `internal/lintprobe/probe.go` und `internal/lintprobe/probe_test.go` (Streams A/B/D)
 - Modify (nur bei Befunden): `.golangci.yml`
 
-- [ ] **Step 1: Probe-Pakete anlegen**
+- [x] **Step 1: Probe-Pakete anlegen**
 
 `internal/agent/lintprobe/probe.go`:
 
@@ -472,7 +472,7 @@ func TestProbe(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Probes linten**
+- [x] **Step 2: Probes linten**
 
 ```bash
 probes="./internal/agent/lintprobe/... ./internal/notify/lintprobe/... ./internal/lintprobe/..."
@@ -494,7 +494,7 @@ Verbindliche Reaktion auf Befunde (gleiche Regeln wie Task 1 Step 4: gezielt, be
 
 Nach jeder Config-Änderung `config verify` (Task 1 Step 3) und Step 2 wiederholen.
 
-- [ ] **Step 3: Gegenprobe – die agent-Ausnahme ist wirklich auf den agent beschränkt**
+- [x] **Step 3: Gegenprobe – die agent-Ausnahme ist wirklich auf den agent beschränkt**
 
 ```bash
 mkdir -p internal/lintprobe2
@@ -504,7 +504,7 @@ rm -rf internal/lintprobe2
 ```
 Expected: genau ein Befund `net.Listen must not be called … (noctx)` in `internal/lintprobe2/probe.go` und `exit=1`. Außerhalb des agent bleibt `noctx` für `net.Listen` also aktiv. (Der `G302`-Befund bleibt aus, weil die `0660`-Regel pfadunabhängig gilt.)
 
-- [ ] **Step 4: Probes entfernen und Arbeitsbaum prüfen**
+- [x] **Step 4: Probes entfernen und Arbeitsbaum prüfen**
 
 ```bash
 rm -rf internal/agent/lintprobe internal/notify/lintprobe internal/lintprobe internal/lintprobe2
@@ -513,7 +513,7 @@ git status --porcelain -- internal/
 ```
 Expected: `git status` ohne Ausgabe; `0 issues.`
 
-- [ ] **Step 5: Commit (nur wenn `.golangci.yml` geändert wurde)**
+- [x] **Step 5: Commit (nur wenn `.golangci.yml` geändert wurde)**
 
 ```bash
 git diff --quiet -- .golangci.yml || {
@@ -530,7 +530,7 @@ git diff --quiet -- .golangci.yml || {
 - Create: `.goreleaser.yaml`
 - Temporär (nur falls `cmd/agent` noch fehlt): `cmd/agent/main.go`
 
-- [ ] **Step 1: `.goreleaser.yaml` schreiben**
+- [x] **Step 1: `.goreleaser.yaml` schreiben**
 
 ```yaml
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
@@ -637,7 +637,7 @@ release:
   draft: false
 ```
 
-- [ ] **Step 2: Konfiguration prüfen**
+- [x] **Step 2: Konfiguration prüfen**
 
 ```bash
 goreleaser --version | head -n 3
@@ -646,7 +646,7 @@ grep -qi deprecat .dev/goreleaser-check.log && echo "DEPRECATIONS FOUND" || echo
 ```
 Expected: Version ≥ 2.8 (Homebrew liefert aktuell 2.18.x); `goreleaser check` mit Exit-Code 0 und Meldung `1 configuration file(s) validated`; `NO-DEPRECATIONS`.
 
-- [ ] **Step 3: Temporären agent-Stub anlegen (nur falls Stream C noch nicht gemergt ist)**
+- [x] **Step 3: Temporären agent-Stub anlegen (nur falls Stream C noch nicht gemergt ist)**
 
 Merge-Reihenfolge ist F vor C, daher fehlt `cmd/agent` im Stream-F-Worktree in der Regel. Der Stub dient nur dieser Verifikation:
 
@@ -666,7 +666,7 @@ EOF
 echo STUB-CREATED; }
 ```
 
-- [ ] **Step 4: Snapshot bauen**
+- [x] **Step 4: Snapshot bauen**
 
 ```bash
 (cd web && npm ci)
@@ -675,7 +675,7 @@ ls -1 dist
 ```
 Expected: GoReleaser endet mit `release succeeded`; in `dist/` liegen u. a. `checksums.txt`, `mc-panel_<v>-snapshot+<sha>_linux_amd64.tar.gz`, `mc-panel_<v>-snapshot+<sha>_linux_arm64.tar.gz`, `artifacts.json` sowie die Build-Verzeichnisse `panel_linux_amd64_v1/`, `panel_linux_arm64_v8.0/`, `agent_linux_amd64_v1/`, `agent_linux_arm64_v8.0/`.
 
-- [ ] **Step 5: Architektur, Static Linking, CGO, Version und eingebettetes Frontend prüfen**
+- [x] **Step 5: Architektur, Static Linking, CGO, Version und eingebettetes Frontend prüfen**
 
 ```bash
 file dist/*/panel dist/*/agent
@@ -689,7 +689,7 @@ Expected:
 - `go version -m`: je Binary `build	CGO_ENABLED=0` und `build	-ldflags="-s -w -X main.version=<v>-snapshot+<sha>"`.
 - Beide `panel`-Binaries: `embedded-ui-markers=` ≥ 1.
 
-- [ ] **Step 6: Archive und Checksummen prüfen**
+- [x] **Step 6: Archive und Checksummen prüfen**
 
 ```bash
 for a in dist/mc-panel_*_linux_amd64.tar.gz dist/mc-panel_*_linux_arm64.tar.gz; do
@@ -699,7 +699,7 @@ done
 ```
 Expected: beide Archive `agent panel` (keine weiteren Dateien, kein Unterordner); `shasum`: zwei Zeilen `…tar.gz: OK`.
 
-- [ ] **Step 7: Negativtest – der Embed-Check unterscheidet wirklich**
+- [x] **Step 7: Negativtest – der Embed-Check unterscheidet wirklich**
 
 ```bash
 tmp="$(mktemp -d)"
@@ -713,7 +713,7 @@ rm -rf "$tmp"
 ```
 Expected: `vite-marker=0 naive-index.html=` ≥ 1 (der naive Check wäre fälschlich grün), danach `HOOK WOULD FAIL (correct)` und `exit=1`.
 
-- [ ] **Step 8: Stub entfernen, Arbeitsbaum prüfen, Commit**
+- [x] **Step 8: Stub entfernen, Arbeitsbaum prüfen, Commit**
 
 ```bash
 if grep -q 'Temporary stub to verify .goreleaser.yaml' cmd/agent/main.go 2>/dev/null; then rm -rf cmd/agent; fi
@@ -731,7 +731,7 @@ Expected: `git status --porcelain` zeigt vor dem `git add` ausschließlich `?? .
 **Files:**
 - Create: `.github/workflows/ci.yml`
 
-- [ ] **Step 1: Workflow schreiben**
+- [x] **Step 1: Workflow schreiben**
 
 ```yaml
 name: CI
@@ -1028,7 +1028,7 @@ jobs:
           (cd dist && sha256sum -c checksums.txt)
 ```
 
-- [ ] **Step 2: Mit actionlint (inkl. shellcheck) validieren**
+- [x] **Step 2: Mit actionlint (inkl. shellcheck) validieren**
 
 ```bash
 command -v shellcheck
@@ -1036,7 +1036,7 @@ go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/ci.y
 ```
 Expected: `shellcheck`-Pfad wird ausgegeben (actionlint prüft damit die `run:`-Skripte); actionlint gibt keine Befundzeilen aus, danach `exit=0`.
 
-- [ ] **Step 3: Jobs lokal nachstellen (soweit macOS es erlaubt)**
+- [x] **Step 3: Jobs lokal nachstellen (soweit macOS es erlaubt)**
 
 ```bash
 go mod verify && go mod tidy -diff && echo MODULES-OK
@@ -1050,7 +1050,7 @@ make clean
 ```
 Expected: `all modules verified`, `MODULES-OK`; Tests grün; `0 issues.`; govulncheck `No vulnerabilities found.`; Web-Schritte grün, `git status --porcelain -- .` ohne Ausgabe, `found 0 vulnerabilities` (oder nur Befunde unterhalb `high`); Redocly `Woohoo! Your API description is valid.`; `bin/panel: Mach-O 64-bit executable arm64` (Host-Build) und Marker-Zahl ≥ 1. Der nftables-Job und die Linux-`file`-Prüfungen laufen nur in CI (Push des Branches `stream/f` triggert den Workflow, sobald ein Remote existiert).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .github/workflows/ci.yml
@@ -1064,7 +1064,7 @@ git commit -m "ci: add GitHub Actions workflow for Go, web, OpenAPI, nftables an
 **Files:**
 - Create: `.github/workflows/release.yml`, `.github/dependabot.yml`
 
-- [ ] **Step 1: `.github/workflows/release.yml` schreiben**
+- [x] **Step 1: `.github/workflows/release.yml` schreiben**
 
 ```yaml
 name: Release
@@ -1135,7 +1135,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-- [ ] **Step 2: `.github/dependabot.yml` schreiben**
+- [x] **Step 2: `.github/dependabot.yml` schreiben**
 
 ```yaml
 version: 2
@@ -1153,14 +1153,14 @@ updates:
       prefix: ci
 ```
 
-- [ ] **Step 3: actionlint**
+- [x] **Step 3: actionlint**
 
 ```bash
 go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12; echo "exit=$?"
 ```
 Expected: keine Befundzeilen für die Workflows in `.github/workflows/`, danach `exit=0`.
 
-- [ ] **Step 4: Sicherheitsprüfungen der Workflows**
+- [x] **Step 4: Sicherheitsprüfungen der Workflows**
 
 ```bash
 echo "--- pull_request_target (expect none)"; grep -rn 'pull_request_target' .github/workflows || true
@@ -1181,7 +1181,7 @@ Expected:
 - unpinned uses: keine Zeile.
 - Pro Datei `checkouts` = `persist` (ci.yml 5 = 5, release.yml 1 = 1).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .github/workflows/release.yml .github/dependabot.yml
@@ -1197,7 +1197,7 @@ git commit -m "ci: add tag-triggered GoReleaser workflow and Dependabot for acti
 **Files:**
 - Create: `scripts/vm-setup.sh`, `scripts/vm-test.sh`
 
-- [ ] **Step 1: `scripts/vm-setup.sh` schreiben**
+- [x] **Step 1: `scripts/vm-setup.sh` schreiben**
 
 ```bash
 #!/usr/bin/env bash
@@ -1411,7 +1411,7 @@ install_and_start
 echo "== done: agent + panel running in VM $VM_NAME (panel at http://192.0.2.1:8080 inside the VM)"
 ```
 
-- [ ] **Step 2: `scripts/vm-test.sh` schreiben**
+- [x] **Step 2: `scripts/vm-test.sh` schreiben**
 
 ```bash
 #!/usr/bin/env bash
@@ -1496,7 +1496,7 @@ echo "PASS: acceptance check 5 (nftables part)"
 GUEST
 ```
 
-- [ ] **Step 3: Statische Prüfung**
+- [x] **Step 3: Statische Prüfung**
 
 ```bash
 chmod +x scripts/vm-setup.sh scripts/vm-test.sh
@@ -1507,7 +1507,7 @@ scripts/vm-setup.sh --bogus; echo "exit=$?"
 ```
 Expected: `SYNTAX-OK`, `SHELLCHECK-OK`, Usage-Text; bei `--bogus` Usage auf stderr und `exit=2`.
 
-- [ ] **Step 4: VM provisionieren (Stream-F-Verifikation)**
+- [x] **Step 4: VM provisionieren (Stream-F-Verifikation)**
 
 **Vor diesem Schritt den Nutzer fragen:** `brew install lima` und der erste `limactl start` laden Lima bzw. das Ubuntu-LTS-Cloud-Image (ca. 600 MB, Quelle cloud-images.ubuntu.com über Lima-Template `ubuntu-lts`).
 
@@ -1522,7 +1522,7 @@ Expected: letzte Zeile des Provisionings `provisioned: nftables v1.…, user mcp
 
 Der vollständige Lauf (`scripts/vm-setup.sh` ohne Flags und `scripts/vm-test.sh`) braucht `cmd/agent` aus Stream C bzw. die Phase-2-Verdrahtung und ist als Phase-2-Verifikation im Wiring-Vertrag festgelegt.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/vm-setup.sh scripts/vm-test.sh
@@ -1536,7 +1536,7 @@ git commit -m "test: add Lima VM setup and nftables acceptance scripts" -m "Co-A
 **Files:**
 - Create: `docs/dev/README.md`, `docs/dev/linux-vm.md`
 
-- [ ] **Step 1: `docs/dev/README.md` schreiben**
+- [x] **Step 1: `docs/dev/README.md` schreiben**
 
 ````markdown
 # Entwicklung
@@ -1625,7 +1625,7 @@ Vor dem Taggen lokal prüfen: `make release && (cd dist && shasum -a 256 -c chec
 Produktionsnahe Tests (nftables, systemd, Benutzer `mcpanel`): siehe `docs/dev/linux-vm.md`.
 ````
 
-- [ ] **Step 2: `docs/dev/linux-vm.md` schreiben**
+- [x] **Step 2: `docs/dev/linux-vm.md` schreiben**
 
 ````markdown
 # Linux-VM für produktionsnahe Tests
@@ -1709,7 +1709,7 @@ limactl delete --force mcpanel                                # VM komplett entf
 | Jail aus früherem Lauf blockiert | `scripts/vm-setup.sh --no-build` setzt DB und Sets zurück (macht `vm-test.sh` automatisch) |
 ````
 
-- [ ] **Step 3: Konsistenzprüfung der Doku gegen Repo und Skripte**
+- [x] **Step 3: Konsistenzprüfung der Doku gegen Repo und Skripte**
 
 ```bash
 for t in dev test test-race lint generate build release clean; do grep -q "^$t:" Makefile || echo "MISSING make target: $t"; done
@@ -1723,7 +1723,7 @@ grep -c '192.0.2.2' scripts/vm-setup.sh scripts/vm-test.sh
 ```
 Expected: keine `MISSING`-Zeile; vier `…-CONSISTENT`-Zeilen; beide `grep -c`-Aufrufe zählen in jeder Datei ≥ 1.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/dev/README.md docs/dev/linux-vm.md
@@ -1736,7 +1736,7 @@ git commit -m "docs: add developer guide and Linux VM instructions" -m "Co-Autho
 
 **Files:** keine neuen
 
-- [ ] **Step 1: Gesamter Check**
+- [x] **Step 1: Gesamter Check**
 
 ```bash
 .dev/tools/golangci-lint config verify && echo CONFIG-OK
@@ -1751,7 +1751,7 @@ git diff --stat phase0..HEAD
 ```
 Expected: `CONFIG-OK`; zweimal `0 issues.`; `goreleaser check` Exit 0; actionlint ohne Ausgabe; `SHELLCHECK-OK`; `make test` grün; `git status` leer; im Log nur die Commits dieses Plans; `git diff --stat` listet ausschließlich `.golangci.yml`, `.goreleaser.yaml`, `.github/…`, `scripts/vm-setup.sh`, `scripts/vm-test.sh`, `docs/dev/…` und – nur falls Task 1 Step 5 nötig war – reine Whitespace-Änderungen an Phase-0-Go-Dateien.
 
-- [ ] **Step 2: Merge-Voraussetzung aus der Übersicht**
+- [x] **Step 2: Merge-Voraussetzung aus der Übersicht**
 
 ```bash
 make lint

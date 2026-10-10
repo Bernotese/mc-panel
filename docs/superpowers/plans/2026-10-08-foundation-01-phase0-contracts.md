@@ -61,7 +61,7 @@ web/  (Vite-Scaffold), web/go.mod
 
 **Interfaces:** Produces: Modul `github.com/Bernotese/mc-panel`.
 
-- [ ] **Step 1: Toolchain installieren**
+- [x] **Step 1: Toolchain installieren**
 
 ```bash
 brew install go node sqlc goose golangci-lint goreleaser
@@ -69,14 +69,14 @@ go version && node --version && sqlc version && golangci-lint --version && gorel
 ```
 Expected: alle Versionen werden ausgegeben.
 
-- [ ] **Step 2: Modul anlegen**
+- [x] **Step 2: Modul anlegen**
 
 ```bash
 cd /Users/jannes/Workspace/mc-panel
 go mod init github.com/Bernotese/mc-panel
 ```
 
-- [ ] **Step 3: `.gitignore` schreiben**
+- [x] **Step 3: `.gitignore` schreiben**
 
 ```gitignore
 /bin/
@@ -93,7 +93,7 @@ web/playwright-report/
 .DS_Store
 ```
 
-- [ ] **Step 4: `internal/deps/deps.go` schreiben (hält alle Abhängigkeiten in go.mod)**
+- [x] **Step 4: `internal/deps/deps.go` schreiben (hält alle Abhängigkeiten in go.mod)**
 
 ```go
 //go:build deps
@@ -117,14 +117,14 @@ import (
 )
 ```
 
-- [ ] **Step 5: `web/go.mod` (schließt node_modules aus `go ./...` aus)**
+- [x] **Step 5: `web/go.mod` (schließt node_modules aus `go ./...` aus)**
 
 ```
 // Separate empty module so that `go ./...` and golangci-lint skip web/node_modules.
 module github.com/Bernotese/mc-panel/web
 ```
 
-- [ ] **Step 6: Abhängigkeiten holen**
+- [x] **Step 6: Abhängigkeiten holen**
 
 ```bash
 go get github.com/BurntSushi/toml github.com/go-chi/chi/v5 github.com/go-webauthn/webauthn/webauthn github.com/google/nftables github.com/oschwald/maxminddb-golang/v2 github.com/pquerna/otp/totp github.com/pressly/goose/v3 golang.org/x/crypto/argon2 golang.org/x/sys/unix golang.org/x/time/rate modernc.org/sqlite
@@ -133,7 +133,7 @@ grep -c require go.mod
 ```
 Expected: `go.mod` listet alle elf Module (direkt oder indirekt); kein Fehler.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add .gitignore go.mod go.sum internal/deps web/go.mod
@@ -158,7 +158,7 @@ func (f *Fake) Advance(d time.Duration)
 func (f *Fake) Set(t time.Time)
 ```
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```go
 package clock_test
@@ -194,9 +194,9 @@ func TestRealIsCurrent(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/clock/` → FAIL (package missing).
+- [x] **Step 2: Run** `go test ./internal/clock/` → FAIL (package missing).
 
-- [ ] **Step 3: Implementation**
+- [x] **Step 3: Implementation**
 
 ```go
 // Package clock abstracts time so business logic can be tested deterministically.
@@ -242,9 +242,9 @@ func (f *Fake) Set(t time.Time) {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/clock/` → PASS.
+- [x] **Step 4: Run** `go test ./internal/clock/` → PASS.
 
-- [ ] **Step 5: Commit** `git add internal/clock && git commit -m "feat(clock): add Clock interface with real and fake implementations" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
+- [x] **Step 5: Commit** `git add internal/clock && git commit -m "feat(clock): add Clock interface with real and fake implementations" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
 
 ---
 
@@ -276,7 +276,7 @@ func LoadAgent(path string, dev bool, root string) (Agent, error)
 func (a Agent) Validate() error
 ```
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```go
 package config_test
@@ -393,9 +393,9 @@ func TestAgentConfig(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/config/` → FAIL.
+- [x] **Step 2: Run** `go test ./internal/config/` → FAIL.
 
-- [ ] **Step 3: Implementation**
+- [x] **Step 3: Implementation**
 
 ```go
 // Package config loads and validates panel and agent configuration (TOML).
@@ -616,9 +616,9 @@ func (a Agent) Validate() error {
 
 Hinweis: `Validate` hat einen Pointer-Receiver (füllt `trusted`). Im Test `TestDefaultPanelIsValidAfterSettingPublicURL` ist `p` addressierbar, daher funktioniert `p.Validate()`.
 
-- [ ] **Step 4: Run** `go test ./internal/config/` → PASS.
+- [x] **Step 4: Run** `go test ./internal/config/` → PASS.
 
-- [ ] **Step 5: Commit** `git add internal/config && git commit -m "feat(config): add panel and agent configuration" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
+- [x] **Step 5: Commit** `git add internal/config && git commit -m "feat(config): add panel and agent configuration" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
 
 ---
 
@@ -650,7 +650,7 @@ func SecurityHeaders(next http.Handler) http.Handler
 func BodyLimit(n int64) func(http.Handler) http.Handler
 ```
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```go
 package httpx_test
@@ -811,9 +811,9 @@ func TestSecurityHeaders(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/httpx/` → FAIL.
+- [x] **Step 2: Run** `go test ./internal/httpx/` → FAIL.
 
-- [ ] **Step 3: Implementation `errors.go`**
+- [x] **Step 3: Implementation `errors.go`**
 
 ```go
 // Package httpx contains shared HTTP helpers: error format, JSON I/O, client IP and middleware.
@@ -867,7 +867,7 @@ func Internal(w http.ResponseWriter, r *http.Request, err error) {
 }
 ```
 
-- [ ] **Step 4: Implementation `json.go`**
+- [x] **Step 4: Implementation `json.go`**
 
 ```go
 package httpx
@@ -913,7 +913,7 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 }
 ```
 
-- [ ] **Step 5: Implementation `ip.go`**
+- [x] **Step 5: Implementation `ip.go`**
 
 ```go
 package httpx
@@ -1010,7 +1010,7 @@ func isTrusted(a netip.Addr, trusted []netip.Prefix) bool {
 
 Hinweis: `fe80::1%en0` im Test: `IPKey` entfernt die Zone vor `Prefix(64)`.
 
-- [ ] **Step 6: Implementation `middleware.go`**
+- [x] **Step 6: Implementation `middleware.go`**
 
 ```go
 package httpx
@@ -1071,9 +1071,9 @@ func BodyLimit(n int64) func(http.Handler) http.Handler {
 
 (`style-src 'unsafe-inline'` ist bewusst erlaubt, weil Radix/shadcn Inline-`style`-Attribute setzen; Skripte bleiben strikt.)
 
-- [ ] **Step 7: Run** `go test ./internal/httpx/` → PASS. Falls `TestSecurityHeaders` an der `unsafe-inline`-Prüfung scheitert: Die Prüfung betrachtet nur den Teil nach `script-src`; korrigiere den Test, falls die Assertion `style-src`-Teile fälschlich mit erfasst, statt die CSP aufzuweichen.
+- [x] **Step 7: Run** `go test ./internal/httpx/` → PASS. Falls `TestSecurityHeaders` an der `unsafe-inline`-Prüfung scheitert: Die Prüfung betrachtet nur den Teil nach `script-src`; korrigiere den Test, falls die Assertion `style-src`-Teile fälschlich mit erfasst, statt die CSP aufzuweichen.
 
-- [ ] **Step 8: Commit** `git add internal/httpx && git commit -m "feat(httpx): add error format, strict JSON decoding, client IP and security middleware" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
+- [x] **Step 8: Commit** `git add internal/httpx && git commit -m "feat(httpx): add error format, strict JSON decoding, client IP and security middleware" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
 
 ---
 
@@ -1092,7 +1092,7 @@ func LoadOrCreateKey(path string) ([]byte, error)    // creates 0600 file; rejec
 ```
 AAD-Konvention (für Streams verbindlich): TOTP-Secret `[]byte(fmt.Sprintf("totp:%d", userID))`, Notifier-Konfiguration `[]byte("notifier:" + kind)` (kind = `discord`|`ntfy`).
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```go
 package secretbox_test
@@ -1162,9 +1162,9 @@ func TestLoadOrCreateKey(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/secretbox/` → FAIL.
+- [x] **Step 2: Run** `go test ./internal/secretbox/` → FAIL.
 
-- [ ] **Step 3: Implementation**
+- [x] **Step 3: Implementation**
 
 ```go
 // Package secretbox encrypts small secrets at rest (AES-256-GCM).
@@ -1256,9 +1256,9 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/secretbox/` → PASS.
+- [x] **Step 4: Run** `go test ./internal/secretbox/` → PASS.
 
-- [ ] **Step 5: Commit** `git add internal/secretbox && git commit -m "feat(secretbox): add AES-GCM secret encryption and key file handling" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
+- [x] **Step 5: Commit** `git add internal/secretbox && git commit -m "feat(secretbox): add AES-GCM secret encryption and key file handling" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
 
 ---
 
@@ -1284,7 +1284,7 @@ func CreateUser(t testing.TB, db *sql.DB, username, role string) int64
 func CreateServer(t testing.TB, db *sql.DB, name string) int64
 ```
 
-- [ ] **Step 1: Migration schreiben `internal/store/migrations/00001_init.sql`**
+- [x] **Step 1: Migration schreiben `internal/store/migrations/00001_init.sql`**
 
 ```sql
 -- +goose Up
@@ -1463,7 +1463,7 @@ DROP TABLE users;
 
 Semantik (für Streams verbindlich): `jails.level` = Eskalationsstufe ab 1, Dauer `15min * 2^(level-1)` gedeckelt auf 7 Tage. `fw_banned_at` = agent hat Ban bestätigt; `fw_unbanned_at` = agent hat Unban nach `lifted_at` bestätigt. `login_attempts.ip` = volle Client-IP, `ip_key` = `httpx.IPKey(ip).String()`. `webauthn_credentials.credential_json` = JSON von `webauthn.Credential`. `recovery_codes.code_hash` = SHA-256 des normalisierten Codes (Kleinbuchstaben, ohne Bindestriche/Leerzeichen). `sessions.token_hash` = SHA-256 des Cookie-Tokens.
 
-- [ ] **Step 2: `sqlc.yaml` und `internal/store/queries/common.sql`**
+- [x] **Step 2: `sqlc.yaml` und `internal/store/queries/common.sql`**
 
 ```yaml
 version: "2"
@@ -1488,14 +1488,14 @@ INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;
 ```
 
-- [ ] **Step 3: Generieren**
+- [x] **Step 3: Generieren**
 
 ```bash
 sqlc generate && ls internal/store
 ```
 Expected: `common.sql.go db.go models.go` (plus `migrations`, `queries`).
 
-- [ ] **Step 4: Failing test `internal/store/store_test.go`**
+- [x] **Step 4: Failing test `internal/store/store_test.go`**
 
 ```go
 package store_test
@@ -1579,9 +1579,9 @@ func TestSecuritySettingsRoundTrip(t *testing.T) {
 }
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/store/...` → FAIL (Open/Migrate/storetest fehlen).
+- [x] **Step 5: Run** `go test ./internal/store/...` → FAIL (Open/Migrate/storetest fehlen).
 
-- [ ] **Step 6: `internal/store/open.go`**
+- [x] **Step 6: `internal/store/open.go`**
 
 ```go
 // Package store owns the SQLite database: connection, migrations and sqlc-generated queries.
@@ -1637,7 +1637,7 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 }
 ```
 
-- [ ] **Step 7: `internal/store/settings.go`**
+- [x] **Step 7: `internal/store/settings.go`**
 
 ```go
 package store
@@ -1694,7 +1694,7 @@ func SaveSecuritySettings(ctx context.Context, q *Queries, s SecuritySettings, n
 }
 ```
 
-- [ ] **Step 8: `internal/store/storetest/storetest.go`**
+- [x] **Step 8: `internal/store/storetest/storetest.go`**
 
 ```go
 // Package storetest provides a migrated temporary database and fixtures for tests.
@@ -1749,9 +1749,9 @@ func CreateServer(t testing.TB, db *sql.DB, name string) int64 {
 }
 ```
 
-- [ ] **Step 9: Run** `go test ./internal/store/...` → PASS. Falls `goose.DialectSQLite3` nicht existiert (API-Änderung in goose), `database.DialectSQLite3` aus `github.com/pressly/goose/v3/database` verwenden.
+- [x] **Step 9: Run** `go test ./internal/store/...` → PASS. Falls `goose.DialectSQLite3` nicht existiert (API-Änderung in goose), `database.DialectSQLite3` aus `github.com/pressly/goose/v3/database` verwenden.
 
-- [ ] **Step 10: Commit** `git add sqlc.yaml internal/store && git commit -m "feat(store): add schema, migrations, sqlc setup and test fixtures" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
+- [x] **Step 10: Commit** `git add sqlc.yaml internal/store && git commit -m "feat(store): add schema, migrations, sqlc setup and test fixtures" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
 
 ---
 
@@ -1763,7 +1763,7 @@ func CreateServer(t testing.TB, db *sql.DB, name string) int64 {
 
 **Interfaces:** Produces (alle unten vollständig angegeben).
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```go
 // internal/principal/principal_test.go
@@ -1815,9 +1815,9 @@ func TestValidateBanPrefix(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/principal/ ./internal/agent/...` → FAIL.
+- [x] **Step 2: Run** `go test ./internal/principal/ ./internal/agent/...` → FAIL.
 
-- [ ] **Step 3: `internal/principal/principal.go`**
+- [x] **Step 3: `internal/principal/principal.go`**
 
 ```go
 // Package principal carries the authenticated user of a request through the context.
@@ -1869,7 +1869,7 @@ func From(ctx context.Context) (Principal, bool) {
 }
 ```
 
-- [ ] **Step 4: `internal/audit/types.go` und `memory.go`**
+- [x] **Step 4: `internal/audit/types.go` und `memory.go`**
 
 ```go
 // Package audit records security-relevant actions in a tamper-evident log.
@@ -1976,7 +1976,7 @@ func (m *MemoryRecorder) Actions() []string {
 }
 ```
 
-- [ ] **Step 5: `internal/notify/notify.go`**
+- [x] **Step 5: `internal/notify/notify.go`**
 
 ```go
 // Package notify sends security notifications. notify.go is a Phase-0 contract;
@@ -2043,7 +2043,7 @@ func (r *Recording) Types() []EventType {
 }
 ```
 
-- [ ] **Step 6: `internal/defense/guard.go` und `fake.go`**
+- [x] **Step 6: `internal/defense/guard.go` und `fake.go`**
 
 ```go
 // Package defense implements rate limits, jails, IP rules and GeoIP.
@@ -2146,7 +2146,7 @@ func (f *FakeGuard) Recorded() []Attempt {
 }
 ```
 
-- [ ] **Step 7: `internal/agent/agentapi/agentapi.go`**
+- [x] **Step 7: `internal/agent/agentapi/agentapi.go`**
 
 ```go
 // Package agentapi is the wire contract between panel and agent (JSON over HTTP on a Unix socket).
@@ -2235,9 +2235,9 @@ func ValidateBanPrefix(p netip.Prefix) error {
 }
 ```
 
-- [ ] **Step 8: Run** `go test ./internal/... && go vet ./...` → PASS.
+- [x] **Step 8: Run** `go test ./internal/... && go vet ./...` → PASS.
 
-- [ ] **Step 9: Commit** `git add internal/principal internal/audit internal/notify internal/defense internal/agent && git commit -m "feat: add cross-stream contracts (principal, audit, notify, defense, agentapi)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
+- [x] **Step 9: Commit** `git add internal/principal internal/audit internal/notify internal/defense internal/agent && git commit -m "feat: add cross-stream contracts (principal, audit, notify, defense, agentapi)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
 
 ---
 
@@ -2274,7 +2274,7 @@ func (rt *Router) Routes() []RouteInfo
 ```
 Fehlerverhalten: kein Principal → 401 `unauthorized`; falsche Stage → 403 `setup_2fa_required` (wenn Stage setup) sonst 401 `unauthorized`; kein Admin → 403 `forbidden`; Server-ID unparsbar → 404 `not_found`; kein Recht → 403 `forbidden`; Sudo abgelaufen → 403 `sudo_required`. Eine Route mit `Rule{}` (Nullwert) führt beim Registrieren zu `panic`.
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```go
 package rbac_test
@@ -2404,9 +2404,9 @@ func TestZeroRulePanics(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/rbac/` → FAIL.
+- [x] **Step 2: Run** `go test ./internal/rbac/` → FAIL.
 
-- [ ] **Step 3: `internal/rbac/rule.go`**
+- [x] **Step 3: `internal/rbac/rule.go`**
 
 ```go
 // Package rbac declares and enforces access rules for every API route.
@@ -2508,7 +2508,7 @@ func (r Rule) String() string {
 }
 ```
 
-- [ ] **Step 4: `internal/rbac/router.go`**
+- [x] **Step 4: `internal/rbac/router.go`**
 
 ```go
 package rbac
@@ -2624,9 +2624,9 @@ func (rt *Router) enforce(rule Rule, h http.HandlerFunc) http.HandlerFunc {
 }
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/rbac/` → PASS.
+- [x] **Step 5: Run** `go test ./internal/rbac/` → PASS.
 
-- [ ] **Step 6: Commit** `git add internal/rbac && git commit -m "feat(rbac): add declarative route rules and enforcing router" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
+- [x] **Step 6: Commit** `git add internal/rbac && git commit -m "feat(rbac): add declarative route rules and enforcing router" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
 
 ---
 
@@ -3032,7 +3032,7 @@ components:
 
 Pfadparameter `{id}` immer über `#/components/parameters/IdPath`. Array-Antworten (`Passkey[]` usw.) als `type: array, items: $ref`.
 
-- [ ] **Step 1: Datei schreiben** – Kopf + `components` exakt wie oben, dann alle Pfade aus der Tabelle gemäß Übersetzungsregeln. Beispiel für zwei Operationen (Muster für alle anderen):
+- [x] **Step 1: Datei schreiben** – Kopf + `components` exakt wie oben, dann alle Pfade aus der Tabelle gemäß Übersetzungsregeln. Beispiel für zwei Operationen (Muster für alle anderen):
 
 ```yaml
 paths:
@@ -3068,7 +3068,7 @@ paths:
 ```
 Zusätzlich: Jede Operation mit Session erhält `'401': { $ref: '#/components/responses/Unauthorized' }`; jede Sudo-Operation `'403'`. Tags: `auth`, `me`, `admin`, `users`, `servers`, `audit`, `security`, `health`.
 
-- [ ] **Step 2: Validieren**
+- [x] **Step 2: Validieren**
 
 ```bash
 npx --yes @redocly/cli@latest lint api/openapi.yaml --extends=minimal
@@ -3076,7 +3076,7 @@ grep -c "operationId:" api/openapi.yaml
 ```
 Expected: keine Fehler; `57` operationIds (Anzahl Tabellenzeilen).
 
-- [ ] **Step 3: Commit** `git add api && git commit -m "feat(api): add OpenAPI contract for foundation API" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
+- [x] **Step 3: Commit** `git add api && git commit -m "feat(api): add OpenAPI contract for foundation API" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
 
 ---
 
@@ -3088,7 +3088,7 @@ Expected: keine Fehler; `57` operationIds (Anzahl Tabellenzeilen).
 **Interfaces:**
 - Produces: `webui.Handler() http.Handler`, `webui.NewHandler(fsys fs.FS) http.Handler`; Make-Targets `generate test test-go test-race test-web lint dev web-build build release clean`; npm-Skripte `dev build test lint typecheck gen:api`.
 
-- [ ] **Step 1: Failing test `internal/webui/embed_test.go`**
+- [x] **Step 1: Failing test `internal/webui/embed_test.go`**
 
 ```go
 package webui_test
@@ -3143,9 +3143,9 @@ func TestNotBuilt(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/webui/` → FAIL.
+- [x] **Step 2: Run** `go test ./internal/webui/` → FAIL.
 
-- [ ] **Step 3: `internal/webui/embed.go` und Platzhalter**
+- [x] **Step 3: `internal/webui/embed.go` und Platzhalter**
 
 ```bash
 mkdir -p internal/webui/dist && touch internal/webui/dist/.gitkeep
@@ -3212,9 +3212,9 @@ func serveIndex(w http.ResponseWriter, r *http.Request, files http.Handler) {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/webui/` → PASS.
+- [x] **Step 4: Run** `go test ./internal/webui/` → PASS.
 
-- [ ] **Step 5: `cmd/panel/main.go` (Phase-0-Skelett; Phase 2 ersetzt `newRouter`)**
+- [x] **Step 5: `cmd/panel/main.go` (Phase-0-Skelett; Phase 2 ersetzt `newRouter`)**
 
 ```go
 // Command panel is the mc-panel web application.
@@ -3356,7 +3356,7 @@ func newRouter(cfg config.Panel) http.Handler {
 
 Hinweis: `config.LoadPanel` gibt `Panel` per Wert zurück, nachdem `Validate` (Pointer-Receiver) auf der lokalen Variable lief – `trusted` ist also befüllt. Falls `TrustedPrefixes()` leer ist, in `LoadPanel` sicherstellen, dass `p.Validate()` auf `&p` aufgerufen wird (ist der Fall, da `p` eine Variable ist).
 
-- [ ] **Step 6: Vite-Scaffold**
+- [x] **Step 6: Vite-Scaffold**
 
 ```bash
 cd /Users/jannes/Workspace/mc-panel
@@ -3368,7 +3368,7 @@ npm install @tanstack/react-router @tanstack/react-query openapi-fetch i18next r
 npm install -D @tanstack/router-plugin openapi-typescript msw vitest jsdom @testing-library/react @testing-library/jest-dom @testing-library/user-event @playwright/test tailwindcss @tailwindcss/vite @types/qrcode @types/node
 ```
 
-- [ ] **Step 7: `web/vite.config.ts`**
+- [x] **Step 7: `web/vite.config.ts`**
 
 ```ts
 import { defineConfig } from 'vite'
@@ -3391,7 +3391,7 @@ export default defineConfig({
 ```
 Am Anfang der Datei `/// <reference types="vitest/config" />` ergänzen, damit `test` typisiert ist.
 
-- [ ] **Step 8: Basis-App, Tailwind, Router, Test**
+- [x] **Step 8: Basis-App, Tailwind, Router, Test**
 
 `web/src/index.css`:
 ```css
@@ -3461,7 +3461,7 @@ test('renders app name', () => {
 
 Löschen: `web/src/App.tsx`, `web/src/App.css`, `web/src/assets/` (Vite-Demo).
 
-- [ ] **Step 9: npm-Skripte in `web/package.json`** (Abschnitt `scripts` ersetzen)
+- [x] **Step 9: npm-Skripte in `web/package.json`** (Abschnitt `scripts` ersetzen)
 
 ```json
 "scripts": {
@@ -3479,7 +3479,7 @@ cd web && npm run gen:api && npm test && npm run build && ls ../internal/webui/d
 ```
 Expected: Test PASS; `index.html` und `assets/` in `internal/webui/dist`.
 
-- [ ] **Step 10: shadcn initialisieren**
+- [x] **Step 10: shadcn initialisieren**
 
 ```bash
 cd web && npx shadcn@latest init --base-color neutral --yes
@@ -3488,7 +3488,7 @@ npm run typecheck
 ```
 Expected: `components.json` und `src/components/ui/*` angelegt; typecheck grün. Falls `init` nach dem Import-Alias fragt: `@/` (passt zu `vite.config.ts`; zusätzlich in `tsconfig.app.json` `"baseUrl": "."` und `"paths": {"@/*": ["./src/*"]}` setzen).
 
-- [ ] **Step 11: `Makefile`**
+- [x] **Step 11: `Makefile`**
 
 ```make
 SHELL := /bin/bash
@@ -3535,7 +3535,7 @@ clean:
 	find internal/webui/dist -mindepth 1 ! -name .gitkeep -delete
 ```
 
-- [ ] **Step 12: `scripts/dev.sh`** (`chmod +x`)
+- [x] **Step 12: `scripts/dev.sh`** (`chmod +x`)
 
 ```bash
 #!/usr/bin/env bash
@@ -3560,7 +3560,7 @@ echo "mc-panel dev: http://localhost:5173"
 wait
 ```
 
-- [ ] **Step 13: Ende-zu-Ende prüfen**
+- [x] **Step 13: Ende-zu-Ende prüfen**
 
 ```bash
 make test
@@ -3573,7 +3573,7 @@ kill %1
 ```
 Expected: Tests grün; `bin/panel`; `{"status":"ok"}`; `200` (eingebettetes Frontend); CSP-Header vorhanden.
 
-- [ ] **Step 14: Commit + Tag**
+- [x] **Step 14: Commit + Tag**
 
 ```bash
 git add -A
@@ -3597,7 +3597,7 @@ func Verify(pw, encoded string) (ok, needsRehash bool, err error)  // constant-t
 func DummyVerify(pw string)                                   // same cost as Verify, for unknown users
 ```
 
-- [ ] **Step 1: Liste häufiger Passwörter erzeugen** – Quelle: SecLists `Passwords/Common-Credentials/xato-net-10-million-passwords-100000.txt`. **Vor dem Download den Nutzer um Erlaubnis fragen** (Datei ~800 KB von raw.githubusercontent.com). Da die Mindestlänge 12 ist, werden nur Einträge mit ≥ 12 Zeichen behalten.
+- [x] **Step 1: Liste häufiger Passwörter erzeugen** – Quelle: SecLists `Passwords/Common-Credentials/xato-net-10-million-passwords-100000.txt`. **Vor dem Download den Nutzer um Erlaubnis fragen** (Datei ~800 KB von raw.githubusercontent.com). Da die Mindestlänge 12 ist, werden nur Einträge mit ≥ 12 Zeichen behalten.
 
 `scripts/gen-common-passwords.sh`:
 ```bash
@@ -3619,7 +3619,7 @@ printf 'passwordpassword\n' >> internal/password/common.txt && LC_ALL=C sort -u 
 ```
 Expected: einige hundert bis wenige tausend Zeilen; `passwordpassword` ist garantiert enthalten (für den Test).
 
-- [ ] **Step 2: Failing test**
+- [x] **Step 2: Failing test**
 
 ```go
 package password_test
@@ -3691,9 +3691,9 @@ func TestVerifyMalformed(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** `go test ./internal/password/` → FAIL.
+- [x] **Step 3: Run** `go test ./internal/password/` → FAIL.
 
-- [ ] **Step 4: Implementation**
+- [x] **Step 4: Implementation**
 
 ```go
 // Package password hashes and validates user passwords (argon2id, PHC string format).
@@ -3822,9 +3822,9 @@ var dummyHash = sync.OnceValue(func() string {
 func DummyVerify(pw string) { _, _, _ = Verify(pw, dummyHash()) }
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/password/` → PASS.
+- [x] **Step 5: Run** `go test ./internal/password/` → PASS.
 
-- [ ] **Step 6: Commit + Tag**
+- [x] **Step 6: Commit + Tag**
 
 ```bash
 git add internal/password scripts/gen-common-passwords.sh
