@@ -3,7 +3,6 @@ import type {
   Catalog,
   CreateServerRequest,
   InstanceType,
-  JavaVersion,
   Permission,
   PowerAction,
   Server,
@@ -12,6 +11,7 @@ import type {
   UpdateServerSettingsRequest,
 } from '@/api/types'
 import { ALL_PERMISSIONS } from '@/api/types'
+import { javaFor } from '@/features/servers/java'
 import { db, nextId, recordAudit, resolveProperties, runningStatus, stoppedStatus, type MockServer } from '../db'
 import { API, apiError, guard, idParam, noContent, op, readJson, serverPermissions, type MockOperation } from './util'
 
@@ -29,18 +29,6 @@ function validBaseDomain(d: string): boolean {
 
 function validMemory(m: unknown): m is number {
   return typeof m === 'number' && Number.isInteger(m) && m >= 1024 && m <= 32768 && m % 256 === 0
-}
-
-/** Same table as instancespec.JavaFor (spec §6.1). Task 17 moves it to web/src/features/servers/java.ts. */
-function mockJavaFor(type: InstanceType, version: string): JavaVersion {
-  if (type === 'modrinth' || type === 'curseforge') return 'java21'
-  const [major, minor, patch] = version.split('.').map((p) => Number.parseInt(p, 10))
-  if (major !== 1 || Number.isNaN(minor)) return 'java25'
-  const pt = Number.isNaN(patch) || patch === undefined ? 0 : patch
-  if (minor <= 16) return 'java8'
-  if (minor <= 19 || (minor === 20 && pt <= 4)) return 'java17'
-  if (minor <= 21) return 'java21'
-  return 'java25'
 }
 
 function settingsBody(): ServerSettings {
@@ -113,7 +101,7 @@ export const serverOperations: MockOperation[] = [
           version,
           loader_version: body.loader_version ?? null,
           modpack: body.modpack ?? null,
-          java: body.java ?? mockJavaFor(body.type, version),
+          java: body.java ?? javaFor(body.type, version),
           memory_mib: body.memory_mib,
           properties: resolveProperties(name, body.properties),
         },
