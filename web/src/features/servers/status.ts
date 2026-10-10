@@ -1,3 +1,4 @@
+import { isApiError } from '@/api/errors'
 import type { PowerAction, Server, ServerState, ServerStatus } from '@/api/types'
 
 export const FAST_POLL_MS = 3_000
@@ -59,6 +60,15 @@ export function isBusy(status: ServerStatus): boolean {
 
 export function pollInterval(servers: readonly Server[] | undefined): number {
   return servers?.some((s) => isBusy(s.status)) ? FAST_POLL_MS : SLOW_POLL_MS
+}
+
+/**
+ * Detail page: like pollInterval, but no polling without data or once the server is gone or hidden (403/404) –
+ * a deleted server or a revoked permission must not be polled forever. Transient errors keep the last data polling.
+ */
+export function detailPollInterval(server: Server | undefined, error: unknown): number | false {
+  if (!server || isApiError(error, 'not_found') || isApiError(error, 'forbidden')) return false
+  return pollInterval([server])
 }
 
 export function powerAllowed(state: ServerState, action: PowerAction): boolean {

@@ -36,7 +36,7 @@ export function DashboardPage() {
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {servers.data.map((server) => (
           <li key={server.id}>
-            <ServerCard server={server} canDelete={isAdmin} />
+            <ServerCard server={server} />
           </li>
         ))}
       </ul>

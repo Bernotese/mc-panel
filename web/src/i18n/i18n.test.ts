@@ -66,6 +66,7 @@ const DYNAMIC_KEYS = [
     'simulation_distance',
     'spawn_protection',
   ].map((p) => `servers.props.${p}`),
+  ...['pulling', 'creating', 'starting', 'stopping', 'removing'].map((o) => `servers.operation.${o}`),
 ]
 
 describe('i18n resources', () => {

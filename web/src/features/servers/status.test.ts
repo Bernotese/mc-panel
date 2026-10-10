@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { ApiError } from '@/api/errors'
 import type { Server, ServerStatus } from '@/api/types'
 import i18n from '@/i18n'
-import { FAST_POLL_MS, isBusy, pollInterval, powerAllowed, SERVER_STATES, SLOW_POLL_MS, stateBadgeVariant, stateLabelKey } from './status'
+import { detailPollInterval, FAST_POLL_MS, isBusy, pollInterval, powerAllowed, SERVER_STATES, SLOW_POLL_MS, stateBadgeVariant, stateLabelKey } from './status'
 
 const settled: ServerStatus = {
   state: 'running',
@@ -69,5 +70,17 @@ describe('server status', () => {
     expect(stateBadgeVariant('stopped')).toBe('secondary')
     expect(stateBadgeVariant('error')).toBe('destructive')
     expect(stateBadgeVariant('creating')).toBe('outline')
+  })
+
+  it('stops polling a detail page without data or after 403/404', () => {
+    expect(detailPollInterval(undefined, null)).toBe(false)
+    expect(detailPollInterval(server({}), null)).toBe(SLOW_POLL_MS)
+    expect(detailPollInterval(server({ state: 'starting' }), null)).toBe(FAST_POLL_MS)
+    const gone = new ApiError({ status: 404, code: 'not_found', message: 'server not found' })
+    const hidden = new ApiError({ status: 403, code: 'forbidden', message: 'missing permission server.view' })
+    expect(detailPollInterval(server({}), gone)).toBe(false)
+    expect(detailPollInterval(server({}), hidden)).toBe(false)
+    // A transient failure (agent, network) keeps polling with the last known data.
+    expect(detailPollInterval(server({}), new ApiError({ status: 503, code: 'agent_unavailable', message: 'x' }))).toBe(SLOW_POLL_MS)
   })
 })

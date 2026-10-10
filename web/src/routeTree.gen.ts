@@ -17,6 +17,7 @@ import { Route as AppProfileRouteImport } from './routes/_app/profile'
 import { Route as AppSecurityRouteImport } from './routes/_app/security'
 import { Route as LoginIndexRouteImport } from './routes/login/index'
 import { Route as Login2faRouteImport } from './routes/login/2fa'
+import { Route as AppServersIdRouteImport } from './routes/_app/servers/$id'
 import { Route as AppServersNewRouteImport } from './routes/_app/servers/new'
 import { Route as AppUsersIndexRouteImport } from './routes/_app/users/index'
 import { Route as AppUsersIdPermissionsRouteImport } from './routes/_app/users/$id.permissions'
@@ -60,6 +61,11 @@ const Login2faRoute = Login2faRouteImport.update({
   path: '/login/2fa',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppServersIdRoute = AppServersIdRouteImport.update({
+  id: '/servers/$id',
+  path: '/servers/$id',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppServersNewRoute = AppServersNewRouteImport.update({
   id: '/servers/new',
   path: '/servers/new',
@@ -84,6 +90,7 @@ export interface FileRoutesByFullPath {
   '/security': typeof AppSecurityRoute
   '/login/2fa': typeof Login2faRoute
   '/login/': typeof LoginIndexRoute
+  '/servers/$id': typeof AppServersIdRoute
   '/servers/new': typeof AppServersNewRoute
   '/users/': typeof AppUsersIndexRoute
   '/users/$id/permissions': typeof AppUsersIdPermissionsRoute
@@ -96,6 +103,7 @@ export interface FileRoutesByTo {
   '/login/2fa': typeof Login2faRoute
   '/': typeof AppIndexRoute
   '/login': typeof LoginIndexRoute
+  '/servers/$id': typeof AppServersIdRoute
   '/servers/new': typeof AppServersNewRoute
   '/users': typeof AppUsersIndexRoute
   '/users/$id/permissions': typeof AppUsersIdPermissionsRoute
@@ -110,6 +118,7 @@ export interface FileRoutesById {
   '/login/2fa': typeof Login2faRoute
   '/_app/': typeof AppIndexRoute
   '/login/': typeof LoginIndexRoute
+  '/_app/servers/$id': typeof AppServersIdRoute
   '/_app/servers/new': typeof AppServersNewRoute
   '/_app/users/': typeof AppUsersIndexRoute
   '/_app/users/$id/permissions': typeof AppUsersIdPermissionsRoute
@@ -124,6 +133,7 @@ export interface FileRouteTypes {
     | '/security'
     | '/login/2fa'
     | '/login/'
+    | '/servers/$id'
     | '/servers/new'
     | '/users/'
     | '/users/$id/permissions'
@@ -136,6 +146,7 @@ export interface FileRouteTypes {
     | '/login/2fa'
     | '/'
     | '/login'
+    | '/servers/$id'
     | '/servers/new'
     | '/users'
     | '/users/$id/permissions'
@@ -149,6 +160,7 @@ export interface FileRouteTypes {
     | '/login/2fa'
     | '/_app/'
     | '/login/'
+    | '/_app/servers/$id'
     | '/_app/servers/new'
     | '/_app/users/'
     | '/_app/users/$id/permissions'
@@ -219,6 +231,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof Login2faRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/servers/$id': {
+      id: '/_app/servers/$id'
+      path: '/servers/$id'
+      fullPath: '/servers/$id'
+      preLoaderRoute: typeof AppServersIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/servers/new': {
       id: '/_app/servers/new'
       path: '/servers/new'
@@ -248,6 +267,7 @@ interface AppRouteChildren {
   AppProfileRoute: typeof AppProfileRoute
   AppSecurityRoute: typeof AppSecurityRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppServersIdRoute: typeof AppServersIdRoute
   AppServersNewRoute: typeof AppServersNewRoute
   AppUsersIndexRoute: typeof AppUsersIndexRoute
   AppUsersIdPermissionsRoute: typeof AppUsersIdPermissionsRoute
@@ -258,6 +278,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppProfileRoute: AppProfileRoute,
   AppSecurityRoute: AppSecurityRoute,
   AppIndexRoute: AppIndexRoute,
+  AppServersIdRoute: AppServersIdRoute,
   AppServersNewRoute: AppServersNewRoute,
   AppUsersIndexRoute: AppUsersIndexRoute,
   AppUsersIdPermissionsRoute: AppUsersIdPermissionsRoute,
