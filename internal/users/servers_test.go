@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 type serverResp struct {

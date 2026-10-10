@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/password"
 )
 
 // A saturated argon2 limiter must answer 429 rate_limited (Retry-After: 1) for known and

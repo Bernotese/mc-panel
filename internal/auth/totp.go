@@ -11,7 +11,7 @@ import (
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 
-	"mcpanel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
 )
 
 const (

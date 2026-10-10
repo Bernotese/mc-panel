@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent/peercred"
+	"github.com/Bernotese/mc-panel/internal/agent/peercred"
 )
 
 // socketPath returns a short socket path: Unix socket paths are limited to

@@ -15,8 +15,8 @@ import (
 	"github.com/google/nftables/expr"
 	"golang.org/x/sys/unix"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
 )
 
 // NFTables manages the table "inet mcpanel" with the sets mcpanel_jail4

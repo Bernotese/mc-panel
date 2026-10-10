@@ -11,8 +11,8 @@ import (
 	"net/netip"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
 )
 
 const (

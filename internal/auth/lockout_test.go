@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/audit"
 )
 
 // After 10 consecutive failed second-factor attempts within 15 minutes the user's second

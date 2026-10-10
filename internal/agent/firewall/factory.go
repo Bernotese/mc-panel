@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"runtime"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
 )
 
 // ErrUnsupported is returned when the configured backend cannot run on this OS.

@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 // seed records n entries through the real recorder (one second apart).

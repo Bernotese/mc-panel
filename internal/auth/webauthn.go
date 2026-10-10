@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-webauthn/webauthn/webauthn"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const (

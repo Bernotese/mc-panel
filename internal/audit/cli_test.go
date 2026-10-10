@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 func TestRunAuditVerify(t *testing.T) {

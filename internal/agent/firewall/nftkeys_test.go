@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 func a16(s string) []byte {

@@ -14,14 +14,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/audit/auditapi"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/audit/auditapi"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 var rootAdmin = principal.Principal{UserID: 1, Username: "root", Role: principal.RoleAdmin, Stage: principal.StageFull}

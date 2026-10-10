@@ -9,11 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // Rate limits (spec §7.1).

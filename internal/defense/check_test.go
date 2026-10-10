@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func wantRateLimited(t *testing.T, err error, limit time.Duration) {

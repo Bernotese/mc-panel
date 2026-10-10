@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"mcpanel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
 type Permission string

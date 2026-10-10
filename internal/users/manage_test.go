@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/password"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 const newPassword = "violet tractor 42 umbrella"

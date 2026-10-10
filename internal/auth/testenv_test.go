@@ -15,17 +15,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/password"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/secretbox"
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 const testPassword = "correct horse battery staple"

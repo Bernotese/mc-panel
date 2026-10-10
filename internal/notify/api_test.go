@@ -17,10 +17,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
 )
 
 type noPerms struct{}

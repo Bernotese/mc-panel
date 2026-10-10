@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 // fakeAgent is an in-memory agentapi.Client.

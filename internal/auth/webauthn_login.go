@@ -10,10 +10,10 @@ import (
 
 	"github.com/go-webauthn/webauthn/protocol"
 
-	"mcpanel/internal/defense"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 type assertionRequest struct {

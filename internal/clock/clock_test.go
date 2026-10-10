@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/clock"
 )
 
 func TestFakeAdvance(t *testing.T) {

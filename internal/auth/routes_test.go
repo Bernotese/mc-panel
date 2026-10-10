@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
 )
 
 func TestRoutesMatchContract(t *testing.T) {

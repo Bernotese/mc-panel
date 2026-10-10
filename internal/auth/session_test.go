@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 var sessionStart = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)

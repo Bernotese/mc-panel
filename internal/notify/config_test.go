@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
 )
 
 const testWebhook = "https://discord.com/api/webhooks/123456789012345678/SuperSecretToken_abc-XYZ"

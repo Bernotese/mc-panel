@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func TestReloadBuildsSnapshot(t *testing.T) {

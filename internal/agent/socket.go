@@ -4,7 +4,7 @@ import (
 	"net"
 	"os"
 
-	"mcpanel/internal/unixsock"
+	"github.com/Bernotese/mc-panel/internal/unixsock"
 )
 
 // ErrAlreadyRunning is returned by Listen when another process accepts
