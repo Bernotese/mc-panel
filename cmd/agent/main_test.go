@@ -204,3 +204,45 @@ func TestRunRefusesSecondStartBeforeTouchingFirewall(t *testing.T) {
 		t.Fatalf("run = %v, want ErrAlreadyRunning", err)
 	}
 }
+
+func TestMCUserIDs(t *testing.T) {
+	noLookup := func(string) (*user.User, error) { return nil, errors.New("lookup must not run") }
+	uid, gid, err := mcUserIDs(config.Agent{Dev: true}, noLookup)
+	if err != nil || uid != os.Getuid() || gid != os.Getgid() {
+		t.Fatalf("dev without mc_user = %d:%d, %v; want own ids", uid, gid, err)
+	}
+	if _, _, err := mcUserIDs(config.Agent{}, noLookup); err == nil {
+		t.Fatal("prod without mc_user must fail")
+	}
+
+	var asked string
+	uid, gid, err = mcUserIDs(config.Agent{MCUser: "mcpanel-mc"}, func(name string) (*user.User, error) {
+		asked = name
+		return &user.User{Username: name, Uid: "996", Gid: "995"}, nil
+	})
+	if err != nil || uid != 996 || gid != 995 || asked != "mcpanel-mc" {
+		t.Fatalf("prod = %d:%d, %v (asked %q)", uid, gid, err, asked)
+	}
+
+	for name, u := range map[string]*user.User{
+		"root uid":        {Uid: "0", Gid: "995"},
+		"root gid":        {Uid: "996", Gid: "0"},
+		"non-numeric uid": {Uid: "mc", Gid: "995"},
+		"non-numeric gid": {Uid: "996", Gid: "staff"},
+		"negative uid":    {Uid: "-1", Gid: "995"},
+	} {
+		if _, _, err := mcUserIDs(config.Agent{MCUser: "mcpanel-mc"}, func(string) (*user.User, error) { return u, nil }); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	if _, _, err := mcUserIDs(config.Agent{MCUser: "mcpanel-mc"}, func(name string) (*user.User, error) {
+		return nil, user.UnknownUserError(name)
+	}); err == nil || !strings.Contains(err.Error(), "useradd") {
+		t.Fatalf("unknown mc_user: %v", err)
+	}
+	if _, _, err := mcUserIDs(config.Agent{Dev: true, MCUser: "me"}, func(string) (*user.User, error) {
+		return &user.User{Uid: "0", Gid: "0"}, nil
+	}); err != nil {
+		t.Fatalf("dev may run as root (e.g. agent -dev under sudo): %v", err)
+	}
+}
