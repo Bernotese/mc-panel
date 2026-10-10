@@ -74,7 +74,7 @@ Browser ──▶ panel (mcpanel, unprivilegiert)            agent (root)
 
 ### 3.2 agent: Paket `internal/agent/instances`
 
-- **`spec`:** Validierung von `InstanceSpec` (§5.2), analog zu `banrules`. Gleiche Regeln wie im panel, aber unabhängig implementiert-geprüft (Verteidigung in der Tiefe: der agent vertraut dem panel nicht).
+- **`spec`:** Validierung von `InstanceSpec` (§5.2) im eigenen Paket `internal/agent/instancespec`, analog zu `banrules`: das panel prüft damit vor dem Speichern, der agent prüft jede Anfrage erneut mit demselben Code (Verteidigung in der Tiefe: der agent vertraut dem panel nicht).
 - **`docker`:** schmaler Client für die Docker Engine API über den Unix-Socket. Unterstützt nur: Image inspizieren/ziehen, Netz inspizieren/anlegen, Container anlegen/starten/stoppen/entfernen/inspizieren/auflisten (Filter auf Label), Stats (ein Snapshot, kein Stream).
 - **`template`:** reine Funktion `Spec → Docker-Container-Konfiguration` (§5.4).
 - **`router`:** erzeugt die Routen-Datei für mc-router und schreibt sie atomar (temporäre Datei + `rename`).
