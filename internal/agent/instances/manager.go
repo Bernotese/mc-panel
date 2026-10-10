@@ -27,11 +27,14 @@ const (
 	// SampleInterval is the period of the background loop (Docker check, router, stats).
 	SampleInterval = 10 * time.Second
 
-	// DefaultStatusTimeout bounds Status well below the agent server's write timeout
-	// (10 s), so a hanging Docker call never breaks the GET /v1/instances answer.
-	DefaultStatusTimeout = 5 * time.Second
+	// DefaultStatusTimeout bounds Status below the panel's agent client timeout
+	// (agent.DefaultTimeout, 3 s), so a hanging Docker call gives the panel
+	// docker "unavailable" instead of a timeout.
+	DefaultStatusTimeout = 2 * time.Second
 
-	pingTimeout = 5 * time.Second
+	// pingTimeout bounds the Docker check of CheckDocker and of every queued write
+	// (503 docker_unavailable), also below the panel's 3 s client timeout.
+	pingTimeout = 2 * time.Second
 )
 
 // Config wires a Manager. Docker, Clock and Log are required.
@@ -139,6 +142,32 @@ func checkManaged(info docker.ContainerInfo, id int64) error {
 	return nil
 }
 
+// checkOwner refuses a managed container of another server. Server IDs can be
+// reused after a delete; a leftover mcpanel-mc-<id> whose name label differs from
+// the server the panel now means (want; "" = unknown) is never adopted, started,
+// stopped or recreated. The FQDN is not compared: it changes with the base domain
+// while the (immutable) name stays.
+func checkOwner(info docker.ContainerInfo, id int64, want string) error {
+	have := info.Config.Labels[LabelName]
+	if want == "" || have == want {
+		return nil
+	}
+	if !instancespec.ValidName(have) {
+		have = strconv.Quote(have)
+	}
+	return fmt.Errorf("container %s belongs to another server (%s); remove it first", ContainerName(id), have)
+}
+
+// expectedName is the server name the last ensure for id named ("" if unknown).
+func (m *Manager) expectedName(id int64) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if st := m.inst[id]; st != nil {
+		return st.name
+	}
+	return ""
+}
+
 func labelRevision(labels map[string]string) int64 {
 	r, err := strconv.ParseInt(labels[LabelRevision], 10, 64)
 	if err != nil {
@@ -163,6 +192,9 @@ func (m *Manager) ensure(ctx context.Context, req agentapi.EnsureRequest) error 
 	}
 	if exists {
 		if err := checkManaged(info, req.ID); err != nil {
+			return err
+		}
+		if err := checkOwner(info, req.ID, req.Name); err != nil {
 			return err
 		}
 		// Never downgrade: an older revision (a stale or replayed request) is a no-op,
@@ -237,6 +269,9 @@ func (m *Manager) power(ctx context.Context, id int64, action agentapi.PowerActi
 		return err
 	}
 	if err := checkManaged(info, id); err != nil {
+		return err
+	}
+	if err := checkOwner(info, id, m.expectedName(id)); err != nil {
 		return err
 	}
 	switch action {
@@ -538,7 +573,11 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 	m.mu.Lock()
 	work := make(map[int64]instanceState, len(m.inst))
 	for id, st := range m.inst {
-		work[id] = instanceState{op: st.op, lastError: st.lastError, name: st.name}
+		op := st.op
+		if op == agentapi.OpNone && len(st.pending) > 0 { // between two jobs: work is still queued
+			op = initialOp(st.pending[0])
+		}
+		work[id] = instanceState{op: op, lastError: st.lastError, name: st.name}
 	}
 	stats := make(map[int64]sample, len(m.stats))
 	for id, s := range m.stats {

@@ -134,6 +134,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			Clock:        clock.Real{},
 			Log:          log,
 		})
+		// One bounded check before serving, so /v1/health is right from the first
+		// request instead of "unavailable" until the background loop has run.
+		mgr.CheckDocker(ctx)
 		runCtx, stopRun := context.WithCancel(ctx)
 		runDone := make(chan struct{})
 		go func() {

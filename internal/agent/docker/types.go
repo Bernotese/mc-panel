@@ -35,6 +35,7 @@ type HostConfig struct {
 	Memory         int64                    `json:"Memory,omitempty"`
 	MemorySwap     int64                    `json:"MemorySwap,omitempty"`
 	PidsLimit      int64                    `json:"PidsLimit,omitempty"`
+	CPUShares      int64                    `json:"CpuShares,omitempty"` // relative CPU weight; 0 = Docker default 1024
 	LogConfig      LogConfig                `json:"LogConfig"`
 }
 
