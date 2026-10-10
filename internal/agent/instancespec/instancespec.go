@@ -53,7 +53,8 @@ const (
 var ErrInvalid = errors.New("invalid instance spec")
 
 var (
-	nameRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,31}$`)
+	// A DNS label: 2–32 characters, no leading or trailing hyphen (the name is the subdomain).
+	nameRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$`)
 	labelRe   = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	versionRe = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.\-+_]{0,63}$`)
 	slugRe    = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)

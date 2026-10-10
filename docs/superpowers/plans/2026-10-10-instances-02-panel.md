@@ -70,6 +70,8 @@ web/src/mocks/{db.ts,handlers/servers.ts,handlers.test.ts}  (12–15) MSW
 
 ### Task 11: Server-Handler nach `internal/servers` verschieben
 
+> **Nachtrag aus dem Review von Phase A (verbindlich):** `instancespec.ValidName` lehnt seit Phase A einen Bindestrich am Ende ab (`^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$`, gültiges DNS-Label). Diese Aufgabe ist deshalb kein reiner Refactor: Sie übernimmt die Regel auch in `api/openapi.yaml` (`CreateServerRequest.name.pattern`), im MSW-Mock (`SERVER_NAME` in `web/src/mocks/handlers/servers.ts`) und in der Liste ungültiger Namen der verschobenen Server-Tests (zusätzlich `"x-"`), dann `make generate`.
+
 Reines Refactoring ohne Verhaltensänderung: Liste, Anlegen, Details, Löschen, Power und der Power-Limiter ziehen aus `internal/users` in das neue Paket `internal/servers`; die Rechtevergabe (`/users/{id}/permissions`) bleibt in `internal/users`. Die lokale Namens-Regex wird durch `instancespec.ValidName` ersetzt.
 
 **Files:**
@@ -730,7 +732,7 @@ func (h *Handler) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !instancespec.ValidName(req.Name) {
-		writeValidation(w, r, "name must match ^[a-z0-9][a-z0-9-]{1,31}$")
+		writeValidation(w, r, "name must match ^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$")
 		return
 	}
 	if _, err := h.q.RbacGetServerByName(ctx, req.Name); err == nil {
@@ -3382,7 +3384,7 @@ func (h *Handler) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !instancespec.ValidName(req.Name) {
-		writeValidation(w, r, "name must match ^[a-z0-9][a-z0-9-]{1,31}$")
+		writeValidation(w, r, "name must match ^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$")
 		return
 	}
 	if !req.EulaAccepted {
@@ -3769,7 +3771,7 @@ Expected: keine gofmt-Ausgabe, PASS, `0 issues`.
       additionalProperties: false
       required: [name, type, version, memory_mib, eula_accepted]
       properties:
-        name: { type: string, pattern: '^[a-z0-9][a-z0-9-]{1,31}$' }
+        name: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$' }
         type: { $ref: '#/components/schemas/InstanceType' }
         version: { type: string }
         loader_version: { type: [string, 'null'] }
@@ -3962,7 +3964,7 @@ import { ALL_PERMISSIONS } from '@/api/types'
 import { db, nextId, recordAudit, resolveProperties, runningStatus, type MockServer } from '../db'
 import { API, apiError, guard, idParam, noContent, op, readJson, serverPermissions, type MockOperation } from './util'
 
-const SERVER_NAME = /^[a-z0-9][a-z0-9-]{1,31}$/
+const SERVER_NAME = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/
 const ACTIONS: PowerAction[] = ['start', 'stop', 'restart']
 const TYPES: InstanceType[] = ['vanilla', 'paper', 'purpur', 'fabric', 'neoforge', 'modrinth', 'curseforge']
 const DNS_LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
@@ -4046,7 +4048,7 @@ export const serverOperations: MockOperation[] = [
       if (!body) return apiError(400, 'bad_request', 'invalid JSON body')
       if (!db.serverSettings.base_domain) return apiError(409, 'base_domain_missing', 'set a base domain in the server settings first')
       const name = body.name ?? ''
-      if (!SERVER_NAME.test(name)) return apiError(400, 'validation_failed', 'name must match ^[a-z0-9][a-z0-9-]{1,31}$')
+      if (!SERVER_NAME.test(name)) return apiError(400, 'validation_failed', 'name must match ^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$')
       if (body.eula_accepted !== true) return apiError(400, 'validation_failed', 'eula_accepted must be true')
       if (!body.type || !TYPES.includes(body.type)) return apiError(400, 'validation_failed', 'type: unknown type')
       if (!validMemory(body.memory_mib)) return apiError(400, 'validation_failed', 'memory_mib: must be 1024..32768 in steps of 256')
