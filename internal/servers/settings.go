@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -83,6 +84,29 @@ func validCurseForgeKey(key string) error {
 	return s.Validate()
 }
 
+// instanceSettings are the runtime settings with the CurseForge key decrypted.
+type instanceSettings struct {
+	BaseDomain    *string
+	CurseForgeKey *string
+}
+
+func (h *Handler) loadSettings(ctx context.Context) (instanceSettings, error) {
+	row, err := h.q.ServersGetSettings(ctx)
+	if err != nil {
+		return instanceSettings{}, err
+	}
+	out := instanceSettings{BaseDomain: nullString(row.BaseDomain)}
+	if len(row.CurseforgeApiKey) > 0 {
+		pt, err := h.box.Open(row.CurseforgeApiKey, []byte(curseForgeKeyAAD))
+		if err != nil {
+			return instanceSettings{}, fmt.Errorf("servers: open curseforge key: %w", err)
+		}
+		key := string(pt)
+		out.CurseForgeKey = &key
+	}
+	return out, nil
+}
+
 func (h *Handler) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	body, err := h.settingsBody(r.Context())
 	if err != nil {
@@ -113,7 +137,7 @@ func (h *Handler) settingsBody(ctx context.Context) (settingsJSON, error) {
 		Docker:              dockerUnknown,
 		UnknownContainers:   []unknownContainerJSON{},
 	}
-	resp, err := h.inst.Instances(ctx)
+	resp, err := h.refreshStatus(ctx)
 	switch {
 	case err == nil && resp.Docker == agentapi.DockerOK:
 		out.Docker = dockerOK

@@ -431,7 +431,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
+        '409': { description: 'conflict (name taken) or base_domain_missing', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /servers/settings:
     get:
       operationId: getServerSettings
@@ -464,6 +464,22 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateServer
+      tags: [servers]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateServerRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Server' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
     delete:
       operationId: deleteServer
       tags: [servers]
@@ -475,6 +491,8 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /servers/{id}/power:
     post:
       operationId: serverPower
@@ -707,6 +725,7 @@ components:
     NotFound: { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Conflict: { description: Conflict, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     TooManyRequests: { description: Rate limited (Retry-After header set), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    ServiceUnavailable: { description: 'Agent or Docker not available (agent_unavailable, docker_unavailable)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   schemas:
     Error:
       type: object
@@ -821,17 +840,89 @@ components:
       properties:
         role: { $ref: '#/components/schemas/Role' }
         password: { type: string, minLength: 12, maxLength: 256 }
+    InstanceType: { type: string, enum: [vanilla, paper, purpur, fabric, neoforge, modrinth, curseforge] }
+    JavaVersion: { type: string, enum: [java8, java17, java21, java25] }
+    ServerState: { type: string, enum: [not_configured, unknown, creating, starting, running, stopping, stopped, restarting, error] }
+    ServerProperties:
+      type: object
+      additionalProperties: false
+      properties:
+        motd: { type: string, maxLength: 150 }
+        difficulty: { type: string, enum: [peaceful, easy, normal, hard] }
+        gamemode: { type: string, enum: [survival, creative, adventure, spectator] }
+        max_players: { type: integer, minimum: 1, maximum: 500 }
+        pvp: { type: boolean }
+        hardcore: { type: boolean }
+        allow_flight: { type: boolean }
+        enable_command_block: { type: boolean }
+        online_mode: { type: boolean }
+        whitelist_enabled: { type: boolean }
+        whitelist: { type: array, maxItems: 200, items: { type: string, pattern: '^[A-Za-z0-9_]{3,16}$' } }
+        ops: { type: array, maxItems: 50, items: { type: string, pattern: '^[A-Za-z0-9_]{3,16}$' } }
+        view_distance: { type: integer, minimum: 3, maximum: 32 }
+        simulation_distance: { type: integer, minimum: 3, maximum: 32 }
+        spawn_protection: { type: integer, minimum: 0, maximum: 256 }
+        seed: { type: string, maxLength: 64 }
+        level_type: { type: string, enum: [normal, flat, large_biomes, amplified] }
+    InstanceConfig:
+      type: object
+      required: [type, version, loader_version, modpack, java, memory_mib, properties]
+      properties:
+        type: { $ref: '#/components/schemas/InstanceType' }
+        version: { type: string, description: "'LATEST', a version, or '' for modpacks" }
+        loader_version: { type: [string, 'null'] }
+        modpack: { type: [string, 'null'] }
+        java: { $ref: '#/components/schemas/JavaVersion' }
+        memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256 }
+        properties: { $ref: '#/components/schemas/ServerProperties', description: All fields set (defaults resolved) }
+    ServerStatus:
+      type: object
+      required: [state, desired_state, restart_required, operation, last_error, started_at, memory_bytes, memory_limit_bytes, cpu_percent]
+      properties:
+        state: { $ref: '#/components/schemas/ServerState' }
+        desired_state: { type: [string, 'null'], enum: [running, stopped, null] }
+        restart_required: { type: boolean }
+        operation: { type: string, enum: ['', pulling, creating, starting, stopping, removing] }
+        last_error: { type: string }
+        started_at: { type: integer, format: int64, description: Unix ms; 0 = not running }
+        memory_bytes: { type: integer, format: int64 }
+        memory_limit_bytes: { type: integer, format: int64 }
+        cpu_percent: { type: number }
     Server:
       type: object
-      required: [id, name, permissions]
+      required: [id, name, permissions, address, instance, status]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
         permissions: { type: array, items: { $ref: '#/components/schemas/Permission' }, description: Effective permissions of the caller (admins get all) }
+        address: { type: [string, 'null'], description: '<name>.<base_domain>; null without base domain' }
+        instance: { anyOf: [{ $ref: '#/components/schemas/InstanceConfig' }, { type: 'null' }] }
+        status: { $ref: '#/components/schemas/ServerStatus' }
     CreateServerRequest:
       type: object
-      required: [name]
-      properties: { name: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$' } }
+      additionalProperties: false
+      required: [name, type, version, memory_mib, eula_accepted]
+      properties:
+        name: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$' }
+        type: { $ref: '#/components/schemas/InstanceType' }
+        version: { type: string }
+        loader_version: { type: [string, 'null'] }
+        modpack: { type: [string, 'null'] }
+        java: { $ref: '#/components/schemas/JavaVersion', description: Derived from type/version if omitted }
+        memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256 }
+        properties: { $ref: '#/components/schemas/ServerProperties' }
+        eula_accepted: { type: boolean, const: true }
+    UpdateServerRequest:
+      type: object
+      additionalProperties: false
+      description: Omitted fields stay unchanged; properties replaces the whole object.
+      properties:
+        version: { type: string }
+        loader_version: { type: [string, 'null'] }
+        modpack: { type: [string, 'null'] }
+        java: { $ref: '#/components/schemas/JavaVersion' }
+        memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256 }
+        properties: { $ref: '#/components/schemas/ServerProperties' }
     PowerRequest:
       type: object
       required: [action]

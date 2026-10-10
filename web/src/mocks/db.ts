@@ -3,6 +3,7 @@ import type {
   AttemptStage,
   AuditEntry,
   AuditResult,
+  InstanceConfig,
   IPRule,
   Jail,
   Locale,
@@ -15,6 +16,8 @@ import type {
   Role,
   SecondFactor,
   SecuritySettings,
+  ServerProperties,
+  ServerStatus,
   Session,
   Stage,
   User,
@@ -81,6 +84,74 @@ export interface MockSession {
 export interface MockServer {
   id: number
   name: string
+  instance: InstanceConfig | null // properties always fully resolved (defaults from spec §7)
+  status: ServerStatus
+  revision: number // desired revision
+  runningRevision: number // revision of the "running container"
+}
+
+const MIB = 1024 * 1024
+const GIB = 1024 * MIB
+
+/** Every property set: spec §7 defaults (motd = server name) overridden by p. */
+export function resolveProperties(name: string, p: ServerProperties = {}): Required<ServerProperties> {
+  return {
+    motd: name,
+    difficulty: 'normal',
+    gamemode: 'survival',
+    max_players: 20,
+    pvp: true,
+    hardcore: false,
+    allow_flight: false,
+    enable_command_block: false,
+    online_mode: true,
+    whitelist_enabled: false,
+    whitelist: [],
+    ops: [],
+    view_distance: 10,
+    simulation_distance: 10,
+    spawn_protection: 16,
+    seed: '',
+    level_type: 'normal',
+    ...p,
+  }
+}
+
+/** Container limit like the agent sets it: memory_mib × 1.25 MiB. */
+export function memoryLimitBytes(memoryMib: number): number {
+  return memoryMib * 1.25 * MIB
+}
+
+export function runningStatus(memoryMib: number, startedAt: number, memoryBytes = Math.round(memoryLimitBytes(memoryMib) * 0.4), cpu = 3): ServerStatus {
+  return {
+    state: 'running',
+    desired_state: 'running',
+    restart_required: false,
+    operation: '',
+    last_error: '',
+    started_at: startedAt,
+    memory_bytes: memoryBytes,
+    memory_limit_bytes: memoryLimitBytes(memoryMib),
+    cpu_percent: cpu,
+  }
+}
+
+export function stoppedStatus(): ServerStatus {
+  return {
+    state: 'stopped',
+    desired_state: 'stopped',
+    restart_required: false,
+    operation: '',
+    last_error: '',
+    started_at: 0,
+    memory_bytes: 0,
+    memory_limit_bytes: 0,
+    cpu_percent: 0,
+  }
+}
+
+export function notConfiguredStatus(): ServerStatus {
+  return { ...stoppedStatus(), state: 'not_configured', desired_state: null }
 }
 
 /** ServerSettings without unknown_containers (always empty in the mock). */
@@ -235,9 +306,23 @@ function seed(now: number): MockDb {
     ],
     currentSessionId: null,
     servers: [
-      { id: 1, name: 'survival' },
-      { id: 2, name: 'creative' },
-      { id: 3, name: 'lobby' },
+      {
+        id: 1,
+        name: 'survival',
+        instance: { type: 'paper', version: '1.21.11', loader_version: null, modpack: null, java: 'java21', memory_mib: 4096, properties: resolveProperties('survival') },
+        status: runningStatus(4096, now - 2 * HOUR, Math.round(2.1 * GIB), 12.5),
+        revision: 1,
+        runningRevision: 1,
+      },
+      {
+        id: 2,
+        name: 'creative',
+        instance: { type: 'vanilla', version: '26.3', loader_version: null, modpack: null, java: 'java25', memory_mib: 2048, properties: resolveProperties('creative', { gamemode: 'creative' }) },
+        status: stoppedStatus(),
+        revision: 1,
+        runningRevision: 1,
+      },
+      { id: 3, name: 'lobby', instance: null, status: notConfiguredStatus(), revision: 0, runningRevision: 0 },
     ],
     serverSettings: { base_domain: 'mc.example.com', curseforge_api_key_set: false, docker: 'ok' },
     grants: new Map<number, PermissionGrant[]>([

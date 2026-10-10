@@ -32,14 +32,15 @@ type Deps struct {
 }
 
 type Handler struct {
-	db    *sql.DB
-	q     *store.Queries
-	clock clock.Clock
-	rec   audit.Recorder
-	box   *secretbox.Box
-	inst  agentapi.InstancesClient
-	power *powerLimiter
-	kick  chan struct{} // Trigger -> reconcile loop (buffer 1, never blocks)
+	db     *sql.DB
+	q      *store.Queries
+	clock  clock.Clock
+	rec    audit.Recorder
+	box    *secretbox.Box
+	inst   agentapi.InstancesClient
+	power  *powerLimiter
+	kick   chan struct{} // Trigger -> reconcile loop (buffer 1, never blocks)
+	status statusCache   // last actual state reported by the agent
 }
 
 func NewHandler(d Deps) *Handler {
@@ -69,6 +70,7 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Get("/servers/settings", rbac.Admin(), h.handleGetSettings)
 	api.Put("/servers/settings", rbac.Admin().WithSudo(), h.handleUpdateSettings)
 	api.Get("/servers/{id}", rbac.Server(rbac.PermServerView, "id"), h.handleGetServer)
+	api.Patch("/servers/{id}", rbac.Admin().WithSudo(), h.handleUpdateServer)
 	api.Delete("/servers/{id}", rbac.Admin().WithSudo(), h.handleDeleteServer)
 	api.Post("/servers/{id}/power", rbac.Server(rbac.PermServerPower, "id"), h.handleServerPower)
 }

@@ -20,6 +20,7 @@ var wantRoutes = map[string]rbac.Rule{
 	"GET /api/servers/settings":    rbac.Admin(),
 	"PUT /api/servers/settings":    rbac.Admin().WithSudo(),
 	"GET /api/servers/{id}":        rbac.Server(rbac.PermServerView, "id"),
+	"PATCH /api/servers/{id}":      rbac.Admin().WithSudo(),
 	"DELETE /api/servers/{id}":     rbac.Admin().WithSudo(),
 	"POST /api/servers/{id}/power": rbac.Server(rbac.PermServerPower, "id"),
 }

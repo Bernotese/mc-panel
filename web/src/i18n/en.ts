@@ -153,7 +153,7 @@ export const en: Messages = {
     description: 'Your Minecraft servers. Instance management follows in a later sub-project.',
     empty: 'No servers available.',
     create_server: 'Create server',
-    create_description: 'Creates a stub server so that permissions can be granted.',
+    create_description: 'Creates a Paper server (latest version, 4 GiB RAM). By clicking “Create” you accept the Minecraft EULA (aka.ms/MinecraftEULA).',
     name_label: 'Name',
     name_hint: '2–32 characters: lowercase letters, digits, hyphen.',
     name_invalid: 'The name does not match the rules.',

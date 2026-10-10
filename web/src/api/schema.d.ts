@@ -529,7 +529,7 @@ export interface paths {
         delete: operations["deleteServer"];
         options?: never;
         head?: never;
-        patch?: never;
+        patch: operations["updateServer"];
         trace?: never;
     };
     "/servers/{id}/power": {
@@ -887,15 +887,96 @@ export interface components {
             role?: components["schemas"]["Role"];
             password?: string;
         };
+        /** @enum {string} */
+        InstanceType: "vanilla" | "paper" | "purpur" | "fabric" | "neoforge" | "modrinth" | "curseforge";
+        /** @enum {string} */
+        JavaVersion: "java8" | "java17" | "java21" | "java25";
+        /** @enum {string} */
+        ServerState: "not_configured" | "unknown" | "creating" | "starting" | "running" | "stopping" | "stopped" | "restarting" | "error";
+        ServerProperties: {
+            motd?: string;
+            /** @enum {string} */
+            difficulty?: "peaceful" | "easy" | "normal" | "hard";
+            /** @enum {string} */
+            gamemode?: "survival" | "creative" | "adventure" | "spectator";
+            max_players?: number;
+            pvp?: boolean;
+            hardcore?: boolean;
+            allow_flight?: boolean;
+            enable_command_block?: boolean;
+            online_mode?: boolean;
+            whitelist_enabled?: boolean;
+            whitelist?: string[];
+            ops?: string[];
+            view_distance?: number;
+            simulation_distance?: number;
+            spawn_protection?: number;
+            seed?: string;
+            /** @enum {string} */
+            level_type?: "normal" | "flat" | "large_biomes" | "amplified";
+        };
+        InstanceConfig: {
+            type: components["schemas"]["InstanceType"];
+            /** @description 'LATEST', a version, or '' for modpacks */
+            version: string;
+            loader_version: string | null;
+            modpack: string | null;
+            java: components["schemas"]["JavaVersion"];
+            memory_mib: number;
+            /** @description All fields set (defaults resolved) */
+            properties: components["schemas"]["ServerProperties"];
+        };
+        ServerStatus: {
+            state: components["schemas"]["ServerState"];
+            /** @enum {string|null} */
+            desired_state: "running" | "stopped" | null;
+            restart_required: boolean;
+            /** @enum {string} */
+            operation: "" | "pulling" | "creating" | "starting" | "stopping" | "removing";
+            last_error: string;
+            /**
+             * Format: int64
+             * @description Unix ms; 0 = not running
+             */
+            started_at: number;
+            /** Format: int64 */
+            memory_bytes: number;
+            /** Format: int64 */
+            memory_limit_bytes: number;
+            cpu_percent: number;
+        };
         Server: {
             /** Format: int64 */
             id: number;
             name: string;
             /** @description Effective permissions of the caller (admins get all) */
             permissions: components["schemas"]["Permission"][];
+            /** @description <name>.<base_domain>; null without base domain */
+            address: string | null;
+            instance: components["schemas"]["InstanceConfig"] | null;
+            status: components["schemas"]["ServerStatus"];
         };
         CreateServerRequest: {
             name: string;
+            type: components["schemas"]["InstanceType"];
+            version: string;
+            loader_version?: string | null;
+            modpack?: string | null;
+            /** @description Derived from type/version if omitted */
+            java?: components["schemas"]["JavaVersion"];
+            memory_mib: number;
+            properties?: components["schemas"]["ServerProperties"];
+            /** @constant */
+            eula_accepted: true;
+        };
+        /** @description Omitted fields stay unchanged; properties replaces the whole object. */
+        UpdateServerRequest: {
+            version?: string;
+            loader_version?: string | null;
+            modpack?: string | null;
+            java?: components["schemas"]["JavaVersion"];
+            memory_mib?: number;
+            properties?: components["schemas"]["ServerProperties"];
         };
         PowerRequest: {
             /** @enum {string} */
@@ -1152,6 +1233,15 @@ export interface components {
         };
         /** @description Rate limited (Retry-After header set) */
         TooManyRequests: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Agent or Docker not available (agent_unavailable, docker_unavailable) */
+        ServiceUnavailable: {
             headers: {
                 [name: string]: unknown;
             };
@@ -2095,7 +2185,15 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            /** @description conflict (name taken) or base_domain_missing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getServerSettings: {
@@ -2197,6 +2295,41 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateServer: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateServerRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Server"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     serverPower: {

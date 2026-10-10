@@ -124,6 +124,12 @@ func grant(t *testing.T, db *sql.DB, userID, serverID int64, perms ...string) {
 	}
 }
 
+// setBaseDomain stores a base domain directly (the API path is tested in settings_test.go).
+func setBaseDomain(t *testing.T, db *sql.DB, d string) {
+	t.Helper()
+	mustExec(t, db, `UPDATE instance_settings SET base_domain = ? WHERE id = 1`, d)
+}
+
 // createInstance inserts a server with a paper instance row (revision 1, desired running).
 func createInstance(t *testing.T, db *sql.DB, name string) int64 {
 	t.Helper()
@@ -162,13 +168,24 @@ func newFakeAgent() *fakeAgent {
 	return &fakeAgent{docker: agentapi.DockerOK, inst: map[int64]agentapi.InstanceStatus{}}
 }
 
-func (f *fakeAgent) setErr(err error)   { f.mu.Lock(); f.err = err; f.mu.Unlock() }
-func (f *fakeAgent) setDocker(s string) { f.mu.Lock(); f.docker = s; f.mu.Unlock() }
+func (f *fakeAgent) setErr(err error)       { f.mu.Lock(); f.err = err; f.mu.Unlock() }
+func (f *fakeAgent) setActionErr(err error) { f.mu.Lock(); f.actionErr = err; f.mu.Unlock() }
+func (f *fakeAgent) setDocker(s string)     { f.mu.Lock(); f.docker = s; f.mu.Unlock() }
 
 func (f *fakeAgent) set(st agentapi.InstanceStatus) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.inst[st.ID] = st
+}
+
+// takeCalls returns the recorded calls ("ensure 1 r2 recreate=false", "power 1 start",
+// "remove 1") and forgets them.
+func (f *fakeAgent) takeCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := f.calls
+	f.calls = nil
+	return out
 }
 
 func (f *fakeAgent) Instances(context.Context) (agentapi.InstancesResponse, error) {

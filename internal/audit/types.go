@@ -58,6 +58,7 @@ const (
 	ActionServerCreate         = "server.create"
 	ActionServerDelete         = "server.delete"
 	ActionServerPower          = "server.power"
+	ActionServerUpdate         = "server.update"
 	ActionServerSettingsUpdate = "server.settings_update"
 	ActionJailAuto             = "security.jail_auto"
 	ActionJailCreate           = "security.jail_create"
