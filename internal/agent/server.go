@@ -91,7 +91,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, agentapi.HealthResponse{Status: "ok", Version: s.version, Firewall: s.fw.Name()})
+	writeJSON(w, http.StatusOK, agentapi.HealthResponse{Status: "ok", Version: s.version, Firewall: s.fw.Name(), Docker: agentapi.DockerUnavailable})
 }
 
 func (s *Server) ban(w http.ResponseWriter, r *http.Request) {
