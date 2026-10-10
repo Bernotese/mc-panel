@@ -163,7 +163,7 @@ export function useFormat(): { locale: string; dateTime(ms: number): string; dat
 
 Hinweis: Die Ressourcendateien enthalten bereits **alle** Texte des Streams. Der Schlüsselscan-Test (Step 1) prüft ab jetzt nach jeder Task, dass jeder statische `t('…')`-Schlüssel im Code existiert; dynamische Schlüssel sind in `DYNAMIC_KEYS` aufgezählt. Benötigt eine spätere Task einen neuen Text, wird er in **beiden** Dateien ergänzt (TS erzwingt Gleichheit).
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/i18n/i18n.test.ts`:
 ```ts
@@ -280,12 +280,12 @@ describe('format', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/i18n src/lib/format.test.ts`
 Expected: FAIL – `Failed to resolve import "./de"` bzw. `"./format"`.
 
-- [ ] **Step 3: `web/src/i18n/de.ts`**
+- [x] **Step 3: `web/src/i18n/de.ts`**
 
 ```ts
 export const de = {
@@ -822,7 +822,7 @@ export const de = {
 export type Messages = typeof de
 ```
 
-- [ ] **Step 4: `web/src/i18n/en.ts`**
+- [x] **Step 4: `web/src/i18n/en.ts`**
 
 ```ts
 import type { Messages } from './de'
@@ -1359,7 +1359,7 @@ export const en: Messages = {
 }
 ```
 
-- [ ] **Step 5: `web/src/i18n/index.ts` und `web/src/api/types.ts`**
+- [x] **Step 5: `web/src/i18n/index.ts` und `web/src/api/types.ts`**
 
 ```ts
 import i18n from 'i18next'
@@ -1454,7 +1454,7 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
 
 Vorher sicherstellen, dass das Schema aktuell ist: `cd web && npm run gen:api` (Phase-0-Skript).
 
-- [ ] **Step 6: `web/src/lib/format.ts`**
+- [x] **Step 6: `web/src/lib/format.ts`**
 
 ```ts
 import { useMemo } from 'react'
@@ -1503,7 +1503,7 @@ export function useFormat() {
 }
 ```
 
-- [ ] **Step 7: `web/src/test/media.ts` und `web/src/test/setup.ts`**
+- [x] **Step 7: `web/src/test/media.ts` und `web/src/test/setup.ts`**
 
 ```ts
 // web/src/test/media.ts
@@ -1602,12 +1602,12 @@ afterEach(async () => {
 })
 ```
 
-- [ ] **Step 8: Tests laufen lassen → PASS**
+- [x] **Step 8: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/i18n src/lib/format.test.ts`
 Expected: PASS (i18n 5, format 3). Der Phase-0-Test `src/routes/index.test.tsx` bleibt grün.
 
-- [ ] **Step 9: Typecheck, Commit**
+- [x] **Step 9: Typecheck, Commit**
 
 Run: `cd web && npm run typecheck`
 Expected: keine Fehler (insbesondere: `en` erfüllt `Messages` exakt).
@@ -1657,7 +1657,7 @@ export function DataList<T>(props: { items: T[]; columns: Column<T>[]; rowKey(ro
 export function NotFoundPage(): JSX.Element
 ```
 
-- [ ] **Step 1: Failing Tests schreiben**
+- [x] **Step 1: Failing Tests schreiben**
 
 `web/src/lib/theme.test.ts`:
 ```ts
@@ -1750,12 +1750,12 @@ describe('DataList', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/lib/theme.test.ts src/components/data-list.test.tsx`
 Expected: FAIL – `Failed to resolve import "./theme"` bzw. `"./data-list"`.
 
-- [ ] **Step 3: `web/src/lib/theme.ts`**
+- [x] **Step 3: `web/src/lib/theme.ts`**
 
 ```ts
 import { useSyncExternalStore } from 'react'
@@ -1822,7 +1822,7 @@ export function useThemePreference(): ThemePreference {
 }
 ```
 
-- [ ] **Step 4: `web/src/lib/use-media-query.ts` und `web/src/lib/download.ts`**
+- [x] **Step 4: `web/src/lib/use-media-query.ts` und `web/src/lib/download.ts`**
 
 ```ts
 // web/src/lib/use-media-query.ts
@@ -1860,7 +1860,7 @@ export function downloadText(filename: string, content: string): void {
 }
 ```
 
-- [ ] **Step 5: Komponenten schreiben**
+- [x] **Step 5: Komponenten schreiben**
 
 `web/src/components/data-list.tsx`:
 ```tsx
@@ -2071,7 +2071,7 @@ export function NotFoundPage() {
 }
 ```
 
-- [ ] **Step 6: Dark-Variant in `web/src/index.css` prüfen**
+- [x] **Step 6: Dark-Variant in `web/src/index.css` prüfen**
 
 Run: `cd web && grep -n "custom-variant dark" src/index.css`
 Expected: eine Zeile `@custom-variant dark (&:is(.dark *));` (legt `shadcn init` an). Fehlt sie, direkt unter `@import "tailwindcss";` einfügen:
@@ -2079,17 +2079,17 @@ Expected: eine Zeile `@custom-variant dark (&:is(.dark *));` (legt `shadcn init`
 @custom-variant dark (&:is(.dark *));
 ```
 
-- [ ] **Step 7: Tests laufen lassen → PASS**
+- [x] **Step 7: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/lib/theme.test.ts src/components/data-list.test.tsx`
 Expected: PASS (8 Tests).
 
-- [ ] **Step 8: Gesamte Suite + Typecheck**
+- [x] **Step 8: Gesamte Suite + Typecheck**
 
 Run: `cd web && npx vitest run && npm run typecheck`
 Expected: alle Tests grün (inkl. i18n-Schlüsselscan aus Task 1), keine TS-Fehler.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add web/src/lib web/src/components web/src/index.css
@@ -2158,12 +2158,12 @@ Mock-Konten (alle mit Passwort `correct-horse-battery`, TOTP-Code immer `123456`
 | `newadmin` | admin | keine | `setup` |
 | `bob` | user (Sprache `en`) | TOTP | `preauth` |
 
-- [ ] **Step 1: Schema-Aliase prüfen**
+- [x] **Step 1: Schema-Aliase prüfen**
 
 Run: `cd web && grep -c "^export type" src/api/types.ts`
 Expected: `39` (Datei aus Task 1, unverändert).
 
-- [ ] **Step 2: Failing Test `web/src/test/call-api.ts` + `web/src/mocks/handlers/auth.test.ts`**
+- [x] **Step 2: Failing Test `web/src/test/call-api.ts` + `web/src/mocks/handlers/auth.test.ts`**
 
 `web/src/test/call-api.ts` (Test-Helfer, bewusst ohne openapi-fetch, um die Mocks unabhängig vom Client zu prüfen):
 ```ts
@@ -2288,12 +2288,12 @@ describe('mock auth flow', () => {
 })
 ```
 
-- [ ] **Step 3: Test laufen lassen → FAIL**
+- [x] **Step 3: Test laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/mocks/handlers/auth.test.ts`
 Expected: FAIL – `Failed to resolve import "../db"`.
 
-- [ ] **Step 4: `web/src/mocks/db.ts`**
+- [x] **Step 4: `web/src/mocks/db.ts`**
 
 ```ts
 import type {
@@ -2743,7 +2743,7 @@ export function loginAs(username: string, opts: { stage?: Stage; sudo?: boolean 
 }
 ```
 
-- [ ] **Step 5: `web/src/mocks/handlers/util.ts`**
+- [x] **Step 5: `web/src/mocks/handlers/util.ts`**
 
 ```ts
 import { HttpResponse, type HttpHandler } from 'msw'
@@ -2832,7 +2832,7 @@ export function serverPermissions(user: MockUser, serverId: number): Permission[
 }
 ```
 
-- [ ] **Step 6: `web/src/mocks/handlers/auth.ts`** (11 Operationen inkl. `getHealth`)
+- [x] **Step 6: `web/src/mocks/handlers/auth.ts`** (11 Operationen inkl. `getHealth`)
 
 ```ts
 import { http, HttpResponse } from 'msw'
@@ -3023,7 +3023,7 @@ export const authOperations: MockOperation[] = [
 ]
 ```
 
-- [ ] **Step 7: `web/src/mocks/handlers/me.ts`** (13 Operationen)
+- [x] **Step 7: `web/src/mocks/handlers/me.ts`** (13 Operationen)
 
 ```ts
 import { http, HttpResponse } from 'msw'
@@ -3247,7 +3247,7 @@ export const meOperations: MockOperation[] = [
 ]
 ```
 
-- [ ] **Step 8: `web/src/mocks/handlers/admin.ts`** (2 Operationen)
+- [x] **Step 8: `web/src/mocks/handlers/admin.ts`** (2 Operationen)
 
 ```ts
 import { http, HttpResponse } from 'msw'
@@ -3281,7 +3281,7 @@ export const adminOperations: MockOperation[] = [
 ]
 ```
 
-- [ ] **Step 9: `web/src/mocks/handlers.ts`, `web/src/mocks/node.ts`**
+- [x] **Step 9: `web/src/mocks/handlers.ts`, `web/src/mocks/node.ts`**
 
 ```ts
 // web/src/mocks/handlers.ts
@@ -3303,7 +3303,7 @@ import { handlers } from './handlers'
 export const server = setupServer(...handlers)
 ```
 
-- [ ] **Step 10: `web/src/test/setup.ts` erweitern** (komplette Datei)
+- [x] **Step 10: `web/src/test/setup.ts` erweitern** (komplette Datei)
 
 ```ts
 import '@testing-library/jest-dom/vitest'
@@ -3341,17 +3341,17 @@ afterEach(async () => {
 afterAll(() => server.close())
 ```
 
-- [ ] **Step 11: Tests laufen lassen → PASS**
+- [x] **Step 11: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/mocks/handlers/auth.test.ts`
 Expected: PASS (7 Tests).
 
-- [ ] **Step 12: Gesamte Suite + Typecheck**
+- [x] **Step 12: Gesamte Suite + Typecheck**
 
 Run: `cd web && npx vitest run && npm run typecheck`
 Expected: grün.
 
-- [ ] **Step 13: Commit**
+- [x] **Step 13: Commit**
 
 ```bash
 git add web/src/mocks web/src/test
@@ -3371,7 +3371,7 @@ git commit -m "feat(web): add in-memory MSW mock with auth, profile and admin se
 - Consumes: alles aus Task 3 (`db`, `guard`, `op`, `paginate`, `serverPermissions`, `callApi`, `field`)
 - Produces: `operations` mit genau 57 Einträgen (eine pro `operationId` aus `api/openapi.yaml`); `worker` (`msw/browser`); `.env.mock` mit `VITE_MSW=1`; npm-Skripte `dev:mock` (`vite --mode mock`), `e2e`, `e2e:real`; Vite-Plugin `stripMswWorker`, das `mockServiceWorker.js` aus dem Produktions-Build entfernt.
 
-- [ ] **Step 1: Failing Test `web/src/mocks/handlers.test.ts`**
+- [x] **Step 1: Failing Test `web/src/mocks/handlers.test.ts`**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -3453,12 +3453,12 @@ describe('mock behaviour', () => {
 })
 ```
 
-- [ ] **Step 2: Test laufen lassen → FAIL**
+- [x] **Step 2: Test laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/mocks/handlers.test.ts`
 Expected: FAIL – Coverage-Test meldet fehlende operationIds (`listUsers`, `listServers`, …), Verhaltens-Tests scheitern an `onUnhandledRequest: 'error'`.
 
-- [ ] **Step 3: `web/src/mocks/handlers/users.ts`** (8 Operationen)
+- [x] **Step 3: `web/src/mocks/handlers/users.ts`** (8 Operationen)
 
 ```ts
 import { http, HttpResponse } from 'msw'
@@ -3624,7 +3624,7 @@ export const userOperations: MockOperation[] = [
 ]
 ```
 
-- [ ] **Step 4: `web/src/mocks/handlers/servers.ts`** (5 Operationen)
+- [x] **Step 4: `web/src/mocks/handlers/servers.ts`** (5 Operationen)
 
 ```ts
 import { http, HttpResponse } from 'msw'
@@ -3712,7 +3712,7 @@ export const serverOperations: MockOperation[] = [
 ]
 ```
 
-- [ ] **Step 5: `web/src/mocks/handlers/audit.ts`** (2 Operationen)
+- [x] **Step 5: `web/src/mocks/handlers/audit.ts`** (2 Operationen)
 
 ```ts
 import { http, HttpResponse } from 'msw'
@@ -3752,7 +3752,7 @@ export const auditOperations: MockOperation[] = [
 ]
 ```
 
-- [ ] **Step 6: `web/src/mocks/handlers/security.ts`** (16 Operationen)
+- [x] **Step 6: `web/src/mocks/handlers/security.ts`** (16 Operationen)
 
 ```ts
 import { http, HttpResponse } from 'msw'
@@ -4096,7 +4096,7 @@ export const securityOperations: MockOperation[] = [
 ]
 ```
 
-- [ ] **Step 7: `web/src/mocks/handlers.ts` vervollständigen und `web/src/mocks/browser.ts` anlegen**
+- [x] **Step 7: `web/src/mocks/handlers.ts` vervollständigen und `web/src/mocks/browser.ts` anlegen**
 
 ```ts
 // web/src/mocks/handlers.ts
@@ -4130,12 +4130,12 @@ import { handlers } from './handlers'
 export const worker = setupWorker(...handlers)
 ```
 
-- [ ] **Step 8: Tests laufen lassen → PASS**
+- [x] **Step 8: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/mocks`
 Expected: PASS (Coverage-Test mit 57 operationIds + alle Verhaltens-Tests aus Task 3 und 4).
 
-- [ ] **Step 9: Browser-Worker, Env-Datei, Skripte**
+- [x] **Step 9: Browser-Worker, Env-Datei, Skripte**
 
 ```bash
 cd web
@@ -4158,7 +4158,7 @@ interface ImportMeta {
 }
 ```
 
-- [ ] **Step 10: `web/vite.config.ts` – Worker nie mit ausliefern** (komplette Datei)
+- [x] **Step 10: `web/vite.config.ts` – Worker nie mit ausliefern** (komplette Datei)
 
 ```ts
 /// <reference types="vitest/config" />
@@ -4200,17 +4200,17 @@ export default defineConfig({
 })
 ```
 
-- [ ] **Step 11: Build prüfen – kein Worker im Embed**
+- [x] **Step 11: Build prüfen – kein Worker im Embed**
 
 Run: `make web-build && test ! -f internal/webui/dist/mockServiceWorker.js && echo "worker stripped"`
 Expected: Build grün (inkl. `tsc -b`), Ausgabe `worker stripped`.
 
-- [ ] **Step 12: Mock-Dev-Server manuell prüfen**
+- [x] **Step 12: Mock-Dev-Server manuell prüfen**
 
 Run: `cd web && npm run dev:mock` und `http://localhost:5173` im Browser öffnen.
 Expected: Browser-Konsole zeigt `[MSW] Mocking enabled.` erst ab Task 8 (Bootstrap); bis dahin lädt die Phase-0-Seite ohne Fehler. Server mit `Ctrl+C` beenden.
 
-- [ ] **Step 13: Commit**
+- [x] **Step 13: Commit**
 
 ```bash
 git add web/src/mocks web/src/vite-env.d.ts web/vite.config.ts web/.env.mock web/public/mockServiceWorker.js web/package.json web/package-lock.json
@@ -4266,7 +4266,7 @@ Verhalten der Middleware (verbindlich):
 6. `403 csrf_invalid` → Me nachladen, Anfrage **einmal** wiederholen.
 7. `403 sudo_required` (nicht für `/auth/*`) → `await requestSudo()`; bei `true` Anfrage **einmal** mit frischem Token wiederholen, bei `false` Originalantwort zurückgeben.
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/api/errors.test.ts`:
 ```ts
@@ -4472,12 +4472,12 @@ describe('errorMessage', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/api src/lib/error-message.test.ts`
 Expected: FAIL – Module `./errors`, `./client`, `./error-message` fehlen.
 
-- [ ] **Step 3: `web/src/api/csrf.ts` und `web/src/api/handlers.ts`**
+- [x] **Step 3: `web/src/api/csrf.ts` und `web/src/api/handlers.ts`**
 
 ```ts
 // web/src/api/csrf.ts
@@ -4526,7 +4526,7 @@ export function apiHandlers(): ApiHandlers {
 }
 ```
 
-- [ ] **Step 4: `web/src/api/errors.ts`**
+- [x] **Step 4: `web/src/api/errors.ts`**
 
 ```ts
 import type { ErrorCode } from './types'
@@ -4620,7 +4620,7 @@ export async function unwrapVoid(promise: Promise<{ error?: unknown; response: R
 }
 ```
 
-- [ ] **Step 5: `web/src/api/client.ts`**
+- [x] **Step 5: `web/src/api/client.ts`**
 
 ```ts
 import createClient, { type Middleware } from 'openapi-fetch'
@@ -4765,7 +4765,7 @@ export type ApiClient = ReturnType<typeof createApiClient>
 export const api: ApiClient = createApiClient()
 ```
 
-- [ ] **Step 6: `web/src/lib/error-message.ts`**
+- [x] **Step 6: `web/src/lib/error-message.ts`**
 
 ```ts
 import type { TFunction } from 'i18next'
@@ -4802,7 +4802,7 @@ export function useErrorToast(): (err: unknown) => void {
 }
 ```
 
-- [ ] **Step 7: `web/src/test/setup.ts` – Handler und Token zwischen Tests zurücksetzen** (komplette Datei)
+- [x] **Step 7: `web/src/test/setup.ts` – Handler und Token zwischen Tests zurücksetzen** (komplette Datei)
 
 ```ts
 import '@testing-library/jest-dom/vitest'
@@ -4844,17 +4844,17 @@ afterEach(async () => {
 afterAll(() => server.close())
 ```
 
-- [ ] **Step 8: Tests laufen lassen → PASS**
+- [x] **Step 8: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/api src/lib/error-message.test.ts`
 Expected: PASS (errors 5, client 9, error-message 5).
 
-- [ ] **Step 9: Gesamte Suite + Typecheck**
+- [x] **Step 9: Gesamte Suite + Typecheck**
 
 Run: `cd web && npx vitest run && npm run typecheck`
 Expected: grün. Insbesondere kompiliert `api.POST('/me/sessions/revoke-others')` **ohne** `params.header` – Beleg, dass `ClientPaths` den Pflicht-Header entfernt.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add web/src/api web/src/lib/error-message.ts web/src/lib/error-message.test.ts web/src/test/setup.ts
@@ -4888,7 +4888,7 @@ export function useSudoOpen(): boolean
 export function resetSudoStore(): void
 ```
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/features/webauthn/webauthn.test.ts`:
 ```ts
@@ -4981,12 +4981,12 @@ describe('sudo store', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/webauthn src/features/sudo`
 Expected: FAIL – Module fehlen.
 
-- [ ] **Step 3: `web/src/features/webauthn/webauthn.ts`**
+- [x] **Step 3: `web/src/features/webauthn/webauthn.ts`**
 
 ```ts
 import { browserSupportsWebAuthn, startAuthentication, startRegistration } from '@simplewebauthn/browser'
@@ -5037,7 +5037,7 @@ export async function registerPasskey(name: string): Promise<PasskeyCreated> {
 }
 ```
 
-- [ ] **Step 4: `web/src/features/sudo/sudo-store.ts`**
+- [x] **Step 4: `web/src/features/sudo/sudo-store.ts`**
 
 ```ts
 import { useSyncExternalStore } from 'react'
@@ -5087,7 +5087,7 @@ export function resetSudoStore(): void {
 }
 ```
 
-- [ ] **Step 5: `web/src/test/setup.ts` – Sudo-Store zurücksetzen**
+- [x] **Step 5: `web/src/test/setup.ts` – Sudo-Store zurücksetzen**
 
 In `web/src/test/setup.ts` den Import ergänzen und im `afterEach` nach `resetApiHandlers()` aufrufen. Komplette Datei:
 
@@ -5133,12 +5133,12 @@ afterEach(async () => {
 afterAll(() => server.close())
 ```
 
-- [ ] **Step 6: Tests laufen lassen → PASS**
+- [x] **Step 6: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/features/webauthn src/features/sudo`
 Expected: PASS (8 Tests).
 
-- [ ] **Step 7: Gesamte Suite + Typecheck, Commit**
+- [x] **Step 7: Gesamte Suite + Typecheck, Commit**
 
 Run: `cd web && npx vitest run && npm run typecheck`
 Expected: grün.
@@ -5186,7 +5186,7 @@ export function createTestQueryClient(): QueryClient
 export function renderWithProviders(ui: ReactNode, opts?: { path?: string; me?: Me | null; queryClient?: QueryClient }): Promise<RenderResult & { router: TestRouter; queryClient: QueryClient }>
 ```
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/features/auth/guards.test.ts`:
 ```ts
@@ -5348,12 +5348,12 @@ describe('wireApi', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/auth src/app`
 Expected: FAIL – Module `./guards`, `./me`, `./wire-api` fehlen.
 
-- [ ] **Step 3: `web/src/features/auth/me.ts`**
+- [x] **Step 3: `web/src/features/auth/me.ts`**
 
 ```ts
 import { queryOptions, useQuery, type QueryClient } from '@tanstack/react-query'
@@ -5402,7 +5402,7 @@ export function clearSession(queryClient: QueryClient): void {
 }
 ```
 
-- [ ] **Step 4: `web/src/features/auth/guards.ts`**
+- [x] **Step 4: `web/src/features/auth/guards.ts`**
 
 ```ts
 import type { Me, Stage } from '@/api/types'
@@ -5442,7 +5442,7 @@ export function setupGuard(me: Me | null): AuthPath | null {
 }
 ```
 
-- [ ] **Step 5: `web/src/app/wire-api.ts`**
+- [x] **Step 5: `web/src/app/wire-api.ts`**
 
 ```ts
 import type { QueryClient } from '@tanstack/react-query'
@@ -5479,7 +5479,7 @@ export function wireApi(queryClient: QueryClient, nav: AppNavigator): void {
 }
 ```
 
-- [ ] **Step 6: `web/src/test/render.tsx`**
+- [x] **Step 6: `web/src/test/render.tsx`**
 
 ```tsx
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -5538,12 +5538,12 @@ export async function renderWithProviders(
 }
 ```
 
-- [ ] **Step 7: Tests laufen lassen → PASS**
+- [x] **Step 7: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/features/auth src/app`
 Expected: PASS (guards 4, me 4, wire-api 5).
 
-- [ ] **Step 8: Gesamte Suite + Typecheck, Commit**
+- [x] **Step 8: Gesamte Suite + Typecheck, Commit**
 
 Run: `cd web && npx vitest run && npm run typecheck`
 Expected: grün.
@@ -5574,7 +5574,7 @@ export interface RouterContext { queryClient: QueryClient }
 export function createAppRouter(queryClient: QueryClient): AppRouter   // registriert in @tanstack/react-router Register
 ```
 
-- [ ] **Step 1: `web/src/test/render.tsx` – SudoDialog im Test-Root** (komplette Datei)
+- [x] **Step 1: `web/src/test/render.tsx` – SudoDialog im Test-Root** (komplette Datei)
 
 ```tsx
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -5635,7 +5635,7 @@ export async function renderWithProviders(
 }
 ```
 
-- [ ] **Step 2: Failing Test `web/src/features/sudo/sudo-dialog.test.tsx`**
+- [x] **Step 2: Failing Test `web/src/features/sudo/sudo-dialog.test.tsx`**
 
 ```tsx
 import { browserSupportsWebAuthn, startAuthentication } from '@simplewebauthn/browser'
@@ -5726,12 +5726,12 @@ describe('SudoDialog', () => {
 })
 ```
 
-- [ ] **Step 3: Test laufen lassen → FAIL**
+- [x] **Step 3: Test laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/sudo/sudo-dialog.test.tsx`
 Expected: FAIL – `Failed to resolve import "@/features/sudo/sudo-dialog"`.
 
-- [ ] **Step 4: `web/src/components/code-form.tsx`**
+- [x] **Step 4: `web/src/components/code-form.tsx`**
 
 ```tsx
 import { useId, useState } from 'react'
@@ -5791,7 +5791,7 @@ export function CodeForm({ label, submitLabel, numeric = false, pending = false,
 }
 ```
 
-- [ ] **Step 5: `web/src/features/sudo/sudo-dialog.tsx`**
+- [x] **Step 5: `web/src/features/sudo/sudo-dialog.tsx`**
 
 ```tsx
 import { useState } from 'react'
@@ -5912,12 +5912,12 @@ export function SudoDialog() {
 }
 ```
 
-- [ ] **Step 6: Test laufen lassen → PASS**
+- [x] **Step 6: Test laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/features/sudo`
 Expected: PASS (sudo-store 3, sudo-dialog 5).
 
-- [ ] **Step 7: Bootstrap – `web/src/app/query-client.ts`, `web/src/router.ts`**
+- [x] **Step 7: Bootstrap – `web/src/app/query-client.ts`, `web/src/router.ts`**
 
 ```ts
 // web/src/app/query-client.ts
@@ -5960,7 +5960,7 @@ declare module '@tanstack/react-router' {
 }
 ```
 
-- [ ] **Step 8: `web/src/routes/__root.tsx`, `web/src/main.tsx`, `web/index.html`** (komplette Dateien)
+- [x] **Step 8: `web/src/routes/__root.tsx`, `web/src/main.tsx`, `web/index.html`** (komplette Dateien)
 
 ```tsx
 // web/src/routes/__root.tsx
@@ -6045,17 +6045,17 @@ void Promise.all([enableMocking(), i18nReady]).then(() => {
 
 Außerdem `web/public/vite.svg` löschen, falls vom Vite-Template noch vorhanden (wird nicht mehr referenziert): `rm -f web/public/vite.svg`.
 
-- [ ] **Step 9: Route-Baum erzeugen, Typecheck, Suite**
+- [x] **Step 9: Route-Baum erzeugen, Typecheck, Suite**
 
 Run: `cd web && npx vite build && npm run typecheck && npx vitest run`
 Expected: `src/routeTree.gen.ts` aktualisiert, keine TS-Fehler, alle Tests grün.
 
-- [ ] **Step 10: Manuell im Mock-Modus prüfen**
+- [x] **Step 10: Manuell im Mock-Modus prüfen**
 
 Run: `cd web && npm run dev:mock`, `http://localhost:5173` öffnen.
 Expected: Konsole `[MSW] Mocking enabled.`; Phase-0-Startseite „mc-panel“ wird angezeigt; `<html>` hat je nach System `class="dark"`. Mit `Ctrl+C` beenden.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add web/src web/index.html web/public
@@ -6080,7 +6080,7 @@ export function PasskeySetupCard(props: { onRegistered(created: PasskeyCreated):
 ```
 Diese Komponenten werden vom erzwungenen Setup (Task 10) **und** vom Profil (Task 19) verwendet. Erfordert der Server Sudo (2FA schon aktiv), öffnet die Middleware den Sudo-Dialog automatisch.
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/features/setup/recovery-codes-panel.test.tsx`:
 ```tsx
@@ -6232,12 +6232,12 @@ describe('PasskeySetupCard', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/setup`
 Expected: FAIL – Module `./recovery-codes-panel`, `./totp-setup-card`, `./passkey-setup-card` fehlen.
 
-- [ ] **Step 3: `web/src/features/setup/recovery-codes-panel.tsx`**
+- [x] **Step 3: `web/src/features/setup/recovery-codes-panel.tsx`**
 
 ```tsx
 import { useId, useState } from 'react'
@@ -6313,7 +6313,7 @@ export function RecoveryCodesPanel({ codes, doneLabel, onDone }: RecoveryCodesPa
 }
 ```
 
-- [ ] **Step 4: `web/src/features/setup/totp-setup-card.tsx`**
+- [x] **Step 4: `web/src/features/setup/totp-setup-card.tsx`**
 
 ```tsx
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -6381,7 +6381,7 @@ export function TotpSetupCard({ onEnabled }: { onEnabled(codes: string[]): void 
 }
 ```
 
-- [ ] **Step 5: `web/src/features/setup/passkey-setup-card.tsx`**
+- [x] **Step 5: `web/src/features/setup/passkey-setup-card.tsx`**
 
 ```tsx
 import { useMutation } from '@tanstack/react-query'
@@ -6434,12 +6434,12 @@ export function PasskeySetupCard({ onRegistered }: { onRegistered(created: Passk
 }
 ```
 
-- [ ] **Step 6: Tests laufen lassen → PASS**
+- [x] **Step 6: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/features/setup`
 Expected: PASS (recovery 4, totp 2, passkey 3).
 
-- [ ] **Step 7: Gesamte Suite + Typecheck, Commit**
+- [x] **Step 7: Gesamte Suite + Typecheck, Commit**
 
 Run: `cd web && npx vitest run && npm run typecheck`
 Expected: grün.
@@ -6474,7 +6474,7 @@ export function AppLayout(): JSX.Element     // vorläufig: <main>+<Outlet/>; Ta
 // Routen: /login, /login/2fa, /setup-2fa, pfadloses Layout /_app (Guard stage=full)
 ```
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/features/auth/login-page.test.tsx`:
 ```tsx
@@ -6675,12 +6675,12 @@ describe('Setup2faPage', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/auth/login-page.test.tsx src/features/auth/second-factor-page.test.tsx src/features/setup/setup-2fa-page.test.tsx`
 Expected: FAIL – Module `./login-page`, `./second-factor-page`, `./setup-2fa-page` fehlen.
 
-- [ ] **Step 3: Gemeinsame Teile – `auth-layout.tsx`, `use-logout.ts`, `logout-button.tsx`, `route-guards.ts`**
+- [x] **Step 3: Gemeinsame Teile – `auth-layout.tsx`, `use-logout.ts`, `logout-button.tsx`, `route-guards.ts`**
 
 ```tsx
 // web/src/features/auth/auth-layout.tsx
@@ -6767,7 +6767,7 @@ export function guardBeforeLoad(guard: (me: Me | null) => AuthPath | null) {
 }
 ```
 
-- [ ] **Step 4: `web/src/features/auth/login-page.tsx`**
+- [x] **Step 4: `web/src/features/auth/login-page.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -6847,7 +6847,7 @@ export function LoginPage() {
 }
 ```
 
-- [ ] **Step 5: `web/src/features/auth/second-factor-page.tsx`**
+- [x] **Step 5: `web/src/features/auth/second-factor-page.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -6951,7 +6951,7 @@ export function SecondFactorPage() {
 }
 ```
 
-- [ ] **Step 6: `web/src/features/setup/setup-2fa-page.tsx`**
+- [x] **Step 6: `web/src/features/setup/setup-2fa-page.tsx`**
 
 ```tsx
 import { useNavigate } from '@tanstack/react-router'
@@ -7017,7 +7017,7 @@ export function Setup2faPage() {
 }
 ```
 
-- [ ] **Step 7: `web/src/features/layout/app-layout.tsx` (vorläufig) und Route-Dateien**
+- [x] **Step 7: `web/src/features/layout/app-layout.tsx` (vorläufig) und Route-Dateien**
 
 ```tsx
 // web/src/features/layout/app-layout.tsx – replaced by the full app shell in Task 20
@@ -7084,22 +7084,22 @@ export const Route = createFileRoute('/_app')({
 })
 ```
 
-- [ ] **Step 8: Tests laufen lassen → PASS**
+- [x] **Step 8: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/features/auth src/features/setup`
 Expected: PASS (login 5, second-factor 6, setup-page 3 sowie alle früheren Tests dieser Ordner).
 
-- [ ] **Step 9: Route-Baum, Typecheck, Suite**
+- [x] **Step 9: Route-Baum, Typecheck, Suite**
 
 Run: `cd web && npx vite build && npm run typecheck && npx vitest run`
 Expected: `src/routeTree.gen.ts` enthält `/login/`, `/login/2fa`, `/setup-2fa`, `/_app`; keine TS-Fehler; alle Tests grün.
 
-- [ ] **Step 10: Manuell im Mock-Modus prüfen**
+- [x] **Step 10: Manuell im Mock-Modus prüfen**
 
 Run: `cd web && npm run dev:mock`, `http://localhost:5173/login` öffnen.
 Expected: `admin` / `correct-horse-battery` → `/login/2fa` → `123456` → `/` (Phase-0-Startseite); `newadmin` → `/setup-2fa` mit QR-Code. `Ctrl+C`.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add web/src/features web/src/routes web/src/routeTree.gen.ts
@@ -7127,7 +7127,7 @@ export function DashboardPage(): JSX.Element
 // Route: / (Kind von /_app)
 ```
 
-- [ ] **Step 1: Failing Test `web/src/features/dashboard/dashboard-page.test.tsx`**
+- [x] **Step 1: Failing Test `web/src/features/dashboard/dashboard-page.test.tsx`**
 
 ```tsx
 import { screen, within } from '@testing-library/react'
@@ -7195,12 +7195,12 @@ describe('DashboardPage', () => {
 })
 ```
 
-- [ ] **Step 2: Test laufen lassen → FAIL**
+- [x] **Step 2: Test laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/dashboard`
 Expected: FAIL – `Failed to resolve import "./dashboard-page"`.
 
-- [ ] **Step 3: `web/src/features/dashboard/servers.ts`**
+- [x] **Step 3: `web/src/features/dashboard/servers.ts`**
 
 ```ts
 import { queryOptions } from '@tanstack/react-query'
@@ -7215,7 +7215,7 @@ export const serversQueryOptions = queryOptions({
 })
 ```
 
-- [ ] **Step 4: `web/src/features/dashboard/server-card.tsx`**
+- [x] **Step 4: `web/src/features/dashboard/server-card.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -7323,7 +7323,7 @@ export function ServerCard({ server, canDelete }: { server: Server; canDelete: b
 }
 ```
 
-- [ ] **Step 5: `web/src/features/dashboard/create-server-dialog.tsx`**
+- [x] **Step 5: `web/src/features/dashboard/create-server-dialog.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -7417,7 +7417,7 @@ export function CreateServerDialog({ open, onOpenChange }: { open: boolean; onOp
 }
 ```
 
-- [ ] **Step 6: `web/src/features/dashboard/dashboard-page.tsx`**
+- [x] **Step 6: `web/src/features/dashboard/dashboard-page.tsx`**
 
 ```tsx
 import { useQuery } from '@tanstack/react-query'
@@ -7481,7 +7481,7 @@ export function DashboardPage() {
 }
 ```
 
-- [ ] **Step 7: Route und Platzhalter entfernen**
+- [x] **Step 7: Route und Platzhalter entfernen**
 
 ```bash
 cd web && rm src/routes/index.tsx src/routes/index.test.tsx
@@ -7495,12 +7495,12 @@ import { DashboardPage } from '@/features/dashboard/dashboard-page'
 export const Route = createFileRoute('/_app/')({ component: DashboardPage })
 ```
 
-- [ ] **Step 8: Tests, Route-Baum, Typecheck**
+- [x] **Step 8: Tests, Route-Baum, Typecheck**
 
 Run: `cd web && npx vitest run src/features/dashboard && npx vite build && npm run typecheck && npx vitest run`
 Expected: Dashboard-Tests PASS (5); `/` hängt jetzt unter `/_app` (geschützt); alles grün.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -A web/src/features/dashboard web/src/routes web/src/routeTree.gen.ts
@@ -7531,7 +7531,7 @@ export function UserPermissionsPage(props: { userId: number }): JSX.Element
 // Routen: /users, /users/$id/permissions (beide adminGuard)
 ```
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/features/users/permission-matrix.test.ts`:
 ```ts
@@ -7685,12 +7685,12 @@ describe('UserPermissionsPage', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/users`
 Expected: FAIL – Module fehlen.
 
-- [ ] **Step 3: `web/src/features/users/permission-matrix.ts`**
+- [x] **Step 3: `web/src/features/users/permission-matrix.ts`**
 
 ```ts
 import { ALL_PERMISSIONS, type Permission, type PermissionGrant } from '@/api/types'
@@ -7734,7 +7734,7 @@ export function sameMatrix(a: Matrix, b: Matrix): boolean {
 }
 ```
 
-- [ ] **Step 4: `web/src/features/users/create-user-dialog.tsx`**
+- [x] **Step 4: `web/src/features/users/create-user-dialog.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -7860,7 +7860,7 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
 }
 ```
 
-- [ ] **Step 5: `web/src/features/users/users-page.tsx`**
+- [x] **Step 5: `web/src/features/users/users-page.tsx`**
 
 ```tsx
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -8050,7 +8050,7 @@ export function UsersPage() {
 }
 ```
 
-- [ ] **Step 6: `web/src/features/users/permissions-page.tsx`**
+- [x] **Step 6: `web/src/features/users/permissions-page.tsx`**
 
 ```tsx
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -8157,7 +8157,7 @@ export function UserPermissionsPage({ userId }: { userId: number }) {
 }
 ```
 
-- [ ] **Step 7: Route-Dateien**
+- [x] **Step 7: Route-Dateien**
 
 ```tsx
 // web/src/routes/_app/users/index.tsx
@@ -8190,12 +8190,12 @@ function PermissionsRoute() {
 }
 ```
 
-- [ ] **Step 8: Tests laufen lassen → PASS**
+- [x] **Step 8: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/features/users`
 Expected: PASS (matrix 5, users 6, permissions 2).
 
-- [ ] **Step 9: Route-Baum, Typecheck, Suite, Commit**
+- [x] **Step 9: Route-Baum, Typecheck, Suite, Commit**
 
 Run: `cd web && npx vite build && npm run typecheck && npx vitest run`
 Expected: grün; `routeTree.gen.ts` enthält `/users/` und `/users/$id/permissions`.
@@ -8225,7 +8225,7 @@ export function OverviewTab(): JSX.Element
 ```
 Diagramm-Regeln (handgebautes SVG, keine Chart-Bibliothek): zwei Serien gestapelt (Erfolg unten `--chart-2`, Fehler oben `--chart-1`), 2 px Abstand zwischen Segmenten, Radius 2, eine y-Achse mit Gitterlinien bei 0/50/100 %, höchstens ~6 x-Beschriftungen, Legende immer sichtbar, pro Balken `<title>` als Hover-Tooltip über eine Trefferfläche in voller Spaltenbreite, `role="img"` mit Titel + Summen-Beschreibung und eine `sr-only`-Datentabelle.
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/features/security/bar-chart.test.tsx`:
 ```tsx
@@ -8337,12 +8337,12 @@ describe('OverviewTab', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/security`
 Expected: FAIL – Module fehlen.
 
-- [ ] **Step 3: `web/src/features/security/bar-chart.tsx`**
+- [x] **Step 3: `web/src/features/security/bar-chart.tsx`**
 
 ```tsx
 import { useId } from 'react'
@@ -8459,7 +8459,7 @@ export function LoginBarChart({ data, title, formatTick, labels }: LoginBarChart
 }
 ```
 
-- [ ] **Step 4: `web/src/features/security/agent-status-card.tsx`**
+- [x] **Step 4: `web/src/features/security/agent-status-card.tsx`**
 
 ```tsx
 import { useQuery } from '@tanstack/react-query'
@@ -8517,7 +8517,7 @@ export function AgentStatusCard() {
 }
 ```
 
-- [ ] **Step 5: `web/src/features/security/overview-tab.tsx`**
+- [x] **Step 5: `web/src/features/security/overview-tab.tsx`**
 
 ```tsx
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
@@ -8663,12 +8663,12 @@ export function OverviewTab() {
 }
 ```
 
-- [ ] **Step 6: Tests laufen lassen → PASS**
+- [x] **Step 6: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/features/security`
 Expected: PASS (bar-chart 4, agent 3, overview 2).
 
-- [ ] **Step 7: Gesamte Suite + Typecheck, Commit**
+- [x] **Step 7: Gesamte Suite + Typecheck, Commit**
 
 Run: `cd web && npx vitest run && npm run typecheck`
 Expected: grün.
@@ -8696,7 +8696,7 @@ export function CreateJailDialog(props: { open: boolean; onOpenChange(open: bool
 export const securityKey: readonly ['security']   // Präfix aller Security-Queries (in jails-tab.ts exportiert)
 ```
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/features/security/attempts-tab.test.tsx`:
 ```tsx
@@ -8807,12 +8807,12 @@ describe('JailsTab', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/security/attempts-tab.test.tsx src/features/security/jails-tab.test.tsx`
 Expected: FAIL – Module fehlen.
 
-- [ ] **Step 3: `web/src/features/security/attempts-tab.tsx`**
+- [x] **Step 3: `web/src/features/security/attempts-tab.tsx`**
 
 ```tsx
 import { useInfiniteQuery } from '@tanstack/react-query'
@@ -8945,7 +8945,7 @@ export function AttemptsTab() {
 }
 ```
 
-- [ ] **Step 4: `web/src/features/security/create-jail-dialog.tsx`**
+- [x] **Step 4: `web/src/features/security/create-jail-dialog.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -9046,7 +9046,7 @@ export function CreateJailDialog({ open, onOpenChange }: { open: boolean; onOpen
 }
 ```
 
-- [ ] **Step 5: `web/src/features/security/jails-tab.tsx`**
+- [x] **Step 5: `web/src/features/security/jails-tab.tsx`**
 
 ```tsx
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -9166,12 +9166,12 @@ export function JailsTab() {
 }
 ```
 
-- [ ] **Step 6: Tests laufen lassen → PASS**
+- [x] **Step 6: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/features/security`
 Expected: PASS (inkl. attempts 3, jails 4).
 
-- [ ] **Step 7: Gesamte Suite + Typecheck, Commit**
+- [x] **Step 7: Gesamte Suite + Typecheck, Commit**
 
 Run: `cd web && npx vitest run && npm run typecheck`
 Expected: grün.
@@ -9200,7 +9200,7 @@ export function formatCountries(codes: string[]): string
 export function SettingsTab(): JSX.Element
 ```
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/features/security/countries.test.ts`:
 ```ts
@@ -9320,12 +9320,12 @@ describe('SettingsTab', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/security/countries.test.ts src/features/security/ip-rules-tab.test.tsx src/features/security/settings-tab.test.tsx`
 Expected: FAIL – Module fehlen.
 
-- [ ] **Step 3: `web/src/features/security/countries.ts`**
+- [x] **Step 3: `web/src/features/security/countries.ts`**
 
 ```ts
 const COUNTRY = /^[A-Z]{2}$/
@@ -9344,7 +9344,7 @@ export function formatCountries(codes: string[]): string {
 }
 ```
 
-- [ ] **Step 4: `web/src/features/security/create-ip-rule-dialog.tsx`**
+- [x] **Step 4: `web/src/features/security/create-ip-rule-dialog.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -9461,7 +9461,7 @@ export function CreateIpRuleDialog({ open, onOpenChange }: { open: boolean; onOp
 }
 ```
 
-- [ ] **Step 5: `web/src/features/security/ip-rules-tab.tsx`**
+- [x] **Step 5: `web/src/features/security/ip-rules-tab.tsx`**
 
 ```tsx
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -9565,7 +9565,7 @@ export function IpRulesTab() {
 }
 ```
 
-- [ ] **Step 6: `web/src/features/security/settings-tab.tsx`**
+- [x] **Step 6: `web/src/features/security/settings-tab.tsx`**
 
 ```tsx
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -9698,12 +9698,12 @@ export function SettingsTab() {
 }
 ```
 
-- [ ] **Step 7: Tests laufen lassen → PASS**
+- [x] **Step 7: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/features/security`
 Expected: PASS (countries 3, ip-rules 3, settings 4 sowie Tasks 13/14).
 
-- [ ] **Step 8: Gesamte Suite + Typecheck, Commit**
+- [x] **Step 8: Gesamte Suite + Typecheck, Commit**
 
 Run: `cd web && npx vitest run && npm run typecheck`
 Expected: grün.
@@ -9733,7 +9733,7 @@ export function SecurityPage(): JSX.Element
 ```
 Beim Bearbeiten werden URL/Topic/Token nur gesendet, wenn sie neu eingegeben wurden (das Backend liefert Secrets nur maskiert zurück). Vertragsdetails: `testNotifier` meldet eine fehlgeschlagene Zustellung als `400 validation_failed` mit Klartext-`message` (UI: Fehler-Toast „Eingaben ungültig (<message>)“); ein doppelter Name bei `PATCH` ist ebenfalls `400 validation_failed` (bei `POST` bleibt es `409 conflict`). Im Mock schlägt der Test für deaktivierte Benachrichtigungen fehl.
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/features/security/notifiers-tab.test.tsx`:
 ```tsx
@@ -9860,12 +9860,12 @@ describe('SecurityPage', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/security/notifiers-tab.test.tsx src/features/security/security-page.test.tsx`
 Expected: FAIL – Module fehlen.
 
-- [ ] **Step 3: `web/src/features/security/notifier-dialog.tsx`**
+- [x] **Step 3: `web/src/features/security/notifier-dialog.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -10019,7 +10019,7 @@ export function NotifierDialog({ open, onOpenChange, notifier }: { open: boolean
 }
 ```
 
-- [ ] **Step 4: `web/src/features/security/notifiers-tab.tsx`**
+- [x] **Step 4: `web/src/features/security/notifiers-tab.tsx`**
 
 ```tsx
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -10150,7 +10150,7 @@ export function NotifiersTab() {
 }
 ```
 
-- [ ] **Step 5: `web/src/features/security/security-page.tsx` und Route**
+- [x] **Step 5: `web/src/features/security/security-page.tsx` und Route**
 
 ```tsx
 // web/src/features/security/security-page.tsx
@@ -10213,12 +10213,12 @@ export const Route = createFileRoute('/_app/security')({
 })
 ```
 
-- [ ] **Step 6: Tests laufen lassen → PASS**
+- [x] **Step 6: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/features/security`
 Expected: PASS (notifiers 8, security-page 1 sowie Tasks 13–15).
 
-- [ ] **Step 7: Route-Baum, Typecheck, Suite, Commit**
+- [x] **Step 7: Route-Baum, Typecheck, Suite, Commit**
 
 Run: `cd web && npx vite build && npm run typecheck && npx vitest run`
 Expected: grün.
@@ -10248,7 +10248,7 @@ export function AuditPage(): JSX.Element
 // Route: /audit (adminGuard)
 ```
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/features/audit/audit-filters.test.ts`:
 ```ts
@@ -10317,12 +10317,12 @@ describe('AuditPage', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/audit`
 Expected: FAIL – Module fehlen.
 
-- [ ] **Step 3: `web/src/features/audit/audit-filters.ts`**
+- [x] **Step 3: `web/src/features/audit/audit-filters.ts`**
 
 ```ts
 import type { AuditResult } from '@/api/types'
@@ -10355,7 +10355,7 @@ export function toAuditQuery(filters: AuditFilters) {
 }
 ```
 
-- [ ] **Step 4: `web/src/features/audit/audit-page.tsx`**
+- [x] **Step 4: `web/src/features/audit/audit-page.tsx`**
 
 ```tsx
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
@@ -10534,7 +10534,7 @@ export function AuditPage() {
 }
 ```
 
-- [ ] **Step 5: `web/src/routes/_app/audit.tsx`**
+- [x] **Step 5: `web/src/routes/_app/audit.tsx`**
 
 ```tsx
 import { createFileRoute } from '@tanstack/react-router'
@@ -10548,12 +10548,12 @@ export const Route = createFileRoute('/_app/audit')({
 })
 ```
 
-- [ ] **Step 6: Tests laufen lassen → PASS**
+- [x] **Step 6: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/features/audit`
 Expected: PASS (filters 2, page 4).
 
-- [ ] **Step 7: Route-Baum, Typecheck, Suite, Commit**
+- [x] **Step 7: Route-Baum, Typecheck, Suite, Commit**
 
 Run: `cd web && npx vite build && npm run typecheck && npx vitest run`
 Expected: grün.
@@ -10588,7 +10588,7 @@ export const allSessionsKey: readonly ['sessions', 'all']
 export function AdminSessionsCard(): JSX.Element
 ```
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/lib/user-agent.test.ts`:
 ```ts
@@ -10729,12 +10729,12 @@ describe('AdminSessionsCard', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/lib/user-agent.test.ts src/features/profile`
 Expected: FAIL – Module fehlen.
 
-- [ ] **Step 3: `web/src/lib/user-agent.ts` und `web/src/features/profile/section-card.tsx`**
+- [x] **Step 3: `web/src/lib/user-agent.ts` und `web/src/features/profile/section-card.tsx`**
 
 ```ts
 // web/src/lib/user-agent.ts
@@ -10803,7 +10803,7 @@ export function SectionCard({
 }
 ```
 
-- [ ] **Step 4: `web/src/features/profile/language-card.tsx`**
+- [x] **Step 4: `web/src/features/profile/language-card.tsx`**
 
 ```tsx
 import { useMutation } from '@tanstack/react-query'
@@ -10854,7 +10854,7 @@ export function LanguageCard() {
 }
 ```
 
-- [ ] **Step 5: `web/src/features/profile/password-card.tsx`**
+- [x] **Step 5: `web/src/features/profile/password-card.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -10949,7 +10949,7 @@ export function PasswordCard() {
 }
 ```
 
-- [ ] **Step 6: `web/src/features/profile/session-columns.tsx`**
+- [x] **Step 6: `web/src/features/profile/session-columns.tsx`**
 
 ```tsx
 import type { TFunction } from 'i18next'
@@ -11032,7 +11032,7 @@ export function buildSessionColumns({ t, fmt, deviceLabel, withUser, pending, on
 }
 ```
 
-- [ ] **Step 7: `web/src/features/profile/sessions-card.tsx` und `admin-sessions-card.tsx`**
+- [x] **Step 7: `web/src/features/profile/sessions-card.tsx` und `admin-sessions-card.tsx`**
 
 ```tsx
 // web/src/features/profile/sessions-card.tsx
@@ -11178,12 +11178,12 @@ export function AdminSessionsCard() {
 }
 ```
 
-- [ ] **Step 8: Tests laufen lassen → PASS**
+- [x] **Step 8: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/lib/user-agent.test.ts src/features/profile`
 Expected: PASS (user-agent 6, language 1, password 3, sessions 4).
 
-- [ ] **Step 9: Gesamte Suite + Typecheck, Commit**
+- [x] **Step 9: Gesamte Suite + Typecheck, Commit**
 
 Run: `cd web && npx vitest run && npm run typecheck`
 Expected: grün.
@@ -11214,7 +11214,7 @@ export function ProfilePage(): JSX.Element
 ```
 Nach jeder Änderung an 2FA-Methoden wird `refreshMe(queryClient)` aufgerufen, weil `totp_enabled`, `passkey_count` und `recovery_codes_remaining` im `Me` stehen (Sudo-Dialog und 2FA-Tabs hängen davon ab).
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 
 `web/src/features/profile/two-factor-card.test.tsx`:
 ```tsx
@@ -11366,12 +11366,12 @@ describe('ProfilePage', () => {
 })
 ```
 
-- [ ] **Step 2: Tests laufen lassen → FAIL**
+- [x] **Step 2: Tests laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/profile`
 Expected: FAIL – `two-factor-card`, `recovery-card`, `passkeys-card`, `profile-page` fehlen.
 
-- [ ] **Step 3: `web/src/features/profile/two-factor-card.tsx`**
+- [x] **Step 3: `web/src/features/profile/two-factor-card.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -11467,7 +11467,7 @@ export function TwoFactorCard() {
 }
 ```
 
-- [ ] **Step 4: `web/src/features/profile/recovery-card.tsx`**
+- [x] **Step 4: `web/src/features/profile/recovery-card.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -11536,7 +11536,7 @@ export function RecoveryCard() {
 }
 ```
 
-- [ ] **Step 5: `web/src/features/profile/passkeys-card.tsx`**
+- [x] **Step 5: `web/src/features/profile/passkeys-card.tsx`**
 
 ```tsx
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -11674,7 +11674,7 @@ export function PasskeysCard() {
 }
 ```
 
-- [ ] **Step 6: `web/src/features/profile/profile-page.tsx` und Route**
+- [x] **Step 6: `web/src/features/profile/profile-page.tsx` und Route**
 
 ```tsx
 // web/src/features/profile/profile-page.tsx
@@ -11717,12 +11717,12 @@ import { ProfilePage } from '@/features/profile/profile-page'
 export const Route = createFileRoute('/_app/profile')({ component: ProfilePage })
 ```
 
-- [ ] **Step 7: Tests laufen lassen → PASS**
+- [x] **Step 7: Tests laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/features/profile`
 Expected: PASS (two-factor 2, recovery 2, passkeys 2, profile-page 2 sowie Task 18).
 
-- [ ] **Step 8: Route-Baum, Typecheck, Suite, Commit**
+- [x] **Step 8: Route-Baum, Typecheck, Suite, Commit**
 
 Run: `cd web && npx vite build && npm run typecheck && npx vitest run`
 Expected: grün.
@@ -11752,12 +11752,12 @@ export function navItemsFor(role: Role): NavItem[]
 export function AppLayout(): JSX.Element   // Sidebar ≥ 768 px, Sheet darunter, Skip-Link, <main id="main">
 ```
 
-- [ ] **Step 1: shadcn-Sheet hinzufügen**
+- [x] **Step 1: shadcn-Sheet hinzufügen**
 
 Run: `cd web && npx shadcn@latest add sheet --yes`
 Expected: `src/components/ui/sheet.tsx` angelegt; `package.json`-Abhängigkeiten unverändert (Sheet nutzt dieselbe Radix-Dialog-Basis wie `dialog`). Prüfen mit `git diff --stat web/package.json` – nur falls dort eine neue Abhängigkeit auftaucht: Änderung verwerfen (`git checkout web/package.json web/package-lock.json`) und Lead informieren.
 
-- [ ] **Step 2: Failing Test `web/src/features/layout/app-layout.test.tsx`**
+- [x] **Step 2: Failing Test `web/src/features/layout/app-layout.test.tsx`**
 
 ```tsx
 import { screen, waitFor, within } from '@testing-library/react'
@@ -11810,12 +11810,12 @@ describe('AppLayout', () => {
 })
 ```
 
-- [ ] **Step 3: Test laufen lassen → FAIL**
+- [x] **Step 3: Test laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/layout`
 Expected: FAIL – `Failed to resolve import "./nav"` bzw. fehlende Navigation in der vorläufigen `AppLayout`.
 
-- [ ] **Step 4: `web/src/features/layout/nav.ts`**
+- [x] **Step 4: `web/src/features/layout/nav.ts`**
 
 ```ts
 import { LayoutDashboard, ScrollText, ShieldCheck, UserRound, Users, type LucideIcon } from 'lucide-react'
@@ -11843,7 +11843,7 @@ export function navItemsFor(role: Role): NavItem[] {
 }
 ```
 
-- [ ] **Step 5: `web/src/features/layout/app-layout.tsx`** (komplette Datei)
+- [x] **Step 5: `web/src/features/layout/app-layout.tsx`** (komplette Datei)
 
 ```tsx
 import { Link, Outlet } from '@tanstack/react-router'
@@ -11953,22 +11953,22 @@ export function AppLayout() {
 }
 ```
 
-- [ ] **Step 6: Test laufen lassen → PASS**
+- [x] **Step 6: Test laufen lassen → PASS**
 
 Run: `cd web && npx vitest run src/features/layout`
 Expected: PASS (5 Tests).
 
-- [ ] **Step 7: Build, Typecheck, Lint, gesamte Suite**
+- [x] **Step 7: Build, Typecheck, Lint, gesamte Suite**
 
 Run: `cd web && npx vite build && npm run typecheck && npm run lint && npx vitest run`
 Expected: alles grün; `npm run lint` ohne Fehler (Warnungen von `react-refresh/only-export-components` für Dateien, die Komponenten und Konstanten exportieren, sind zulässig).
 
-- [ ] **Step 8: Manuell im Mock-Modus prüfen (Desktop + 360 px)**
+- [x] **Step 8: Manuell im Mock-Modus prüfen (Desktop + 360 px)**
 
 Run: `cd web && npm run dev:mock`, im Browser `admin`/`correct-horse-battery`/`123456`.
 Expected: Sidebar mit fünf Einträgen; in den DevTools auf 360 px Breite: Hamburger-Menü öffnet Sheet, Tabellen werden zu Karten, kein horizontales Scrollen der Seite; Theme-Umschalter wechselt Hell → Dunkel → System und überlebt ein Neuladen (`localStorage['mcpanel.theme']`). `Ctrl+C`.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add web/src/features/layout web/src/components/ui/sheet.tsx web/src/routeTree.gen.ts
@@ -11994,7 +11994,7 @@ export function totp(secretBase32: string, timeMs?: number, stepSeconds?: number
 ```
 Projekte: `mock` (immer; startet `vite --mode mock --port 5174`, Specs `totp.spec.ts` + `smoke.spec.ts`) und `real` (nur wenn `E2E_BASE_URL` gesetzt; Spec `login-totp.spec.ts`).
 
-- [ ] **Step 1: Failing Spec `web/e2e/totp.spec.ts`** (RFC-6238-Anhang-B-Vektoren, SHA-1, 8 Stellen)
+- [x] **Step 1: Failing Spec `web/e2e/totp.spec.ts`** (RFC-6238-Anhang-B-Vektoren, SHA-1, 8 Stellen)
 
 ```ts
 import { expect, test } from '@playwright/test'
@@ -12028,7 +12028,7 @@ test('defaults to 6 digits', () => {
 })
 ```
 
-- [ ] **Step 2: `web/playwright.config.ts`**
+- [x] **Step 2: `web/playwright.config.ts`**
 
 ```ts
 import { defineConfig, devices } from '@playwright/test'
@@ -12070,12 +12070,12 @@ export default defineConfig({
 })
 ```
 
-- [ ] **Step 3: Spec laufen lassen → FAIL**
+- [x] **Step 3: Spec laufen lassen → FAIL**
 
 Run: `cd web && npx playwright install chromium && npx playwright test --project=mock e2e/totp.spec.ts`
 Expected: FAIL – `Cannot find module './totp'`.
 
-- [ ] **Step 4: `web/e2e/totp.ts`**
+- [x] **Step 4: `web/e2e/totp.ts`**
 
 ```ts
 import { createHmac } from 'node:crypto'
@@ -12114,12 +12114,12 @@ export function totp(secretBase32: string, timeMs: number = Date.now(), stepSeco
 }
 ```
 
-- [ ] **Step 5: Spec laufen lassen → PASS**
+- [x] **Step 5: Spec laufen lassen → PASS**
 
 Run: `cd web && npx playwright test --project=mock e2e/totp.spec.ts`
 Expected: 8 passed (der Vite-Mock-Server wird gestartet, aber nicht benutzt).
 
-- [ ] **Step 6: `web/e2e/smoke.spec.ts`** (läuft jetzt gegen MSW)
+- [x] **Step 6: `web/e2e/smoke.spec.ts`** (läuft jetzt gegen MSW)
 
 ```ts
 import { expect, test, type Page } from '@playwright/test'
@@ -12181,12 +12181,12 @@ test('theme preference survives a reload', async ({ page }) => {
 })
 ```
 
-- [ ] **Step 7: Smoke laufen lassen → PASS**
+- [x] **Step 7: Smoke laufen lassen → PASS**
 
 Run: `cd web && npm run e2e`
 Expected: alle `mock`-Tests grün (totp 8, smoke 4).
 
-- [ ] **Step 8: `web/e2e/login-totp.spec.ts`** (echtes Backend, Phase 2)
+- [x] **Step 8: `web/e2e/login-totp.spec.ts`** (echtes Backend, Phase 2)
 
 ```ts
 import { expect, test, type Page } from '@playwright/test'
@@ -12235,17 +12235,17 @@ test('fresh admin: forced TOTP setup, recovery codes, sign-in again with TOTP', 
 })
 ```
 
-- [ ] **Step 9: Real-Spec ohne Backend prüfen (wird übersprungen)**
+- [x] **Step 9: Real-Spec ohne Backend prüfen (wird übersprungen)**
 
 Run: `cd web && npx playwright test --list`
 Expected: nur das Projekt `mock` wird gelistet (ohne `E2E_BASE_URL` existiert `real` nicht); `npx tsc --noEmit --module esnext --moduleResolution bundler --target es2022 --types node --skipLibCheck e2e/*.ts playwright.config.ts` meldet keine Fehler.
 
-- [ ] **Step 10: Abschluss – alles grün**
+- [x] **Step 10: Abschluss – alles grün**
 
 Run: `cd web && npx vitest run && npm run typecheck && npm run lint && cd .. && make web-build && test ! -f internal/webui/dist/mockServiceWorker.js && echo OK`
 Expected: Vitest grün, keine TS-/Lint-Fehler, Build ok, `OK`.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add web/playwright.config.ts web/e2e

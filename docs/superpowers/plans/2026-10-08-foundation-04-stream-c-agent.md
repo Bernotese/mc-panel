@@ -109,7 +109,7 @@ func RemainingSeconds(d time.Duration) int64
 func FindOverlap(p netip.Prefix, existing []netip.Prefix) (netip.Prefix, bool)
 ```
 
-- [ ] **Step 1: Failing tests schreiben** – `internal/agent/banrules/banrules_test.go`
+- [x] **Step 1: Failing tests schreiben** – `internal/agent/banrules/banrules_test.go`
 
 ```go
 package banrules_test
@@ -254,12 +254,12 @@ func TestFindOverlap(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test ./internal/agent/banrules/`
 Expected: FAIL – Build-Fehler, weil das Paket `github.com/Bernotese/mc-panel/internal/agent/banrules` keine Nicht-Test-Dateien enthält bzw. `banrules.CheckPrefix` undefiniert ist.
 
-- [ ] **Step 3: Implementierung** – `internal/agent/banrules/banrules.go`
+- [x] **Step 3: Implementierung** – `internal/agent/banrules/banrules.go`
 
 ```go
 // Package banrules holds the agent's validation rules for firewall bans. They
@@ -373,12 +373,12 @@ func FindOverlap(p netip.Prefix, existing []netip.Prefix) (netip.Prefix, bool) {
 }
 ```
 
-- [ ] **Step 4: Test laufen lassen (grün)**
+- [x] **Step 4: Test laufen lassen (grün)**
 
 Run: `go test ./internal/agent/banrules/`
 Expected: `ok  	github.com/Bernotese/mc-panel/internal/agent/banrules`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/banrules
@@ -410,7 +410,7 @@ func FromContext(ctx context.Context) (uint32, bool)
 
 Entscheidung: Die Prüfung sitzt in einem umhüllenden `net.Listener` (nicht in einer HTTP-Middleware). Abgelehnte Verbindungen werden im `Accept` geschlossen, bevor `net/http` ein Byte liest; `Accept` läuft dann weiter (gibt keinen Fehler zurück, sonst würde `http.Server.Serve` beendet). Die Allow-Funktion ist injizierbar, damit Tests eine fremde UID simulieren können, ohne Benutzer zu wechseln.
 
-- [ ] **Step 1: Failing tests schreiben** – `internal/agent/peercred/peercred_test.go`
+- [x] **Step 1: Failing tests schreiben** – `internal/agent/peercred/peercred_test.go`
 
 ```go
 package peercred_test
@@ -563,12 +563,12 @@ func TestConnContext(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test ./internal/agent/peercred/`
 Expected: FAIL – Build-Fehler (`peercred.PeerUID` undefiniert / keine Nicht-Test-Dateien).
 
-- [ ] **Step 3: Implementierung** – `internal/agent/peercred/peercred.go`
+- [x] **Step 3: Implementierung** – `internal/agent/peercred/peercred.go`
 
 ```go
 // Package peercred authenticates Unix socket peers by their kernel-provided
@@ -726,12 +726,12 @@ func peerUID(int) (uint32, error) {
 }
 ```
 
-- [ ] **Step 4: Tests laufen lassen (grün) + Linux-Compile-Check**
+- [x] **Step 4: Tests laufen lassen (grün) + Linux-Compile-Check**
 
 Run: `go test ./internal/agent/peercred/ && GOOS=linux GOARCH=amd64 go vet ./internal/agent/peercred/`
 Expected: `ok  	github.com/Bernotese/mc-panel/internal/agent/peercred`, `go vet` ohne Ausgabe.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/peercred
@@ -763,7 +763,7 @@ func (n *Noop) List(ctx context.Context) ([]agentapi.Ban, error)
 
 Semantik (für beide Backends verbindlich): Re-Ban desselben Prefixes **ersetzt** den Timeout (auch verkürzend – Stream B sendet immer die aktuelle Restdauer). Unban eines nicht gebannten Prefixes ist kein Fehler. Ein Ban, der einen **anderen** gebannten Prefix überlappt (z. B. /128 in gebanntem /64), liefert `banrules.ErrConflict`. `List` ist sortiert (IPv4 vor IPv6, dann Adresse, dann Prefix-Länge) und liefert nie `nil`. Der Noop-Zustand lebt nur im Speicher und geht bei einem Agent-Neustart verloren (akzeptiert, siehe Self-Review).
 
-- [ ] **Step 1: Failing tests schreiben** – `internal/agent/firewall/noop_test.go`
+- [x] **Step 1: Failing tests schreiben** – `internal/agent/firewall/noop_test.go`
 
 ```go
 package firewall_test
@@ -934,12 +934,12 @@ func TestNoopConcurrent(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test ./internal/agent/firewall/`
 Expected: FAIL – Build-Fehler (`firewall.NewNoop` undefiniert).
 
-- [ ] **Step 3: Implementierung** – `internal/agent/firewall/firewall.go`
+- [x] **Step 3: Implementierung** – `internal/agent/firewall/firewall.go`
 
 ```go
 // Package firewall contains the agent-side firewall backends: nftables
@@ -1079,12 +1079,12 @@ func (n *Noop) purgeLocked(now time.Time) {
 }
 ```
 
-- [ ] **Step 4: Tests laufen lassen (grün, mit Race-Detector)**
+- [x] **Step 4: Tests laufen lassen (grün, mit Race-Detector)**
 
 Run: `go test ./internal/agent/firewall/ && CGO_ENABLED=1 go test -race -run Noop ./internal/agent/firewall/`
 Expected: zweimal `ok  	github.com/Bernotese/mc-panel/internal/agent/firewall`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/firewall
@@ -1122,7 +1122,7 @@ func splitExisting(p netip.Prefix, entries []entry) (exists bool, others []netip
 
 Hintergrund (verifiziert in google/nftables v0.3.0 `set.go`): In einem Set mit `Interval: true` wird ein Bereich als zwei Elemente gespeichert – Start-Element (`Key` = erste Adresse, trägt den `Timeout`) und End-Element (`Key` = erste Adresse **nach** dem Bereich, `IntervalEnd: true`, **ohne** Timeout; neuere Kernel lehnen Timeout-Attribute an End-Elementen mit `EINVAL` ab). Reicht ein Bereich bis `ffff:…:ffff`, entfällt das End-Element. `GetSetElements` liefert die Elemente in Kernel-Reihenfolge (rbtree, nicht garantiert sortiert) mit `Expires` = Restlaufzeit; ein abgelaufenes, noch nicht eingesammeltes Element kann mit `Expires == 0` erscheinen und wird hier herausgefiltert.
 
-- [ ] **Step 1: Failing tests schreiben** – `internal/agent/firewall/nftkeys_test.go`
+- [x] **Step 1: Failing tests schreiben** – `internal/agent/firewall/nftkeys_test.go`
 
 ```go
 package firewall
@@ -1275,12 +1275,12 @@ func TestSplitExisting(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test -run 'ElementFor|PrefixFromRange|EntriesFromElements|SplitExisting' ./internal/agent/firewall/`
 Expected: FAIL – Build-Fehler (`elementFor`, `prefixFromRange`, `rawElem`, `entriesFromElements`, `splitExisting` undefiniert).
 
-- [ ] **Step 3: Implementierung** – `internal/agent/firewall/nftkeys.go`
+- [x] **Step 3: Implementierung** – `internal/agent/firewall/nftkeys.go`
 
 ```go
 package firewall
@@ -1509,12 +1509,12 @@ func splitExisting(p netip.Prefix, entries []entry) (bool, []netip.Prefix) {
 }
 ```
 
-- [ ] **Step 4: Tests laufen lassen (grün)**
+- [x] **Step 4: Tests laufen lassen (grün)**
 
 Run: `go test ./internal/agent/firewall/`
 Expected: `ok  	github.com/Bernotese/mc-panel/internal/agent/firewall`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/firewall/nftkeys.go internal/agent/firewall/nftkeys_test.go
@@ -1548,7 +1548,7 @@ Designentscheidungen:
 - **Überlappung:** Intervall-Sets ohne `auto-merge` lehnen überlappende Bereiche ab; wir prüfen vorher mit `banrules.FindOverlap` und liefern `banrules.ErrConflict` (→ 409) statt eines Netlink-Fehlers.
 - Jede Operation öffnet eine kurzlebige Netlink-Verbindung (`nftables.New` ohne `AsLasting`); die Optionen (`WithNetNSFd` im Test) werden gespeichert.
 
-- [ ] **Step 1: Integrationstest schreiben (rot)** – `internal/agent/firewall/nftables_integration_test.go`
+- [x] **Step 1: Integrationstest schreiben (rot)** – `internal/agent/firewall/nftables_integration_test.go`
 
 ```go
 //go:build linux && nftintegration
@@ -1868,12 +1868,12 @@ func TestNFTablesBansSurviveAgentRestart(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Compile-Check auf macOS (rot)**
+- [x] **Step 2: Compile-Check auf macOS (rot)**
 
 Run: `GOOS=linux GOARCH=amd64 go vet -tags nftintegration ./internal/agent/firewall/`
 Expected: FAIL – `undefined: firewall.NewNFTables` / `firewall.NFTables`.
 
-- [ ] **Step 3: Implementierung** – `internal/agent/firewall/nftables_linux.go`
+- [x] **Step 3: Implementierung** – `internal/agent/firewall/nftables_linux.go`
 
 ```go
 //go:build linux
@@ -2105,7 +2105,7 @@ func toRaw(els []nftables.SetElement) []rawElem {
 }
 ```
 
-- [ ] **Step 4: Compile-Checks (grün)**
+- [x] **Step 4: Compile-Checks (grün)**
 
 Run:
 ```bash
@@ -2116,7 +2116,7 @@ go test ./internal/agent/firewall/
 ```
 Expected: `go vet` ohne Ausgabe; `ok  	github.com/Bernotese/mc-panel/internal/agent/firewall` (auf macOS laufen nur Noop- und nftkeys-Tests).
 
-- [ ] **Step 5: Integrationstest in der Linux-VM (root)**
+- [x] **Step 5: Integrationstest in der Linux-VM (root)**
 
 In der OrbStack/Lima-VM (Ubuntu LTS, Repo gemountet bzw. geklont):
 ```bash
@@ -2127,7 +2127,7 @@ Expected: alle sieben `TestNFTables…` mit `--- PASS`, am Ende `PASS`. Danach z
 
 Falls `TestNFTablesSetupIsIdempotentAndScoped` nur an `chain.Priority` scheitert (Byte-Order-Dekodierung in einer anderen google/nftables-Version), mit `sudo nft list chain inet mcpanel input` in einem manuellen Lauf prüfen, dass `priority -10` gesetzt ist, und die Assertion an die tatsächlich dekodierte Darstellung anpassen – die Kernel-Konfiguration ist maßgeblich, nicht die Bibliotheksdekodierung.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/firewall/nftables_linux.go internal/agent/firewall/nftables_integration_test.go
@@ -2151,7 +2151,7 @@ func New(cfg config.Agent, clk clock.Clock, log *slog.Logger) (agentapi.Firewall
 func choose(name, goos string) (string, error) // package-internal, pure
 ```
 
-- [ ] **Step 1: Failing tests schreiben** – `internal/agent/firewall/factory_test.go`
+- [x] **Step 1: Failing tests schreiben** – `internal/agent/firewall/factory_test.go`
 
 ```go
 package firewall
@@ -2207,12 +2207,12 @@ func TestNewNFTablesUnsupportedOffLinux(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test -run 'Choose|TestNew' ./internal/agent/firewall/`
 Expected: FAIL – `undefined: choose`, `undefined: New`, `undefined: ErrUnsupported`.
 
-- [ ] **Step 3: Implementierung** – `internal/agent/firewall/factory.go`
+- [x] **Step 3: Implementierung** – `internal/agent/firewall/factory.go`
 
 ```go
 package firewall
@@ -2299,12 +2299,12 @@ import (
 func newNFTables(*slog.Logger) (agentapi.Firewall, error) { return nil, ErrUnsupported }
 ```
 
-- [ ] **Step 4: Tests laufen lassen (grün) + Linux-Compile-Check**
+- [x] **Step 4: Tests laufen lassen (grün) + Linux-Compile-Check**
 
 Run: `go test ./internal/agent/firewall/ && GOOS=linux GOARCH=amd64 go vet ./internal/agent/firewall/`
 Expected: `ok  	github.com/Bernotese/mc-panel/internal/agent/firewall`; `go vet` ohne Ausgabe.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/firewall/factory.go internal/agent/firewall/factory_linux.go internal/agent/firewall/factory_other.go internal/agent/firewall/factory_test.go
@@ -2341,7 +2341,7 @@ type stubFirewall struct{ err error } // implements agentapi.Firewall, Name() ==
 
 Hinweise: Zwischen `bind` und `chmod` hat der Socket kurz die umask-Rechte (typisch `0755`); `connect` braucht Schreibrecht, Fremde können sich in diesem Fenster also nicht verbinden – und die Peer-UID-Prüfung greift ohnehin. Das Elternverzeichnis wird **nicht** von `Listen` angelegt (Prod: `/run/mc-panel` kommt von systemd `RuntimeDirectory`, Dev: `cmd/agent` legt `.dev/` an).
 
-- [ ] **Step 1: Test-Helfer schreiben** – `internal/agent/helpers_test.go`
+- [x] **Step 1: Test-Helfer schreiben** – `internal/agent/helpers_test.go`
 
 ```go
 package agent_test
@@ -2420,7 +2420,7 @@ func (s stubFirewall) Unban(context.Context, netip.Prefix) error              { 
 func (s stubFirewall) List(context.Context) ([]agentapi.Ban, error)           { return nil, s.err }
 ```
 
-- [ ] **Step 2: Failing tests schreiben** – `internal/agent/socket_test.go`
+- [x] **Step 2: Failing tests schreiben** – `internal/agent/socket_test.go`
 
 ```go
 package agent_test
@@ -2550,12 +2550,12 @@ func TestListenRefusesSymlink(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Test laufen lassen (rot)**
+- [x] **Step 3: Test laufen lassen (rot)**
 
 Run: `go test ./internal/agent/`
 Expected: FAIL – Build-Fehler (`agent.Listen`, `agent.ErrAlreadyRunning` undefiniert; Paket `github.com/Bernotese/mc-panel/internal/agent` hat keine Nicht-Test-Dateien).
 
-- [ ] **Step 4: Implementierung** – `internal/agent/socket.go`
+- [x] **Step 4: Implementierung** – `internal/agent/socket.go`
 
 ```go
 package agent
@@ -2626,12 +2626,12 @@ func removeStale(path string) error {
 }
 ```
 
-- [ ] **Step 5: Tests laufen lassen (grün)**
+- [x] **Step 5: Tests laufen lassen (grün)**
 
 Run: `go test -run Listen ./internal/agent/`
 Expected: `ok  	github.com/Bernotese/mc-panel/internal/agent`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/socket.go internal/agent/socket_test.go internal/agent/helpers_test.go
@@ -2659,7 +2659,7 @@ func (s *Server) Shutdown(ctx context.Context) error
 
 Routing ist bewusst eine feste Tabelle `Pfad → Methode` statt `http.ServeMux`, damit auch 404/405 im JSON-Format `agentapi.ErrorResponse` antworten.
 
-- [ ] **Step 1: Failing tests schreiben** – `internal/agent/server_test.go`
+- [x] **Step 1: Failing tests schreiben** – `internal/agent/server_test.go`
 
 ```go
 package agent_test
@@ -2861,12 +2861,12 @@ func TestServerConflict(t *testing.T) {
 
 (`t.Context()` gibt es seit Go 1.24; bei älterer Toolchain `context.Background()` verwenden und `context` importieren.)
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test -run Server ./internal/agent/`
 Expected: FAIL – `undefined: agent.NewServer`.
 
-- [ ] **Step 3: Implementierung** – `internal/agent/server.go`
+- [x] **Step 3: Implementierung** – `internal/agent/server.go`
 
 ```go
 // Package agent implements the privileged mc-panel agent: the HTTP server on
@@ -3079,12 +3079,12 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 ```
 
-- [ ] **Step 4: Tests laufen lassen (grün)**
+- [x] **Step 4: Tests laufen lassen (grün)**
 
 Run: `go test -run 'Server|Listen' ./internal/agent/`
 Expected: `ok  	github.com/Bernotese/mc-panel/internal/agent`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/server.go internal/agent/server_test.go
@@ -3126,7 +3126,7 @@ Fehlersemantik für Aufrufer (Stream B / Phase 2):
 - Clientseitige Validierungsfehler und HTTP 4xx (außer 409) → `errors.Is(err, agent.ErrInvalid)` (dauerhaft, **nicht** wiederholen). HTTP 409 → `errors.Is(err, agent.ErrConflict)`.
 - Ungültige Eingaben werden **vor** dem Senden abgelehnt (gleiche `banrules` wie der Server).
 
-- [ ] **Step 1: Failing tests schreiben** – `internal/agent/client_test.go`
+- [x] **Step 1: Failing tests schreiben** – `internal/agent/client_test.go`
 
 ```go
 package agent_test
@@ -3443,12 +3443,12 @@ func TestServerShutdownRemovesSocket(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test -run Client ./internal/agent/`
 Expected: FAIL – `undefined: agent.Client`, `agent.NewClient`, `agent.StatusError`, `agent.ErrInvalid`, `agent.ErrConflict`, `agent.NewClientWithTimeout`.
 
-- [ ] **Step 3: Implementierung** – `internal/agent/client.go`
+- [x] **Step 3: Implementierung** – `internal/agent/client.go`
 
 ```go
 package agent
@@ -3622,12 +3622,12 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 }
 ```
 
-- [ ] **Step 4: Tests laufen lassen (grün, auch mit Race-Detector)**
+- [x] **Step 4: Tests laufen lassen (grün, auch mit Race-Detector)**
 
 Run: `go test ./internal/agent/... && CGO_ENABLED=1 go test -race ./internal/agent/...`
 Expected: `ok` für `github.com/Bernotese/mc-panel/internal/agent`, `…/agent/agentapi`, `…/agent/banrules`, `…/agent/firewall`, `…/agent/peercred` – in beiden Läufen, keine `DATA RACE`-Meldung.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/client.go internal/agent/client_test.go
@@ -3654,7 +3654,7 @@ func newLogger(dev bool, w io.Writer) *slog.Logger
 ```
 CLI: `agent [-config path] [-dev] [-version]`. Ohne `-config` und ohne `-dev` wird `/etc/mc-panel/agent.toml` gelesen; mit `-dev` ohne `-config` gilt das reine Dev-Profil (`config.DevAgent(cwd)`), mit `-dev -config f` wird `f` über das Dev-Profil gelegt.
 
-- [ ] **Step 1: Failing tests schreiben** – `cmd/agent/main_test.go`
+- [x] **Step 1: Failing tests schreiben** – `cmd/agent/main_test.go`
 
 ```go
 package main
@@ -3850,12 +3850,12 @@ func TestUIDFromConfig(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test ./cmd/agent/`
 Expected: FAIL – `undefined: run`, `version`, `socketPerms`, `uidFromConfig`.
 
-- [ ] **Step 3: Implementierung** – `cmd/agent/main.go`
+- [x] **Step 3: Implementierung** – `cmd/agent/main.go`
 
 ```go
 // Command agent is the privileged mc-panel helper. It serves a small, strictly
@@ -4016,7 +4016,7 @@ func newLogger(dev bool, w io.Writer) *slog.Logger {
 }
 ```
 
-- [ ] **Step 4: Tests laufen lassen (grün) + Builds**
+- [x] **Step 4: Tests laufen lassen (grün) + Builds**
 
 Run:
 ```bash
@@ -4027,7 +4027,7 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./cmd/agent
 ```
 Expected: `ok  	github.com/Bernotese/mc-panel/cmd/agent`; Ausgabe `0.0.0-test`; beide Linux-Builds ohne Ausgabe.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/agent
@@ -4042,7 +4042,7 @@ git commit -m "feat(agent): add agent daemon binary" -m "Co-Authored-By: Claude 
 
 **Interfaces:** – (prüft nur)
 
-- [ ] **Step 1: Alle Tests, Race, Vet, Cross-Compile**
+- [x] **Step 1: Alle Tests, Race, Vet, Cross-Compile**
 
 ```bash
 go test ./internal/agent/... ./cmd/agent/...
@@ -4055,7 +4055,7 @@ make test
 ```
 Expected: alle `ok`; `go vet` und `golangci-lint` ohne Befunde (falls die `.golangci.yml` von Stream F noch nicht gemerged ist, läuft `golangci-lint` mit Standardkonfiguration – Befunde trotzdem beheben, nicht unterdrücken; vorhandene `//nolint:gosec`-Kommentare sind begründet); `make test` grün.
 
-- [ ] **Step 2: Smoke-Test macOS (Dev)**
+- [x] **Step 2: Smoke-Test macOS (Dev)**
 
 ```bash
 mkdir -p .dev/bin
@@ -4075,7 +4075,7 @@ Expected: `{"status":"ok","version":"0.0.0-smoke","firewall":"noop"}`; `204`; `{
 
 Danach `.dev/bin/agent -dev &` zweimal starten: der zweite Prozess beendet sich mit `agent: another agent is already listening on this socket: …/.dev/agent.sock`. Ersten Prozess per `kill -9` beenden, erneut starten: startet (Stale-Socket wird ersetzt).
 
-- [ ] **Step 3: Smoke-Test Linux-VM (nftables, prod-ähnlich)**
+- [x] **Step 3: Smoke-Test Linux-VM (nftables, prod-ähnlich)**
 
 ```bash
 go build -ldflags "-X main.version=0.0.0-vm" -o /tmp/mcp-agent ./cmd/agent
@@ -4103,7 +4103,7 @@ sudo nft delete table inet mcpanel
 ```
 Expected: Socket `srw-rw---- 1 root <primäre Gruppe des Users>`; Health mit `"firewall":"nftables"`; zweimal `204`; `jail4` enthält `203.0.113.7 timeout 15m expires …`; `jail6` enthält `2001:db8:1:2::/64 timeout 15m expires …`; die Chain zeigt `type filter hook input priority -10; policy accept;` und die beiden Drop-Regeln. Der `nobody`-Aufruf erhält keine Antwort (`exit=52`, „Empty reply from server“) und das Agent-Log enthält `rejecting connection from disallowed uid`. Nach dem Stoppen sind die Set-Elemente weiterhin vorhanden (Bans überleben einen Agent-Neustart); `nft delete table inet mcpanel` räumt auf.
 
-- [ ] **Step 4: Abschluss-Commit (nur falls Steps 1–3 Korrekturen erforderten)**
+- [x] **Step 4: Abschluss-Commit (nur falls Steps 1–3 Korrekturen erforderten)**
 
 ```bash
 git add cmd/agent internal/agent
