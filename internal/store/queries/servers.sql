@@ -33,3 +33,17 @@ SELECT * FROM instance_settings WHERE id = 1;
 
 -- name: ServersUpdateSettings :exec
 UPDATE instance_settings SET base_domain = ?, curseforge_api_key = ?, updated_at = ? WHERE id = 1;
+
+-- name: ServersNextServerID :one
+-- Allocates the ID of a new server: never one that was used before (see migration 00003).
+UPDATE server_ids
+SET last_id = max(last_id, (SELECT COALESCE(MAX(id), 0) FROM servers)) + 1
+WHERE id = 1
+RETURNING last_id;
+
+-- name: ServersCreateServer :one
+INSERT INTO servers (id, name, created_at) VALUES (?, ?, ?)
+RETURNING *;
+
+-- name: ServersBumpCurseForgeRevisions :exec
+UPDATE instances SET revision = revision + 1, updated_at = ? WHERE type = 'curseforge';

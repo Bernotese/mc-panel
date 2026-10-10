@@ -284,6 +284,7 @@ export const de = {
       spawn_protection: 'Spawn-Schutz (Blöcke)',
       seed: 'Seed',
       level_type: 'Welttyp',
+      lists_sync_hint: 'Whitelist und Operatoren werden bei jedem Neustart auf diese Listen gesetzt. Änderungen im Spiel (/op, /whitelist add …) werden dabei überschrieben.',
       world_hint: 'Seed und Welttyp wirken nur, wenn eine neue Welt erzeugt wird.',
     },
     difficulty: {
@@ -336,6 +337,7 @@ export const de = {
       cpu: 'CPU',
       started: 'Gestartet',
       last_error: 'Letzter Fehler',
+      error_hidden: 'Der Server meldet einen Fehler. Details sieht ein Admin.',
       controls: 'Steuerung',
       unknown_hint: 'Der Agent antwortet gerade nicht. Angezeigt wird der zuletzt bekannte Soll-Zustand; Aktionen werden nachgeholt, sobald er wieder erreichbar ist.',
     },

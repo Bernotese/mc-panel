@@ -1,6 +1,9 @@
 package servers
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
@@ -45,9 +48,25 @@ func (s Snapshot) actualStatus(id int64) agentapi.InstanceStatus {
 	return agentapi.InstanceStatus{ID: id, State: agentapi.StateMissing}
 }
 
+// errForeignContainer: the container with the server's ID belongs to another server.
+var errForeignContainer = errors.New("the container belongs to another server")
+
+// foreignContainer reports a container with the instance's ID whose mcpanel.name label names
+// another server: a leftover of a deleted server whose ID came back (databases before
+// migration 00003 reused IDs). The panel never sends actions for it. A missing entry is no
+// container (queued work or a remembered error), so its name does not matter.
+func foreignContainer(st agentapi.InstanceStatus, name string) bool {
+	return st.State != agentapi.StateMissing && st.Name != name
+}
+
+func foreignContainerError(st agentapi.InstanceStatus) string {
+	return fmt.Sprintf("container mcpanel-mc-%d belongs to another server (%q); the panel leaves it alone, "+
+		"remove it on the host or delete this server", st.ID, st.Name)
+}
+
 // deriveStatus implements the state table of the plan (contract V4). in == nil means the
-// server has no instance yet (TP1 stub).
-func deriveStatus(_ string, in *store.Instance, snap Snapshot) statusJSON {
+// server has no instance yet (TP1 stub); name is the server's name.
+func deriveStatus(name string, in *store.Instance, snap Snapshot) statusJSON {
 	if in == nil {
 		return statusJSON{State: stateNotConfigured}
 	}
@@ -57,6 +76,14 @@ func deriveStatus(_ string, in *store.Instance, snap Snapshot) statusJSON {
 		return out
 	}
 	st := snap.actualStatus(in.ServerID)
+	if foreignContainer(st, name) {
+		out.State = stateError
+		out.LastError = foreignContainerError(st)
+		return out
+	}
+	if st.LastError == "" {
+		st.LastError = snap.PanelErrors[in.ServerID] // the reconcile loop failed before reaching the agent
+	}
 	out.State = containerState(st, desired)
 	out.RestartRequired = isUp(st.State) && st.Revision < in.Revision
 	out.Operation = string(st.Operation)
@@ -70,6 +97,8 @@ func deriveStatus(_ string, in *store.Instance, snap Snapshot) statusJSON {
 
 func containerState(st agentapi.InstanceStatus, desired string) string {
 	switch {
+	case st.State == agentapi.StateMissing && st.Operation == agentapi.OpNone && st.LastError != "":
+		return stateError // the ensure failed for good (or never reached the agent)
 	case st.Operation == agentapi.OpPulling || st.Operation == agentapi.OpCreating || st.State == agentapi.StateMissing:
 		return stateCreating
 	case st.Operation == agentapi.OpStarting:

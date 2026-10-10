@@ -46,8 +46,9 @@ func (f *fakeInstances) Ensure(_ context.Context, req agentapi.EnsureRequest) er
 	switch {
 	case !ok:
 		f.inst[req.ID] = agentapi.InstanceStatus{ID: req.ID, Name: req.Name, Revision: req.Revision, State: agentapi.StateCreated}
-	case cur.Revision != req.Revision && req.Recreate:
-		// recreated; it runs again if it ran before
+	case req.Recreate && req.Revision > cur.Revision:
+		// recreated; it runs again if it ran before. Like the agent, never downgrade: an
+		// older revision (stale or replayed request) is a no-op, even with recreate.
 		cur.Revision = req.Revision
 		f.inst[req.ID] = cur
 	}

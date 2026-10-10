@@ -3,6 +3,7 @@ package servers
 import (
 	"context"
 	"errors"
+	"maps"
 	"sync"
 	"time"
 
@@ -24,14 +25,37 @@ type Snapshot struct {
 }
 
 type statusCache struct {
-	mu   sync.Mutex
-	snap Snapshot
+	mu       sync.Mutex
+	snap     Snapshot
+	panelErr map[int64]string // reconcile errors that never reached the agent, by server id
+}
+
+// setPanelError remembers (msg != "") or clears the panel-side reconcile error of a server.
+func (h *Handler) setPanelError(id int64, msg string) {
+	h.status.mu.Lock()
+	defer h.status.mu.Unlock()
+	if msg == "" {
+		delete(h.status.panelErr, id)
+		return
+	}
+	if h.status.panelErr == nil {
+		h.status.panelErr = map[int64]string{}
+	}
+	h.status.panelErr[id] = msg
+}
+
+// keepPanelErrors forgets the panel-side errors of servers that are gone.
+func (h *Handler) keepPanelErrors(keep map[int64]bool) {
+	h.status.mu.Lock()
+	defer h.status.mu.Unlock()
+	maps.DeleteFunc(h.status.panelErr, func(id int64, _ string) bool { return !keep[id] })
 }
 
 // snapshot returns the cached state, or the zero Snapshot (unreachable) if it is too old.
 func (h *Handler) snapshot() Snapshot {
 	h.status.mu.Lock()
 	s := h.status.snap
+	s.PanelErrors = maps.Clone(h.status.panelErr)
 	h.status.mu.Unlock()
 	if s.At.IsZero() || h.clock.Now().Sub(s.At) > statusMaxAge {
 		return Snapshot{}
