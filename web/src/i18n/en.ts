@@ -391,7 +391,7 @@ export const en: Messages = {
       title: 'Minecraft servers',
     },
     base_domain: {
-      title: 'Base domain',
+      title: 'Server addresses',
       description: 'Every server is reachable at <name>.<base domain>.',
       label: 'Base domain',
       dns_hint: 'Create a wildcard record with your DNS provider that points to the IP address of this server (A or AAAA record):',

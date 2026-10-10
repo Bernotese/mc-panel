@@ -389,7 +389,7 @@ export const de = {
       title: 'Minecraft-Server',
     },
     base_domain: {
-      title: 'Basisdomain',
+      title: 'Server-Adressen',
       description: 'Jeder Server ist unter <name>.<basisdomain> erreichbar.',
       label: 'Basisdomain',
       dns_hint: 'Lege beim DNS-Anbieter einen Wildcard-Eintrag an, der auf die IP-Adresse dieses Servers zeigt (A- bzw. AAAA-Eintrag):',
