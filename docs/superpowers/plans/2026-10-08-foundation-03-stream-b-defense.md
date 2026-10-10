@@ -125,7 +125,7 @@ func (k *keyedLimiter) size() int
 func RetryAfterSeconds(d time.Duration) int                           // ceil seconds, min 1
 ```
 
-- [ ] **Step 1: Failing test `internal/defense/limiter_test.go`**
+- [x] **Step 1: Failing test `internal/defense/limiter_test.go`**
 
 ```go
 package defense
@@ -188,9 +188,9 @@ func TestRetryAfterSeconds(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/defense/ -run 'KeyedLimiter|RetryAfter'` → FAIL (`undefined: newKeyedLimiter`).
+- [x] **Step 2: Run** `go test ./internal/defense/ -run 'KeyedLimiter|RetryAfter'` → FAIL (`undefined: newKeyedLimiter`).
 
-- [ ] **Step 3: Implementation `internal/defense/limiter.go`**
+- [x] **Step 3: Implementation `internal/defense/limiter.go`**
 
 ```go
 package defense
@@ -280,9 +280,9 @@ func RetryAfterSeconds(d time.Duration) int {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/defense/ -run 'KeyedLimiter|RetryAfter'` → PASS.
+- [x] **Step 4: Run** `go test ./internal/defense/ -run 'KeyedLimiter|RetryAfter'` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/defense/limiter.go internal/defense/limiter_test.go
@@ -332,7 +332,7 @@ func (q *Queries) DefenseInsertJail(ctx context.Context, arg DefenseInsertJailPa
 ```
 sqlc-Modelle (aus Phase-0-Schema generiert, Feldnamen nach sqlc-Standard, Initialismus nur `id`): `store.Jail{ID int64; IpKey, Reason string; Level, Manual, CreatedAt, ExpiresAt int64; LiftedAt sql.NullInt64; LiftedBy sql.NullString; FwBannedAt, FwUnbannedAt sql.NullInt64}`, `store.IpRule{ID int64; Cidr, Kind, Comment string; ExpiresAt sql.NullInt64; CreatedBy string; CreatedAt int64}`, `store.LoginAttempt{ID, Ts int64; Ip, IpKey, Username string; UserID sql.NullInt64; Stage string; Success int64; Reason, UserAgent, Country string}`, `store.Notifier{ID int64; Kind, Name string; ConfigEnc []byte; Enabled, CreatedAt, UpdatedAt int64}`.
 
-- [ ] **Step 1: Queries anlegen `internal/store/queries/defense.sql`**
+- [x] **Step 1: Queries anlegen `internal/store/queries/defense.sql`**
 
 ```sql
 -- Stream B (defense + notify). All query names are prefixed with "Defense".
@@ -361,7 +361,7 @@ sqlc generate && go build ./internal/store/ && grep -n "^func (q \*Queries) Defe
 ```
 Expected: vier Funktionen `DefenseListIPRules`, `DefenseInsertIPRule`, `DefenseListActiveJails(ctx context.Context, now int64)`, `DefenseInsertJail`.
 
-- [ ] **Step 2: Test-Umgebung `internal/defense/testutil_test.go`**
+- [x] **Step 2: Test-Umgebung `internal/defense/testutil_test.go`**
 
 ```go
 package defense
@@ -463,7 +463,7 @@ func (e *env) insertJail(t *testing.T, key string, created, expires time.Time) i
 func addr(s string) netip.Addr { return netip.MustParseAddr(s) }
 ```
 
-- [ ] **Step 3: Failing test `internal/defense/rules_test.go`**
+- [x] **Step 3: Failing test `internal/defense/rules_test.go`**
 
 ```go
 package defense
@@ -562,9 +562,9 @@ func TestIsLocal(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/defense/ -run 'Reload|AddJail|IsLocal'` → FAIL (`undefined: NewService`, `normalizeIP`, …).
+- [x] **Step 4: Run** `go test ./internal/defense/ -run 'Reload|AddJail|IsLocal'` → FAIL (`undefined: NewService`, `normalizeIP`, …).
 
-- [ ] **Step 5: Implementation `internal/defense/service.go`**
+- [x] **Step 5: Implementation `internal/defense/service.go`**
 
 ```go
 package defense
@@ -691,7 +691,7 @@ func (s *Service) kickSync() {
 }
 ```
 
-- [ ] **Step 6: Implementation `internal/defense/rules.go`**
+- [x] **Step 6: Implementation `internal/defense/rules.go`**
 
 ```go
 package defense
@@ -846,9 +846,9 @@ func (s *Service) addJail(key netip.Prefix, expires time.Time) {
 }
 ```
 
-- [ ] **Step 7: Run** `go test ./internal/defense/ -run 'Reload|AddJail|IsLocal'` → PASS. Dann `go vet ./internal/defense/` → keine Meldungen.
+- [x] **Step 7: Run** `go test ./internal/defense/ -run 'Reload|AddJail|IsLocal'` → PASS. Dann `go vet ./internal/defense/` → keine Meldungen.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/store/queries/defense.sql internal/store/defense.sql.go internal/defense/service.go internal/defense/rules.go internal/defense/testutil_test.go internal/defense/rules_test.go
@@ -875,7 +875,7 @@ func normalizeUsername(u string) string
 ```
 Semantik: Ein Login verbraucht je einen Token aus IP-Key- und Benutzernamen-Bucket (Benutzername nur, wenn der IP-Bucket erlaubt). Allowlistete IPs gelten nie als gejailt, unterliegen aber den Rate-Limits.
 
-- [ ] **Step 1: Failing test `internal/defense/check_test.go`**
+- [x] **Step 1: Failing test `internal/defense/check_test.go`**
 
 ```go
 package defense
@@ -1017,9 +1017,9 @@ func TestCheckAdminNetwork(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/defense/ -run 'CheckLogin|CheckSecondFactor|CheckAdminNetwork'` → FAIL (`e.svc.CheckLogin undefined`).
+- [x] **Step 2: Run** `go test ./internal/defense/ -run 'CheckLogin|CheckSecondFactor|CheckAdminNetwork'` → FAIL (`e.svc.CheckLogin undefined`).
 
-- [ ] **Step 3: Implementation `internal/defense/check.go`**
+- [x] **Step 3: Implementation `internal/defense/check.go`**
 
 ```go
 package defense
@@ -1084,9 +1084,9 @@ func (s *Service) CheckAdminNetwork(_ context.Context, ip netip.Addr) error {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/defense/ -run 'CheckLogin|CheckSecondFactor|CheckAdminNetwork'` → PASS.
+- [x] **Step 4: Run** `go test ./internal/defense/ -run 'CheckLogin|CheckSecondFactor|CheckAdminNetwork'` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/defense/check.go internal/defense/check_test.go
@@ -1121,7 +1121,7 @@ func (q *Queries) DefenseCountJailsSince(ctx context.Context, arg DefenseCountJa
 ```
 Semantik: Gespeichert werden `username` (max. 64 Runen), `user_agent` (max. 256), `reason` (max. 64). „Neues Gerät“ = Versuch mit `Success: true`, `Reason: "complete"` (Stream-A-Vertrag: vollständige Anmeldung; `second_factor_pending` = Passwort ok, 2FA ausstehend) und `UserID`, ohne frühere Zeile mit `success = 1 AND reason = 'complete'` für denselben `user_id` + `ip_key` (geprüft vor dem Einfügen). Für das Jail zählt jede Zeile mit `success = 0`, auch `reason = 'admin_network'`. Jail-Entscheidungen sind über `jailMu` serialisiert; Audit und Benachrichtigung erfolgen nach dem Insert.
 
-- [ ] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
+- [x] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
 
 ```sql
 -- name: DefenseInsertAttempt :exec
@@ -1150,7 +1150,7 @@ sqlc generate && go build ./internal/store/
 ```
 Expected: kein Fehler; `DefenseInsertAttemptParams` hat die Felder `Ts, Ip, IpKey, Username, UserID, Stage, Success, Reason, UserAgent, Country`.
 
-- [ ] **Step 2: Failing test `internal/defense/jail_test.go`**
+- [x] **Step 2: Failing test `internal/defense/jail_test.go`**
 
 ```go
 package defense
@@ -1394,9 +1394,9 @@ func TestAdminNetworkDenialsCountTowardJail(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** `go test ./internal/defense/ -run 'Jail|RecordAttempt|NewDevice|Allowlisted|Failures|AdminNetworkDenials'` → FAIL (`e.svc.RecordAttempt undefined`).
+- [x] **Step 3: Run** `go test ./internal/defense/ -run 'Jail|RecordAttempt|NewDevice|Allowlisted|Failures|AdminNetworkDenials'` → FAIL (`e.svc.RecordAttempt undefined`).
 
-- [ ] **Step 4: Implementation `internal/defense/jail.go`**
+- [x] **Step 4: Implementation `internal/defense/jail.go`**
 
 ```go
 package defense
@@ -1584,9 +1584,9 @@ func (s *Service) maybeJail(ctx context.Context, ip netip.Addr, key netip.Prefix
 }
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/defense/` → PASS (alle bisherigen Tests).
+- [x] **Step 5: Run** `go test ./internal/defense/` → PASS (alle bisherigen Tests).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/store/queries/defense.sql internal/store/defense.sql.go internal/defense/jail.go internal/defense/jail_test.go
@@ -1610,7 +1610,7 @@ func (s *Service) APIRateLimit(next http.Handler) http.Handler   // Phase 2: glo
 func (s *snapshot) blockReason(ip netip.Addr, now time.Time, geo GeoResolver) string   // "" | "deny_rule" | "country:XX"
 ```
 
-- [ ] **Step 1: Failing test `internal/defense/middleware_test.go`**
+- [x] **Step 1: Failing test `internal/defense/middleware_test.go`**
 
 ```go
 package defense
@@ -1773,9 +1773,9 @@ func TestAPIRateLimitAnonymousByIPKey(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/defense/ -run 'IPFilter|JailBlocks|APIRateLimit'` → FAIL (`e.svc.IPFilter undefined`).
+- [x] **Step 2: Run** `go test ./internal/defense/ -run 'IPFilter|JailBlocks|APIRateLimit'` → FAIL (`e.svc.IPFilter undefined`).
 
-- [ ] **Step 3: Implementation `internal/defense/middleware.go`**
+- [x] **Step 3: Implementation `internal/defense/middleware.go`**
 
 ```go
 package defense
@@ -1860,9 +1860,9 @@ func (s *Service) APIRateLimit(next http.Handler) http.Handler {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/defense/` → PASS.
+- [x] **Step 4: Run** `go test ./internal/defense/` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/defense/middleware.go internal/defense/middleware_test.go
@@ -1889,7 +1889,7 @@ func LoadGeo(path string, log *slog.Logger) (GeoResolver, bool, func() error)   
 ```
 Datenformat: DB-IP „IP to Country Lite“ im MMDB-Format nutzt dieselbe Struktur wie GeoLite2-Country (`{"country": {"iso_code": "DE", …}}`).
 
-- [ ] **Step 1: Failing test `internal/defense/geoip_test.go`** (enthält einen minimalen MMDB-Writer nur für Tests: IPv4-only, `record_size` 24, Format laut https://maxmind.github.io/MaxMind-DB/)
+- [x] **Step 1: Failing test `internal/defense/geoip_test.go`** (enthält einen minimalen MMDB-Writer nur für Tests: IPv4-only, `record_size` 24, Format laut https://maxmind.github.io/MaxMind-DB/)
 
 ```go
 package defense
@@ -2115,9 +2115,9 @@ func TestGeoIPRealDatabase(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/defense/ -run 'GeoIP|LoadGeo'` → FAIL (`undefined: OpenGeoIP`).
+- [x] **Step 2: Run** `go test ./internal/defense/ -run 'GeoIP|LoadGeo'` → FAIL (`undefined: OpenGeoIP`).
 
-- [ ] **Step 3: Implementation `internal/defense/geoip.go`**
+- [x] **Step 3: Implementation `internal/defense/geoip.go`**
 
 ```go
 package defense
@@ -2207,9 +2207,9 @@ func LoadGeo(path string, log *slog.Logger) (GeoResolver, bool, func() error) {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/defense/ -run 'GeoIP|LoadGeo' -v` → PASS (`TestGeoIPRealDatabase` SKIP). Falls `TestGeoIPWithMMDBFixture` mit einem Format-Fehler scheitert: den Test-Writer gegen den Reader-Quelltext abgleichen (`ls $(go env GOMODCACHE)/github.com/oschwald/maxminddb-golang/v2@*/` → `reader.go` `searchTreeSizeBytes`/`resolveDataPointer`, `internal/decoder`), nicht den Produktionscode anpassen.
+- [x] **Step 4: Run** `go test ./internal/defense/ -run 'GeoIP|LoadGeo' -v` → PASS (`TestGeoIPRealDatabase` SKIP). Falls `TestGeoIPWithMMDBFixture` mit einem Format-Fehler scheitert: den Test-Writer gegen den Reader-Quelltext abgleichen (`ls $(go env GOMODCACHE)/github.com/oschwald/maxminddb-golang/v2@*/` → `reader.go` `searchTreeSizeBytes`/`resolveDataPointer`, `internal/decoder`), nicht den Produktionscode anpassen.
 
-- [ ] **Step 5: Manuelle Prüfung mit der echten Datenbank** – **Vor dem Download den Nutzer um Erlaubnis fragen** (Datei ca. 5–8 MB von `download.db-ip.com`, Lizenz CC BY 4.0, Attribution „IP Geolocation by DB-IP“ im UI ist Aufgabe von Stream E/Phase 2):
+- [x] **Step 5: Manuelle Prüfung mit der echten Datenbank** – **Vor dem Download den Nutzer um Erlaubnis fragen** (Datei ca. 5–8 MB von `download.db-ip.com`, Lizenz CC BY 4.0, Attribution „IP Geolocation by DB-IP“ im UI ist Aufgabe von Stream E/Phase 2):
 
 ```bash
 mkdir -p .dev/geoip-download
@@ -2219,7 +2219,7 @@ MCPANEL_GEOIP_TEST_DB="$PWD/.dev/dbip-country-lite.mmdb" go test ./internal/defe
 ```
 Expected: `--- PASS: TestGeoIPRealDatabase`. Zu Monatsbeginn kann die neue Datei noch fehlen (404) → Vormonat (`date -v-1m +%Y-%m`) verwenden. `.dev/` ist in `.gitignore`; nichts committen.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/defense/geoip.go internal/defense/geoip_test.go
@@ -2254,7 +2254,7 @@ func (q *Queries) DefenseDeleteAttemptsBefore(ctx context.Context, before int64)
 ```
 Fehlerklassen: `errors.Is(err, agentapi.ErrUnavailable)` oder `context.DeadlineExceeded` → vorübergehend (Zyklus abbrechen, später wiederholen). Alle anderen Agent-Fehler → permanent (Ban: Jail-ID in `unbannable`, nie wieder versucht, solange der Prozess läuft; Unban: als erledigt markieren).
 
-- [ ] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
+- [x] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
 
 ```sql
 -- name: DefenseJailsToBan :many
@@ -2292,7 +2292,7 @@ sqlc generate && go build ./internal/store/
 ```
 Expected: kein Fehler; `DefenseMarkJailBannedParams{FwBannedAt sql.NullInt64; ID int64}`, `DefenseMarkJailUnbannedParams{FwUnbannedAt sql.NullInt64; ID int64}`.
 
-- [ ] **Step 2: Failing test `internal/defense/sync_test.go`**
+- [x] **Step 2: Failing test `internal/defense/sync_test.go`**
 
 ```go
 package defense
@@ -2583,9 +2583,9 @@ func TestCleanupLimiters(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** `go test ./internal/defense/ -run 'Sync|RunKicks|Prune|CleanupLimiters'` → FAIL (`e.svc.SyncOnce undefined`).
+- [x] **Step 3: Run** `go test ./internal/defense/ -run 'Sync|RunKicks|Prune|CleanupLimiters'` → FAIL (`e.svc.SyncOnce undefined`).
 
-- [ ] **Step 4: Implementation `internal/defense/sync.go`**
+- [x] **Step 4: Implementation `internal/defense/sync.go`**
 
 ```go
 package defense
@@ -2834,9 +2834,9 @@ func (s *Service) runMaintenance(ctx context.Context) {
 }
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/defense/` → PASS. Zusätzlich `make test-race` (bzw. `CGO_ENABLED=1 go test -race ./internal/defense/`) → PASS ohne Data-Race-Meldung.
+- [x] **Step 5: Run** `go test ./internal/defense/` → PASS. Zusätzlich `make test-race` (bzw. `CGO_ENABLED=1 go test -race ./internal/defense/`) → PASS ohne Data-Race-Meldung.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/store/queries/defense.sql internal/store/defense.sql.go internal/defense/sync.go internal/defense/sync_test.go
@@ -2880,7 +2880,7 @@ func (q *Queries) DefenseLiftJail(ctx context.Context, arg DefenseLiftJailParams
 ```
 Endpunkte: `GET /security/jails` (Query `active`, Standard `true`; `false` → die letzten 200 Jails), `POST /security/jails` (201), `DELETE /security/jails/{id}` (204; unbekannt oder bereits aufgehoben → 404). `firewall_synced`: aufgehoben → `fw_banned_at IS NULL OR fw_unbanned_at IS NOT NULL`; abgelaufen → `true`; aktiv → `fw_banned_at IS NOT NULL`.
 
-- [ ] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
+- [x] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
 
 ```sql
 -- name: DefenseListJails :many
@@ -2899,7 +2899,7 @@ sqlc generate && go build ./internal/store/
 ```
 Expected: kein Fehler; `DefenseLiftJailParams{LiftedAt sql.NullInt64; LiftedBy sql.NullString; ID int64}`.
 
-- [ ] **Step 2: Test-Helfer `internal/defense/handler_test.go`**
+- [x] **Step 2: Test-Helfer `internal/defense/handler_test.go`**
 
 ```go
 package defense
@@ -2981,7 +2981,7 @@ func wantStatus(t *testing.T, rec *httptest.ResponseRecorder, code int, errCodeW
 }
 ```
 
-- [ ] **Step 3: Failing test `internal/defense/jails_api_test.go`**
+- [x] **Step 3: Failing test `internal/defense/jails_api_test.go`**
 
 ```go
 package defense
@@ -3108,9 +3108,9 @@ func TestLiftJail(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/defense/ -run 'Jail'` → FAIL (`undefined: NewHandler`).
+- [x] **Step 4: Run** `go test ./internal/defense/ -run 'Jail'` → FAIL (`undefined: NewHandler`).
 
-- [ ] **Step 5: Implementation `internal/defense/handler.go`**
+- [x] **Step 5: Implementation `internal/defense/handler.go`**
 
 ```go
 package defense
@@ -3219,7 +3219,7 @@ func toJailResponse(j store.Jail, now time.Time) jailResponse {
 }
 ```
 
-- [ ] **Step 6: Implementation `internal/defense/jails_api.go`**
+- [x] **Step 6: Implementation `internal/defense/jails_api.go`**
 
 ```go
 package defense
@@ -3398,7 +3398,7 @@ func (h *Handler) liftJail(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 7: `internal/defense/routes.go` (Stand nach Task 8)**
+- [x] **Step 7: `internal/defense/routes.go` (Stand nach Task 8)**
 
 ```go
 package defense
@@ -3413,9 +3413,9 @@ func (h *Handler) Routes(api *rbac.Router) {
 }
 ```
 
-- [ ] **Step 8: Run** `go test ./internal/defense/` → PASS. (`t.Context()` erfordert Go ≥ 1.24; die Toolchain aus Phase 0 ist aktueller.)
+- [x] **Step 8: Run** `go test ./internal/defense/` → PASS. (`t.Context()` erfordert Go ≥ 1.24; die Toolchain aus Phase 0 ist aktueller.)
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add internal/store/queries/defense.sql internal/store/defense.sql.go internal/defense/handler.go internal/defense/routes.go internal/defense/jails_api.go internal/defense/handler_test.go internal/defense/jails_api_test.go
@@ -3448,7 +3448,7 @@ func (q *Queries) DefenseDeleteIPRule(ctx context.Context, id int64) (int64, err
 ```
 Endpunkte: `GET /security/ip-rules` (alle, inkl. abgelaufene), `POST /security/ip-rules` (201; Duplikat `cidr+kind` → 409; Selbstaussperrung → 409), `DELETE /security/ip-rules/{id}` (204; unbekannt → 404; Selbstaussperrung → 409).
 
-- [ ] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
+- [x] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
 
 ```sql
 -- name: DefenseGetIPRule :one
@@ -3462,7 +3462,7 @@ DELETE FROM ip_rules WHERE id = sqlc.arg(id);
 sqlc generate && go build ./internal/store/
 ```
 
-- [ ] **Step 2: Failing test `internal/defense/rules_api_test.go`**
+- [x] **Step 2: Failing test `internal/defense/rules_api_test.go`**
 
 ```go
 package defense
@@ -3582,9 +3582,9 @@ func TestDeleteIPRuleRejectsSelfLockout(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** `go test ./internal/defense/ -run 'IPRule|DenyRule'` → FAIL (404 für alle Requests bzw. `undefined: parseRuleCIDR` nach Anlegen der Datei).
+- [x] **Step 3: Run** `go test ./internal/defense/ -run 'IPRule|DenyRule'` → FAIL (404 für alle Requests bzw. `undefined: parseRuleCIDR` nach Anlegen der Datei).
 
-- [ ] **Step 4: Implementation `internal/defense/lockout.go`**
+- [x] **Step 4: Implementation `internal/defense/lockout.go`**
 
 ```go
 package defense
@@ -3642,7 +3642,7 @@ func lockoutMessage(reason string) string {
 }
 ```
 
-- [ ] **Step 5: Implementation `internal/defense/rules_api.go`**
+- [x] **Step 5: Implementation `internal/defense/rules_api.go`**
 
 ```go
 package defense
@@ -3816,7 +3816,7 @@ func (h *Handler) deleteIPRule(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 6: `internal/defense/routes.go` ersetzen (Stand nach Task 9)**
+- [x] **Step 6: `internal/defense/routes.go` ersetzen (Stand nach Task 9)**
 
 ```go
 package defense
@@ -3834,9 +3834,9 @@ func (h *Handler) Routes(api *rbac.Router) {
 }
 ```
 
-- [ ] **Step 7: Run** `go test ./internal/defense/` → PASS.
+- [x] **Step 7: Run** `go test ./internal/defense/` → PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/store/queries/defense.sql internal/store/defense.sql.go internal/defense/lockout.go internal/defense/rules_api.go internal/defense/rules_api_test.go internal/defense/routes.go
@@ -3862,7 +3862,7 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request)
 ```
 Regeln: Alle drei Felder Pflicht (`null`/fehlend → `400 validation_failed`); Ländercodes `^[A-Z]{2}$`, Duplikate werden entfernt (Reihenfolge bleibt), max. 300 Einträge. Länderliste wird auch ohne GeoIP-DB gespeichert (wirkt dann nicht; `geoip_available=false` informiert das UI).
 
-- [ ] **Step 1: Failing test `internal/defense/settings_api_test.go`**
+- [x] **Step 1: Failing test `internal/defense/settings_api_test.go`**
 
 ```go
 package defense
@@ -3972,9 +3972,9 @@ func TestPutSettingsRejectsSelfLockout(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/defense/ -run 'Settings'` → FAIL (404, Route fehlt).
+- [x] **Step 2: Run** `go test ./internal/defense/ -run 'Settings'` → FAIL (404, Route fehlt).
 
-- [ ] **Step 3: Implementation `internal/defense/settings_api.go`**
+- [x] **Step 3: Implementation `internal/defense/settings_api.go`**
 
 ```go
 package defense
@@ -4085,7 +4085,7 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 4: `internal/defense/routes.go` ersetzen (Stand nach Task 10)**
+- [x] **Step 4: `internal/defense/routes.go` ersetzen (Stand nach Task 10)**
 
 ```go
 package defense
@@ -4105,9 +4105,9 @@ func (h *Handler) Routes(api *rbac.Router) {
 }
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/defense/` → PASS.
+- [x] **Step 5: Run** `go test ./internal/defense/` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/defense/settings_api.go internal/defense/settings_api_test.go internal/defense/routes.go
@@ -4150,7 +4150,7 @@ Definitionen (exakt):
 - **Attempts-Cursor:** opak = Dezimal-`id` des letzten Elements; Seite = `id < cursor` absteigend; `next_cursor` nur, wenn weitere Elemente existieren (es wird `limit+1` gelesen). `limit` 1–200 (Standard 50). `ip`-Filter: einzelne IP (normalisiert, exakter Treffer auf `ip`) oder Präfix (maskiert, Treffer auf `ip_key` bzw. `ip`). Ungültige Query-Parameter → `400 bad_request`.
 - **Agent-Status:** `Health` mit `2 s` Timeout; Fehler → `reachable=false`, `firewall=""`, `version=""`; `pending_sync` = `DefenseCountPendingSync(now)`. Immer `200`.
 
-- [ ] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
+- [x] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
 
 ```sql
 -- name: DefenseAttemptSeries :many
@@ -4210,7 +4210,7 @@ sqlc generate && go build ./internal/store/ && grep -n "type DefenseAttemptSerie
 ```
 Expected: `DefenseAttemptSeriesRow{Bucket int64; Successes int64; Failures int64}`, `DefenseListAttemptsParams{BeforeID int64; AnySuccess …; Success int64; AnyIp …; Ip string; IpKey string; Lim int64}` (`AnySuccess`/`AnyIp` ggf. `interface{}`).
 
-- [ ] **Step 2: Failing test `internal/defense/stats_api_test.go`**
+- [x] **Step 2: Failing test `internal/defense/stats_api_test.go`**
 
 ```go
 package defense
@@ -4413,7 +4413,7 @@ func TestAgentStatus(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Failing test `internal/defense/routes_test.go`**
+- [x] **Step 3: Failing test `internal/defense/routes_test.go`**
 
 ```go
 package defense
@@ -4456,9 +4456,9 @@ func TestRoutesDeclareRules(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/defense/ -run 'Overview|SeriesWindow|ListAttempts|AgentStatus|RoutesDeclareRules'` → FAIL (`undefined: seriesWindow`, Routen fehlen).
+- [x] **Step 4: Run** `go test ./internal/defense/ -run 'Overview|SeriesWindow|ListAttempts|AgentStatus|RoutesDeclareRules'` → FAIL (`undefined: seriesWindow`, Routen fehlen).
 
-- [ ] **Step 5: Implementation `internal/defense/stats_api.go`**
+- [x] **Step 5: Implementation `internal/defense/stats_api.go`**
 
 ```go
 package defense
@@ -4720,7 +4720,7 @@ func (h *Handler) agentStatus(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 6: `internal/defense/routes.go` ersetzen (Endstand)**
+- [x] **Step 6: `internal/defense/routes.go` ersetzen (Endstand)**
 
 ```go
 package defense
@@ -4743,9 +4743,9 @@ func (h *Handler) Routes(api *rbac.Router) {
 }
 ```
 
-- [ ] **Step 7: Run** `go test ./internal/defense/` → PASS.
+- [x] **Step 7: Run** `go test ./internal/defense/` → PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/store/queries/defense.sql internal/store/defense.sql.go internal/defense/stats_api.go internal/defense/stats_api_test.go internal/defense/routes.go internal/defense/routes_test.go
@@ -4772,7 +4772,7 @@ func (q *Queries) DefenseLiftAllActiveJails(ctx context.Context, arg DefenseLift
 ```
 Wirkung: hebt alle aktiven Jails auf (`lifted_by = "cli"`), setzt `admin_allowlist_only = false` und leert `allowed_countries`; `enforce_2fa_for_users` und IP-Regeln bleiben unverändert. Audit (nach den Schreibvorgängen) mit `ActorType: audit.ActorCLI`, `ActorName: "cli"`: `ActionJailLift` (Target `all`, nur wenn ≥ 1 Jail) und `ActionSettingsUpdate` (nur wenn sich etwas geändert hat). Ein laufendes panel übernimmt die Änderungen beim nächsten Snapshot-Refresh (≤ 30 s); der Firewall-Sync entfernt die Bans.
 
-- [ ] **Step 1: Query an `internal/store/queries/defense.sql` anhängen**
+- [x] **Step 1: Query an `internal/store/queries/defense.sql` anhängen**
 
 ```sql
 -- name: DefenseLiftAllActiveJails :execrows
@@ -4785,7 +4785,7 @@ sqlc generate && go build ./internal/store/
 ```
 Expected: `DefenseLiftAllActiveJailsParams{LiftedAt sql.NullInt64; LiftedBy sql.NullString; Now int64}`.
 
-- [ ] **Step 2: Failing test `internal/defense/unlock_test.go`**
+- [x] **Step 2: Failing test `internal/defense/unlock_test.go`**
 
 ```go
 package defense
@@ -4864,9 +4864,9 @@ func TestUnlockNothingToDo(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** `go test ./internal/defense/ -run Unlock` → FAIL (`undefined: Unlock`).
+- [x] **Step 3: Run** `go test ./internal/defense/ -run Unlock` → FAIL (`undefined: Unlock`).
 
-- [ ] **Step 4: Implementation `internal/defense/unlock.go`**
+- [x] **Step 4: Implementation `internal/defense/unlock.go`**
 
 ```go
 package defense
@@ -4957,9 +4957,9 @@ func Unlock(ctx context.Context, db *sql.DB, rec audit.Recorder, c clock.Clock, 
 }
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/defense/` → PASS.
+- [x] **Step 5: Run** `go test ./internal/defense/` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/store/queries/defense.sql internal/store/defense.sql.go internal/defense/unlock.go internal/defense/unlock_test.go
@@ -4989,7 +4989,7 @@ func OpenConfig(box *secretbox.Box, kind Kind, enc []byte) (Config, error)
 ```
 Maskierung (exakt): Discord `scheme://host/api/webhooks/<erste 4 Zeichen der ID>…/****`; ntfy `scheme://host[/pfad]/<erste min(3, len/2) Zeichen des Topics>****` plus ` (token)`, falls ein Token gesetzt ist.
 
-- [ ] **Step 1: Failing test `internal/notify/config_test.go`**
+- [x] **Step 1: Failing test `internal/notify/config_test.go`**
 
 ```go
 package notify
@@ -5094,9 +5094,9 @@ func TestSealOpenConfig(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/notify/ -run 'ValidateConfig|MaskTarget|SealOpen'` → FAIL (`undefined: ValidateConfig`).
+- [x] **Step 2: Run** `go test ./internal/notify/ -run 'ValidateConfig|MaskTarget|SealOpen'` → FAIL (`undefined: ValidateConfig`).
 
-- [ ] **Step 3: Implementation `internal/notify/config.go`**
+- [x] **Step 3: Implementation `internal/notify/config.go`**
 
 ```go
 package notify
@@ -5267,9 +5267,9 @@ func OpenConfig(box *secretbox.Box, kind Kind, enc []byte) (Config, error) {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/notify/ -run 'ValidateConfig|MaskTarget|SealOpen'` → PASS.
+- [x] **Step 4: Run** `go test ./internal/notify/ -run 'ValidateConfig|MaskTarget|SealOpen'` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/notify/config.go internal/notify/config_test.go
@@ -5298,7 +5298,7 @@ func render(e Event) (title, body string)
 ```
 Discord: `POST <webhook>` mit JSON `{"content": "**<title>**\n<body>", "allowed_mentions": {"parse": []}}` (verhindert `@everyone`-Injektion über Benutzernamen), `content` max. 2000 Runen. ntfy: `POST <url>/<topic>` (`url.JoinPath`), Body = Text, Header `Title` (Nicht-ASCII als RFC-2047-B-Wort, das ntfy dekodiert), `Priority: high` für `security.jailed` und `audit.chain_broken`, optional `Authorization: Bearer <token>`. Fehlermeldungen enthalten nie die URL (`*url.Error` wird ausgepackt).
 
-- [ ] **Step 1: Failing test `internal/notify/sender_test.go`**
+- [x] **Step 1: Failing test `internal/notify/sender_test.go`**
 
 ```go
 package notify
@@ -5500,9 +5500,9 @@ func TestNewSenderUnknownKind(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/notify/ -run 'Sender|Render'` → FAIL (`undefined: NewSender`).
+- [x] **Step 2: Run** `go test ./internal/notify/ -run 'Sender|Render'` → FAIL (`undefined: NewSender`).
 
-- [ ] **Step 3: Implementation `internal/notify/sender.go`**
+- [x] **Step 3: Implementation `internal/notify/sender.go`**
 
 ```go
 package notify
@@ -5616,7 +5616,7 @@ func truncateRunes(s string, n int) string {
 }
 ```
 
-- [ ] **Step 4: Implementation `internal/notify/discord.go`**
+- [x] **Step 4: Implementation `internal/notify/discord.go`**
 
 ```go
 package notify
@@ -5661,7 +5661,7 @@ func (d *discordSender) Send(ctx context.Context, e Event) error {
 }
 ```
 
-- [ ] **Step 5: Implementation `internal/notify/ntfy.go`**
+- [x] **Step 5: Implementation `internal/notify/ntfy.go`**
 
 ```go
 package notify
@@ -5726,9 +5726,9 @@ func (n *ntfySender) Send(ctx context.Context, e Event) error {
 }
 ```
 
-- [ ] **Step 6: Run** `go test ./internal/notify/` → PASS.
+- [x] **Step 6: Run** `go test ./internal/notify/` → PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/notify/sender.go internal/notify/discord.go internal/notify/ntfy.go internal/notify/sender_test.go
@@ -5763,7 +5763,7 @@ func (q *Queries) DefenseInsertNotifier(ctx context.Context, arg DefenseInsertNo
 ```
 Semantik: `Notify` setzt `Time` (falls leer) auf `clock.Now()`, dedupliziert (`Type|IP`, nur bei nicht leerer IP und nicht `EventTest`) und reiht nicht blockierend ein; volle Queue → `slog.Warn` + verwerfen. `Run` stellt nacheinander an alle aktivierten Notifier zu (Konfiguration bei jedem Event frisch aus der DB). Pro Notifier: 1 Versuch + `len(Backoff)` Wiederholungen; `PermanentError` beendet sofort. Fehler nur ins Log (ohne URL). `Backoff: nil` → `DefaultBackoff`, leerer Slice → keine Wiederholung.
 
-- [ ] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
+- [x] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
 
 ```sql
 -- name: DefenseListEnabledNotifiers :many
@@ -5783,7 +5783,7 @@ sqlc generate && go build ./internal/store/
 ```
 Expected: `DefenseInsertNotifierParams{Kind string; Name string; ConfigEnc []byte; Enabled int64; CreatedAt int64; UpdatedAt int64}`.
 
-- [ ] **Step 2: Failing test `internal/notify/dispatcher_test.go`**
+- [x] **Step 2: Failing test `internal/notify/dispatcher_test.go`**
 
 ```go
 package notify
@@ -6008,9 +6008,9 @@ func TestSendTest(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** `go test ./internal/notify/ -run 'Notify|Deliver|RunDelivers|SendTest'` → FAIL (`undefined: NewDispatcher`).
+- [x] **Step 3: Run** `go test ./internal/notify/ -run 'Notify|Deliver|RunDelivers|SendTest'` → FAIL (`undefined: NewDispatcher`).
 
-- [ ] **Step 4: Implementation `internal/notify/dispatcher.go`**
+- [x] **Step 4: Implementation `internal/notify/dispatcher.go`**
 
 ```go
 package notify
@@ -6197,9 +6197,9 @@ func (d *Dispatcher) SendTest(ctx context.Context, id int64) error {
 }
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/notify/` → PASS; zusätzlich `CGO_ENABLED=1 go test -race ./internal/notify/` → PASS.
+- [x] **Step 5: Run** `go test ./internal/notify/` → PASS; zusätzlich `CGO_ENABLED=1 go test -race ./internal/notify/` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/store/queries/defense.sql internal/store/defense.sql.go internal/notify/dispatcher.go internal/notify/dispatcher_test.go
@@ -6229,7 +6229,7 @@ func (q *Queries) DefenseDeleteNotifier(ctx context.Context, id int64) (int64, e
 ```
 Endpunkte und Regeln (exakt laut OpenAPI-Tabelle): `GET /security/notifiers` Admin; `POST /security/notifiers` Admin+Sudo (201; Name doppelt → 409); `PATCH /security/notifiers/{id}` Admin+Sudo (200; 404; Name doppelt → `400 validation_failed`, da der Vertrag hier kein 409 vorsieht); `DELETE /security/notifiers/{id}` Admin+Sudo (204; 404); `POST /security/notifiers/{id}/test` Admin (204; 404; Zustellfehler → `400 validation_failed` mit bereinigter Meldung, siehe Global Constraints). PATCH: nur gesetzte Felder ändern; `token: ""` entfernt das Token; die zusammengeführte Konfiguration wird vollständig neu validiert. Antworten enthalten nie URL/Topic/Token im Klartext, nur `target_masked`.
 
-- [ ] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
+- [x] **Step 1: Queries an `internal/store/queries/defense.sql` anhängen**
 
 ```sql
 -- name: DefenseListNotifiers :many
@@ -6250,7 +6250,7 @@ sqlc generate && go build ./internal/store/
 ```
 Expected: `DefenseUpdateNotifierParams{Name string; ConfigEnc []byte; Enabled int64; UpdatedAt int64; ID int64}`.
 
-- [ ] **Step 2: Failing test `internal/notify/api_test.go`**
+- [x] **Step 2: Failing test `internal/notify/api_test.go`**
 
 ```go
 package notify
@@ -6505,9 +6505,9 @@ func TestTestNotifierEndpoint(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** `go test ./internal/notify/ -run 'Notifier|TestNotifierEndpoint'` → FAIL (`undefined: NewHandler`).
+- [x] **Step 3: Run** `go test ./internal/notify/ -run 'Notifier|TestNotifierEndpoint'` → FAIL (`undefined: NewHandler`).
 
-- [ ] **Step 4: Implementation `internal/notify/api.go`**
+- [x] **Step 4: Implementation `internal/notify/api.go`**
 
 ```go
 package notify
@@ -6835,9 +6835,9 @@ func (h *Handler) test(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/notify/` → PASS. Danach das gesamte Stream-Paket: `go vet ./internal/defense/ ./internal/notify/ && go test ./internal/... && make lint` → grün.
+- [x] **Step 5: Run** `go test ./internal/notify/` → PASS. Danach das gesamte Stream-Paket: `go vet ./internal/defense/ ./internal/notify/ && go test ./internal/... && make lint` → grün.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/store/queries/defense.sql internal/store/defense.sql.go internal/notify/api.go internal/notify/api_test.go

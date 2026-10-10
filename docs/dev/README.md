@@ -6,7 +6,7 @@ Architektur und Anforderungen: `docs/superpowers/specs/2026-10-08-mc-panel-found
 ## Toolchain
 
 ```bash
-brew install go node sqlc goose golangci-lint goreleaser jq shellcheck lima
+brew install go node sqlc goose golangci-lint goreleaser jq shellcheck
 ```
 
 | Werkzeug | Version | Hinweis |
@@ -19,7 +19,6 @@ brew install go node sqlc goose golangci-lint goreleaser jq shellcheck lima
 | govulncheck | v1.8.0 | `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...` |
 | Redocly CLI | 2.54.2 | `npx --yes @redocly/cli@2.54.2 lint api/openapi.yaml --extends=minimal` |
 | actionlint | v1.7.12 | `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12` (nutzt `shellcheck`, falls installiert) |
-| Lima | aktuell | nur für die Linux-VM, siehe `docs/dev/linux-vm.md` |
 
 ## Schnellstart
 
@@ -117,7 +116,7 @@ In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er 
 | `go` | `go mod verify && go mod tidy -diff`, `sqlc generate && git status --porcelain internal/store`, `make test-go`, `make test-race`, `.dev/tools/golangci-lint run ./...`, `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...` |
 | `web` | `cd web && npm ci && npm run lint && npm run typecheck && npm test && npm run build && npm run gen:api && git status --porcelain . && npm audit --audit-level=high` |
 | `openapi` | `npx --yes @redocly/cli@2.54.2 lint api/openapi.yaml --extends=minimal` |
-| `nftables` | nur unter Linux als root: in der VM oder per CI (`go test -tags nftintegration -exec sudo ./internal/agent/...`) |
+| `nftables` | nur in der CI (Linux, root): `go test -tags nftintegration -exec sudo ./internal/agent/...` und der Abnahmetest `sudo scripts/ci-acceptance.sh bin/panel bin/agent` (5 Fehlversuche → IP im nftables-Jail). Das Skript verändert den Host (Benutzer, Netz-Namespace, nftables) und ist nur für Wegwerf-Runner gedacht. |
 | `build` | `make build`, `make release`, dann `file dist/*/panel dist/*/agent` |
 
 Linux-spezifische Dateien lokal linten: `GOOS=linux .dev/tools/golangci-lint run ./...`.
@@ -156,6 +155,3 @@ Hinweise zu GoReleaser:
 - `goreleaser check` und die Git-Statusermittlung brauchen einen konfigurierten Git-Remote. Ohne Remote funktioniert `make release` im Snapshot-Modus trotzdem (Version `0.0.1-snapshot+none`); `goreleaser check` bricht mit `no remote configured` ab. Ohne den Repo-Remote zu ändern, hilft: `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0=https://github.com/example/mc-panel.git goreleaser check`.
 - Ab Go 1.27 speichert `go version -m` die `-ldflags` nicht mehr. Ob die Version eingelinkt wurde, zeigt nur der String selbst: `grep -aF "$(jq -r .version dist/metadata.json)" dist/agent_linux_arm64_v8.0/agent` (setzt `var version` in `package main` voraus).
 
-## Linux-VM
-
-Produktionsnahe Tests (nftables, systemd, Benutzer `mcpanel`): siehe `docs/dev/linux-vm.md`.

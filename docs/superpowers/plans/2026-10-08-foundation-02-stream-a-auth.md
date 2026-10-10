@@ -119,7 +119,7 @@ func (q *Queries) AuthListAllActiveSessions(ctx context.Context, arg AuthListAll
 	// Row-Felder beider: ID, UserID int64, Username, Ip, Country, UserAgent string, CreatedAt, LastSeenAt, ExpiresAt int64
 ```
 
-- [ ] **Step 1: Paketdoku `internal/auth/doc.go`**
+- [x] **Step 1: Paketdoku `internal/auth/doc.go`**
 
 ```go
 // Package auth implements login (password, TOTP, WebAuthn, recovery codes),
@@ -127,7 +127,7 @@ func (q *Queries) AuthListAllActiveSessions(ctx context.Context, arg AuthListAll
 package auth
 ```
 
-- [ ] **Step 2: Failing test `internal/auth/queries_test.go`**
+- [x] **Step 2: Failing test `internal/auth/queries_test.go`**
 
 ```go
 package auth
@@ -252,9 +252,9 @@ func TestAuthQueries(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** `go test ./internal/auth/ -run TestAuthQueries` → FAIL (`undefined: store.AuthAdvanceTOTPStepParams` u. a.).
+- [x] **Step 3: Run** `go test ./internal/auth/ -run TestAuthQueries` → FAIL (`undefined: store.AuthAdvanceTOTPStepParams` u. a.).
 
-- [ ] **Step 4: `internal/store/queries/auth.sql`**
+- [x] **Step 4: `internal/store/queries/auth.sql`**
 
 ```sql
 -- Stream A (auth). All query names carry the prefix "Auth".
@@ -383,7 +383,7 @@ WHERE s.revoked_at IS NULL AND s.expires_at > sqlc.arg(now) AND s.last_seen_at >
 ORDER BY s.last_seen_at DESC, s.id DESC;
 ```
 
-- [ ] **Step 5: Generieren und Signaturen prüfen**
+- [x] **Step 5: Generieren und Signaturen prüfen**
 
 ```bash
 sqlc generate
@@ -392,9 +392,9 @@ grep -n "type AuthListActiveSessionsForUserRow\|type AuthRotateSessionParams\|Id
 ```
 Expected: `31` Methoden; Typen/Felder vorhanden. Weicht ein Parametertyp von der Liste unter **Interfaces** ab (z. B. `interface{}` statt `int64` bei `Now`/`IdleCutoff`/`Step`), den betroffenen Ausdruck in `auth.sql` als `CAST(sqlc.arg(x) AS INTEGER)` schreiben und neu generieren.
 
-- [ ] **Step 6: Run** `go test ./internal/auth/ -run TestAuthQueries -v` → PASS.
+- [x] **Step 6: Run** `go test ./internal/auth/ -run TestAuthQueries -v` → PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/store/queries/auth.sql internal/store/auth.sql.go internal/auth/doc.go internal/auth/queries_test.go
@@ -422,7 +422,7 @@ func normalizeRecoveryCode(s string) string      // lower-case, without '-' and 
 func hashRecoveryCode(s string) []byte           // SHA-256(normalizeRecoveryCode(s))
 ```
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 `internal/auth/token_test.go`:
 ```go
@@ -507,9 +507,9 @@ func TestRecoveryCodeNormalization(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/auth/ -run 'TestNewToken|TestGenerateRecoveryCodes|TestRecoveryCodeNormalization'` → FAIL (`undefined: newToken`).
+- [x] **Step 2: Run** `go test ./internal/auth/ -run 'TestNewToken|TestGenerateRecoveryCodes|TestRecoveryCodeNormalization'` → FAIL (`undefined: newToken`).
 
-- [ ] **Step 3: `internal/auth/token.go`**
+- [x] **Step 3: `internal/auth/token.go`**
 
 ```go
 package auth
@@ -547,7 +547,7 @@ func validTokenFormat(tok string) bool {
 }
 ```
 
-- [ ] **Step 4: `internal/auth/recovery.go`**
+- [x] **Step 4: `internal/auth/recovery.go`**
 
 ```go
 package auth
@@ -608,9 +608,9 @@ func hashRecoveryCode(s string) []byte {
 }
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/auth/ -run 'TestNewToken|TestGenerateRecoveryCodes|TestRecoveryCodeNormalization'` → PASS.
+- [x] **Step 5: Run** `go test ./internal/auth/ -run 'TestNewToken|TestGenerateRecoveryCodes|TestRecoveryCodeNormalization'` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/auth/token.go internal/auth/token_test.go internal/auth/recovery.go internal/auth/recovery_test.go
@@ -637,7 +637,7 @@ func sealTOTPSecret(box *secretbox.Box, userID int64, secret string) ([]byte, er
 func openTOTPSecret(box *secretbox.Box, userID int64, enc []byte) (string, error)
 ```
 
-- [ ] **Step 1: Failing test `internal/auth/totp_test.go`**
+- [x] **Step 1: Failing test `internal/auth/totp_test.go`**
 
 ```go
 package auth
@@ -722,9 +722,9 @@ func TestSealTOTPSecret(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/auth/ -run 'TestTOTPKey|TestMatchTOTP|TestSealTOTPSecret'` → FAIL (`undefined: newTOTPKey`).
+- [x] **Step 2: Run** `go test ./internal/auth/ -run 'TestTOTPKey|TestMatchTOTP|TestSealTOTPSecret'` → FAIL (`undefined: newTOTPKey`).
 
-- [ ] **Step 3: `internal/auth/totp.go`**
+- [x] **Step 3: `internal/auth/totp.go`**
 
 ```go
 package auth
@@ -813,9 +813,9 @@ func openTOTPSecret(box *secretbox.Box, userID int64, enc []byte) (string, error
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/auth/ -run 'TestTOTPKey|TestMatchTOTP|TestSealTOTPSecret'` → PASS.
+- [x] **Step 4: Run** `go test ./internal/auth/ -run 'TestTOTPKey|TestMatchTOTP|TestSealTOTPSecret'` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/auth/totp.go internal/auth/totp_test.go
@@ -859,7 +859,7 @@ func setSessionCookie(w http.ResponseWriter, token string)
 func clearSessionCookie(w http.ResponseWriter)
 ```
 
-- [ ] **Step 1: Failing test `internal/auth/session_test.go`**
+- [x] **Step 1: Failing test `internal/auth/session_test.go`**
 
 ```go
 package auth
@@ -1047,9 +1047,9 @@ func TestSessionCookies(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/auth/ -run 'TestSession|TestPreAuth|TestIdle|TestAbsolute|TestRotate'` → FAIL (`undefined: Sessions`).
+- [x] **Step 2: Run** `go test ./internal/auth/ -run 'TestSession|TestPreAuth|TestIdle|TestAbsolute|TestRotate'` → FAIL (`undefined: Sessions`).
 
-- [ ] **Step 3: `internal/auth/session.go`**
+- [x] **Step 3: `internal/auth/session.go`**
 
 ```go
 package auth
@@ -1234,9 +1234,9 @@ func clearSessionCookie(w http.ResponseWriter) {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/auth/ -run 'TestSession|TestPreAuth|TestIdle|TestAbsolute|TestRotate'` → PASS.
+- [x] **Step 4: Run** `go test ./internal/auth/ -run 'TestSession|TestPreAuth|TestIdle|TestAbsolute|TestRotate'` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/auth/session.go internal/auth/session_test.go
@@ -1259,7 +1259,7 @@ func (s *Sessions) Middleware(next http.Handler) http.Handler   // loads session
 func CSRF(origin string) func(http.Handler) http.Handler       // origin = cfg.Origin()
 ```
 
-- [ ] **Step 1: Failing test `internal/auth/middleware_test.go`**
+- [x] **Step 1: Failing test `internal/auth/middleware_test.go`**
 
 ```go
 package auth
@@ -1378,9 +1378,9 @@ func TestCSRF(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/auth/ -run 'TestSessionMiddleware|TestCSRF'` → FAIL (`s.Middleware undefined`, `undefined: CSRF`).
+- [x] **Step 2: Run** `go test ./internal/auth/ -run 'TestSessionMiddleware|TestCSRF'` → FAIL (`s.Middleware undefined`, `undefined: CSRF`).
 
-- [ ] **Step 3: `internal/auth/middleware.go`**
+- [x] **Step 3: `internal/auth/middleware.go`**
 
 ```go
 package auth
@@ -1494,9 +1494,9 @@ func sameOrigin(r *http.Request, origin string) bool {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/auth/ -run 'TestSessionMiddleware|TestCSRF'` → PASS.
+- [x] **Step 4: Run** `go test ./internal/auth/ -run 'TestSessionMiddleware|TestCSRF'` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/auth/middleware.go internal/auth/middleware_test.go
@@ -1545,7 +1545,7 @@ type meResponse struct{ /* JSON schema Me */ }
 ```
 - Test-Helfer (von allen späteren Tests genutzt): `newTestEnv(t) *testEnv` (Felder `db`, `q`, `cfg`, `clock *clock.Fake`, `guard *testGuard`, `audit *audit.MemoryRecorder`, `notes *notify.Recording`, `h`, `router`, `srv`), `(*testEnv).createUser(username, role) int64`, `enableTOTP(userID) string`, `code(secret) string`, `grantSudo(c *client)`, `enforce2FAForUsers()`, `newClient(ip) *client`, `(*client).do(method, path, body) response`, `doWith(method, path, body, mutate func(*http.Request)) response`, `login(username, pw) response`, `sessionID() int64`, `response.errCode() string`, `response.me(t) meResponse`, `(*testGuard).last() defense.Attempt`, `testPassword`, `testNow`.
 
-- [ ] **Step 1: Test-Umgebung `internal/auth/testenv_test.go`**
+- [x] **Step 1: Test-Umgebung `internal/auth/testenv_test.go`**
 
 ```go
 package auth
@@ -1812,7 +1812,7 @@ func (c *client) sessionID() int64 {
 }
 ```
 
-- [ ] **Step 2: Failing test `internal/auth/login_test.go`**
+- [x] **Step 2: Failing test `internal/auth/login_test.go`**
 
 ```go
 package auth
@@ -2071,9 +2071,9 @@ func TestCompleteAttemptRecordedWithoutNotification(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** `go test ./internal/auth/` → FAIL (`undefined: New`, `undefined: Deps`, `undefined: meResponse`).
+- [x] **Step 3: Run** `go test ./internal/auth/` → FAIL (`undefined: New`, `undefined: Deps`, `undefined: meResponse`).
 
-- [ ] **Step 4: `internal/auth/handler.go`**
+- [x] **Step 4: `internal/auth/handler.go`**
 
 ```go
 package auth
@@ -2348,7 +2348,7 @@ func invalidCode(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 5: `internal/auth/login.go`**
+- [x] **Step 5: `internal/auth/login.go`**
 
 ```go
 package auth
@@ -2507,9 +2507,9 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 6: Run** `go test ./internal/auth/` → PASS (alle bisherigen Tests).
+- [x] **Step 6: Run** `go test ./internal/auth/` → PASS (alle bisherigen Tests).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/auth/handler.go internal/auth/login.go internal/auth/testenv_test.go internal/auth/login_test.go
@@ -2540,7 +2540,7 @@ func hasAction(e *testEnv, action string) bool
 func wrongCode(code string) string
 ```
 
-- [ ] **Step 1: Failing test `internal/auth/twofa_test.go`**
+- [x] **Step 1: Failing test `internal/auth/twofa_test.go`**
 
 ```go
 package auth
@@ -2735,9 +2735,9 @@ func TestRecoveryCodeLogin(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/auth/ -run 'TestTOTPLoginFlow|TestTOTPReplay|TestPreAuthSessionExpires|TestSecondFactorGuard|TestRecoveryCodeLogin'` → FAIL (`404`/`405` für `/api/auth/2fa/*`, da Routen fehlen).
+- [x] **Step 2: Run** `go test ./internal/auth/ -run 'TestTOTPLoginFlow|TestTOTPReplay|TestPreAuthSessionExpires|TestSecondFactorGuard|TestRecoveryCodeLogin'` → FAIL (`404`/`405` für `/api/auth/2fa/*`, da Routen fehlen).
 
-- [ ] **Step 3: `internal/auth/twofa.go`**
+- [x] **Step 3: `internal/auth/twofa.go`**
 
 ```go
 package auth
@@ -2882,7 +2882,7 @@ func (h *Handler) completeSecondFactor(w http.ResponseWriter, r *http.Request, p
 }
 ```
 
-- [ ] **Step 4: Routen ergänzen** – in `Routes` (`internal/auth/handler.go`) direkt nach `api.Post("/auth/logout", anyStage, h.logout)`:
+- [x] **Step 4: Routen ergänzen** – in `Routes` (`internal/auth/handler.go`) direkt nach `api.Post("/auth/logout", anyStage, h.logout)`:
 
 ```go
 	preAuth := rbac.Authenticated().AllowStages(principal.StagePreAuth)
@@ -2890,9 +2890,9 @@ func (h *Handler) completeSecondFactor(w http.ResponseWriter, r *http.Request, p
 	api.Post("/auth/2fa/recovery", preAuth, h.verifyRecovery)
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/auth/` → PASS.
+- [x] **Step 5: Run** `go test ./internal/auth/` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/auth/twofa.go internal/auth/twofa_test.go internal/auth/handler.go
@@ -2926,7 +2926,7 @@ func (h *Handler) notify2FAChanged(ctx context.Context, u store.User, change str
 func (e *testEnv) insertPasskeyRow(userID int64, name string) int64
 ```
 
-- [ ] **Step 1: Failing test `internal/auth/totp_setup_test.go`**
+- [x] **Step 1: Failing test `internal/auth/totp_setup_test.go`**
 
 ```go
 package auth
@@ -3124,9 +3124,9 @@ func TestDisableTOTPEnforcedUser(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/auth/ -run 'TestAdminSetupFlow|TestEnableWithoutSetup|TestSetupRequiresSudo|TestSetupConflict|TestDisableTOTP'` → FAIL (`undefined: totpSetupResponse`).
+- [x] **Step 2: Run** `go test ./internal/auth/ -run 'TestAdminSetupFlow|TestEnableWithoutSetup|TestSetupRequiresSudo|TestSetupConflict|TestDisableTOTP'` → FAIL (`undefined: totpSetupResponse`).
 
-- [ ] **Step 3: `internal/auth/totp_setup.go`**
+- [x] **Step 3: `internal/auth/totp_setup.go`**
 
 ```go
 package auth
@@ -3401,7 +3401,7 @@ func (h *Handler) disableTOTP(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 4: Routen ergänzen** – in `Routes` nach den Zeilen aus Task 7:
+- [x] **Step 4: Routen ergänzen** – in `Routes` nach den Zeilen aus Task 7:
 
 ```go
 	setupOrFull := rbac.Authenticated().AllowStages(principal.StageSetup, principal.StageFull)
@@ -3410,9 +3410,9 @@ func (h *Handler) disableTOTP(w http.ResponseWriter, r *http.Request) {
 	api.Delete("/me/totp", rbac.Authenticated().WithSudo(), h.disableTOTP)
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/auth/` → PASS.
+- [x] **Step 5: Run** `go test ./internal/auth/` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/auth/totp_setup.go internal/auth/totp_setup_test.go internal/auth/handler.go
@@ -3437,7 +3437,7 @@ func (h *Handler) grantSudo(w http.ResponseWriter, r *http.Request, p principal.
 func (h *Handler) sudoFailed(r *http.Request, u store.User, method, reason string)
 ```
 
-- [ ] **Step 1: Failing test `internal/auth/sudo_test.go`**
+- [x] **Step 1: Failing test `internal/auth/sudo_test.go`**
 
 ```go
 package auth
@@ -3539,9 +3539,9 @@ func TestSudoRequiresFullSession(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/auth/ -run 'TestSudo|TestTOTPCodeNotReusableForSudo'` → FAIL (`undefined: sudoResponse`).
+- [x] **Step 2: Run** `go test ./internal/auth/ -run 'TestSudo|TestTOTPCodeNotReusableForSudo'` → FAIL (`undefined: sudoResponse`).
 
-- [ ] **Step 3: `internal/auth/sudo.go`**
+- [x] **Step 3: `internal/auth/sudo.go`**
 
 ```go
 package auth
@@ -3614,15 +3614,15 @@ func (h *Handler) grantSudo(w http.ResponseWriter, r *http.Request, p principal.
 }
 ```
 
-- [ ] **Step 4: Route ergänzen** – in `Routes` nach den Zeilen aus Task 8:
+- [x] **Step 4: Route ergänzen** – in `Routes` nach den Zeilen aus Task 8:
 
 ```go
 	api.Post("/auth/sudo/totp", rbac.Authenticated(), h.sudoTOTP)
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/auth/` → PASS.
+- [x] **Step 5: Run** `go test ./internal/auth/` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/auth/sudo.go internal/auth/sudo_test.go internal/auth/handler.go
@@ -3659,7 +3659,7 @@ func (e *testEnv) registerPasskey(c *client, name string) (*softAuthenticator, r
 ```
 Version-Annahme: Falls `go list -m github.com/go-webauthn/webauthn` eine Version liefert, in der `CreateCredential`/`ValidateLogin` andere Signaturen haben, auf `FinishRegistration`/`FinishLogin` mit einem `*http.Request` ausweichen, dessen Body das rohe `credential`-JSON ist (`r2 := r.Clone(ctx); r2.Body = io.NopCloser(bytes.NewReader(raw))`).
 
-- [ ] **Step 1: Software-Authenticator `internal/auth/softauthn_test.go`**
+- [x] **Step 1: Software-Authenticator `internal/auth/softauthn_test.go`**
 
 ```go
 package auth
@@ -3839,7 +3839,7 @@ func (e *testEnv) registerPasskey(c *client, name string) (*softAuthenticator, r
 }
 ```
 
-- [ ] **Step 2: Failing test `internal/auth/passkeys_test.go`**
+- [x] **Step 2: Failing test `internal/auth/passkeys_test.go`**
 
 ```go
 package auth
@@ -4030,9 +4030,9 @@ func TestConcurrentFactorRemovalKeepsOne(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** `go test ./internal/auth/ -run 'TestPasskey|TestAdminSetupWithPasskey|TestDelete|TestConcurrentFactorRemoval'` → FAIL (`undefined: passkeyCreatedResponse`).
+- [x] **Step 3: Run** `go test ./internal/auth/ -run 'TestPasskey|TestAdminSetupWithPasskey|TestDelete|TestConcurrentFactorRemoval'` → FAIL (`undefined: passkeyCreatedResponse`).
 
-- [ ] **Step 4: `internal/auth/webauthn.go`**
+- [x] **Step 4: `internal/auth/webauthn.go`**
 
 ```go
 package auth
@@ -4123,7 +4123,7 @@ func (h *Handler) takeCeremony(ctx context.Context, sessionID int64, kind string
 }
 ```
 
-- [ ] **Step 5: `internal/auth/passkeys.go`**
+- [x] **Step 5: `internal/auth/passkeys.go`**
 
 ```go
 package auth
@@ -4348,7 +4348,7 @@ func (h *Handler) deletePasskey(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 6: Routen ergänzen** – in `Routes` nach der Zeile aus Task 9 (`setupOrFull` stammt aus Task 8):
+- [x] **Step 6: Routen ergänzen** – in `Routes` nach der Zeile aus Task 9 (`setupOrFull` stammt aus Task 8):
 
 ```go
 	api.Post("/me/passkeys/begin", setupOrFull, h.beginPasskeyRegistration)
@@ -4357,9 +4357,9 @@ func (h *Handler) deletePasskey(w http.ResponseWriter, r *http.Request) {
 	api.Delete("/me/passkeys/{id}", rbac.Authenticated().WithSudo(), h.deletePasskey)
 ```
 
-- [ ] **Step 7: Run** `go test ./internal/auth/` → PASS. Schlägt nur `TestPasskeyRegistrationAndList` beim `finish` mit `400 passkey verification failed` fehl, den Fehler von `CreateCredential` temporär per `t.Logf` ausgeben (z. B. `%+v` von `*protocol.Error` mit `DevInfo`) und den Software-Authenticator korrigieren – nicht die Produktionsprüfung lockern.
+- [x] **Step 7: Run** `go test ./internal/auth/` → PASS. Schlägt nur `TestPasskeyRegistrationAndList` beim `finish` mit `400 passkey verification failed` fehl, den Fehler von `CreateCredential` temporär per `t.Logf` ausgeben (z. B. `%+v` von `*protocol.Error` mit `DevInfo`) und den Software-Authenticator korrigieren – nicht die Produktionsprüfung lockern.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/auth/webauthn.go internal/auth/passkeys.go internal/auth/softauthn_test.go internal/auth/passkeys_test.go internal/auth/handler.go
@@ -4385,7 +4385,7 @@ func (e *testEnv) passkeyUser(username, role string) *softAuthenticator
 func (c *client) webauthnLogin(a *softAuthenticator) response
 ```
 
-- [ ] **Step 1: Failing test `internal/auth/webauthn_login_test.go`**
+- [x] **Step 1: Failing test `internal/auth/webauthn_login_test.go`**
 
 ```go
 package auth
@@ -4563,9 +4563,9 @@ func TestWebAuthnBeginWithoutPasskeys(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/auth/ -run 'TestWebAuthn|TestSudoWebAuthn'` → FAIL (`404`/`405` für `/api/auth/2fa/webauthn/*`, Routen fehlen).
+- [x] **Step 2: Run** `go test ./internal/auth/ -run 'TestWebAuthn|TestSudoWebAuthn'` → FAIL (`404`/`405` für `/api/auth/2fa/webauthn/*`, Routen fehlen).
 
-- [ ] **Step 3: `internal/auth/webauthn_login.go`**
+- [x] **Step 3: `internal/auth/webauthn_login.go`**
 
 ```go
 package auth
@@ -4744,7 +4744,7 @@ func (h *Handler) finishSudoWebAuthn(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 4: Routen ergänzen** – in `Routes` nach den Zeilen aus Task 10 (`preAuth` stammt aus Task 7):
+- [x] **Step 4: Routen ergänzen** – in `Routes` nach den Zeilen aus Task 10 (`preAuth` stammt aus Task 7):
 
 ```go
 	api.Post("/auth/2fa/webauthn/begin", preAuth, h.beginWebAuthnLogin)
@@ -4753,9 +4753,9 @@ func (h *Handler) finishSudoWebAuthn(w http.ResponseWriter, r *http.Request) {
 	api.Post("/auth/sudo/webauthn/finish", rbac.Authenticated(), h.finishSudoWebAuthn)
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/auth/` → PASS.
+- [x] **Step 5: Run** `go test ./internal/auth/` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/auth/webauthn_login.go internal/auth/webauthn_login_test.go internal/auth/handler.go
@@ -4780,7 +4780,7 @@ type passwordChangeRequest struct{ CurrentPassword string `json:"current_passwor
 func passwordPolicyMessage(err error) string
 ```
 
-- [ ] **Step 1: Failing test `internal/auth/me_test.go`**
+- [x] **Step 1: Failing test `internal/auth/me_test.go`**
 
 ```go
 package auth
@@ -4891,9 +4891,9 @@ func TestRegenerateRecoveryCodes(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/auth/ -run 'TestUpdateLocale|TestChangePassword|TestRegenerateRecoveryCodes'` → FAIL (`405`/`404`, Routen fehlen).
+- [x] **Step 2: Run** `go test ./internal/auth/ -run 'TestUpdateLocale|TestChangePassword|TestRegenerateRecoveryCodes'` → FAIL (`405`/`404`, Routen fehlen).
 
-- [ ] **Step 3: `internal/auth/me.go`**
+- [x] **Step 3: `internal/auth/me.go`**
 
 ```go
 package auth
@@ -5041,7 +5041,7 @@ func (h *Handler) regenerateRecoveryCodes(w http.ResponseWriter, r *http.Request
 }
 ```
 
-- [ ] **Step 4: Routen ergänzen** – in `Routes` nach den Zeilen aus Task 11:
+- [x] **Step 4: Routen ergänzen** – in `Routes` nach den Zeilen aus Task 11:
 
 ```go
 	api.Patch("/me", rbac.Authenticated(), h.updateMe)
@@ -5049,9 +5049,9 @@ func (h *Handler) regenerateRecoveryCodes(w http.ResponseWriter, r *http.Request
 	api.Post("/me/recovery-codes", rbac.Authenticated().WithSudo(), h.regenerateRecoveryCodes)
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/auth/` → PASS.
+- [x] **Step 5: Run** `go test ./internal/auth/` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/auth/me.go internal/auth/me_test.go internal/auth/handler.go
@@ -5075,7 +5075,7 @@ type sessionJSON struct{ /* JSON schema Session */ }
 func (h *Handler) activeWindow() (now, idleCutoff int64)
 ```
 
-- [ ] **Step 1: Failing test `internal/auth/sessions_api_test.go`**
+- [x] **Step 1: Failing test `internal/auth/sessions_api_test.go`**
 
 ```go
 package auth
@@ -5217,9 +5217,9 @@ func TestAdminSessions(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/auth/ -run 'TestMySessions|TestRevokeOtherSessions|TestSessionListExcludesIdle|TestAdminSessions'` → FAIL (`undefined: sessionJSON`).
+- [x] **Step 2: Run** `go test ./internal/auth/ -run 'TestMySessions|TestRevokeOtherSessions|TestSessionListExcludesIdle|TestAdminSessions'` → FAIL (`undefined: sessionJSON`).
 
-- [ ] **Step 3: `internal/auth/sessions_api.go`**
+- [x] **Step 3: `internal/auth/sessions_api.go`**
 
 ```go
 package auth
@@ -5380,7 +5380,7 @@ func (h *Handler) revokeAnySession(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 4: Routen ergänzen** – in `Routes` nach den Zeilen aus Task 12:
+- [x] **Step 4: Routen ergänzen** – in `Routes` nach den Zeilen aus Task 12:
 
 ```go
 	api.Get("/me/sessions", rbac.Authenticated(), h.listMySessions)
@@ -5390,9 +5390,9 @@ func (h *Handler) revokeAnySession(w http.ResponseWriter, r *http.Request) {
 	api.Delete("/admin/sessions/{id}", rbac.Admin().WithSudo(), h.revokeAnySession)
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/auth/` → PASS.
+- [x] **Step 5: Run** `go test ./internal/auth/` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/auth/sessions_api.go internal/auth/sessions_api_test.go internal/auth/handler.go
@@ -5410,7 +5410,7 @@ git commit -m "feat(auth): add session listing and revocation endpoints" -m "Co-
 - Consumes: `(*rbac.Router).Routes() []rbac.RouteInfo`, `rbac.Rule.String()`, `rbac.Public/Authenticated/Admin`, `.AllowStages`, `.WithSudo`; Test-Umgebung aus Task 6.
 - Produces: – (reiner Vertragstest; schlägt fehl, sobald eine Route fehlt, doppelt ist oder eine andere Regel als in der Phase-0-Tabelle hat).
 
-- [ ] **Step 1: Test `internal/auth/routes_test.go`**
+- [x] **Step 1: Test `internal/auth/routes_test.go`**
 
 ```go
 package auth
@@ -5502,9 +5502,9 @@ func TestCSRFEnforcedOnAuthRoutes(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/auth/ -run 'TestRoutesMatchContract|TestCSRFEnforcedOnAuthRoutes' -v` → PASS (alle Routen sind aus Task 6–13 registriert). Fehlt eine Route oder weicht eine Regel ab, zeigt der Test den Schlüssel; dann `Routes` korrigieren, nicht den Test.
+- [x] **Step 2: Run** `go test ./internal/auth/ -run 'TestRoutesMatchContract|TestCSRFEnforcedOnAuthRoutes' -v` → PASS (alle Routen sind aus Task 6–13 registriert). Fehlt eine Route oder weicht eine Regel ab, zeigt der Test den Schlüssel; dann `Routes` korrigieren, nicht den Test.
 
-- [ ] **Step 3: Gesamtlauf, Race-Detector und Lint**
+- [x] **Step 3: Gesamtlauf, Race-Detector und Lint**
 
 ```bash
 go test ./internal/auth/... ./internal/store/...
@@ -5514,7 +5514,7 @@ golangci-lint run ./internal/auth/...
 ```
 Expected: alles grün, keine Lint-Befunde (insbesondere keine ungenutzten Konstanten/Felder – alle `reason*`-Konstanten und `h.wa` werden ab Task 11 verwendet).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/auth/routes_test.go

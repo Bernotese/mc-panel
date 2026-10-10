@@ -46,7 +46,7 @@ cmd/panel/fakeagent_test.go  In-Memory agentapi.Client für Tests
 
 **Files:** keine neuen; Merges der Branches `stream/f`, `stream/c`, `stream/d`, `stream/b`, `stream/a`, `stream/e`.
 
-- [ ] **Step 1: Vorbedingungen prüfen** – jeder Stream-Branch hat im eigenen Worktree `make test` und `make lint` grün gemeldet.
+- [x] **Step 1: Vorbedingungen prüfen** – jeder Stream-Branch hat im eigenen Worktree `make test` und `make lint` grün gemeldet.
 
 ```bash
 git branch --list 'stream/*'
@@ -54,7 +54,7 @@ git log --oneline phase0..stream/f | head
 ```
 Expected: sechs Branches, jeder mit Commits nach `phase0`.
 
-- [ ] **Step 2: In fester Reihenfolge mergen, nach jedem Merge testen**
+- [x] **Step 2: In fester Reihenfolge mergen, nach jedem Merge testen**
 
 ```bash
 for b in f c d b a e; do
@@ -65,7 +65,7 @@ done
 ```
 Expected: alle sechs Merges ohne Konflikt, `make test-go` nach jedem grün. Konflikte sind laut Planung nur möglich in `go.sum` (nicht erwartet, Abhängigkeiten sind gepinnt) und bei Stream E in `web/package.json` und `web/src/routeTree.gen.ts`. Lösung: `go mod tidy` bzw. `cd web && npx vite build` (generiert `routeTree.gen.ts` neu), dann `git add` und `git merge --continue`.
 
-- [ ] **Step 3: Gesamtprüfung nach dem letzten Merge**
+- [x] **Step 3: Gesamtprüfung nach dem letzten Merge**
 
 ```bash
 make generate && git diff --exit-code
@@ -106,7 +106,7 @@ var version = "dev"
 
 Hinweis: Stimmen einzelne Signaturen nach den Merges nicht exakt (z. B. ein Konstruktor gibt zusätzlich `error` zurück), gilt der tatsächlich gemergte Code; `app.go` wird angepasst, die Struktur bleibt.
 
-- [ ] **Step 1: `cmd/panel/app.go`**
+- [x] **Step 1: `cmd/panel/app.go`**
 
 ```go
 package main
@@ -225,7 +225,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 }
 ```
 
-- [ ] **Step 2: Passwort-Eingabe ohne Echo**
+- [x] **Step 2: Passwort-Eingabe ohne Echo**
 
 `cmd/panel/term_linux.go`:
 ```go
@@ -293,7 +293,7 @@ func readPassword(stdin *os.File, stderr io.Writer) (io.Reader, error) {
 }
 ```
 
-- [ ] **Step 3: `cmd/panel/main.go` komplett ersetzen**
+- [x] **Step 3: `cmd/panel/main.go` komplett ersetzen**
 
 ```go
 // Command panel is the mc-panel web application and its admin CLI.
@@ -508,7 +508,7 @@ func setupLogging(dev bool) {
 }
 ```
 
-- [ ] **Step 4: Bauen und CLI prüfen**
+- [x] **Step 4: Bauen und CLI prüfen**
 
 ```bash
 gofmt -w cmd/panel && go vet ./cmd/panel && go build -o bin/ ./cmd/...
@@ -521,7 +521,7 @@ printf 'mc-panel integration pw 1\n' | ./bin/panel admin create -dev -username a
 ```
 Expected: `dev`; Admin angelegt (Ausgabe von `RunAdminCreate`); Audit-Kette OK mit `exit=0`; Unlock meldet „nichts zu tun“ o. ä. mit `exit=0`; Usage mit `exit=2`.
 
-- [ ] **Step 5: Commit** `git add cmd/panel && git commit -m "feat(panel): wire all streams into serve and add admin/audit CLI" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
+- [x] **Step 5: Commit** `git add cmd/panel && git commit -m "feat(panel): wire all streams into serve and add admin/audit CLI" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
 
 ---
 
@@ -533,7 +533,7 @@ Expected: `dev`; Admin angelegt (Ausgabe von `RunAdminCreate`); Audit-Kette OK m
 
 Die Tests sprechen ausschließlich den OpenAPI-Vertrag. Weicht ein Detail vom tatsächlich gemergten Verhalten ab (z. B. Stage-Wechsel erst nach `GET /auth/me` sichtbar), wird zuerst geprüft, ob der Code den Vertrag verletzt (dann Code fixen); nur wenn der Vertrag mehrdeutig ist, wird der Test angepasst und der Vertrag präzisiert.
 
-- [ ] **Step 1: `cmd/panel/fakeagent_test.go`**
+- [x] **Step 1: `cmd/panel/fakeagent_test.go`**
 
 ```go
 package main
@@ -590,7 +590,7 @@ func (f *fakeAgent) banned(prefix string) bool {
 }
 ```
 
-- [ ] **Step 2: `cmd/panel/app_test.go`**
+- [x] **Step 2: `cmd/panel/app_test.go`**
 
 ```go
 package main
@@ -932,12 +932,12 @@ func agentClientForMissingSocket(t *testing.T) *agent.Client {
 ```
 und den Import `"github.com/Bernotese/mc-panel/internal/agent"`.
 
-- [ ] **Step 3: Run** `go test ./cmd/panel/ -run . -count=1 -v`
+- [x] **Step 3: Run** `go test ./cmd/panel/ -run . -count=1 -v`
 Expected: alle fünf Tests PASS. Typische Integrationsfehler und ihr Ort: `TestRouteCoverage` ≠ 57 → ein Stream registriert eine Route zu viel/zu wenig (mit Phase-0-Tabelle abgleichen); `csrf_invalid` bei legitimen Requests → Origin-Vergleich in `auth.CSRF` vs. `cfg.Origin()`; Jail nicht synchronisiert → `svc.Run`-Kick nach `addJail` (Stream B Task 7).
 
-- [ ] **Step 4: Race-Detector** `CGO_ENABLED=1 go test -race ./cmd/panel/ ./internal/...` → PASS.
+- [x] **Step 4: Race-Detector** `CGO_ENABLED=1 go test -race ./cmd/panel/ ./internal/...` → PASS.
 
-- [ ] **Step 5: Commit** `git add cmd/panel && git commit -m "test(panel): add route coverage and end-to-end integration tests" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
+- [x] **Step 5: Commit** `git add cmd/panel && git commit -m "test(panel): add route coverage and end-to-end integration tests" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
 
 ---
 
@@ -945,25 +945,25 @@ Expected: alle fünf Tests PASS. Typische Integrationsfehler und ihr Ort: `TestR
 
 **Files:** keine (nur Verifikation; gefundene Fehler → eigene Fix-Commits)
 
-- [ ] **Step 1: Dev-Stack starten** – `make dev` in einem eigenen Terminal-Tab.
+- [x] **Step 1: Dev-Stack starten** – `make dev` in einem eigenen Terminal-Tab.
 Expected: agent (noop-Firewall), panel auf `127.0.0.1:8080`, Vite auf `http://localhost:5173`.
 
-- [ ] **Step 2: Admin anlegen**
+- [x] **Step 2: Admin anlegen**
 ```bash
 printf '%s\n' 'local dev admin password' | ./.dev/bin/panel admin create -dev -username jannes
 ```
 
-- [ ] **Step 3: Im Browser durchklicken (Built-in-Browser, `http://localhost:5173`)** – Login → erzwungenes TOTP-Setup (QR scannen mit Authenticator-App) → Recovery-Codes → Dashboard; Passkey im Profil hinzufügen (Touch ID); abmelden; Login per Passkey; Server-Stub anlegen (Sudo-Dialog erscheint); Benutzer `max` mit `server.power` anlegen; in privatem Fenster als `max` einloggen. Expected: alles ohne Konsolenfehler, keine CSP-Verletzungen in der Browser-Konsole.
+- [x] **Step 3: Im Browser durchklicken (Built-in-Browser, `http://localhost:5173`)** – Login → erzwungenes TOTP-Setup (QR scannen mit Authenticator-App) → Recovery-Codes → Dashboard; Passkey im Profil hinzufügen (Touch ID); abmelden; Login per Passkey; Server-Stub anlegen (Sudo-Dialog erscheint); Benutzer `max` mit `server.power` anlegen; in privatem Fenster als `max` einloggen. Expected: alles ohne Konsolenfehler, keine CSP-Verletzungen in der Browser-Konsole.
 
-- [ ] **Step 4: Agent-Ausfall** – agent-Prozess beenden (`pkill -f '.dev/bin/agent'`), Security Center → Agent-Karte zeigt „Nicht erreichbar“, Login funktioniert weiter; agent neu starten (`.dev/bin/agent -dev &`), Karte wird nach Reload grün.
+- [x] **Step 4: Agent-Ausfall** – agent-Prozess beenden (`pkill -f '.dev/bin/agent'`), Security Center → Agent-Karte zeigt „Nicht erreichbar“, Login funktioniert weiter; agent neu starten (`.dev/bin/agent -dev &`), Karte wird nach Reload grün.
 
-- [ ] **Step 5: Jail lokal** – 5 Fehlversuche aus einem zweiten Browser-Profil sind lokal *nicht* jailbar (Loopback wird nie gejailt, Stream-B-Entscheidung). Daher per curl mit simulierter Client-IP über den Proxy-Header:
+- [x] **Step 5: Jail lokal** – 5 Fehlversuche aus einem zweiten Browser-Profil sind lokal *nicht* jailbar (Loopback wird nie gejailt, Stream-B-Entscheidung). Daher per curl mit simulierter Client-IP über den Proxy-Header:
 ```bash
 for i in 1 2 3 4 5 6; do curl -s -o /dev/null -w "%{http_code}\n" -H 'Content-Type: application/json' -H 'Origin: http://localhost:5173' -H 'X-Forwarded-For: 203.0.113.77' -d '{"username":"jannes","password":"wrong wrong wrong"}' http://127.0.0.1:8080/api/auth/login; done
 ```
 Expected: fünfmal `401`, dann `403`; Jail im Security Center sichtbar; Aufheben per Button (Sudo) funktioniert.
 
-- [ ] **Step 6: Benachrichtigung** – ntfy-Notifier mit `https://ntfy.sh` und einem zufälligen Topic anlegen (Nutzer fragen, ob ein öffentlicher ntfy.sh-Test ok ist), „Test senden“ → Nachricht kommt in der ntfy-App/Weboberfläche an; Schritt 5 wiederholen → Jail-Benachrichtigung kommt an (Abnahmekriterium 5, App-Teil).
+- [x] **Step 6: Benachrichtigung** – ntfy-Notifier mit `https://ntfy.sh` und einem zufälligen Topic anlegen (Nutzer fragen, ob ein öffentlicher ntfy.sh-Test ok ist), „Test senden“ → Nachricht kommt in der ntfy-App/Weboberfläche an; Schritt 5 wiederholen → Jail-Benachrichtigung kommt an (Abnahmekriterium 5, App-Teil).
 
 ---
 
@@ -971,14 +971,14 @@ Expected: fünfmal `401`, dann `403`; Jail im Security Center sichtbar; Aufheben
 
 **Files:** Modify `.github/workflows/ci.yml`
 
-- [ ] **Step 1: Session-Rotation abgleichen** – `ROTATING_PATHS`/`ME_PATHS` in `web/src/api/client.ts` mit den Stellen vergleichen, an denen Stream A die Session rotiert:
+- [x] **Step 1: Session-Rotation abgleichen** – `ROTATING_PATHS`/`ME_PATHS` in `web/src/api/client.ts` mit den Stellen vergleichen, an denen Stream A die Session rotiert:
 ```bash
 grep -n "rotate\|Rotate" internal/auth/*.go | grep -v _test
 grep -n "ROTATING_PATHS\|ME_PATHS" -A8 web/src/api/client.ts
 ```
 Expected: Jeder Endpunkt, der in `internal/auth` eine Rotation auslöst und kein `Me` liefert, steht in `ROTATING_PATHS`. Fehlende ergänzen, `cd web && npm test`, Commit `fix(web): align session rotation paths with backend`.
 
-- [ ] **Step 2: E2E gegen echtes Backend**
+- [x] **Step 2: E2E gegen echtes Backend**
 ```bash
 make dev &
 sleep 8
@@ -989,7 +989,7 @@ npm run e2e
 ```
 Expected: beide Playwright-Projekte grün (real: Login + TOTP-Setup + zweiter Login; mock: Smoke inkl. 360 px).
 
-- [ ] **Step 3: Playwright-Job in `.github/workflows/ci.yml`** – unter `jobs:` ergänzen (Action-Versionen exakt wie in den übrigen Jobs der Datei übernehmen):
+- [x] **Step 3: Playwright-Job in `.github/workflows/ci.yml`** – unter `jobs:` ergänzen (Action-Versionen exakt wie in den übrigen Jobs der Datei übernehmen):
 
 ```yaml
   e2e:
@@ -1030,9 +1030,9 @@ Expected: beide Playwright-Projekte grün (real: Login + TOTP-Setup + zweiter Lo
 ```
 Die Pins entsprechen denen aus dem Stream-F-Plan; hat Stream F beim Ausführen andere SHAs aufgelöst, die aus dem `go`-Job derselben Datei übernehmen.
 
-- [ ] **Step 4: Validieren** `go run github.com/rhysd/actionlint/cmd/actionlint@latest .github/workflows/ci.yml` → keine Meldungen.
+- [x] **Step 4: Validieren** `go run github.com/rhysd/actionlint/cmd/actionlint@latest .github/workflows/ci.yml` → keine Meldungen.
 
-- [ ] **Step 5: Commit** `git add .github web && git commit -m "ci: add playwright e2e job against real backend" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
+- [x] **Step 5: Commit** `git add .github web && git commit -m "ci: add playwright e2e job against real backend" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`
 
 ---
 
@@ -1040,7 +1040,7 @@ Die Pins entsprechen denen aus dem Stream-F-Plan; hat Stream F beim Ausführen a
 
 **Files:** keine (Verifikation)
 
-- [ ] **Step 1: Release-Snapshot**
+- [x] **Step 1: Release-Snapshot**
 ```bash
 make clean && make release
 ls dist/*.tar.gz dist/checksums.txt
@@ -1050,7 +1050,7 @@ tar -xzOf dist/mc-panel_*_linux_amd64.tar.gz panel | strings | grep -c mockServi
 ```
 Expected: zwei Archive + `checksums.txt`; Inhalt `panel`, `agent`; Frontend eingebettet (Zähler ≥ 1 je Archiv); `mockServiceWorker` 0 Treffer.
 
-- [ ] **Step 2: VM-Abnahme** (Nutzer vorher fragen, falls das Ubuntu-Image noch nicht geladen ist, ca. 600 MB)
+- [x] **Step 2: VM-Abnahme** (Nutzer vorher fragen, falls das Ubuntu-Image noch nicht geladen ist, ca. 600 MB)
 ```bash
 scripts/vm-setup.sh --no-build
 scripts/vm-test.sh
@@ -1063,11 +1063,11 @@ Expected (aus Stream-F-Vertrag): `vm-setup.sh` endet mit `{"status":"ok"}`, Sock
 
 **Files:** nach Befund
 
-- [ ] **Step 1: Security-Review** – Skill `security-review` auf dem gesamten Branch seit `phase0` ausführen. Jeder Befund: bewerten (`superpowers:receiving-code-review`), berechtigte mit Test + Fix als eigenen Commit beheben.
+- [x] **Step 1: Security-Review** – Skill `security-review` auf dem gesamten Branch seit `phase0` ausführen. Jeder Befund: bewerten (`superpowers:receiving-code-review`), berechtigte mit Test + Fix als eigenen Commit beheben.
 
-- [ ] **Step 2: Code-Review** – Skill `superpowers:requesting-code-review` für den Gesamtstand; Befunde wie oben.
+- [x] **Step 2: Code-Review** – Skill `superpowers:requesting-code-review` für den Gesamtstand; Befunde wie oben.
 
-- [ ] **Step 3: Abnahmekriterien der Spec (§12) abhaken**
+- [x] **Step 3: Abnahmekriterien der Spec (§12) abhaken**
 
 | # | Kriterium | Nachweis |
 |---|---|---|
@@ -1079,7 +1079,7 @@ Expected (aus Stream-F-Vertrag): `vm-setup.sh` endet mit `{"status":"ok"}`, Sock
 | 6 | Audit-Log vollständig, verify OK, Manipulation erkannt | `TestFullFlowPermissionsAndAudit`, Stream-D-Tamper-Tests, `panel audit verify` |
 | 7 | `make release` → Linux-Binaries mit Frontend, laufen in VM | Task 6 |
 
-- [ ] **Step 4: Abschluss** – Skill `superpowers:finishing-a-development-branch`; danach mit dem Nutzer klären, ob ein GitHub-Remote angelegt und `v0.1.0` getaggt werden soll (Tag löst den Release-Workflow aus → nur nach ausdrücklicher Zustimmung).
+- [x] **Step 4: Abschluss** – Skill `superpowers:finishing-a-development-branch`; danach mit dem Nutzer klären, ob ein GitHub-Remote angelegt und `v0.1.0` getaggt werden soll (Tag löst den Release-Workflow aus → nur nach ausdrücklicher Zustimmung).
 
 ## Self-Review
 
