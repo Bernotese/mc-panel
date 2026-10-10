@@ -11,3 +11,6 @@ web/.tanstack/
 web/test-results/
 web/playwright-report/
 .DS_Store
+
+# Personal Claude Code overrides
+.claude/settings.local.json
