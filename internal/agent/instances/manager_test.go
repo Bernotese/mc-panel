@@ -55,17 +55,26 @@ type env struct {
 	logs *syncBuffer
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, opts ...func(*instances.Config)) *env {
 	t.Helper()
 	d := dockertest.New(t)
 	e := &env{d: d, dir: t.TempDir(), clk: clock.NewFake(time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)), logs: &syncBuffer{}}
-	e.m = instances.New(instances.Config{
-		Docker: docker.New(d.Socket), InstancesDir: e.dir, UID: os.Getuid(), GID: os.Getgid(),
-		Images: config.DefaultImages(), Clock: e.clk,
-		Log: slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
-	})
+	e.m = instances.New(e.config(opts...))
 	t.Cleanup(e.m.Close)
 	return e
+}
+
+// config is the manager configuration of this env (for a second manager on the same daemon).
+func (e *env) config(opts ...func(*instances.Config)) instances.Config {
+	cfg := instances.Config{
+		Docker: docker.New(e.d.Socket), InstancesDir: e.dir, UID: os.Getuid(), GID: os.Getgid(),
+		Images: config.DefaultImages(), Clock: e.clk,
+		Log: slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return cfg
 }
 
 func ensureReq(id int64, name string, revision int64) agentapi.EnsureRequest {

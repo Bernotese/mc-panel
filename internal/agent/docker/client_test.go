@@ -325,3 +325,29 @@ func TestRequestShapeAndLimits(t *testing.T) {
 		t.Fatalf("requests =\n%q\nwant\n%q", seen, want)
 	}
 }
+
+// TestEnsureNetworkRefusesForeignNetwork: a network that only shares the name (without
+// the requested labels, or with another driver) is never adopted or modified.
+func TestEnsureNetworkRefusesForeignNetwork(t *testing.T) {
+	d := dockertest.New(t)
+	c := docker.New(d.Socket)
+	ctx := context.Background()
+	labels := map[string]string{"mcpanel.network": "1"}
+	d.AddNetwork("mcpanel-mc", "bridge", map[string]string{"com.example": "other"})
+	if err := c.EnsureNetwork(ctx, "mcpanel-mc", labels); err == nil || !strings.Contains(err.Error(), "not managed") {
+		t.Fatalf("network without label = %v, want refusal", err)
+	}
+	d.AddNetwork("mcpanel-host", "host", labels)
+	if err := c.EnsureNetwork(ctx, "mcpanel-host", labels); err == nil {
+		t.Fatal("network with another driver must be refused")
+	}
+	d.AddNetwork("mcpanel-ok", "bridge", map[string]string{"mcpanel.network": "1", "extra": "x"})
+	if err := c.EnsureNetwork(ctx, "mcpanel-ok", labels); err != nil {
+		t.Fatalf("own network: %v", err)
+	}
+	for _, call := range d.Calls() {
+		if strings.HasPrefix(call, "network create") {
+			t.Fatalf("existing networks must never be re-created: %v", d.Calls())
+		}
+	}
+}

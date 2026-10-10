@@ -36,6 +36,8 @@ type Config struct {
 	// Customize may adjust a container configuration right before it is created.
 	// Only the dockerintegration test sets it (small test image); nil in production.
 	Customize func(name string, cfg *docker.ContainerConfig)
+	// StatusTimeout bounds Status (GET /v1/instances); 0 means DefaultStatusTimeout.
+	StatusTimeout time.Duration
 }
 
 type sample struct {

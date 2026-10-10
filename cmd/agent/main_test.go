@@ -216,16 +216,16 @@ func TestRunRefusesSecondStartBeforeTouchingFirewall(t *testing.T) {
 
 func TestMCUserIDs(t *testing.T) {
 	noLookup := func(string) (*user.User, error) { return nil, errors.New("lookup must not run") }
-	uid, gid, err := mcUserIDs(config.Agent{Dev: true}, noLookup)
+	uid, gid, err := mcUserIDs(config.Agent{Dev: true}, -1, noLookup)
 	if err != nil || uid != os.Getuid() || gid != os.Getgid() {
 		t.Fatalf("dev without mc_user = %d:%d, %v; want own ids", uid, gid, err)
 	}
-	if _, _, err := mcUserIDs(config.Agent{}, noLookup); err == nil {
+	if _, _, err := mcUserIDs(config.Agent{}, 990, noLookup); err == nil {
 		t.Fatal("prod without mc_user must fail")
 	}
 
 	var asked string
-	uid, gid, err = mcUserIDs(config.Agent{MCUser: "mcpanel-mc"}, func(name string) (*user.User, error) {
+	uid, gid, err = mcUserIDs(config.Agent{MCUser: "mcpanel-mc"}, 990, func(name string) (*user.User, error) {
 		asked = name
 		return &user.User{Username: name, Uid: "996", Gid: "995"}, nil
 	})
@@ -240,16 +240,16 @@ func TestMCUserIDs(t *testing.T) {
 		"non-numeric gid": {Uid: "996", Gid: "staff"},
 		"negative uid":    {Uid: "-1", Gid: "995"},
 	} {
-		if _, _, err := mcUserIDs(config.Agent{MCUser: "mcpanel-mc"}, func(string) (*user.User, error) { return u, nil }); err == nil {
+		if _, _, err := mcUserIDs(config.Agent{MCUser: "mcpanel-mc"}, 990, func(string) (*user.User, error) { return u, nil }); err == nil {
 			t.Errorf("%s: want error", name)
 		}
 	}
-	if _, _, err := mcUserIDs(config.Agent{MCUser: "mcpanel-mc"}, func(name string) (*user.User, error) {
+	if _, _, err := mcUserIDs(config.Agent{MCUser: "mcpanel-mc"}, 990, func(name string) (*user.User, error) {
 		return nil, user.UnknownUserError(name)
 	}); err == nil || !strings.Contains(err.Error(), "useradd") {
 		t.Fatalf("unknown mc_user: %v", err)
 	}
-	if _, _, err := mcUserIDs(config.Agent{Dev: true, MCUser: "me"}, func(string) (*user.User, error) {
+	if _, _, err := mcUserIDs(config.Agent{Dev: true, MCUser: "me"}, -1, func(string) (*user.User, error) {
 		return &user.User{Uid: "0", Gid: "0"}, nil
 	}); err != nil {
 		t.Fatalf("dev may run as root (e.g. agent -dev under sudo): %v", err)
@@ -313,4 +313,52 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for: %s", what)
+}
+
+// TestMCUserIDsSeparatesPanelAndContainers: the Minecraft containers must not share
+// the panel's uid or primary group (they could read panel.db or the agent socket),
+// and with Docker enabled even dev mode refuses root.
+func TestMCUserIDsSeparatesPanelAndContainers(t *testing.T) {
+	prod := config.Agent{PanelUID: 998, MCUser: "mcpanel-mc"}
+	as := func(uid, gid string) func(string) (*user.User, error) {
+		return func(name string) (*user.User, error) { return &user.User{Username: name, Uid: uid, Gid: gid}, nil }
+	}
+	if _, _, err := mcUserIDs(prod, 990, as("998", "995")); err == nil {
+		t.Error("mc_user with the panel's uid must be refused")
+	}
+	if _, _, err := mcUserIDs(prod, 990, as("996", "990")); err == nil {
+		t.Error("mc_user with the panel's primary gid must be refused")
+	}
+	if uid, gid, err := mcUserIDs(prod, 990, as("996", "995")); err != nil || uid != 996 || gid != 995 {
+		t.Errorf("separate user = %d:%d, %v", uid, gid, err)
+	}
+	devDocker := config.Agent{Dev: true, MCUser: "me", DockerSocket: "/var/run/docker.sock"}
+	for name, ids := range map[string][2]string{"uid 0": {"0", "20"}, "gid 0": {"501", "0"}} {
+		if _, _, err := mcUserIDs(devDocker, -1, as(ids[0], ids[1])); err == nil {
+			t.Errorf("dev with Docker, %s: want error", name)
+		}
+	}
+	if _, _, err := mcUserIDs(devDocker, -1, as("501", "20")); err != nil {
+		t.Errorf("dev with Docker as a normal user: %v", err)
+	}
+}
+
+// TestCheckImages: config validation only applies a regex; every configured image
+// must also be accepted by the Docker client, or the agent refuses to start.
+func TestCheckImages(t *testing.T) {
+	if err := checkImages(config.DefaultImages()); err != nil {
+		t.Fatalf("default images: %v", err)
+	}
+	digest := "@sha256:" + strings.Repeat("ab", 32)
+	for key, mod := range map[string]func(*config.Images){
+		"java8":  func(i *config.Images) { i.Java8 = "Itzg/minecraft-server" + digest },
+		"java17": func(i *config.Images) { i.Java17 = "itzg//minecraft-server" + digest },
+		"router": func(i *config.Images) { i.Router = "itzg/mc-router/" + digest },
+	} {
+		imgs := config.DefaultImages()
+		mod(&imgs)
+		if err := checkImages(imgs); err == nil || !strings.Contains(err.Error(), "images."+key) {
+			t.Errorf("%s: checkImages = %v, want an error naming images.%s", key, err, key)
+		}
+	}
 }
