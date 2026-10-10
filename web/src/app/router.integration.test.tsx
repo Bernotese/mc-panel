@@ -89,4 +89,11 @@ describe('app router with the real guards', () => {
     await mountApp('/servers/1', queryClient)
     expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
   })
+
+  it('keeps regular users out of the settings page', async () => {
+    const queryClient = createTestQueryClient()
+    applyMe(queryClient, loginAs('alice'))
+    const { router } = await mountApp('/settings', queryClient)
+    await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  })
 })

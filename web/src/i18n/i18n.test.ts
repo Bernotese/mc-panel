@@ -45,7 +45,8 @@ const DYNAMIC_KEYS = [
   ...['overview', 'attempts', 'jails', 'ip_rules', 'settings', 'notifiers'].map((tab) => `security.tabs.${tab}`),
   ...['de', 'en'].map((l) => `profile.language.${l}`),
   ...['totp', 'webauthn', 'recovery'].map((m) => `second_factor.tab_${m}`),
-  ...['dashboard', 'users', 'security', 'audit', 'profile'].map((k) => `nav.${k}`),
+  ...['dashboard', 'users', 'security', 'audit', 'settings', 'profile'].map((k) => `nav.${k}`),
+  ...['ok', 'unavailable', 'unknown'].map((d) => `settings.docker.${d}`),
   ...['not_configured', 'unknown', 'creating', 'starting', 'running', 'stopping', 'stopped', 'restarting', 'error'].map(
     (s) => `servers.state.${s}`,
   ),

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { useId, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { isSudoCancelled } from '@/api/errors'
@@ -249,7 +250,14 @@ function TypeField({
           )
         })}
       </div>
-      {curseforgeKeySet ? null : <p className="text-muted-foreground text-sm">{t('servers.form.curseforge_key_hint')}</p>}
+      {curseforgeKeySet ? null : (
+        <p className="text-muted-foreground text-sm">
+          {t('servers.form.curseforge_key_hint')}{' '}
+          <Link to="/settings" className="text-primary underline underline-offset-4">
+            {t('settings.link')}
+          </Link>
+        </p>
+      )}
       {error ? (
         <p id={`${id}-error`} className="text-destructive text-sm">
           {t(error.key, error.params ?? {})}

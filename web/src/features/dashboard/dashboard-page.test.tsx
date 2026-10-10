@@ -94,6 +94,7 @@ describe('DashboardPage', () => {
     await renderWithProviders(<DashboardPage />, { me: loginAs('admin') })
     expect(await screen.findByText('Keine Basisdomain festgelegt')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Server anlegen' })).toBeDisabled()
+    expect(screen.getByRole('link', { name: 'Zu den Einstellungen' })).toHaveAttribute('href', '/settings')
   })
 
   it('links admins to the create page when a base domain is set', async () => {
