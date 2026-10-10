@@ -39,6 +39,9 @@ cleanup() {
   ip link del mcp-host 2>/dev/null || true
   ip netns del "$ns" 2>/dev/null || true
   nft delete table inet mcpanel 2>/dev/null || true
+  # The agent's instance manager creates the mc-router container and its network.
+  docker rm -f mcpanel-router >/dev/null 2>&1 || true
+  docker network rm mcpanel-mc >/dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT
@@ -53,6 +56,9 @@ logs() {
 echo "== setup: user mcpanel, binaries, test network"
 if ! id mcpanel >/dev/null 2>&1; then
   useradd --system --user-group --no-create-home --shell /usr/sbin/nologin mcpanel
+fi
+if ! id mcpanel-mc >/dev/null 2>&1; then
+  useradd --system --user-group --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin mcpanel-mc
 fi
 install -d -m 0755 "$work/bin"
 install -m 0755 "$1" "$work/bin/panel"
@@ -74,6 +80,8 @@ cat >"$work/agent.toml" <<EOF
 socket = "$work/run/agent.sock"
 panel_uid = $(id -u mcpanel)
 firewall = "nftables"
+instances_dir = "$work/mc"
+mc_user = "mcpanel-mc"
 EOF
 cat >"$work/panel.toml" <<EOF
 listen = "192.0.2.1:8080"

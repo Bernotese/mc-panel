@@ -259,6 +259,14 @@ jobs:
       - name: Integration tests as root
         run: go test -tags nftintegration -exec sudo -count=1 -v ./internal/agent/...
 
+      # GitHub's Ubuntu runners ship a running Docker daemon. The tests pull a small,
+      # digest-pinned busybox image instead of the itzg images. MCPANEL_IT_STRICT=1 turns
+      # the "host not clean" skip of the manager test into a failure.
+      - name: Docker integration tests as root
+        run: |
+          sudo docker version
+          go test -tags dockerintegration -exec "sudo env MCPANEL_IT_STRICT=1" -count=1 -v ./internal/agent/...
+
       # Acceptance check 5 end to end: agent (root, nftables) + panel (user mcpanel) in
       # production mode; five failed logins must jail the client IP in nftables.
       - name: Build panel and agent
