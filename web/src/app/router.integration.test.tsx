@@ -68,4 +68,11 @@ describe('app router with the real guards', () => {
     expect(await screen.findByText('Deine IP-Adresse ist vorübergehend gesperrt.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Erneut versuchen' })).toBeInTheDocument()
   })
+
+  it('keeps regular users out of the create server page', async () => {
+    const queryClient = createTestQueryClient()
+    applyMe(queryClient, loginAs('alice'))
+    const { router } = await mountApp('/servers/new', queryClient)
+    await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  })
 })
