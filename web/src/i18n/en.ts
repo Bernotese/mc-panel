@@ -153,7 +153,9 @@ export const en: Messages = {
   },
   dashboard: {
     title: 'Servers',
-    description: 'Your Minecraft servers. Instance management follows in a later sub-project.',
+    description: 'Your Minecraft servers at a glance.',
+    base_domain_missing_title: 'No base domain set',
+    base_domain_missing: 'Servers are reachable at <name>.<base domain>. You cannot create servers until a base domain is set.',
     empty: 'No servers available.',
     create_server: 'Create server',
     create_description: 'Creates a Paper server (latest version, 4 GiB RAM). By clicking “Create” you accept the Minecraft EULA (aka.ms/MinecraftEULA).',
@@ -165,23 +167,6 @@ export const en: Messages = {
     delete_for: 'Delete {{name}}',
     delete_title: 'Delete server “{{name}}”?',
     delete_description: 'All permissions on this server will be removed.',
-    stub_hint: 'Stub server (no instance yet)',
-    permissions_label: 'Your permissions',
-    power_group: 'Controls for {{name}}',
-    no_power: 'No permission to start/stop.',
-    power: {
-      start: 'Start',
-      stop: 'Stop',
-      restart: 'Restart',
-    },
-    power_noun: {
-      start: 'Start',
-      stop: 'Stop',
-      restart: 'Restart',
-    },
-    stop_title: 'Stop server "{{name}}"?',
-    stop_description: 'Players are disconnected as soon as the server shuts down.',
-    power_requested: '{{action}} requested for “{{name}}”.',
   },
   servers: {
     state: {
@@ -208,7 +193,31 @@ export const en: Messages = {
       version: '{{type}} {{version}}',
       latest: '{{type}} (latest version)',
       modpack: '{{type}}: {{modpack}}',
+    },    power: {
+      start: 'Start',
+      stop: 'Stop',
+      restart: 'Restart',
     },
+    power_noun: {
+      start: 'Start',
+      stop: 'Stop',
+      restart: 'Restart',
+    },
+    power_group: 'Controls for {{name}}',
+    no_power: 'No permission to start/stop.',
+    stop_title: 'Stop server “{{name}}”?',
+    stop_description: 'Players are disconnected as soon as the server shuts down.',
+    power_requested: '{{action}} requested for “{{name}}”.',
+    address: {
+      missing: 'No address yet – the base domain is missing.',
+      copy: 'Copy address {{address}}',
+      copied: 'Address copied.',
+      copy_failed: 'Copy failed.',
+    },
+    memory_usage: 'RAM: {{used}} / {{limit}} GiB',
+    restart_required: 'Restart required',
+    not_configured_hint: 'No Minecraft instance yet – can only be deleted.',
+
     validation: {
       name_required: 'Enter a name.',
       name_invalid: 'Only lowercase letters, digits and hyphens, 2–32 characters, not starting or ending with a hyphen.',

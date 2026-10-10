@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { errorMessage } from '@/lib/error-message'
 import { cn } from '@/lib/utils'
-import { serversKey } from './servers'
+import { serversKey } from '@/features/servers/api'
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/
 
