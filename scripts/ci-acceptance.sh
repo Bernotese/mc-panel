@@ -39,6 +39,9 @@ cleanup() {
   ip link del mcp-host 2>/dev/null || true
   ip netns del "$ns" 2>/dev/null || true
   nft delete table inet mcpanel 2>/dev/null || true
+  # The agent's instance manager creates the mc-router container and its network.
+  docker rm -f mcpanel-router >/dev/null 2>&1 || true
+  docker network rm mcpanel-mc >/dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT

@@ -172,18 +172,40 @@ type networkCreate struct {
 	Labels map[string]string `json:"Labels,omitempty"`
 }
 
-// EnsureNetwork creates the bridge network name unless it exists.
+type networkInfo struct {
+	Driver string            `json:"Driver"`
+	Labels map[string]string `json:"Labels"`
+}
+
+// EnsureNetwork creates the bridge network name unless it exists. An existing
+// network is only used if it is a bridge carrying all of labels; anything else
+// (e.g. a network of another service that happens to share the name) is refused
+// and never modified.
 func (c *Client) EnsureNetwork(ctx context.Context, name string, labels map[string]string) error {
-	err := c.call(ctx, c.timeout, http.MethodGet, "/networks/"+url.PathEscape(name), nil, nil, nil)
-	if err == nil || !IsNotFound(err) {
+	path := "/networks/" + url.PathEscape(name)
+	var info networkInfo
+	err := c.call(ctx, c.timeout, http.MethodGet, path, nil, nil, &info)
+	if IsNotFound(err) {
+		err = c.call(ctx, c.timeout, http.MethodPost, "/networks/create", nil,
+			networkCreate{Name: name, Driver: "bridge", Labels: labels}, nil)
+		if !IsConflict(err) {
+			return err
+		}
+		// Created concurrently: check what exists now.
+		err = c.call(ctx, c.timeout, http.MethodGet, path, nil, nil, &info)
+	}
+	if err != nil {
 		return err
 	}
-	err = c.call(ctx, c.timeout, http.MethodPost, "/networks/create", nil,
-		networkCreate{Name: name, Driver: "bridge", Labels: labels}, nil)
-	if IsConflict(err) { // created concurrently
-		return nil
+	if info.Driver != "bridge" {
+		return fmt.Errorf("docker: network %s exists with driver %q and is not managed by mc-panel; leaving it untouched", name, info.Driver)
 	}
-	return err
+	for k, v := range labels {
+		if got, ok := info.Labels[k]; !ok || got != v {
+			return fmt.Errorf("docker: network %s exists but is not managed by mc-panel (label %s=%s missing); leaving it untouched", name, k, v)
+		}
+	}
+	return nil
 }
 
 // CreateContainer creates (but does not start) a container and returns its ID.
