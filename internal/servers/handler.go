@@ -17,6 +17,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/servers/catalog"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
 
@@ -29,20 +30,22 @@ type Deps struct {
 	// Instances is the agent's instance API; nil means "no agent" (every call fails with
 	// agentapi.ErrUnavailable).
 	Instances agentapi.InstancesClient
-	Log       *slog.Logger // nil = slog.Default()
+	Log       *slog.Logger  // nil = slog.Default()
+	Catalog   CatalogSource // nil = catalog.New with the default upstreams
 }
 
 type Handler struct {
-	db     *sql.DB
-	q      *store.Queries
-	clock  clock.Clock
-	rec    audit.Recorder
-	box    *secretbox.Box
-	inst   agentapi.InstancesClient
-	log    *slog.Logger
-	power  *powerLimiter
-	kick   chan struct{} // Trigger -> reconcile loop (buffer 1, never blocks)
-	status statusCache   // last actual state reported by the agent
+	db      *sql.DB
+	q       *store.Queries
+	clock   clock.Clock
+	rec     audit.Recorder
+	box     *secretbox.Box
+	inst    agentapi.InstancesClient
+	catalog CatalogSource
+	log     *slog.Logger
+	power   *powerLimiter
+	kick    chan struct{} // Trigger -> reconcile loop (buffer 1, never blocks)
+	status  statusCache   // last actual state reported by the agent
 
 	reconcile reconcileState
 }
@@ -56,8 +59,12 @@ func NewHandler(d Deps) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
+	cat := d.Catalog
+	if cat == nil {
+		cat = catalog.New(catalog.Options{Clock: d.Clock})
+	}
 	return &Handler{
-		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst, log: log,
+		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst, catalog: cat, log: log,
 		power: newPowerLimiter(), kick: make(chan struct{}, 1),
 		reconcile: reconcileState{attempts: map[int64]attempt{}, warned: map[int64]bool{}},
 	}
@@ -76,6 +83,7 @@ func (h *Handler) Trigger() {
 func (h *Handler) Routes(api *rbac.Router) {
 	api.Get("/servers", rbac.Authenticated(), h.handleListServers)
 	api.Post("/servers", rbac.Admin().WithSudo(), h.handleCreateServer)
+	api.Get("/servers/catalog/{type}", rbac.Admin(), h.handleGetCatalog)
 	api.Get("/servers/settings", rbac.Admin(), h.handleGetSettings)
 	api.Put("/servers/settings", rbac.Admin().WithSudo(), h.handleUpdateSettings)
 	api.Get("/servers/{id}", rbac.Server(rbac.PermServerView, "id"), h.handleGetServer)

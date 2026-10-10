@@ -1,5 +1,6 @@
 import { http, HttpResponse } from 'msw'
 import type {
+  Catalog,
   CreateServerRequest,
   InstanceType,
   JavaVersion,
@@ -123,6 +124,21 @@ export const serverOperations: MockOperation[] = [
       db.servers.push(server)
       recordAudit(g.user, 'server.create', `server:${server.id}`, 'success', { name, type: body.type, version })
       return HttpResponse.json<Server>(toServer(server, [...ALL_PERMISSIONS]), { status: 201 })
+    }),
+  ),
+
+  op(
+    'getServerCatalog',
+    http.get(`${API}/servers/catalog/:type`, ({ request, params }) => {
+      const g = guard(request, { admin: true })
+      if (g instanceof Response) return g
+      const type = params.type as InstanceType
+      if (!TYPES.includes(type) || type === 'modrinth' || type === 'curseforge') {
+        return apiError(404, 'not_found', 'no version catalog for this type')
+      }
+      const catalog = db.catalogs[type]
+      if (!catalog) return apiError(502, 'catalog_unavailable', 'version catalog unavailable, enter the version manually')
+      return HttpResponse.json<Catalog>(catalog)
     }),
   ),
 

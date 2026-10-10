@@ -10,7 +10,7 @@ const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../
 describe('mock coverage', () => {
   it('mocks every operationId of api/openapi.yaml exactly once', () => {
     const ids = [...openapiYaml.matchAll(/operationId:\s*(\w+)/g)].map((m) => m[1]).sort()
-    expect(ids).toHaveLength(60)
+    expect(ids).toHaveLength(61)
     expect(operations.map((o) => o.operationId).sort()).toEqual(ids)
   })
 })
@@ -130,6 +130,19 @@ describe('mock behaviour', () => {
     const stub = await power(3, 'start')
     expect(stub.status).toBe(409)
     expect(field(stub.body, 'error')).toBe('conflict')
+  })
+
+  it('serves version catalogs: 404 for modpacks, 502 when missing', async () => {
+    loginAs('admin')
+    const fabric = await callApi('GET', '/servers/catalog/fabric')
+    expect(fabric.body).toMatchObject({ versions: [{ id: '26.3', java: 'java25' }, { id: '1.21.11', java: 'java21' }], loaders: ['0.19.5', '0.19.4'] })
+    expect((await callApi('GET', '/servers/catalog/modrinth')).status).toBe(404)
+    delete db.catalogs.paper
+    const paper = await callApi('GET', '/servers/catalog/paper')
+    expect(paper.status).toBe(502)
+    expect(field(paper.body, 'error')).toBe('catalog_unavailable')
+    loginAs('alice')
+    expect((await callApi('GET', '/servers/catalog/vanilla')).status).toBe(403)
   })
 
   it('buckets the overview series by range', async () => {
