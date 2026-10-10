@@ -57,7 +57,7 @@ export function CurseForgeCard({ settings }: { settings: ServerSettings }) {
           hint={t('settings.curseforge.hint')}
           error={error ?? undefined}
         >
-          {(c) => <Input {...c} type="password" value={key} autoComplete="off" spellCheck={false} onChange={(e) => setKey(e.target.value)} />}
+          {(c) => <Input {...c} type="password" value={key} autoComplete="new-password" spellCheck={false} onChange={(e) => setKey(e.target.value)} />}
         </FieldRow>
         <a href={CONSOLE_URL} target="_blank" rel="noreferrer" className="text-primary inline-block underline underline-offset-4">
           {t('settings.curseforge.console_link')}
