@@ -39,7 +39,7 @@ func TestServerHealth(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &h); err != nil {
 		t.Fatal(err)
 	}
-	if h != (agentapi.HealthResponse{Status: "ok", Version: "1.2.3", Firewall: "noop"}) {
+	if h != (agentapi.HealthResponse{Status: "ok", Version: "1.2.3", Firewall: "noop", Docker: "unavailable"}) {
 		t.Fatalf("health = %+v", h)
 	}
 }

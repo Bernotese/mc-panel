@@ -467,7 +467,7 @@ export const MAX_WHITELIST = 200
 export const MAX_OPS = 50
 export const MAX_BASE_DOMAIN_LENGTH = 200
 
-const SERVER_NAME_RE = /^[a-z0-9][a-z0-9-]{1,31}$/
+const SERVER_NAME_RE = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/
 const VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.\-+_]{0,63}$/
 const SLUG_RE = /^[a-z0-9-]{1,64}$/
 const CURSEFORGE_URL_RE = /^https:\/\/www\.curseforge\.com\/minecraft\/modpacks\/[a-z0-9-]{1,64}$/

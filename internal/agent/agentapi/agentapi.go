@@ -22,6 +22,7 @@ type HealthResponse struct {
 	Status   string `json:"status"` // "ok"
 	Version  string `json:"version"`
 	Firewall string `json:"firewall"` // "nftables" | "noop"
+	Docker   string `json:"docker"`   // DockerOK | DockerUnavailable
 }
 
 type BanRequest struct {
@@ -44,6 +45,7 @@ type BansResponse struct {
 
 type ErrorResponse struct {
 	Error string `json:"error"`
+	Code  string `json:"code,omitempty"` // ErrorCodeBusy | ErrorCodeDockerUnavailable
 }
 
 var ErrUnavailable = errors.New("agent unavailable")
