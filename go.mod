@@ -1,4 +1,4 @@
-module mcpanel
+module github.com/Bernotese/mc-panel
 
 go 1.27.2
 

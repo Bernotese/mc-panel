@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"time"
 
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // presentedTokenKey carries the token hash of the cookie the session loader authenticated.

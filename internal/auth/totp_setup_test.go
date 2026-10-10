@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // insertPasskeyRow adds a passkey row directly (counts as a 2FA method; not usable for login).

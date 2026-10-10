@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"testing"
 
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 func TestAuthQueries(t *testing.T) {

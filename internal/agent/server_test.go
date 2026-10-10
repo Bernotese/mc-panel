@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent"
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
 )
 
 const jsonCT = "application/json"

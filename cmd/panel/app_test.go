@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
-	"mcpanel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/rbac"
 )
 
 func newTestApp(t *testing.T) (*app, config.Panel) {

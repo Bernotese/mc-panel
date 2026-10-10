@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // isUnavailable reports transient agent failures that must be retried later.

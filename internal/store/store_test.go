@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 func TestMigrateIsIdempotentAndCreatesTables(t *testing.T) {

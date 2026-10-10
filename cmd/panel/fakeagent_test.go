@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 type fakeAgent struct {

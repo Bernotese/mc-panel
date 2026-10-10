@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mcpanel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
 )
 
 func TestSealOpenRoundTrip(t *testing.T) {

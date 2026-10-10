@@ -9,11 +9,11 @@ import (
 	"net/http"
 	"slices"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // grantJSON is the OpenAPI schema PermissionGrant.

@@ -19,11 +19,11 @@ import (
 	"syscall"
 	"time"
 
-	"mcpanel/internal/agent"
-	"mcpanel/internal/agent/firewall"
-	"mcpanel/internal/agent/peercred"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/agent/firewall"
+	"github.com/Bernotese/mc-panel/internal/agent/peercred"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
 )
 
 // version is set at build time: go build -ldflags "-X main.version=1.2.3".

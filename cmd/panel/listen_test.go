@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
 )
 
 // serveUnix starts the full app on a unix socket in a short temp dir (macOS: 104-byte limit).

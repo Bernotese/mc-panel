@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"mcpanel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
 )
 
 type Kind string

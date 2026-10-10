@@ -11,19 +11,19 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/audit"
-	"mcpanel/internal/audit/auditapi"
-	"mcpanel/internal/auth"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/secretbox"
-	"mcpanel/internal/users"
-	"mcpanel/internal/webui"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/audit/auditapi"
+	"github.com/Bernotese/mc-panel/internal/auth"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/users"
+	"github.com/Bernotese/mc-panel/internal/webui"
 )
 
 // sessionPruneInterval is how often ended sessions older than auth.SessionRetention are deleted.

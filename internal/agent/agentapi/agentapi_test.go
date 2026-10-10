@@ -4,7 +4,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 func TestValidateBanPrefix(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/httpx"
 )
 
 func TestWriteError(t *testing.T) {

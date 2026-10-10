@@ -5,7 +5,7 @@ package firewall
 import (
 	"log/slog"
 
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 func newNFTables(log *slog.Logger) (agentapi.Firewall, error) {

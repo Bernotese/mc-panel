@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/password"
-	"mcpanel/internal/store/storetest"
-	"mcpanel/internal/users"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/users"
 )
 
 func TestRunAdminCreate(t *testing.T) {

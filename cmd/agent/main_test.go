@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent"
-	"mcpanel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/config"
 )
 
 // socketPath returns a short socket path (macOS limits them to 104 bytes).

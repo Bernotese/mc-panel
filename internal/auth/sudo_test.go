@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/defense"
 )
 
 func TestSudoTOTPGrantsSudo(t *testing.T) {

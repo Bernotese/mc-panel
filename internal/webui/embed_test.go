@@ -8,7 +8,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"mcpanel/internal/webui"
+	"github.com/Bernotese/mc-panel/internal/webui"
 )
 
 func get(h http.Handler, path string) (int, string, http.Header) {

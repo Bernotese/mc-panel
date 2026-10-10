@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/password"
 )
 
 func TestValidate(t *testing.T) {

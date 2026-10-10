@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
 )
 
 func TestTOTPKey(t *testing.T) {

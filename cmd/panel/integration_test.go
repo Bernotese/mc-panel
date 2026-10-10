@@ -16,13 +16,13 @@ import (
 
 	"github.com/pquerna/otp/totp"
 
-	"mcpanel/internal/agent"
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store/storetest"
-	"mcpanel/internal/users"
+	"github.com/Bernotese/mc-panel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/users"
 )
 
 const adminPW = "mc-panel integration pw 1"
