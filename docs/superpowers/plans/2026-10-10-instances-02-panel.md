@@ -98,7 +98,7 @@ func (h *Handler) Routes(api *rbac.Router)
 ```
 `users.NewHandler(db, clock, rec, notifier)` behält seine Signatur, registriert aber keine `/servers`-Routen mehr.
 
-- [ ] **Step 1: Tests ins neue Paket schreiben**
+- [x] **Step 1: Tests ins neue Paket schreiben**
 
 `internal/servers/helpers_test.go`:
 
@@ -469,12 +469,12 @@ func TestServerPowerRateLimitedPerUser(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test ./internal/servers/ -count=1`
 Expected: FAIL beim Kompilieren (`package github.com/Bernotese/mc-panel/internal/servers` hat keine Go-Dateien außer Tests; `servers.NewHandler` undefiniert).
 
-- [ ] **Step 3: Power-Limiter verschieben**
+- [x] **Step 3: Power-Limiter verschieben**
 
 ```bash
 mkdir -p internal/servers
@@ -483,7 +483,7 @@ sed -i.bak 's/^package users$/package servers/' internal/servers/powerlimit.go &
 git rm -q internal/users/servers.go internal/users/servers_test.go
 ```
 
-- [ ] **Step 4: Paket `internal/servers` schreiben**
+- [x] **Step 4: Paket `internal/servers` schreiben**
 
 `internal/servers/handler.go`:
 
@@ -823,7 +823,7 @@ func (h *Handler) handleServerPower(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 5: `internal/users` entschlacken**
+- [x] **Step 5: `internal/users` entschlacken**
 
 `internal/users/handler.go`:
 
@@ -853,7 +853,7 @@ func (h *Handler) Routes(api *rbac.Router) {
 ```
 (`orderedPerms`, `loadGrants`, `pathID` und `writeConflict` bleiben in `users`, sie werden dort weiter benutzt.)
 
-- [ ] **Step 6: In `cmd/panel/app.go` verdrahten**
+- [x] **Step 6: In `cmd/panel/app.go` verdrahten**
 
 Import `"github.com/Bernotese/mc-panel/internal/servers"` ergänzen (alphabetisch nach `secretbox`), nach `usersH := …`:
 ```go
@@ -864,17 +864,17 @@ und im `/api`-Block nach `usersH.Routes(api)`:
 		serversH.Routes(api)
 ```
 
-- [ ] **Step 7: Tests laufen lassen (grün)**
+- [x] **Step 7: Tests laufen lassen (grün)**
 
 Run: `gofmt -l internal/ cmd/ && go test ./internal/servers/ ./internal/users/ ./cmd/panel/ -count=1`
 Expected: keine Ausgabe von `gofmt -l`; PASS (inkl. `TestRoutesMatchOpenAPI`, `TestRouteCoverage` mit unverändert 57 Routen).
 
-- [ ] **Step 8: Gesamtprüfung**
+- [x] **Step 8: Gesamtprüfung**
 
 Run: `make test && make lint`
 Expected: PASS, `0 issues`, eslint/tsc ohne Befunde (Frontend unverändert).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add internal/servers internal/users cmd/panel/app.go
@@ -916,7 +916,7 @@ func (h *Handler) Trigger()
 ```
 OpenAPI: `GET /servers/settings` (`getServerSettings`, Admin), `PUT /servers/settings` (`updateServerSettings`, Admin + Sudo), Schemas `UnknownContainer`, `ServerSettings`, `UpdateServerSettingsRequest` (wörtlich V4), Error-Enum + 3 Codes. MSW: `db.serverSettings` (V5), zwei Operationen (vor `getServer` registriert). Operationen: 59.
 
-- [ ] **Step 1: Failing tests schreiben**
+- [x] **Step 1: Failing tests schreiben**
 
 `internal/servers/helpers_test.go` komplett ersetzen (neu: `secretbox`, Fake-agent, `createInstance`, `instanceRow`):
 
@@ -1397,12 +1397,12 @@ func TestSettingsNeedAdminAndSudo(t *testing.T) {
 	"PUT /api/servers/settings":    rbac.Admin().WithSudo(),
 ```
 
-- [ ] **Step 2: Tests laufen lassen (rot)**
+- [x] **Step 2: Tests laufen lassen (rot)**
 
 Run: `go test ./internal/servers/ -count=1`
 Expected: FAIL beim Kompilieren (`unknown field Box in struct literal of type servers.Deps`, `undefined: optional`).
 
-- [ ] **Step 3: Fehlercodes und Audit-Aktion**
+- [x] **Step 3: Fehlercodes und Audit-Aktion**
 
 `internal/httpx/errors.go`, im `const`-Block nach `CodeAgentUnavailable`:
 ```go
@@ -1416,7 +1416,7 @@ Expected: FAIL beim Kompilieren (`unknown field Box in struct literal of type se
 ```
 Danach `gofmt -w internal/audit/types.go internal/httpx/errors.go` (richtet den ganzen Block neu aus).
 
-- [ ] **Step 4: Implementieren**
+- [x] **Step 4: Implementieren**
 
 `internal/servers/handler.go` komplett ersetzen:
 
@@ -1814,12 +1814,12 @@ func (h *Handler) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 ```
 (`Instances` bleibt bis Aufgabe 16 `nil` → `noAgent`.)
 
-- [ ] **Step 5: Go-Tests laufen lassen (grün)**
+- [x] **Step 5: Go-Tests laufen lassen (grün)**
 
 Run: `gofmt -l internal/ && go test ./internal/servers/ -count=1`
 Expected: PASS. `go test ./cmd/panel/` schlägt jetzt erwartungsgemäß fehl (`route not in OpenAPI: GET /api/servers/settings`, Fehlercodes ≠ Enum) – Step 6 behebt das.
 
-- [ ] **Step 6: OpenAPI-Vertrag**
+- [x] **Step 6: OpenAPI-Vertrag**
 
 `api/openapi.yaml`:
 
@@ -1881,7 +1881,7 @@ Expected: PASS. `go test ./cmd/panel/` schlägt jetzt erwartungsgemäß fehl (`r
 Run: `make generate`
 Expected: `web/src/api/schema.d.ts` enthält `"/servers/settings"`, `ServerSettings`, `UpdateServerSettingsRequest`, `UnknownContainer` und die drei neuen Codes im `Error`-Enum; `sqlc` ändert nichts.
 
-- [ ] **Step 7: MSW-Mock und Typen**
+- [x] **Step 7: MSW-Mock und Typen**
 
 `web/src/api/types.ts`, nach `export type PowerAction = …`:
 ```ts
@@ -1986,12 +1986,12 @@ und in `serverOperations` **direkt vor** `op('getServer', …)`:
 
 `web/src/api/errors.ts` (`KNOWN_CODES`), die `errors.*`-Texte und `ERROR_CODES` in `web/src/i18n/i18n.test.ts` bleiben unverändert – Aufgabe 17 trägt die drei neuen Codes dort ein. Bis dahin zeigt das Frontend sie als „unerwarteter Fehler“; kein Test hängt davon ab.
 
-- [ ] **Step 8: Gesamtprüfung**
+- [x] **Step 8: Gesamtprüfung**
 
 Run: `make test && make lint`
 Expected: PASS (Go inkl. `TestRoutesMatchOpenAPI`, `TestErrorCodesMatchOpenAPI`, `TestRouteCoverage` mit 59; Vitest inkl. „mocks every operationId … exactly once“ mit 59), `0 issues`, eslint und `tsc -b` ohne Befunde.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add internal/httpx/errors.go internal/audit/types.go internal/servers cmd/panel/app.go cmd/panel/integration_test.go \
@@ -2041,7 +2041,7 @@ func RefreshStatus(ctx context.Context, h *Handler)
 ```
 OpenAPI: Schemas `InstanceType`, `JavaVersion`, `ServerState`, `ServerProperties`, `InstanceConfig`, `ServerStatus`, `Server` (neu), `CreateServerRequest` (neu), `UpdateServerRequest` (alle wörtlich V4); Operation `PATCH /servers/{id}` (`updateServer`, Admin + Sudo, 200/400/404/409); `DELETE /servers/{id}` bekommt 429 und 503; neue Antwort-Komponente `ServiceUnavailable`. Operationen: 60. MSW: `MockServer` und Seed nach V5, Verhalten für list/get/create/update/delete nach V5 (Power bleibt bis Aufgabe 14 wie in TP1).
 
-- [ ] **Step 1: Failing tests schreiben**
+- [x] **Step 1: Failing tests schreiben**
 
 `internal/servers/export_test.go`:
 
@@ -2754,19 +2754,19 @@ func TestServerPowerRateLimitedPerUser(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Tests laufen lassen (rot)**
+- [x] **Step 2: Tests laufen lassen (rot)**
 
 Run: `go test ./internal/servers/ -count=1`
 Expected: FAIL beim Kompilieren (`undefined: Snapshot`, `undefined: deriveStatus`, `h.refreshStatus undefined`).
 
-- [ ] **Step 3: Audit-Aktion**
+- [x] **Step 3: Audit-Aktion**
 
 `internal/audit/types.go`, nach `ActionServerPower`:
 ```go
 	ActionServerUpdate         = "server.update"
 ```
 
-- [ ] **Step 4: Konfiguration, Status-Cache, Zustandsableitung, Antwortschema**
+- [x] **Step 4: Konfiguration, Status-Cache, Zustandsableitung, Antwortschema**
 
 `internal/servers/config.go`:
 
@@ -3219,7 +3219,7 @@ func view(s store.Server, perms []rbac.Permission, in *store.Instance, baseDomai
 }
 ```
 
-- [ ] **Step 5: Handler – `servers.go` komplett ersetzen**
+- [x] **Step 5: Handler – `servers.go` komplett ersetzen**
 
 ```go
 package servers
@@ -3605,7 +3605,7 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 6: `handler.go` und `settings.go` anpassen**
+- [x] **Step 6: `handler.go` und `settings.go` anpassen**
 
 `internal/servers/handler.go`:
 - Das `Handler`-Struct wird zu
@@ -3657,12 +3657,12 @@ func (h *Handler) loadSettings(ctx context.Context) (instanceSettings, error) {
 
 ```
 
-- [ ] **Step 7: Go-Tests laufen lassen (grün)**
+- [x] **Step 7: Go-Tests laufen lassen (grün)**
 
 Run: `gofmt -l internal/ && go test ./internal/servers/ -count=1 && golangci-lint run ./internal/servers/...`
 Expected: keine gofmt-Ausgabe, PASS, `0 issues`.
 
-- [ ] **Step 8: OpenAPI-Vertrag**
+- [x] **Step 8: OpenAPI-Vertrag**
 
 `api/openapi.yaml`:
 
@@ -3796,7 +3796,7 @@ Expected: keine gofmt-Ausgabe, PASS, `0 issues`.
 Run: `make generate`
 Expected: `schema.d.ts` enthält `updateServer`, `Server.instance: components["schemas"]["InstanceConfig"] | null`, `ServerStatus.desired_state: "running" | "stopped" | null` und `CreateServerRequest.eula_accepted: true`.
 
-- [ ] **Step 9: Integrationstest in `cmd/panel` anpassen**
+- [x] **Step 9: Integrationstest in `cmd/panel` anpassen**
 
 `cmd/panel/integration_test.go`:
 - `TestRouteCoverage`: `59` → `60`.
@@ -3831,7 +3831,7 @@ func paperServer(name string) map[string]any {
 Run: `go test ./cmd/panel/ -count=1`
 Expected: PASS (60 Routen, OpenAPI ↔ Routen identisch).
 
-- [ ] **Step 10: Typen, MSW-Mock (V5) und Übergangs-Dialog**
+- [x] **Step 10: Typen, MSW-Mock (V5) und Übergangs-Dialog**
 
 `web/src/api/types.ts`, vor `export type ServerSettings = …`:
 ```ts
@@ -4252,12 +4252,12 @@ export const serverOperations: MockOperation[] = [
 ```
 `dashboard-page.test.tsx` und `web/e2e/smoke.spec.ts` bleiben unverändert (der Dialog hat weiterhin nur das Namensfeld; der Mock-Seed hat eine Basisdomain).
 
-- [ ] **Step 11: Gesamtprüfung**
+- [x] **Step 11: Gesamtprüfung**
 
 Run: `make test && make lint && (cd web && npm run e2e)`
 Expected: Go und Vitest PASS (60 Operationen), `0 issues`, eslint/`tsc -b` ohne Befunde, Playwright gegen den Mock grün (Sudo-Test legt `skyblock` weiter über den Dialog an).
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add internal/audit/types.go internal/servers cmd/panel/integration_test.go api/openapi.yaml web/src/api/schema.d.ts \
@@ -4291,7 +4291,7 @@ func ensureRequest(name string, in store.Instance, set instanceSettings, recreat
 ```
 OpenAPI: `serverPower` bekommt `409` (nicht eingerichtet / `base_domain_missing` bei restart) und `503`; `PowerRequest` eine Beschreibung. Keine neue Operation (weiter 60). MSW: Power-Übergänge nach V5.
 
-- [ ] **Step 1: Failing tests schreiben**
+- [x] **Step 1: Failing tests schreiben**
 
 `internal/servers/helpers_test.go`:
 - Import `"log/slog"` ergänzen (nach `"io"`).
@@ -4771,12 +4771,12 @@ func TestRunStopsOnCancel(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Tests laufen lassen (rot)**
+- [x] **Step 2: Tests laufen lassen (rot)**
 
 Run: `go test ./internal/servers/ -count=1`
 Expected: FAIL beim Kompilieren (`unknown field Log in struct literal of type servers.Deps`, `e.h.ReconcileOnce undefined`).
 
-- [ ] **Step 3: Implementieren**
+- [x] **Step 3: Implementieren**
 
 `internal/servers/power.go` komplett ersetzen:
 
@@ -5180,12 +5180,12 @@ func NewHandler(d Deps) *Handler {
 		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeBaseDomainMissing, "set a base domain in the server settings first")
 ```
 
-- [ ] **Step 4: Tests laufen lassen (grün, auch mit Race-Detector)**
+- [x] **Step 4: Tests laufen lassen (grün, auch mit Race-Detector)**
 
 Run: `gofmt -l internal/ && go test ./internal/servers/ -count=1 && CGO_ENABLED=1 go test -race -count=1 ./internal/servers/ && golangci-lint run ./internal/servers/...`
 Expected: PASS (inkl. aller 17 Zeilen von `TestReconcileTable`), keine Races, `0 issues`.
 
-- [ ] **Step 5: Integrationstest, OpenAPI, MSW**
+- [x] **Step 5: Integrationstest, OpenAPI, MSW**
 
 `cmd/panel/integration_test.go`, `TestFullFlowPermissionsAndAudit`: `restart` braucht jetzt den agent (in `buildApp` erst ab Aufgabe 16 verdrahtet) – die beiden Power-Aufrufe von `maxUser` nutzen `stop`:
 ```go
@@ -5249,12 +5249,12 @@ import { db, nextId, recordAudit, resolveProperties, runningStatus, stoppedStatu
 
 ```
 
-- [ ] **Step 6: Gesamtprüfung**
+- [x] **Step 6: Gesamtprüfung**
 
 Run: `make test && make lint`
 Expected: PASS (die Dashboard-Tests „Neu starten“/„Stoppen“ auf `survival` laufen über die neuen Übergänge), `0 issues`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/servers cmd/panel/integration_test.go api/openapi.yaml web/src/api/schema.d.ts \
@@ -5300,7 +5300,7 @@ type Deps struct { …; Catalog CatalogSource } // nil = catalog.New(catalog.Opt
 ```
 OpenAPI: `GET /servers/catalog/{type}` (`getServerCatalog`, Admin; 200 `Catalog`, 404, 502), Schemas `CatalogVersion`, `Catalog` (V4). Operationen: 61. MSW: `db.catalogs` nach V5.
 
-- [ ] **Step 1: Beispielantworten (gekürzt, echte Formen)**
+- [x] **Step 1: Beispielantworten (gekürzt, echte Formen)**
 
 `internal/servers/catalog/testdata/mojang_manifest.json`:
 ```json
@@ -5423,7 +5423,7 @@ OpenAPI: `GET /servers/catalog/{type}` (`getServerCatalog`, Admin; 200 `Catalog`
 }
 ```
 
-- [ ] **Step 2: Failing tests schreiben**
+- [x] **Step 2: Failing tests schreiben**
 
 `internal/servers/catalog/catalog_test.go`:
 
@@ -5761,12 +5761,12 @@ var wantRoutes = map[string]rbac.Rule{
 }
 ```
 
-- [ ] **Step 3: Tests laufen lassen (rot)**
+- [x] **Step 3: Tests laufen lassen (rot)**
 
 Run: `go test ./internal/servers/... -count=1`
 Expected: FAIL beim Kompilieren (Paket `internal/servers/catalog` ohne Quelldateien, `unknown field Catalog in struct literal of type servers.Deps`).
 
-- [ ] **Step 4: Katalog-Paket implementieren**
+- [x] **Step 4: Katalog-Paket implementieren**
 
 `internal/servers/catalog/catalog.go`:
 
@@ -6176,7 +6176,7 @@ func NeoForgeMC(v string) (string, bool) {
 }
 ```
 
-- [ ] **Step 5: Handler und Verdrahtung im Paket**
+- [x] **Step 5: Handler und Verdrahtung im Paket**
 
 `internal/servers/catalog_api.go`:
 
@@ -6284,12 +6284,12 @@ func NewHandler(d Deps) *Handler {
 
 (`cmd/panel/app.go` bleibt unverändert: `Catalog: nil` erzeugt den Standard-Client mit User-Agent `mc-panel/dev …`; Aufgabe 16 übergibt die echte Version.)
 
-- [ ] **Step 6: Go-Tests laufen lassen (grün)**
+- [x] **Step 6: Go-Tests laufen lassen (grün)**
 
 Run: `gofmt -l internal/ && go test ./internal/servers/... -count=1 && CGO_ENABLED=1 go test -race -count=1 ./internal/servers/catalog/ && golangci-lint run ./internal/servers/...`
 Expected: PASS (der Timeout-Fall dauert ≈ 1 s), keine Races, `0 issues`.
 
-- [ ] **Step 7: OpenAPI, Zähler, MSW**
+- [x] **Step 7: OpenAPI, Zähler, MSW**
 
 `api/openapi.yaml`:
 - Unter `paths`, direkt vor `  /servers/settings:`:
@@ -6421,12 +6421,12 @@ export type CatalogVersion = Schemas['CatalogVersion']
 
 ```
 
-- [ ] **Step 8: Gesamtprüfung**
+- [x] **Step 8: Gesamtprüfung**
 
 Run: `make test && make lint`
 Expected: PASS (61 Operationen in Go und Vitest), `0 issues`.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add internal/servers cmd/panel/integration_test.go api/openapi.yaml web/src/api/schema.d.ts web/src/api/types.ts \
@@ -6457,7 +6457,7 @@ type appDeps struct {
 }
 ```
 
-- [ ] **Step 1: Failing test schreiben**
+- [x] **Step 1: Failing test schreiben**
 
 `cmd/panel/fakeinstances_test.go`:
 
@@ -6669,12 +6669,12 @@ und am Ende `return &env{t: t, srv: srv, app: a, clk: clk, agent: fa, instances:
 	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clock.Real{}, Agent: ac, Instances: ac})
 ```
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test ./cmd/panel/ -run 'TestInstanceLifecycleEndToEnd|TestAgentDownStillWorks' -count=1`
 Expected: FAIL beim Kompilieren (`unknown field Instances in struct literal of type appDeps`).
 
-- [ ] **Step 3: Verdrahten**
+- [x] **Step 3: Verdrahten**
 
 `cmd/panel/app.go`:
 - Import `"github.com/Bernotese/mc-panel/internal/servers/catalog"` ergänzen (nach `internal/servers`).
@@ -6716,19 +6716,19 @@ type appDeps struct {
 ```
 (`newTestApp` in `app_test.go` bleibt bei `appDeps{Clock: clock.Real{}}`: `Instances: nil` → `noAgent`; `TestRunStopsOnCancel` prüft, dass auch die Abgleichsschleife beim Abbruch endet.)
 
-- [ ] **Step 4: Tests laufen lassen (grün, auch mit Race-Detector)**
+- [x] **Step 4: Tests laufen lassen (grün, auch mit Race-Detector)**
 
 Run: `gofmt -l cmd/ && go test ./cmd/panel/ -count=1 && CGO_ENABLED=1 go test -race -count=1 ./cmd/panel/ ./internal/servers/...`
 Expected: PASS (`TestInstanceLifecycleEndToEnd` braucht < 2 s: jede erfolgreiche Abgleichsaktion stößt sofort den nächsten Durchlauf an), keine Races.
 
-- [ ] **Step 5: Gesamtprüfung und manuelle Kontrolle**
+- [x] **Step 5: Gesamtprüfung und manuelle Kontrolle**
 
 Run: `make test && make lint && make build`
 Expected: alles grün, `bin/panel` und `bin/agent` gebaut.
 
 Manuell (optional, macOS): `make dev`, als Admin anmelden, `PUT /api/servers/settings` über die Browser-Konsole bzw. ab Aufgabe 21 über die Einstellungsseite; ohne Docker zeigt `GET /api/servers/settings` `docker: "unavailable"` (agent läuft) bzw. `"unknown"` (agent gestoppt), angelegte Server stehen auf `unknown`, die panel-Logs enthalten genau eine Zeile `servers: reconcile paused …`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cmd/panel/app.go cmd/panel/main.go cmd/panel/integration_test.go cmd/panel/fakeinstances_test.go cmd/panel/instances_test.go

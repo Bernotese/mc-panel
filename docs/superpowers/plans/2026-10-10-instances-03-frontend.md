@@ -177,7 +177,7 @@ export function pollInterval(servers: readonly Server[] | undefined): number
 export function powerAllowed(state: ServerState, action: PowerAction): boolean
 ```
 
-- [ ] **Step 1: Typ-Aliase, Fehlercodes und Basis-Texte**
+- [x] **Step 1: Typ-Aliase, Fehlercodes und Basis-Texte**
 
 `web/src/api/types.ts`: direkt nach `export type PowerAction = Schemas['PowerRequest']['action']` einfügen (hat Aufgabe 12–15 einzelne Aliase schon angelegt, diese nicht doppeln – der Endzustand ist genau diese Liste):
 
@@ -247,12 +247,12 @@ und am Ende von `DYNAMIC_KEYS` (nach der `nav.${k}`-Zeile) ergänzen:
   ...['vanilla', 'paper', 'purpur', 'fabric', 'neoforge', 'modrinth', 'curseforge'].map((k) => `servers.type.${k}`),
 ```
 
-- [ ] **Step 2: i18n-Test laufen lassen → FAIL**
+- [x] **Step 2: i18n-Test laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/i18n/i18n.test.ts`
 Expected: FAIL – `translates every API error code` (`docker_unavailable`) und `defines every dynamic key` (`servers.state.*`, `servers.type.*`).
 
-- [ ] **Step 3: Texte ergänzen**
+- [x] **Step 3: Texte ergänzen**
 
 `web/src/i18n/de.ts`, im Block `errors` nach `agent_unavailable` (vorhandene gleichnamige Schlüssel aus Aufgabe 12–15 durch diese Texte ersetzen):
 
@@ -383,7 +383,7 @@ Expected: FAIL – `translates every API error code` (`docker_unavailable`) und 
 Run: `cd web && npx vitest run src/i18n/i18n.test.ts`
 Expected: PASS.
 
-- [ ] **Step 4: Failing Test `web/src/features/servers/java.test.ts`**
+- [x] **Step 4: Failing Test `web/src/features/servers/java.test.ts`**
 
 ```ts
 import fs from 'node:fs'
@@ -439,7 +439,7 @@ describe('mock java derivation', () => {
 Run: `cd web && npx vitest run src/features/servers/java.test.ts`
 Expected: FAIL – `Failed to resolve import "./java"`.
 
-- [ ] **Step 5: `web/src/features/servers/validation.ts`** (wird von `java.ts` gebraucht)
+- [x] **Step 5: `web/src/features/servers/validation.ts`** (wird von `java.ts` gebraucht)
 
 ```ts
 import type { Difficulty, Gamemode, InstanceType, JavaVersion, LevelType } from '@/api/types'
@@ -567,7 +567,7 @@ export function validateCurseForgeKey(key: string): FieldError | null {
 }
 ```
 
-- [ ] **Step 6: `web/src/features/servers/java.ts`**
+- [x] **Step 6: `web/src/features/servers/java.ts`**
 
 ```ts
 import type { InstanceType, JavaVersion } from '@/api/types'
@@ -599,7 +599,7 @@ function leadingInt(s: string): number | null {
 }
 ```
 
-- [ ] **Step 7: Mock auf `javaFor` umstellen**
+- [x] **Step 7: Mock auf `javaFor` umstellen**
 
 In `web/src/mocks/handlers/servers.ts` die Inline-Ableitung aus V5 entfernen: die lokale Funktion `mockJavaFor` samt ihrer Versionstabelle löschen, `import { javaFor } from '@/features/servers/java'` zu den Imports nehmen und jeden Aufruf `mockJavaFor(` durch `javaFor(` ersetzen. Kontrolle:
 
@@ -609,7 +609,7 @@ Expected: keine Treffer (die Seeds mit `java21`/`java25` liegen in `db.ts`).
 Run: `cd web && npx vitest run src/features/servers/java.test.ts`
 Expected: PASS (3 Tests).
 
-- [ ] **Step 8: Absicherung gegen die Go-Fälle – `web/src/features/servers/validation.test.ts`**
+- [x] **Step 8: Absicherung gegen die Go-Fälle – `web/src/features/servers/validation.test.ts`**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -739,7 +739,7 @@ describe('properties', () => {
 Run: `cd web && npx vitest run src/features/servers/validation.test.ts`
 Expected: PASS (die Implementierung aus Step 5 liegt schon vor; der Test sichert sie gegen die Go-Fälle ab). Schlägt ein Fall fehl, die Regex in `validation.ts` korrigieren, nicht den Test.
 
-- [ ] **Step 9: Failing Test `web/src/features/servers/format.test.ts`**
+- [x] **Step 9: Failing Test `web/src/features/servers/format.test.ts`**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -791,7 +791,7 @@ describe('servers format', () => {
 Run: `cd web && npx vitest run src/features/servers/format.test.ts`
 Expected: FAIL – `Failed to resolve import "./format"`.
 
-- [ ] **Step 10: `web/src/features/servers/format.ts`**
+- [x] **Step 10: `web/src/features/servers/format.ts`**
 
 ```ts
 import type { TFunction } from 'i18next'
@@ -833,7 +833,7 @@ export function describeInstance(instance: InstanceConfig, t: TFunction): string
 Run: `cd web && npx vitest run src/features/servers/format.test.ts`
 Expected: PASS (5 Tests).
 
-- [ ] **Step 11: Failing Test `web/src/features/servers/status.test.ts`**
+- [x] **Step 11: Failing Test `web/src/features/servers/status.test.ts`**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -914,7 +914,7 @@ describe('server status', () => {
 Run: `cd web && npx vitest run src/features/servers/status.test.ts`
 Expected: FAIL – `Failed to resolve import "./status"`.
 
-- [ ] **Step 12: `web/src/features/servers/status.ts`**
+- [x] **Step 12: `web/src/features/servers/status.ts`**
 
 ```ts
 import type { PowerAction, Server, ServerState, ServerStatus } from '@/api/types'
@@ -988,7 +988,7 @@ export function powerAllowed(state: ServerState, action: PowerAction): boolean {
 Run: `cd web && npx vitest run src/features/servers/status.test.ts`
 Expected: PASS (6 Tests).
 
-- [ ] **Step 13: Failing Test `web/src/features/servers/api.test.ts`**
+- [x] **Step 13: Failing Test `web/src/features/servers/api.test.ts`**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -1066,7 +1066,7 @@ describe('servers api against the mock', () => {
 Run: `cd web && npx vitest run src/features/servers/api.test.ts`
 Expected: FAIL – `Failed to resolve import "./api"`.
 
-- [ ] **Step 14: `web/src/features/servers/api.ts`**
+- [x] **Step 14: `web/src/features/servers/api.ts`**
 
 ```ts
 import { queryOptions } from '@tanstack/react-query'
@@ -1149,7 +1149,7 @@ export { serversKey, serversQueryOptions } from '@/features/servers/api'
 Run: `cd web && npx vitest run src/features/servers`
 Expected: PASS (alle fünf Testdateien).
 
-- [ ] **Step 15: Gesamtprüfung**
+- [x] **Step 15: Gesamtprüfung**
 
 Run: `cd web && npm run lint && npm run typecheck && npm test && npm run build`
 Expected: alles grün; `npm test` enthält die bestehenden Dashboard- und Mock-Tests unverändert grün.
@@ -1160,7 +1160,7 @@ Expected: PASS (Go unverändert).
 Run: `git status --porcelain`
 Expected: nur die in **Files** genannten Pfade.
 
-- [ ] **Step 16: Commit**
+- [x] **Step 16: Commit**
 
 ```bash
 git add web/src/api/types.ts web/src/api/errors.ts web/src/i18n/de.ts web/src/i18n/en.ts web/src/i18n/i18n.test.ts \
@@ -1189,7 +1189,7 @@ export function ServerCard(props: { server: Server; canDelete: boolean }): JSX.E
 export function DashboardPage(): JSX.Element  // Polling über pollInterval; Admin: Basisdomain-Hinweis, „Server anlegen“ gesperrt ohne Basisdomain
 ```
 
-- [ ] **Step 1: Failing Test – `web/src/features/dashboard/dashboard-page.test.tsx` vollständig ersetzen**
+- [x] **Step 1: Failing Test – `web/src/features/dashboard/dashboard-page.test.tsx` vollständig ersetzen**
 
 ```tsx
 import { screen, waitFor, within } from '@testing-library/react'
@@ -1329,12 +1329,12 @@ describe('DashboardPage', () => {
 })
 ```
 
-- [ ] **Step 2: Test laufen lassen → FAIL**
+- [x] **Step 2: Test laufen lassen → FAIL**
 
 Run: `cd web && npx vitest run src/features/dashboard`
 Expected: FAIL – u. a. `Unable to find role="group" and name "Steuerung für survival"` (alte Karte) und `Unable to find an element with the text: Läuft`.
 
-- [ ] **Step 3: Texte**
+- [x] **Step 3: Texte**
 
 `web/src/i18n/de.ts`, im Block `dashboard`: `description` ersetzen, die Schlüssel `stub_hint`, `permissions_label`, `power_group`, `no_power`, `power`, `power_noun`, `stop_title`, `stop_description` und `power_requested` **entfernen** (sie ziehen nach `servers` um), zwei neue ergänzen. Alle übrigen Schlüssel (auch solche, die Aufgabe 11–16 für den Dialog ergänzt hat) bleiben:
 
@@ -1422,7 +1422,7 @@ ersetzen durch
   ...['start', 'stop', 'restart'].flatMap((a) => [`servers.power.${a}`, `servers.power_noun.${a}`]),
 ```
 
-- [ ] **Step 4: `web/src/features/servers/status-badge.tsx`**
+- [x] **Step 4: `web/src/features/servers/status-badge.tsx`**
 
 ```tsx
 import { useTranslation } from 'react-i18next'
@@ -1436,7 +1436,7 @@ export function StatusBadge({ state }: { state: ServerState }) {
 }
 ```
 
-- [ ] **Step 5: `web/src/features/servers/address-line.tsx`**
+- [x] **Step 5: `web/src/features/servers/address-line.tsx`**
 
 ```tsx
 import { Copy } from 'lucide-react'
@@ -1471,7 +1471,7 @@ export function AddressLine({ address }: { address: string | null }) {
 }
 ```
 
-- [ ] **Step 6: `web/src/features/servers/use-power.ts`**
+- [x] **Step 6: `web/src/features/servers/use-power.ts`**
 
 ```ts
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -1497,7 +1497,7 @@ export function usePower(server: Pick<Server, 'id' | 'name'>) {
 }
 ```
 
-- [ ] **Step 7: `web/src/features/servers/power-buttons.tsx`**
+- [x] **Step 7: `web/src/features/servers/power-buttons.tsx`**
 
 ```tsx
 import { useState } from 'react'
@@ -1545,7 +1545,7 @@ export function PowerButtons({ server }: { server: Pick<Server, 'id' | 'name' | 
 }
 ```
 
-- [ ] **Step 8: `web/src/features/dashboard/server-card.tsx` vollständig ersetzen**
+- [x] **Step 8: `web/src/features/dashboard/server-card.tsx` vollständig ersetzen**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -1637,7 +1637,7 @@ export function ServerCard({ server, canDelete }: { server: Server; canDelete: b
 }
 ```
 
-- [ ] **Step 9: `web/src/features/dashboard/dashboard-page.tsx` vollständig ersetzen**
+- [x] **Step 9: `web/src/features/dashboard/dashboard-page.tsx` vollständig ersetzen**
 
 ```tsx
 import { useQuery } from '@tanstack/react-query'
@@ -1712,7 +1712,7 @@ export function DashboardPage() {
 }
 ```
 
-- [ ] **Step 10: Übergangsdatei entfernen und Importe umstellen**
+- [x] **Step 10: Übergangsdatei entfernen und Importe umstellen**
 
 ```bash
 git rm -q web/src/features/dashboard/servers.ts
@@ -1735,12 +1735,12 @@ In `web/src/features/dashboard/create-server-dialog.tsx` den Import `from './ser
 Run: `grep -rn "features/dashboard/servers\|from './servers'" web/src`
 Expected: keine Treffer.
 
-- [ ] **Step 11: Tests → PASS**
+- [x] **Step 11: Tests → PASS**
 
 Run: `cd web && npx vitest run src/features/dashboard src/i18n`
 Expected: PASS (Dashboard 10 Tests, i18n grün).
 
-- [ ] **Step 12: Gesamtprüfung**
+- [x] **Step 12: Gesamtprüfung**
 
 Run: `cd web && npm run lint && npm run typecheck && npm test && npm run build`
 Expected: alles grün.
@@ -1748,7 +1748,7 @@ Expected: alles grün.
 Run: `make test`
 Expected: PASS.
 
-- [ ] **Step 13: Commit**
+- [x] **Step 13: Commit**
 
 ```bash
 git add -A web/src/features/servers web/src/features/dashboard web/src/features/users/permissions-page.tsx \
@@ -1807,7 +1807,7 @@ export function CreateServerPage(props: { onCreated(server: Server): void }): JS
 // Route: /servers/new (Kind von /_app, adminGuard); navigiert nach dem Anlegen vorerst auf / (Aufgabe 20: Detailseite)
 ```
 
-- [ ] **Step 1: Failing Test `web/src/features/servers/form-model.test.ts`**
+- [x] **Step 1: Failing Test `web/src/features/servers/form-model.test.ts`**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -2013,7 +2013,7 @@ describe('server form model', () => {
 Run: `cd web && npx vitest run src/features/servers/form-model.test.ts`
 Expected: FAIL – `Failed to resolve import "./form-model"`.
 
-- [ ] **Step 2: `web/src/features/servers/form-model.ts`**
+- [x] **Step 2: `web/src/features/servers/form-model.ts`**
 
 ```ts
 import type { Catalog, Difficulty, Gamemode, InstanceConfig, InstanceType, JavaVersion, LevelType, ServerProperties } from '@/api/types'
@@ -2274,7 +2274,7 @@ export function sameFormValue(a: ServerFormValue, b: ServerFormValue): boolean {
 Run: `cd web && npx vitest run src/features/servers/form-model.test.ts`
 Expected: PASS (14 Tests).
 
-- [ ] **Step 3: Texte**
+- [x] **Step 3: Texte**
 
 `web/src/i18n/de.ts`, im Block `servers` nach `not_configured_hint` einfügen:
 
@@ -2503,7 +2503,7 @@ In beiden Dateien im Block `dashboard` die nur vom Dialog genutzten Schlüssel e
   ].map((p) => `servers.props.${p}`),
 ```
 
-- [ ] **Step 4: `web/src/features/servers/field-row.tsx`**
+- [x] **Step 4: `web/src/features/servers/field-row.tsx`**
 
 ```tsx
 import type { ReactNode } from 'react'
@@ -2545,7 +2545,7 @@ export function FieldRow({ id, label, hint, error, children }: FieldRowProps) {
 }
 ```
 
-- [ ] **Step 5: `web/src/features/servers/collapsible-section.tsx`**
+- [x] **Step 5: `web/src/features/servers/collapsible-section.tsx`**
 
 ```tsx
 import { ChevronDown } from 'lucide-react'
@@ -2592,7 +2592,7 @@ export function CollapsibleSection({
 }
 ```
 
-- [ ] **Step 6: `web/src/features/servers/properties-fields.tsx`**
+- [x] **Step 6: `web/src/features/servers/properties-fields.tsx`**
 
 ```tsx
 import { useTranslation } from 'react-i18next'
@@ -2759,7 +2759,7 @@ export function PropertiesFields({ idPrefix, mode, serverName, value, error, onC
 }
 ```
 
-- [ ] **Step 7: Failing Test `web/src/features/servers/create-server-page.test.tsx`**
+- [x] **Step 7: Failing Test `web/src/features/servers/create-server-page.test.tsx`**
 
 ```tsx
 import { screen, waitFor, within } from '@testing-library/react'
@@ -2939,7 +2939,7 @@ describe('CreateServerPage', () => {
 Run: `cd web && npx vitest run src/features/servers/create-server-page.test.tsx`
 Expected: FAIL – `Failed to resolve import "./create-server-page"`.
 
-- [ ] **Step 8: `web/src/features/servers/server-form.tsx`**
+- [x] **Step 8: `web/src/features/servers/server-form.tsx`**
 
 ```tsx
 import { useQuery } from '@tanstack/react-query'
@@ -3432,7 +3432,7 @@ function EulaField({ id, checked, error, onChange }: { id: string; checked: bool
 }
 ```
 
-- [ ] **Step 9: `web/src/features/servers/create-server-page.tsx`**
+- [x] **Step 9: `web/src/features/servers/create-server-page.tsx`**
 
 ```tsx
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -3504,7 +3504,7 @@ export function CreateServerPage({ onCreated }: { onCreated(server: Server): voi
 Run: `cd web && npx vitest run src/features/servers`
 Expected: PASS (alle Dateien, `create-server-page.test.tsx` mit 9 Tests).
 
-- [ ] **Step 10: Route `web/src/routes/_app/servers/new.tsx`**
+- [x] **Step 10: Route `web/src/routes/_app/servers/new.tsx`**
 
 ```tsx
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
@@ -3538,7 +3538,7 @@ In `web/src/app/router.integration.test.tsx` im `describe`-Block ergänzen:
   })
 ```
 
-- [ ] **Step 11: Dashboard verlinkt die neue Seite, Dialog entfällt**
+- [x] **Step 11: Dashboard verlinkt die neue Seite, Dialog entfällt**
 
 Test zuerst: in `web/src/features/dashboard/dashboard-page.test.tsx` den Test `lets admins open server creation when a base domain is set` vollständig ersetzen durch:
 
@@ -3641,7 +3641,7 @@ git rm -q web/src/features/dashboard/create-server-dialog.tsx
 Run: `cd web && npx vitest run src/features/dashboard src/app`
 Expected: PASS.
 
-- [ ] **Step 12: Smoke-Test ohne alten Dialog**
+- [x] **Step 12: Smoke-Test ohne alten Dialog**
 
 `web/e2e/smoke.spec.ts`: den Test `sensitive actions ask for sudo once and then succeed` vollständig ersetzen (der alte Dialog existiert nicht mehr; Server deckt `servers.spec.ts` in Aufgabe 22 ab):
 
@@ -3667,7 +3667,7 @@ Kontrolle, dass keine Dialog-Texte übrig sind:
 Run: `grep -rnE "dashboard\.(create_description|name_label|name_hint|name_invalid|created)|create-server-dialog|CreateServerDialog" web/src web/e2e`
 Expected: keine Treffer.
 
-- [ ] **Step 13: Gesamtprüfung**
+- [x] **Step 13: Gesamtprüfung**
 
 Run: `cd web && npm run lint && npm run typecheck && npm test && npm run build`
 Expected: alles grün; `git status --porcelain web/src/routeTree.gen.ts` zeigt die Datei als geändert (wird mit committet).
@@ -3678,7 +3678,7 @@ Expected: PASS (`smoke.spec.ts`, `totp.spec.ts`).
 Run: `make test`
 Expected: PASS.
 
-- [ ] **Step 14: Commit**
+- [x] **Step 14: Commit**
 
 ```bash
 git add -A web/src/features/servers web/src/features/dashboard web/src/routes/_app/servers web/src/routeTree.gen.ts \
@@ -3706,7 +3706,7 @@ export function ServerCard(props: { server: Server }): JSX.Element   // ohne Lö
 // Route: /servers/$id (Kind von /_app); nicht-numerische ID → 404-Seite. /servers/new navigiert nach dem Anlegen hierher.
 ```
 
-- [ ] **Step 1: Failing Test `web/src/features/servers/server-detail-page.test.tsx`**
+- [x] **Step 1: Failing Test `web/src/features/servers/server-detail-page.test.tsx`**
 
 ```tsx
 import { screen, waitFor, within } from '@testing-library/react'
@@ -3863,7 +3863,7 @@ describe('ServerDetailPage', () => {
 Run: `cd web && npx vitest run src/features/servers/server-detail-page.test.tsx`
 Expected: FAIL – `Failed to resolve import "./server-detail-page"`.
 
-- [ ] **Step 2: Texte**
+- [x] **Step 2: Texte**
 
 `web/src/i18n/de.ts`, im Block `servers` nach `level_type: { … },` einfügen:
 
@@ -3985,7 +3985,7 @@ In beiden Dateien im Block `dashboard` die Schlüssel `deleted`, `delete_for`, `
   ...['pulling', 'creating', 'starting', 'stopping', 'removing'].map((o) => `servers.operation.${o}`),
 ```
 
-- [ ] **Step 3: `web/src/features/servers/server-overview.tsx`**
+- [x] **Step 3: `web/src/features/servers/server-overview.tsx`**
 
 ```tsx
 import { useTranslation } from 'react-i18next'
@@ -4070,7 +4070,7 @@ function RestartBanner({ server, canPower }: { server: Server; canPower: boolean
 }
 ```
 
-- [ ] **Step 4: `web/src/features/servers/server-settings-tab.tsx`**
+- [x] **Step 4: `web/src/features/servers/server-settings-tab.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -4121,7 +4121,7 @@ export function ServerSettingsTab({ server, instance }: { server: Server; instan
 }
 ```
 
-- [ ] **Step 5: `web/src/features/servers/delete-server-section.tsx`**
+- [x] **Step 5: `web/src/features/servers/delete-server-section.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -4192,7 +4192,7 @@ export function DeleteServerSection({ server }: { server: Server }) {
 }
 ```
 
-- [ ] **Step 6: `web/src/features/servers/server-detail-page.tsx`**
+- [x] **Step 6: `web/src/features/servers/server-detail-page.tsx`**
 
 ```tsx
 import { useQuery } from '@tanstack/react-query'
@@ -4291,7 +4291,7 @@ export function ServerDetailPage({ serverId }: { serverId: number }) {
 Run: `cd web && npx vitest run src/features/servers/server-detail-page.test.tsx`
 Expected: PASS (10 Tests).
 
-- [ ] **Step 7: Route `web/src/routes/_app/servers/$id.tsx`**
+- [x] **Step 7: Route `web/src/routes/_app/servers/$id.tsx`**
 
 ```tsx
 import { createFileRoute, notFound } from '@tanstack/react-router'
@@ -4341,7 +4341,7 @@ In `web/src/app/router.integration.test.tsx` ergänzen:
 Run: `cd web && npx vite build && npx vitest run src/app`
 Expected: Build erfolgreich (`routeTree.gen.ts` enthält `/servers/$id`); Router-Tests PASS.
 
-- [ ] **Step 8: Karte verlinkt die Detailseite, Löschen zieht um**
+- [x] **Step 8: Karte verlinkt die Detailseite, Löschen zieht um**
 
 Test zuerst – in `web/src/features/dashboard/dashboard-page.test.tsx`:
 - die Tests `shows no error toast after the user cancelled the sudo dialog` und `deletes a server after confirmation and sudo` löschen (beides prüft jetzt `server-detail-page.test.tsx`),
@@ -4433,7 +4433,7 @@ ersetzen durch
 Run: `cd web && npx vitest run src/features/dashboard src/features/servers src/i18n`
 Expected: PASS.
 
-- [ ] **Step 9: Gesamtprüfung**
+- [x] **Step 9: Gesamtprüfung**
 
 Run: `cd web && npm run lint && npm run typecheck && npm test && npm run build`
 Expected: alles grün.
@@ -4444,7 +4444,7 @@ Expected: PASS.
 Run: `make test`
 Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add -A web/src/features/servers web/src/features/dashboard web/src/routes/_app/servers web/src/routeTree.gen.ts \
@@ -4473,7 +4473,7 @@ export type NavPath = '/' | '/users' | '/security' | '/audit' | '/settings' | '/
 // Route: /settings (Kind von /_app, adminGuard); Navigationspunkt „Einstellungen“ (lucide Settings, adminOnly)
 ```
 
-- [ ] **Step 1: Failing Test `web/src/features/settings/settings-page.test.tsx`**
+- [x] **Step 1: Failing Test `web/src/features/settings/settings-page.test.tsx`**
 
 ```tsx
 import { screen, within } from '@testing-library/react'
@@ -4579,7 +4579,7 @@ describe('SettingsPage', () => {
 Run: `cd web && npx vitest run src/features/settings`
 Expected: FAIL – `Failed to resolve import "./settings-page"`.
 
-- [ ] **Step 2: Texte**
+- [x] **Step 2: Texte**
 
 `web/src/i18n/de.ts`: im Block `nav` nach `audit: 'Audit-Log',` die Zeile `settings: 'Einstellungen',` ergänzen. Neuer Top-Level-Block direkt nach `servers: { … },`:
 
@@ -4710,7 +4710,7 @@ ersetzen durch
   ...['ok', 'unavailable', 'unknown'].map((d) => `settings.docker.${d}`),
 ```
 
-- [ ] **Step 3: `web/src/features/settings/settings-card.tsx`**
+- [x] **Step 3: `web/src/features/settings/settings-card.tsx`**
 
 ```tsx
 import { useId, type ReactNode } from 'react'
@@ -4740,7 +4740,7 @@ export function SettingsCard({ title, description, actions, children }: { title:
 }
 ```
 
-- [ ] **Step 4: `web/src/features/settings/base-domain-card.tsx`**
+- [x] **Step 4: `web/src/features/settings/base-domain-card.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -4822,7 +4822,7 @@ export function BaseDomainCard({ settings }: { settings: ServerSettings }) {
 }
 ```
 
-- [ ] **Step 5: `web/src/features/settings/curseforge-card.tsx`**
+- [x] **Step 5: `web/src/features/settings/curseforge-card.tsx`**
 
 ```tsx
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -4915,7 +4915,7 @@ export function CurseForgeCard({ settings }: { settings: ServerSettings }) {
 }
 ```
 
-- [ ] **Step 6: `web/src/features/settings/instance-status-card.tsx`**
+- [x] **Step 6: `web/src/features/settings/instance-status-card.tsx`**
 
 ```tsx
 import { useTranslation } from 'react-i18next'
@@ -4956,7 +4956,7 @@ export function InstanceStatusCard({ settings }: { settings: ServerSettings }) {
 }
 ```
 
-- [ ] **Step 7: `web/src/features/settings/settings-page.tsx`**
+- [x] **Step 7: `web/src/features/settings/settings-page.tsx`**
 
 ```tsx
 import { useQuery } from '@tanstack/react-query'
@@ -5010,7 +5010,7 @@ export function SettingsPage() {
 Run: `cd web && npx vitest run src/features/settings src/i18n`
 Expected: PASS (Settings 5 Tests, i18n grün).
 
-- [ ] **Step 8: Route und Navigation**
+- [x] **Step 8: Route und Navigation**
 
 `web/src/routes/_app/settings.tsx`:
 
@@ -5087,7 +5087,7 @@ export function navItemsFor(role: Role): NavItem[] {
 Run: `cd web && npx vite build && npx vitest run src/features/layout src/app`
 Expected: Build erfolgreich (`routeTree.gen.ts` enthält `/settings`); Tests PASS.
 
-- [ ] **Step 9: Links auf `/settings` nachziehen**
+- [x] **Step 9: Links auf `/settings` nachziehen**
 
 Tests zuerst:
 
@@ -5163,7 +5163,7 @@ und im Test `asks for the CurseForge modpack once a key is stored` durch:
 Run: `cd web && npx vitest run src/features/dashboard src/features/servers`
 Expected: PASS.
 
-- [ ] **Step 10: Gesamtprüfung**
+- [x] **Step 10: Gesamtprüfung**
 
 Run: `cd web && npm run lint && npm run typecheck && npm test && npm run build`
 Expected: alles grün.
@@ -5174,7 +5174,7 @@ Expected: PASS.
 Run: `make test`
 Expected: PASS.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add -A web/src/features/settings web/src/features/layout web/src/features/dashboard web/src/features/servers \
@@ -5194,7 +5194,7 @@ git commit -m "feat(web): add settings page for base domain, CurseForge key and 
 - Consumes: Aufgaben 17–21 (UI), V5-Mock im Browser-Worker (`npm run dev:mock`, Port 5174 über `webServer` der Playwright-Konfiguration); Login wie `web/e2e/smoke.spec.ts` (Mock-Passwort `correct-horse-battery`, TOTP `123456`; `admin` mit TOTP, `alice` ohne 2FA)
 - Produces: zwei E2E-Tests im Projekt `mock`. Wichtig: Der MSW-Zustand lebt in der Seite – ein `page.goto` nach dem Login (voller Reload) setzt die Mock-Datenbank und die Sitzung zurück. Nach dem Login wird deshalb nur noch über Links und Buttons navigiert.
 
-- [ ] **Step 1: Playwright-Konfiguration**
+- [x] **Step 1: Playwright-Konfiguration**
 
 In `web/playwright.config.ts` im Projekt `mock` die Zeile
 
@@ -5208,7 +5208,7 @@ ersetzen durch
       testMatch: /(?<![\w-])(totp|smoke|servers)\.spec\.ts$/,
 ```
 
-- [ ] **Step 2: `web/e2e/servers.spec.ts`**
+- [x] **Step 2: `web/e2e/servers.spec.ts`**
 
 ```ts
 import { expect, test, type Page } from '@playwright/test'
@@ -5294,12 +5294,12 @@ test('a restricted user sees only permitted servers and no admin areas', async (
 })
 ```
 
-- [ ] **Step 3: Laufen lassen**
+- [x] **Step 3: Laufen lassen**
 
 Run: `cd web && npx playwright install chromium && npm run e2e`
 Expected: PASS – `totp.spec.ts`, `smoke.spec.ts` und beide Tests aus `servers.spec.ts`. Schlägt `servers.spec.ts` beim Polling fehl (z. B. `Läuft` erscheint nicht), mit `npx playwright test --project=mock e2e/servers.spec.ts --trace on` den Trace prüfen; die Ursache liegt dann im Mock-Übergang `creating → running` (V5) oder in `pollInterval`, nicht im Test-Timeout.
 
-- [ ] **Step 4: Gesamtprüfung**
+- [x] **Step 4: Gesamtprüfung**
 
 Run: `cd web && npm run lint && npm run typecheck && npm test && npm run build`
 Expected: alles grün (Lint deckt `e2e/` mit ab).
@@ -5307,7 +5307,7 @@ Expected: alles grün (Lint deckt `e2e/` mit ab).
 Run: `make test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/e2e/servers.spec.ts web/playwright.config.ts
