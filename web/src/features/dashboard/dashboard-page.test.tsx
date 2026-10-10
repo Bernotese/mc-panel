@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { db, loginAs, MOCK_TOTP_CODE } from '@/mocks/db'
+import { db, loginAs } from '@/mocks/db'
 import { renderWithProviders } from '@/test/render'
 import { DashboardPage } from './dashboard-page'
 
@@ -106,30 +106,10 @@ describe('DashboardPage', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/servers/new'))
   })
 
-  it('shows no error toast after the user cancelled the sudo dialog', async () => {
-    const user = userEvent.setup()
+  it('links each card to its detail page and offers no delete button', async () => {
     await renderWithProviders(<DashboardPage />, { me: loginAs('admin') })
-    const lobby = await screen.findByRole('article', { name: 'lobby' })
-    await user.click(within(lobby).getByRole('button', { name: 'lobby löschen' }))
-    await user.click(within(screen.getByRole('dialog', { name: 'Server „lobby“ löschen?' })).getByRole('button', { name: 'Löschen' }))
-    const sudo = await screen.findByRole('dialog', { name: 'Aktion bestätigen' })
-    await user.click(within(sudo).getByRole('button', { name: 'Abbrechen' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Aktion bestätigen' })).not.toBeInTheDocument())
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    expect(screen.queryByText('Diese Aktion muss bestätigt werden.')).not.toBeInTheDocument()
-    expect(screen.getByRole('dialog', { name: 'Server „lobby“ löschen?' })).toBeInTheDocument()
-  })
-
-  it('deletes a server after confirmation and sudo', async () => {
-    const user = userEvent.setup()
-    await renderWithProviders(<DashboardPage />, { me: loginAs('admin') })
-    const lobby = await screen.findByRole('article', { name: 'lobby' })
-    await user.click(within(lobby).getByRole('button', { name: 'lobby löschen' }))
-    await user.click(within(screen.getByRole('dialog', { name: 'Server „lobby“ löschen?' })).getByRole('button', { name: 'Löschen' }))
-    const sudo = await screen.findByRole('dialog', { name: 'Aktion bestätigen' })
-    await user.type(within(sudo).getByLabelText('Code aus der Authenticator-App'), MOCK_TOTP_CODE)
-    await user.click(within(sudo).getByRole('button', { name: 'Bestätigen' }))
-    expect(await screen.findByText('Server „lobby“ gelöscht.')).toBeInTheDocument()
-    await waitFor(() => expect(screen.queryByRole('article', { name: 'lobby' })).not.toBeInTheDocument())
+    const survival = await screen.findByRole('article', { name: 'survival' })
+    expect(within(survival).getByRole('link', { name: 'survival' })).toHaveAttribute('href', '/servers/1')
+    expect(screen.queryByRole('button', { name: 'lobby löschen' })).not.toBeInTheDocument()
   })
 })

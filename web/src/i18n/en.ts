@@ -158,10 +158,6 @@ export const en: Messages = {
     base_domain_missing: 'Servers are reachable at <name>.<base domain>. You cannot create servers until a base domain is set.',
     empty: 'No servers available.',
     create_server: 'Create server',
-    deleted: 'Server “{{name}}” deleted.',
-    delete_for: 'Delete {{name}}',
-    delete_title: 'Delete server “{{name}}”?',
-    delete_description: 'All permissions on this server will be removed.',
   },
   servers: {
     state: {
@@ -308,7 +304,58 @@ export const en: Messages = {
       flat: 'Flat',
       large_biomes: 'Large biomes',
       amplified: 'Amplified',
+    },    restart: {
+      description: 'Changed settings only take effect after a restart. Players are briefly disconnected.',
+      now: 'Restart now',
     },
+    operation: {
+      pulling: 'Pulling image',
+      creating: 'Creating container',
+      starting: 'Starting',
+      stopping: 'Stopping',
+      removing: 'Removing',
+    },
+    memory_value: '{{used}} / {{limit}} GiB',
+    cpu_value: '{{value}}%',
+    detail: {
+      tabs: {
+        overview: 'Overview',
+        settings: 'Settings',
+        delete: 'Delete',
+      },
+      not_found: 'This server does not exist (anymore).',
+      forbidden: 'You are not allowed to view this server.',
+      not_configured: 'This server predates instance management and has no Minecraft instance yet. You can only delete it.',
+    },
+    overview: {
+      title: 'State',
+      status: 'Status',
+      address: 'Address',
+      type: 'Type',
+      java: 'Java',
+      memory: 'Memory',
+      cpu: 'CPU',
+      started: 'Started',
+      last_error: 'Last error',
+      controls: 'Controls',
+      unknown_hint: 'The agent is not responding. Shown is the last known desired state; actions are applied once it is reachable again.',
+    },
+    settings: {
+      save: 'Save changes',
+      saved: 'Changes saved.',
+      saved_restart: 'Changes saved. They take effect at the next restart.',
+      running_notice: 'The server is running. Changes take effect after a restart.',
+    },
+    delete: {
+      title: 'Delete server',
+      description:
+        'The server is stopped and removed, along with all permissions on it. The agent moves the world and all files on the host to deleted/{{name}}-<timestamp> in the instance directory (default: /srv/mc-panel/deleted/). They stay there until you delete them yourself.',
+      description_not_configured: 'The entry and all permissions on it are removed. There is no server data.',
+      confirm_label: 'Type “{{name}}” to confirm',
+      submit: 'Delete server',
+      deleted: 'Server “{{name}}” deleted.',
+    },
+
 
     validation: {
       name_required: 'Enter a name.',

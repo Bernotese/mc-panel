@@ -156,10 +156,6 @@ export const de = {
     base_domain_missing: 'Server sind unter <name>.<basisdomain> erreichbar. Solange keine Basisdomain eingetragen ist, kannst du keine Server anlegen.',
     empty: 'Keine Server verfügbar.',
     create_server: 'Server anlegen',
-    deleted: 'Server „{{name}}“ gelöscht.',
-    delete_for: '{{name}} löschen',
-    delete_title: 'Server „{{name}}“ löschen?',
-    delete_description: 'Alle Rechte auf diesen Server werden entfernt.',
   },
   servers: {
     state: {
@@ -306,7 +302,58 @@ export const de = {
       flat: 'Flach',
       large_biomes: 'Große Biome',
       amplified: 'Zerklüftet',
+    },    restart: {
+      description: 'Geänderte Einstellungen werden erst nach einem Neustart aktiv. Spieler werden dabei kurz getrennt.',
+      now: 'Jetzt neu starten',
     },
+    operation: {
+      pulling: 'Image wird geladen',
+      creating: 'Container wird angelegt',
+      starting: 'Wird gestartet',
+      stopping: 'Wird gestoppt',
+      removing: 'Wird entfernt',
+    },
+    memory_value: '{{used}} / {{limit}} GiB',
+    cpu_value: '{{value}} %',
+    detail: {
+      tabs: {
+        overview: 'Übersicht',
+        settings: 'Einstellungen',
+        delete: 'Löschen',
+      },
+      not_found: 'Diesen Server gibt es nicht (mehr).',
+      forbidden: 'Du hast keine Berechtigung, diesen Server anzusehen.',
+      not_configured: 'Dieser Server stammt aus der Zeit vor der Instanzverwaltung und hat noch keine Minecraft-Instanz. Du kannst ihn nur löschen.',
+    },
+    overview: {
+      title: 'Zustand',
+      status: 'Status',
+      address: 'Adresse',
+      type: 'Art',
+      java: 'Java',
+      memory: 'Arbeitsspeicher',
+      cpu: 'CPU',
+      started: 'Gestartet',
+      last_error: 'Letzter Fehler',
+      controls: 'Steuerung',
+      unknown_hint: 'Der Agent antwortet gerade nicht. Angezeigt wird der zuletzt bekannte Soll-Zustand; Aktionen werden nachgeholt, sobald er wieder erreichbar ist.',
+    },
+    settings: {
+      save: 'Änderungen speichern',
+      saved: 'Änderungen gespeichert.',
+      saved_restart: 'Änderungen gespeichert. Sie werden beim nächsten Neustart aktiv.',
+      running_notice: 'Der Server läuft. Änderungen werden erst nach einem Neustart aktiv.',
+    },
+    delete: {
+      title: 'Server löschen',
+      description:
+        'Der Server wird gestoppt und entfernt, ebenso alle Rechte darauf. Die Welt und alle Dateien verschiebt der Agent auf dem Host nach deleted/{{name}}-<Zeitpunkt> im Instanz-Verzeichnis (Standard: /srv/mc-panel/deleted/). Dort bleiben sie, bis du sie selbst löschst.',
+      description_not_configured: 'Der Eintrag und alle Rechte darauf werden entfernt. Serverdaten gibt es keine.',
+      confirm_label: 'Zum Bestätigen den Namen „{{name}}“ eintippen',
+      submit: 'Server löschen',
+      deleted: 'Server „{{name}}“ gelöscht.',
+    },
+
 
     validation: {
       name_required: 'Gib einen Namen ein.',

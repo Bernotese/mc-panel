@@ -10,6 +10,5 @@ export const Route = createFileRoute('/_app/servers/new')({
 
 function NewServerRoute() {
   const navigate = useNavigate()
-  // The dashboard shows the new server until the detail page exists (task 20 switches to /servers/$id).
-  return <CreateServerPage onCreated={() => void navigate({ to: '/' })} />
+  return <CreateServerPage onCreated={(server) => void navigate({ to: '/servers/$id', params: { id: String(server.id) } })} />
 }
