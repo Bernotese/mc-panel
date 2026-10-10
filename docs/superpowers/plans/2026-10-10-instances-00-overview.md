@@ -359,6 +359,8 @@ Damit steigt die Zahl der Operationen von 57 auf 61 (`web/src/mocks/handlers.tes
 |---|---|
 | keine `instances`-Zeile | `not_configured` (`desired_state: null`) |
 | agent nicht erreichbar oder Docker `unavailable` | `unknown` |
+| Container `missing`, keine `operation`, `last_error != ""` (agent- oder panel-seitig) | `error` |
+| agent meldet einen Container, dessen `name` nicht zur DB-Zeile passt | `error` (fremder Container, keine Aktionen) |
 | `operation` ∈ {pulling, creating} oder Container `missing` | `creating` |
 | `operation = starting` | `starting` |
 | `operation` ∈ {stopping, removing} | `stopping` |
