@@ -23,6 +23,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/secretbox"
 	"github.com/Bernotese/mc-panel/internal/servers"
+	"github.com/Bernotese/mc-panel/internal/servers/catalog"
 	"github.com/Bernotese/mc-panel/internal/users"
 	"github.com/Bernotese/mc-panel/internal/webui"
 )
@@ -57,6 +58,10 @@ func pruneSessionsLoop(ctx context.Context, prune func(context.Context) (int64, 
 type appDeps struct {
 	Clock clock.Clock
 	Agent agentapi.Client
+	// Instances is the agent's instance API (in production the same *agent.Client as Agent);
+	// nil means no agent: the panel works, instance states are "unknown".
+	Instances agentapi.InstancesClient
+	Version   string // panel version, sent in the User-Agent of catalog requests
 }
 
 type app struct {
@@ -99,7 +104,10 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		return nil, fmt.Errorf("auth: %w", err)
 	}
 	usersH := users.NewHandler(db, d.Clock, auditRec, disp)
-	serversH := servers.NewHandler(servers.Deps{DB: db, Clock: d.Clock, Audit: auditRec, Box: box})
+	serversH := servers.NewHandler(servers.Deps{
+		DB: db, Clock: d.Clock, Audit: auditRec, Box: box, Instances: d.Instances,
+		Catalog: catalog.New(catalog.Options{Clock: d.Clock, Version: d.Version}),
+	})
 	auditH := auditapi.NewHandler(db, d.Clock, disp)
 	defenseH := defense.NewHandler(svc)
 	notifyH := notify.NewHandler(notify.HandlerDeps{
@@ -142,9 +150,10 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 
 	run := func(ctx context.Context) {
 		var wg sync.WaitGroup
-		wg.Add(3)
+		wg.Add(4)
 		go func() { defer wg.Done(); disp.Run(ctx) }()
 		go func() { defer wg.Done(); svc.Run(ctx) }()
+		go func() { defer wg.Done(); serversH.Run(ctx) }()
 		go func() { defer wg.Done(); pruneSessionsLoop(ctx, authH.PruneSessions, sessionPruneInterval) }()
 		wg.Wait()
 	}

@@ -28,12 +28,13 @@ import (
 const adminPW = "mc-panel integration pw 1"
 
 type env struct {
-	t     *testing.T
-	srv   *httptest.Server
-	app   *app
-	clk   *clock.Fake
-	agent *fakeAgent
-	cfg   config.Panel
+	t         *testing.T
+	srv       *httptest.Server
+	app       *app
+	clk       *clock.Fake
+	agent     *fakeAgent
+	instances *fakeInstances
+	cfg       config.Panel
 }
 
 func newEnv(t *testing.T) *env {
@@ -56,8 +57,9 @@ func newEnv(t *testing.T) *env {
 	db := storetest.Open(t)
 	clk := clock.NewFake(time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC))
 	fa := newFakeAgent()
+	fi := newFakeInstances()
 	ctx, cancel := context.WithCancel(context.Background())
-	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clk, Agent: fa})
+	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clk, Agent: fa, Instances: fi, Version: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +72,7 @@ func newEnv(t *testing.T) *env {
 		[]string{"-username", "admin"}, strings.NewReader(adminPW+"\n"), io.Discard); err != nil {
 		t.Fatalf("admin create: %v", err)
 	}
-	return &env{t: t, srv: srv, app: a, clk: clk, agent: fa, cfg: cfg}
+	return &env{t: t, srv: srv, app: a, clk: clk, agent: fa, instances: fi, cfg: cfg}
 }
 
 type client struct {
@@ -339,7 +341,8 @@ func TestAgentDownStillWorks(t *testing.T) {
 	db := storetest.Open(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clock.Real{}, Agent: agentClientForMissingSocket(t)})
+	ac := agentClientForMissingSocket(t)
+	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clock.Real{}, Agent: ac, Instances: ac})
 	if err != nil {
 		t.Fatalf("buildApp must succeed without agent: %v", err)
 	}
