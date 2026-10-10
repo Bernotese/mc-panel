@@ -297,10 +297,13 @@ func TestRequestShapeAndLimits(t *testing.T) {
 		}
 	})
 	ctx := context.Background()
-	c := docker.NewWithTimeouts(path, 200*time.Millisecond, time.Second)
-	if _, err := c.List(ctx, "mcpanel.instance"); !errors.Is(err, docker.ErrUnavailable) || !strings.Contains(err.Error(), "exceeds") {
+	// The size limit gets its own, generous timeout: under -race, pushing 9 MiB through
+	// the socket can take longer than the 200 ms that prove the hanging-daemon timeout.
+	big := docker.NewWithTimeouts(path, 30*time.Second, time.Second)
+	if _, err := big.List(ctx, "mcpanel.instance"); !errors.Is(err, docker.ErrUnavailable) || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("oversized response = %v", err)
 	}
+	c := docker.NewWithTimeouts(path, 200*time.Millisecond, time.Second)
 	start := time.Now()
 	if err := c.Ping(ctx); !errors.Is(err, docker.ErrUnavailable) {
 		t.Fatalf("hanging daemon = %v, want ErrUnavailable", err)
