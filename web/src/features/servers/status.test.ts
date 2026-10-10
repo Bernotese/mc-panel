@@ -39,6 +39,8 @@ describe('server status', () => {
 
   it('treats error, unknown and not configured as settled', () => {
     expect(isBusy(status({ state: 'error', desired_state: 'running', last_error: 'exit 1' }))).toBe(false)
+    expect(isBusy(status({ state: 'error', desired_state: 'stopped', last_error: 'pull failed' }))).toBe(false)
+    expect(isBusy(status({ state: 'error', desired_state: 'running', last_error: '' }))).toBe(false)
     expect(isBusy(status({ state: 'unknown', desired_state: 'running' }))).toBe(false)
     expect(isBusy(status({ state: 'not_configured', desired_state: null }))).toBe(false)
   })
@@ -60,6 +62,9 @@ describe('server status', () => {
     expect(powerAllowed('stopped', 'restart')).toBe(false)
     expect(powerAllowed('creating', 'start')).toBe(false)
     expect(powerAllowed('unknown', 'start')).toBe(true)
+    expect(powerAllowed('unknown', 'stop')).toBe(true)
+    // restart needs the agent right away (503 without it); start/stop are stored and applied later
+    expect(powerAllowed('unknown', 'restart')).toBe(false)
     expect(powerAllowed('error', 'restart')).toBe(true)
     expect(powerAllowed('not_configured', 'start')).toBe(false)
   })

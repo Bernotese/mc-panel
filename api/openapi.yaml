@@ -521,7 +521,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: 'conflict (server not configured) or base_domain_missing (restart)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'conflict (server not configured, or restart of a container that belongs to another server) or base_domain_missing (restart)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /audit:
@@ -891,13 +891,33 @@ components:
         properties: { $ref: '#/components/schemas/ServerProperties', description: All fields set (defaults resolved) }
     ServerStatus:
       type: object
+      description: |
+        Actual state of the instance as last reported by the agent (contract V4). `state` is the first matching row:
+
+        | Condition | state |
+        |---|---|
+        | no instance row | not_configured (desired_state null) |
+        | agent unreachable or Docker unavailable | unknown |
+        | container with the server's ID whose mcpanel.name label differs from the server's name (leftover of another server; never touched) | error |
+        | container missing, operation '', last_error set (ensure failed for good, or a reconcile error before the agent call, e.g. no base domain) | error |
+        | operation pulling/creating, or container missing | creating |
+        | operation starting | starting |
+        | operation stopping/removing | stopping |
+        | container restarting | restarting |
+        | container running | running |
+        | container exited/created, desired_state running, exit_code != 0 or last_error set | error |
+        | container exited/created | stopped |
+
+        `restart_required`: the container exists, runs, and its label revision is older than the stored revision.
       required: [state, desired_state, restart_required, operation, last_error, started_at, memory_bytes, memory_limit_bytes, cpu_percent]
       properties:
         state: { $ref: '#/components/schemas/ServerState' }
         desired_state: { type: [string, 'null'], enum: [running, stopped, null] }
         restart_required: { type: boolean }
         operation: { type: string, enum: ['', pulling, creating, starting, stopping, removing] }
-        last_error: { type: string }
+        last_error:
+          type: string
+          description: "The agent's last error, otherwise a reconcile error of the panel; '' when there is none. Only admins get the text: for other users it is always '' (state still says error)."
         started_at: { type: integer, format: int64, description: Unix ms; 0 = not running }
         memory_bytes: { type: integer, format: int64 }
         memory_limit_bytes: { type: integer, format: int64 }
@@ -960,10 +980,16 @@ components:
         loaders: { type: array, items: { type: string }, description: 'fabric: stable loader versions, newest first; all other types: []' }
     UnknownContainer:
       type: object
+      description: A container with the mcpanel.instance label that no server in the database owns. Never touched by the panel.
       required: [id, name]
       properties:
-        id: { type: integer, format: int64 }
-        name: { type: string }
+        id:
+          type: integer
+          format: int64
+          description: Server ID from the mcpanel.instance label
+        name:
+          type: string
+          description: "Server name from the mcpanel.name label of the container, not the container name mcpanel-mc-<id>"
     ServerSettings:
       type: object
       required: [base_domain, curseforge_api_key_set, docker, unknown_containers]

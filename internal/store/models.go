@@ -113,6 +113,11 @@ type Server struct {
 	CreatedAt int64
 }
 
+type ServerID struct {
+	ID     int64
+	LastID int64
+}
+
 type Session struct {
 	ID            int64
 	TokenHash     []byte
