@@ -10,7 +10,14 @@ describe('AppLayout', () => {
   it('shows the full navigation to admins on desktop', async () => {
     await renderWithProviders(<AppLayout />, { me: loginAs('admin') })
     const nav = screen.getByRole('navigation', { name: 'Hauptnavigation' })
-    expect(within(nav).getAllByRole('link').map((l) => l.textContent)).toEqual(['Übersicht', 'Benutzer', 'Security Center', 'Audit-Log', 'Profil'])
+    expect(within(nav).getAllByRole('link').map((l) => l.textContent)).toEqual([
+      'Übersicht',
+      'Benutzer',
+      'Security Center',
+      'Audit-Log',
+      'Einstellungen',
+      'Profil',
+    ])
     expect(screen.getByRole('link', { name: 'Zum Inhalt springen' })).toHaveAttribute('href', '#main')
   })
 
