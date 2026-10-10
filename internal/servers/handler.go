@@ -11,10 +11,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
 
@@ -23,6 +25,10 @@ type Deps struct {
 	DB    *sql.DB // from store.Open (BEGIN IMMEDIATE transactions)
 	Clock clock.Clock
 	Audit audit.Recorder
+	Box   *secretbox.Box // seals the CurseForge API key at rest
+	// Instances is the agent's instance API; nil means "no agent" (every call fails with
+	// agentapi.ErrUnavailable).
+	Instances agentapi.InstancesClient
 }
 
 type Handler struct {
@@ -30,17 +36,38 @@ type Handler struct {
 	q     *store.Queries
 	clock clock.Clock
 	rec   audit.Recorder
+	box   *secretbox.Box
+	inst  agentapi.InstancesClient
 	power *powerLimiter
+	kick  chan struct{} // Trigger -> reconcile loop (buffer 1, never blocks)
 }
 
 func NewHandler(d Deps) *Handler {
-	return &Handler{db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, power: newPowerLimiter()}
+	inst := d.Instances
+	if inst == nil {
+		inst = noAgent{}
+	}
+	return &Handler{
+		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst,
+		power: newPowerLimiter(), kick: make(chan struct{}, 1),
+	}
+}
+
+// Trigger asks the reconcile loop for an immediate pass. It never blocks; several triggers
+// before the next pass collapse into one.
+func (h *Handler) Trigger() {
+	select {
+	case h.kick <- struct{}{}:
+	default:
+	}
 }
 
 // Routes registers all server routes (paths relative to /api).
 func (h *Handler) Routes(api *rbac.Router) {
 	api.Get("/servers", rbac.Authenticated(), h.handleListServers)
 	api.Post("/servers", rbac.Admin().WithSudo(), h.handleCreateServer)
+	api.Get("/servers/settings", rbac.Admin(), h.handleGetSettings)
+	api.Put("/servers/settings", rbac.Admin().WithSudo(), h.handleUpdateSettings)
 	api.Get("/servers/{id}", rbac.Server(rbac.PermServerView, "id"), h.handleGetServer)
 	api.Delete("/servers/{id}", rbac.Admin().WithSudo(), h.handleDeleteServer)
 	api.Post("/servers/{id}/power", rbac.Server(rbac.PermServerPower, "id"), h.handleServerPower)
@@ -74,3 +101,29 @@ func writeNotFound(w http.ResponseWriter, r *http.Request) {
 func writeConflict(w http.ResponseWriter, r *http.Request, msg string) {
 	httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, msg)
 }
+
+// inTx runs fn in a write transaction (BEGIN IMMEDIATE, see store.Open). Never call h.record
+// inside fn: the SQL recorder opens its own transaction.
+func (h *Handler) inTx(ctx context.Context, fn func(q *store.Queries) error) error {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := fn(h.q.WithTx(tx)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// noAgent stands in for a missing agent client: every call fails as if the agent were down.
+type noAgent struct{}
+
+func (noAgent) Instances(context.Context) (agentapi.InstancesResponse, error) {
+	return agentapi.InstancesResponse{}, agentapi.ErrUnavailable
+}
+func (noAgent) Ensure(context.Context, agentapi.EnsureRequest) error { return agentapi.ErrUnavailable }
+func (noAgent) Power(context.Context, int64, agentapi.PowerAction) error {
+	return agentapi.ErrUnavailable
+}
+func (noAgent) Remove(context.Context, int64) error { return agentapi.ErrUnavailable }

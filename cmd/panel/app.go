@@ -99,7 +99,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		return nil, fmt.Errorf("auth: %w", err)
 	}
 	usersH := users.NewHandler(db, d.Clock, auditRec, disp)
-	serversH := servers.NewHandler(servers.Deps{DB: db, Clock: d.Clock, Audit: auditRec})
+	serversH := servers.NewHandler(servers.Deps{DB: db, Clock: d.Clock, Audit: auditRec, Box: box})
 	auditH := auditapi.NewHandler(db, d.Clock, disp)
 	defenseH := defense.NewHandler(svc)
 	notifyH := notify.NewHandler(notify.HandlerDeps{

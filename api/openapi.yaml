@@ -432,6 +432,27 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /servers/settings:
+    get:
+      operationId: getServerSettings
+      tags: [servers]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ServerSettings' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      operationId: updateServerSettings
+      tags: [servers]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateServerSettingsRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ServerSettings' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /servers/{id}:
     get:
       operationId: getServer
@@ -691,7 +712,7 @@ components:
       type: object
       required: [error, message]
       properties:
-        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, internal] }
+        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, internal] }
         message: { type: string }
         request_id: { type: string }
     Role: { type: string, enum: [admin, user] }
@@ -819,6 +840,27 @@ components:
       type: object
       required: [status]
       properties: { status: { type: string, enum: [accepted] } }
+    UnknownContainer:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+    ServerSettings:
+      type: object
+      required: [base_domain, curseforge_api_key_set, docker, unknown_containers]
+      properties:
+        base_domain: { type: [string, 'null'] }
+        curseforge_api_key_set: { type: boolean }
+        docker: { type: string, enum: [ok, unavailable, unknown] }
+        unknown_containers: { type: array, items: { $ref: '#/components/schemas/UnknownContainer' } }
+    UpdateServerSettingsRequest:
+      type: object
+      additionalProperties: false
+      description: Omitted fields stay unchanged; null removes the value.
+      properties:
+        base_domain: { type: [string, 'null'] }
+        curseforge_api_key: { type: [string, 'null'] }
     PermissionGrant:
       type: object
       required: [server_id, permissions]

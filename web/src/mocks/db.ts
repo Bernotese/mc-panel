@@ -83,11 +83,19 @@ export interface MockServer {
   name: string
 }
 
+/** ServerSettings without unknown_containers (always empty in the mock). */
+export interface MockServerSettings {
+  base_domain: string | null
+  curseforge_api_key_set: boolean
+  docker: 'ok' | 'unavailable' | 'unknown'
+}
+
 export interface MockDb {
   users: MockUser[]
   sessions: MockSession[]
   currentSessionId: number | null
   servers: MockServer[]
+  serverSettings: MockServerSettings
   grants: Map<number, PermissionGrant[]>
   audit: AuditEntry[]
   attempts: LoginAttempt[]
@@ -231,6 +239,7 @@ function seed(now: number): MockDb {
       { id: 2, name: 'creative' },
       { id: 3, name: 'lobby' },
     ],
+    serverSettings: { base_domain: 'mc.example.com', curseforge_api_key_set: false, docker: 'ok' },
     grants: new Map<number, PermissionGrant[]>([
       [
         2,

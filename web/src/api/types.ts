@@ -41,6 +41,9 @@ export type Notifier = Schemas['Notifier']
 export type NotifierKind = Schemas['Notifier']['kind']
 export type AgentStatus = Schemas['AgentStatus']
 export type PowerAction = Schemas['PowerRequest']['action']
+export type ServerSettings = Schemas['ServerSettings']
+export type UpdateServerSettingsRequest = Schemas['UpdateServerSettingsRequest']
+export type UnknownContainer = Schemas['UnknownContainer']
 
 export const ALL_PERMISSIONS: readonly Permission[] = [
   'server.view',

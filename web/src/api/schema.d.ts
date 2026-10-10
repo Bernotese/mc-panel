@@ -500,6 +500,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/servers/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getServerSettings"];
+        put: operations["updateServerSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/servers/{id}": {
         parameters: {
             query?: never;
@@ -746,7 +762,7 @@ export interface components {
     schemas: {
         Error: {
             /** @enum {string} */
-            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "internal";
+            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "internal";
             message: string;
             request_id?: string;
         };
@@ -888,6 +904,23 @@ export interface components {
         PowerResponse: {
             /** @enum {string} */
             status: "accepted";
+        };
+        UnknownContainer: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        ServerSettings: {
+            base_domain: string | null;
+            curseforge_api_key_set: boolean;
+            /** @enum {string} */
+            docker: "ok" | "unavailable" | "unknown";
+            unknown_containers: components["schemas"]["UnknownContainer"][];
+        };
+        /** @description Omitted fields stay unchanged; null removes the value. */
+        UpdateServerSettingsRequest: {
+            base_domain?: string | null;
+            curseforge_api_key?: string | null;
         };
         PermissionGrant: {
             /** Format: int64 */
@@ -2063,6 +2096,57 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    getServerSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateServerSettings: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateServerSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerSettings"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getServer: {
