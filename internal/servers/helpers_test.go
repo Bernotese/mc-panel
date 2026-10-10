@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -41,6 +42,7 @@ type env struct {
 	rec    *audit.MemoryRecorder
 	box    *secretbox.Box
 	agent  *fakeAgent
+	logs   *bytes.Buffer // reconcile log output
 	h      *servers.Handler
 	mux    http.Handler
 	rootID int64
@@ -53,8 +55,11 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &env{t: t, db: db, clk: clock.NewFake(t0), rec: &audit.MemoryRecorder{}, box: box, agent: newFakeAgent()}
-	e.h = servers.NewHandler(servers.Deps{DB: db, Clock: e.clk, Audit: e.rec, Box: box, Instances: e.agent})
+	e := &env{t: t, db: db, clk: clock.NewFake(t0), rec: &audit.MemoryRecorder{}, box: box, agent: newFakeAgent(), logs: &bytes.Buffer{}}
+	e.h = servers.NewHandler(servers.Deps{
+		DB: db, Clock: e.clk, Audit: e.rec, Box: box, Instances: e.agent,
+		Log: slog.New(slog.NewTextHandler(e.logs, nil)),
+	})
 	mux := chi.NewRouter()
 	e.h.Routes(rbac.NewRouter(mux, rbac.NewDBChecker(db), e.clk))
 	e.mux = mux
@@ -160,7 +165,8 @@ type fakeAgent struct {
 	actionErr error // returned by Ensure, Power and Remove only
 	docker    string
 	inst      map[int64]agentapi.InstanceStatus
-	calls     []string
+	calls     []string // accepted calls
+	failed    []string // calls answered with an error
 	ensures   []agentapi.EnsureRequest
 }
 
@@ -203,14 +209,31 @@ func (f *fakeAgent) Instances(context.Context) (agentapi.InstancesResponse, erro
 }
 
 func (f *fakeAgent) record(call string) error {
-	if f.err != nil {
-		return f.err
+	err := f.err
+	if err == nil {
+		err = f.actionErr
 	}
-	if f.actionErr != nil {
-		return f.actionErr
+	if err != nil {
+		f.failed = append(f.failed, call)
+		return err
 	}
 	f.calls = append(f.calls, call)
 	return nil
+}
+
+func (f *fakeAgent) failedCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.failed)
+}
+
+func (f *fakeAgent) lastEnsure() agentapi.EnsureRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.ensures) == 0 {
+		return agentapi.EnsureRequest{}
+	}
+	return f.ensures[len(f.ensures)-1]
 }
 
 func (f *fakeAgent) Ensure(_ context.Context, req agentapi.EnsureRequest) error {

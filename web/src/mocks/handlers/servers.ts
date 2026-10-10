@@ -11,7 +11,7 @@ import type {
   UpdateServerSettingsRequest,
 } from '@/api/types'
 import { ALL_PERMISSIONS } from '@/api/types'
-import { db, nextId, recordAudit, resolveProperties, runningStatus, type MockServer } from '../db'
+import { db, nextId, recordAudit, resolveProperties, runningStatus, stoppedStatus, type MockServer } from '../db'
 import { API, apiError, guard, idParam, noContent, op, readJson, serverPermissions, type MockOperation } from './util'
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/
@@ -236,6 +236,17 @@ export const serverOperations: MockOperation[] = [
       if (!server) return apiError(404, 'not_found', 'server not found')
       const body = await readJson<{ action?: PowerAction }>(request)
       if (!body?.action || !ACTIONS.includes(body.action)) return apiError(400, 'validation_failed', 'action must be start, stop or restart')
+      if (!server.instance) return apiError(409, 'conflict', 'server is not configured (no instance)')
+      settle(server)
+      if (body.action === 'stop') {
+        server.status = stoppedStatus()
+      } else if (body.action === 'start' && server.status.state === 'running') {
+        // already running: nothing to do
+      } else {
+        // start of a stopped server and every restart: up in the current revision
+        server.status = runningStatus(server.instance.memory_mib, Date.now())
+        server.runningRevision = server.revision
+      }
       recordAudit(g.user, 'server.power', `server:${server.id}`, 'success', { action: body.action, name: server.name })
       return HttpResponse.json({ status: 'accepted' as const }, { status: 202 })
     }),

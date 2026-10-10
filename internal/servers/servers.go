@@ -91,6 +91,8 @@ func (h *Handler) loadInstance(w http.ResponseWriter, r *http.Request, s store.S
 // writeAgentError maps a failed synchronous agent call to the API error.
 func writeAgentError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, errBaseDomainMissing):
+		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeBaseDomainMissing, "set a base domain in the server settings first")
 	case errors.Is(err, agentapi.ErrDockerUnavailable):
 		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeDockerUnavailable, "docker is not available on the host")
 	case errors.Is(err, agentapi.ErrBusy):

@@ -29,6 +29,7 @@ type Deps struct {
 	// Instances is the agent's instance API; nil means "no agent" (every call fails with
 	// agentapi.ErrUnavailable).
 	Instances agentapi.InstancesClient
+	Log       *slog.Logger // nil = slog.Default()
 }
 
 type Handler struct {
@@ -38,9 +39,12 @@ type Handler struct {
 	rec    audit.Recorder
 	box    *secretbox.Box
 	inst   agentapi.InstancesClient
+	log    *slog.Logger
 	power  *powerLimiter
 	kick   chan struct{} // Trigger -> reconcile loop (buffer 1, never blocks)
 	status statusCache   // last actual state reported by the agent
+
+	reconcile reconcileState
 }
 
 func NewHandler(d Deps) *Handler {
@@ -48,9 +52,14 @@ func NewHandler(d Deps) *Handler {
 	if inst == nil {
 		inst = noAgent{}
 	}
+	log := d.Log
+	if log == nil {
+		log = slog.Default()
+	}
 	return &Handler{
-		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst,
+		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst, log: log,
 		power: newPowerLimiter(), kick: make(chan struct{}, 1),
+		reconcile: reconcileState{attempts: map[int64]attempt{}, warned: map[int64]bool{}},
 	}
 }
 
