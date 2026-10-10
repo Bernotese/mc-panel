@@ -43,6 +43,9 @@ func TestPropertiesValidation(t *testing.T) {
 		"ops too many":       {Ops: names200[:51]},
 		"seed too long":      {Seed: ptr(strings.Repeat("1", 65))},
 		"seed newline":       {Seed: ptr("1\n2")},
+		"motd backslash u":   {MOTD: ptr(`C:\users`)},
+		"motd trailing bs":   {MOTD: ptr(`Willkommen \`)},
+		"seed backslash":     {Seed: ptr(`1\2`)},
 		"level type":         {LevelType: ptr("minecraft:flat")},
 	}
 	for name, p := range invalid {
