@@ -92,7 +92,10 @@ EOF
 agent_pid=$!
 for _ in $(seq 1 50); do [ -S "$sock" ] && break; sleep 0.2; done
 [ -S "$sock" ] || fail "agent socket missing"
-agent http://agent/v1/health | grep -q '"docker":"ok"' || fail "agent reports docker unavailable"
+# The agent reports Docker as unavailable until its first background check; poll briefly.
+docker_ok() { agent http://agent/v1/health | grep -q '"docker":"ok"'; }
+for _ in $(seq 1 30); do docker_ok && break; sleep 1; done
+docker_ok || fail "agent reports docker unavailable"
 
 echo "== ensure citest (Paper 1.21.11, 2048 MiB) and start"
 agent -X POST http://agent/v1/instances/ensure -d '{

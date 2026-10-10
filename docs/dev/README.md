@@ -80,7 +80,7 @@ make preview-down    # stoppt und entfernt den Container
 MCPANEL_DEV_DOCKER=1 make dev
 ```
 
-- Der dev-agent nutzt dann den Docker-Socket von OrbStack, Docker Desktop oder `/var/run/docker.sock` (in dieser Reihenfolge), legt das Netz `mcpanel-mc` und den Container `mcpanel-router` (Port 25565) an und schreibt Instanzdaten nach `.dev/mc/`.
+- Der dev-agent nutzt dann den Docker-Socket von OrbStack, Docker Desktop oder `/var/run/docker.sock` (in dieser Reihenfolge), legt das Netz `mcpanel-mc` und den Container `mcpanel-router` an und schreibt Instanzdaten nach `.dev/mc/`. Der Router veröffentlicht Port 25565 auf allen Netzwerkschnittstellen des Macs, ist also im lokalen Netz erreichbar.
 - Basisdomain in den Einstellungen: `mc.localhost`; für den Minecraft-Client `/etc/hosts` um `127.0.0.1 <name>.mc.localhost` ergänzen.
 - Aufräumen: `docker rm -f $(docker ps -aq --filter label=mcpanel.instance) mcpanel-router; docker network rm mcpanel-mc`.
 
@@ -92,7 +92,7 @@ Einmalig den Browser installieren: `cd web && npx playwright install chromium`.
 
 | Befehl | Wirkung |
 |---|---|
-| `npm run e2e` | Projekt `mock`: startet selbst `vite --mode mock` auf Port 5174 und testet `e2e/smoke.spec.ts` und `e2e/totp.spec.ts` gegen die Mock-API |
+| `npm run e2e` | Projekt `mock`: startet selbst `vite --mode mock` auf Port 5174 und testet `e2e/smoke.spec.ts`, `e2e/totp.spec.ts` und `e2e/servers.spec.ts` gegen die Mock-API |
 | `npm run e2e:real` | Projekt `real`: `e2e/login-totp.spec.ts` gegen ein laufendes `make dev`; braucht `E2E_BASE_URL`, `E2E_ADMIN_USER` und `E2E_ADMIN_PASSWORD` eines **frischen** Admins ohne 2FA |
 
 Der Real-Test richtet TOTP ein, meldet sich mit TOTP neu an, registriert über einen virtuellen Authenticator (Chrome DevTools Protocol, nur Chromium) einen Passkey im Profil (Sudo per TOTP) und meldet sich zuletzt mit dem Passkey an. Er wartet dabei ggf. auf den nächsten 30-s-TOTP-Schritt. Beispiel:
