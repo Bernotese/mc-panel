@@ -1,7 +1,7 @@
 # mc-panel – Teilprojekt 1: Fundament + Security (Design-Spec)
 
 - **Datum:** 2026-10-08
-- **Status:** Entwurf, wartet auf Review
+- **Status:** umgesetzt (PR #1, 2026-10-10)
 - **Autor:** Jannes Göbel (mit Claude)
 
 ## 1. Ziel und Kontext
@@ -14,8 +14,8 @@ Entwickelt wird lokal auf macOS; das fertige Produkt wird später per Installer 
 
 | # | Teilprojekt | Inhalt (Kurz) |
 |---|---|---|
-| **1** | **Fundament + Security** | **Repo, panel/agent, Auth, 2FA, Sessions, Rechte, Audit, Abwehr, Security Center** |
-| 2 | Instanzen-Lifecycle | Docker + `itzg/minecraft-server`, Versionen/Engines, Ressourcenlimits, Ports/Firewall, Config-Editor, Auto-Restart |
+| **1** | **Fundament + Security** (umgesetzt) | **Repo, panel/agent, Auth, 2FA, Sessions, Rechte, Audit, Abwehr, Security Center** |
+| 2 | Instanzen-Lifecycle (umgesetzt, Spec `2026-10-10-mc-panel-instances-design.md`) | Docker + `itzg/minecraft-server`, Versionen/Engines, Ressourcenlimits, Ports/Firewall, Config-Editor, Auto-Restart |
 | 3 | Live-Betrieb | Konsole (xterm.js/WebSocket), Logs, Dateibrowser, Plugins/Mods (Modrinth, Hangar), Spieler-Verwaltung |
 | 4 | Backups | Zeitpläne, Retention, Offsite via restic, konsistente Snapshots, Restore |
 | 5 | Monitoring + Alerts | Spieler, TPS/MSPT, Ressourcen, Historie, Alerts (Discord, ntfy) |
