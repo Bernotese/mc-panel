@@ -22,13 +22,16 @@ test('admin signs in with password and TOTP and opens the security center', asyn
 
 test('sensitive actions ask for sudo once and then succeed', async ({ page }) => {
   await signInAsAdmin(page)
-  await page.getByRole('button', { name: 'Server anlegen' }).click()
-  await page.getByRole('dialog', { name: 'Server anlegen' }).getByLabel('Name').fill('skyblock')
-  await page.getByRole('dialog', { name: 'Server anlegen' }).getByRole('button', { name: 'Anlegen' }).click()
+  await page.getByRole('link', { name: 'Benutzer', exact: true }).click()
+  await page.getByRole('button', { name: 'Benutzer anlegen' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Benutzer anlegen' })
+  await dialog.getByLabel('Benutzername').fill('carol')
+  await dialog.getByLabel('Initiales Passwort').fill('long-enough-password')
+  await dialog.getByRole('button', { name: 'Anlegen' }).click()
   const sudo = page.getByRole('dialog', { name: 'Aktion bestätigen' })
   await sudo.getByLabel('Code aus der Authenticator-App').fill('123456')
   await sudo.getByRole('button', { name: 'Bestätigen' }).click()
-  await expect(page.getByRole('article', { name: 'skyblock' })).toBeVisible()
+  await expect(page.getByRole('row', { name: /carol/ })).toBeVisible()
   await expect(sudo).toBeHidden()
 })
 

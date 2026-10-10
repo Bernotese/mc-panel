@@ -96,14 +96,14 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('button', { name: 'Server anlegen' })).toBeDisabled()
   })
 
-  it('lets admins open server creation when a base domain is set', async () => {
+  it('links admins to the create page when a base domain is set', async () => {
     const user = userEvent.setup()
-    await renderWithProviders(<DashboardPage />, { me: loginAs('admin') })
-    const create = await screen.findByRole('button', { name: 'Server anlegen' })
-    await waitFor(() => expect(create).toBeEnabled())
+    const { router } = await renderWithProviders(<DashboardPage />, { me: loginAs('admin') })
+    const create = await screen.findByRole('link', { name: 'Server anlegen' })
+    expect(create).toHaveAttribute('href', '/servers/new')
     expect(screen.queryByText('Keine Basisdomain festgelegt')).not.toBeInTheDocument()
     await user.click(create)
-    expect(screen.getByRole('dialog', { name: 'Server anlegen' })).toBeInTheDocument()
+    await waitFor(() => expect(router.state.location.pathname).toBe('/servers/new'))
   })
 
   it('shows no error toast after the user cancelled the sudo dialog', async () => {

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState, type ReactNode } from 'react'
+import { Link } from '@tanstack/react-router'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PageHeader } from '@/components/page-header'
 import { Button } from '@/components/ui/button'
@@ -7,14 +8,12 @@ import { useMe } from '@/features/auth/me'
 import { serverSettingsQueryOptions, serversQueryOptions } from '@/features/servers/api'
 import { pollInterval } from '@/features/servers/status'
 import { errorMessage } from '@/lib/error-message'
-import { CreateServerDialog } from './create-server-dialog'
 import { ServerCard } from './server-card'
 
 export function DashboardPage() {
   const { t } = useTranslation()
   const me = useMe()
   const isAdmin = me?.role === 'admin'
-  const [creating, setCreating] = useState(false)
   // 3 s while a server is changing state, 15 s otherwise (spec §9).
   const servers = useQuery({ ...serversQueryOptions, refetchInterval: (query) => pollInterval(query.state.data) })
   // Only admins may read the instance settings; without a base domain no server can be created.
@@ -44,19 +43,23 @@ export function DashboardPage() {
     )
   }
 
+  let createAction: ReactNode
+  if (isAdmin) {
+    createAction =
+      settings.isPending || baseDomainMissing ? (
+        <Button type="button" disabled>
+          {t('dashboard.create_server')}
+        </Button>
+      ) : (
+        <Button asChild>
+          <Link to="/servers/new">{t('dashboard.create_server')}</Link>
+        </Button>
+      )
+  }
+
   return (
     <>
-      <PageHeader
-        title={t('dashboard.title')}
-        description={t('dashboard.description')}
-        actions={
-          isAdmin ? (
-            <Button type="button" disabled={settings.isPending || baseDomainMissing} onClick={() => setCreating(true)}>
-              {t('dashboard.create_server')}
-            </Button>
-          ) : undefined
-        }
-      />
+      <PageHeader title={t('dashboard.title')} description={t('dashboard.description')} actions={createAction} />
       {baseDomainMissing ? (
         <div role="status" className="mb-6 rounded-md border p-4 text-sm">
           <p className="font-medium">{t('dashboard.base_domain_missing_title')}</p>
@@ -64,7 +67,6 @@ export function DashboardPage() {
         </div>
       ) : null}
       {content}
-      {isAdmin ? <CreateServerDialog open={creating} onOpenChange={setCreating} /> : null}
     </>
   )
 }

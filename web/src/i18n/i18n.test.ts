@@ -50,6 +50,22 @@ const DYNAMIC_KEYS = [
     (s) => `servers.state.${s}`,
   ),
   ...['vanilla', 'paper', 'purpur', 'fabric', 'neoforge', 'modrinth', 'curseforge'].map((k) => `servers.type.${k}`),
+  ...['vanilla', 'paper', 'purpur', 'fabric', 'neoforge', 'modrinth', 'curseforge'].map((k) => `servers.type_description.${k}`),
+  ...['peaceful', 'easy', 'normal', 'hard'].map((d) => `servers.difficulty.${d}`),
+  ...['survival', 'creative', 'adventure', 'spectator'].map((g) => `servers.gamemode.${g}`),
+  ...['normal', 'flat', 'large_biomes', 'amplified'].map((l) => `servers.level_type.${l}`),
+  ...[
+    'pvp',
+    'hardcore',
+    'allow_flight',
+    'enable_command_block',
+    'online_mode',
+    'whitelist_enabled',
+    'max_players',
+    'view_distance',
+    'simulation_distance',
+    'spawn_protection',
+  ].map((p) => `servers.props.${p}`),
 ]
 
 describe('i18n resources', () => {
