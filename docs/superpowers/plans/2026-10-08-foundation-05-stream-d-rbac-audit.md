@@ -132,7 +132,7 @@ func NewDBChecker(db store.DBTX) *DBChecker
 func (c *DBChecker) HasServerPermission(ctx context.Context, userID, serverID int64, p Permission) (bool, error)
 ```
 
-- [ ] **Step 1: `internal/store/queries/rbac.sql` schreiben**
+- [x] **Step 1: `internal/store/queries/rbac.sql` schreiben**
 
 ```sql
 -- Stream D: users, servers, permissions. All query names start with "Rbac".
@@ -221,7 +221,7 @@ DELETE FROM permissions WHERE user_id = ?;
 INSERT INTO permissions (user_id, server_id, permission) VALUES (?, ?, ?);
 ```
 
-- [ ] **Step 2: Generieren und Signaturen prüfen**
+- [x] **Step 2: Generieren und Signaturen prüfen**
 
 ```bash
 cd /Users/jannes/Workspace/mc-panel
@@ -232,7 +232,7 @@ go build ./...
 ```
 Expected: `git status` zeigt nur `?? internal/store/queries/rbac.sql` und `?? internal/store/rbac.sql.go` (`db.go`, `models.go`, `common.sql.go` unverändert); `25` Rbac-Methoden; Build ohne Fehler. Die Signaturen müssen den unter **Interfaces** gelisteten entsprechen. Hinweis zur Typinferenz: Erzeugt sqlc für `RbacListViewableServers` den Parametertyp `interface{}` statt `int64`, kompiliert der Code unverändert (es wird ein `int64` übergeben). Erzeugt sqlc für `RbacLastLogin` `int64` statt `sql.NullInt64`, in `internal/users/users.go` (Task 6) `sql.NullInt64{Int64: u.ID, Valid: true}` durch `u.ID` ersetzen – sonst nichts ändern.
 
-- [ ] **Step 3: Failing test `internal/rbac/checker_test.go`**
+- [x] **Step 3: Failing test `internal/rbac/checker_test.go`**
 
 Hinweis: Phase 0 definiert in `internal/rbac/router_test.go` (Paket `rbac_test`) bereits `fakeChecker`, `now`, `setup`, `do` – diese Namen hier nicht neu deklarieren.
 
@@ -326,10 +326,10 @@ func TestDBCheckerThroughRouter(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/rbac/ -run 'TestDBChecker' -v`
+- [x] **Step 4: Run** `go test ./internal/rbac/ -run 'TestDBChecker' -v`
 Expected: FAIL – Compilerfehler `undefined: rbac.NewDBChecker`.
 
-- [ ] **Step 5: Implementation `internal/rbac/checker.go`**
+- [x] **Step 5: Implementation `internal/rbac/checker.go`**
 
 ```go
 package rbac
@@ -371,10 +371,10 @@ func (c *DBChecker) HasServerPermission(ctx context.Context, userID, serverID in
 }
 ```
 
-- [ ] **Step 6: Run** `go test ./internal/rbac/ -v`
+- [x] **Step 6: Run** `go test ./internal/rbac/ -v`
 Expected: PASS (`TestDBChecker`, `TestDBCheckerThroughRouter` und die Phase-0-Tests `TestEnforcement`, `TestRoutesRegistry`, `TestZeroRulePanics`); letzte Zeile `ok  	github.com/Bernotese/mc-panel/internal/rbac`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/store/queries/rbac.sql internal/store/rbac.sql.go internal/rbac/checker.go internal/rbac/checker_test.go
@@ -399,7 +399,7 @@ func Uncovered(mux chi.Routes, registered []RouteInfo, ignore func(method, patte
 
 Verhalten von chi (relevant für den Vergleich): `chi.Walk` setzt Pfade von Sub-Routern zusammen (`/api/*` + `/health` → `/api/health`) – identisch zu `RouteInfo.Pattern` des `rbac.Router` nach `Route("/api", …)`. Die von `Mount` zusätzlich angelegten Stub-Knoten (`/api`, `/api/`) liefert `Routes()` nicht. `mux.Handle("/*", …)` erscheint für jede HTTP-Methode als `/*`; der Aufrufer ignoriert das per `ignore`.
 
-- [ ] **Step 1: Failing test `internal/rbac/coverage_test.go`**
+- [x] **Step 1: Failing test `internal/rbac/coverage_test.go`**
 
 ```go
 package rbac_test
@@ -464,10 +464,10 @@ func TestUncoveredFullyCovered(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/rbac/ -run TestUncovered -v`
+- [x] **Step 2: Run** `go test ./internal/rbac/ -run TestUncovered -v`
 Expected: FAIL – `undefined: rbac.Uncovered`.
 
-- [ ] **Step 3: Implementation `internal/rbac/coverage.go`**
+- [x] **Step 3: Implementation `internal/rbac/coverage.go`**
 
 ```go
 package rbac
@@ -508,10 +508,10 @@ func Uncovered(mux chi.Routes, registered []RouteInfo, ignore func(method, patte
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/rbac/ -v`
+- [x] **Step 4: Run** `go test ./internal/rbac/ -v`
 Expected: PASS (alle Tests inkl. Phase 0); `ok  	github.com/Bernotese/mc-panel/internal/rbac`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/rbac/coverage.go internal/rbac/coverage_test.go
@@ -547,7 +547,7 @@ func NewSQLRecorder(db *sql.DB, c clock.Clock) *SQLRecorder
 func (r *SQLRecorder) Record(ctx context.Context, e Entry) error
 ```
 
-- [ ] **Step 1: `internal/store/queries/audit.sql` schreiben**
+- [x] **Step 1: `internal/store/queries/audit.sql` schreiben**
 
 ```sql
 -- Stream D: audit log. All query names start with "Audit".
@@ -574,7 +574,7 @@ ORDER BY id DESC
 LIMIT sqlc.arg(max_rows);
 ```
 
-- [ ] **Step 2: Generieren**
+- [x] **Step 2: Generieren**
 
 ```bash
 sqlc generate
@@ -584,7 +584,7 @@ go build ./...
 ```
 Expected: neu nur `internal/store/queries/audit.sql` und `internal/store/audit.sql.go`; vier Methoden `AuditInsert`, `AuditLast`, `AuditList`, `AuditListAfter`; Build ok. Hinweis: Leitet sqlc für die `GLOB`-/`LIMIT`-Parameter `interface{}` statt `string`/`int64` ab, kompiliert der Code in Task 5 trotzdem, weil dort immer bereits typisierte lokale Variablen zugewiesen werden.
 
-- [ ] **Step 3: Failing test `internal/audit/canonical_test.go`**
+- [x] **Step 3: Failing test `internal/audit/canonical_test.go`**
 
 ```go
 package audit_test
@@ -643,10 +643,10 @@ func TestCanonicalDetails(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/audit/ -run 'TestCanonical' -v`
+- [x] **Step 4: Run** `go test ./internal/audit/ -run 'TestCanonical' -v`
 Expected: FAIL – `undefined: audit.Canonical`.
 
-- [ ] **Step 5: Implementation `internal/audit/canonical.go`**
+- [x] **Step 5: Implementation `internal/audit/canonical.go`**
 
 ```go
 package audit
@@ -704,9 +704,9 @@ func CanonicalDetails(d map[string]any) (string, error) {
 }
 ```
 
-- [ ] **Step 6: Run** `go test ./internal/audit/ -run 'TestCanonical' -v` → PASS.
+- [x] **Step 6: Run** `go test ./internal/audit/ -run 'TestCanonical' -v` → PASS.
 
-- [ ] **Step 7: Test-Helfer `internal/audit/helpers_test.go`**
+- [x] **Step 7: Test-Helfer `internal/audit/helpers_test.go`**
 
 ```go
 package audit_test
@@ -763,7 +763,7 @@ func assertChain(t *testing.T, rows []store.AuditLog) {
 }
 ```
 
-- [ ] **Step 8: Failing test `internal/audit/sqlrecorder_test.go`**
+- [x] **Step 8: Failing test `internal/audit/sqlrecorder_test.go`**
 
 ```go
 package audit_test
@@ -941,10 +941,10 @@ func TestRecordConcurrentAcrossConnections(t *testing.T) {
 }
 ```
 
-- [ ] **Step 9: Run** `go test ./internal/audit/ -run 'TestRecord' -v`
+- [x] **Step 9: Run** `go test ./internal/audit/ -run 'TestRecord' -v`
 Expected: FAIL – `undefined: audit.NewSQLRecorder`.
 
-- [ ] **Step 10: Implementation `internal/audit/sqlrecorder.go`**
+- [x] **Step 10: Implementation `internal/audit/sqlrecorder.go`**
 
 ```go
 package audit
@@ -1078,13 +1078,13 @@ func normalize(ctx context.Context, e Entry) (Entry, error) {
 }
 ```
 
-- [ ] **Step 11: Run** `go test ./internal/audit/ -v`
+- [x] **Step 11: Run** `go test ./internal/audit/ -v`
 Expected: PASS (`TestCanonicalAndHashVector`, `TestCanonicalDetails`, `TestRecordFillsActorAndChains`, `TestRecordRejectsInvalidEntries`, `TestRecordSurvivesCancelledContext`, `TestRecordConcurrent`, `TestRecordConcurrentAcrossConnections`).
 
-- [ ] **Step 12: Race-Detector** `CGO_ENABLED=1 go test -race ./internal/audit/`
+- [x] **Step 12: Race-Detector** `CGO_ENABLED=1 go test -race ./internal/audit/`
 Expected: `ok  	github.com/Bernotese/mc-panel/internal/audit` ohne `DATA RACE`.
 
-- [ ] **Step 13: Commit**
+- [x] **Step 13: Commit**
 
 ```bash
 git add internal/store/queries/audit.sql internal/store/audit.sql.go internal/audit/canonical.go internal/audit/canonical_test.go internal/audit/sqlrecorder.go internal/audit/helpers_test.go internal/audit/sqlrecorder_test.go
@@ -1113,7 +1113,7 @@ func RunAuditVerify(ctx context.Context, db *sql.DB, stdout io.Writer) error // 
 ```
 - Test-Helfer (Paket `audit_test`, von Task 5 mitbenutzt): `seed(t, db, n)`, `insertChain(t, db, n)`, `mustExec(t, db, query, args...)`.
 
-- [ ] **Step 1: Failing test `internal/audit/verify_test.go`**
+- [x] **Step 1: Failing test `internal/audit/verify_test.go`**
 
 ```go
 package audit_test
@@ -1253,7 +1253,7 @@ func TestVerifyDetectsDeletedRow(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Failing test `internal/audit/cli_test.go`**
+- [x] **Step 2: Failing test `internal/audit/cli_test.go`**
 
 ```go
 package audit_test
@@ -1293,10 +1293,10 @@ func TestRunAuditVerify(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** `go test ./internal/audit/ -run 'TestVerify|TestRunAuditVerify' -v`
+- [x] **Step 3: Run** `go test ./internal/audit/ -run 'TestVerify|TestRunAuditVerify' -v`
 Expected: FAIL – `undefined: audit.VerifyReport`, `undefined: audit.Verify`, `undefined: audit.RunAuditVerify`.
 
-- [ ] **Step 4: Implementation `internal/audit/verify.go`**
+- [x] **Step 4: Implementation `internal/audit/verify.go`**
 
 ```go
 package audit
@@ -1348,7 +1348,7 @@ func Verify(ctx context.Context, db *sql.DB) (VerifyReport, error) {
 }
 ```
 
-- [ ] **Step 5: Implementation `internal/audit/cli.go`**
+- [x] **Step 5: Implementation `internal/audit/cli.go`**
 
 ```go
 package audit
@@ -1380,10 +1380,10 @@ func RunAuditVerify(ctx context.Context, db *sql.DB, stdout io.Writer) error {
 }
 ```
 
-- [ ] **Step 6: Run** `go test ./internal/audit/ -v`
+- [x] **Step 6: Run** `go test ./internal/audit/ -v`
 Expected: PASS (alle Tests aus Task 3 und 4).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/audit/verify.go internal/audit/verify_test.go internal/audit/cli.go internal/audit/cli_test.go
@@ -1409,7 +1409,7 @@ func (h *Handler) Routes(api *rbac.Router)
 ```
 JSON: `AuditEntry{id, ts, actor_type, actor_id|null, actor_name, action, target, ip, result, details(object), hash}`, `AuditPage{items, next_cursor|null}`, `AuditVerify{ok, checked, first_bad_id|null}`.
 
-- [ ] **Step 1: Failing test `internal/audit/handler_test.go`**
+- [x] **Step 1: Failing test `internal/audit/handler_test.go`**
 
 ```go
 package audit_test
@@ -1657,10 +1657,10 @@ func TestAuditEndpointsRequireAdmin(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/audit/ -run 'TestListAudit|TestVerifyEndpoint|TestAuditEndpoints' -v`
+- [x] **Step 2: Run** `go test ./internal/audit/ -run 'TestListAudit|TestVerifyEndpoint|TestAuditEndpoints' -v`
 Expected: FAIL – `undefined: audit.NewHandler`.
 
-- [ ] **Step 3: Implementation `internal/audit/handler.go`**
+- [x] **Step 3: Implementation `internal/audit/handler.go`**
 
 ```go
 package audit
@@ -1867,10 +1867,10 @@ func parseListQuery(v url.Values) (store.AuditListParams, int, string) {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/audit/ -v`
+- [x] **Step 4: Run** `go test ./internal/audit/ -v`
 Expected: PASS (alle Audit-Tests); `ok  	github.com/Bernotese/mc-panel/internal/audit`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/audit/handler.go internal/audit/handler_test.go
@@ -1911,7 +1911,7 @@ func writeConflict(w http.ResponseWriter, r *http.Request, msg string)
 
 Routen dieses Tasks (exakt laut OpenAPI-Tabelle): `GET /users` `rbac.Admin()`, `POST /users` `rbac.Admin().WithSudo()`, `GET /users/{id}` `rbac.Admin()`.
 
-- [ ] **Step 1: Test-Helfer `internal/users/helpers_test.go`**
+- [x] **Step 1: Test-Helfer `internal/users/helpers_test.go`**
 
 ```go
 package users_test
@@ -2049,7 +2049,7 @@ type userResp struct {
 }
 ```
 
-- [ ] **Step 2: Failing test `internal/users/users_test.go`**
+- [x] **Step 2: Failing test `internal/users/users_test.go`**
 
 ```go
 package users_test
@@ -2221,10 +2221,10 @@ func TestUserRoutesEnforceRules(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run** `go test ./internal/users/ -v`
+- [x] **Step 3: Run** `go test ./internal/users/ -v`
 Expected: FAIL – `no non-test Go files` bzw. `undefined: users.NewHandler`.
 
-- [ ] **Step 4: Implementation `internal/users/handler.go`**
+- [x] **Step 4: Implementation `internal/users/handler.go`**
 
 ```go
 // Package users implements user management, per-server permissions, the server stub API
@@ -2313,7 +2313,7 @@ func writeConflict(w http.ResponseWriter, r *http.Request, msg string) {
 }
 ```
 
-- [ ] **Step 5: Implementation `internal/users/service.go`**
+- [x] **Step 5: Implementation `internal/users/service.go`**
 
 ```go
 package users
@@ -2398,7 +2398,7 @@ func newUser(ctx context.Context, q *store.Queries, now time.Time, username, pw,
 }
 ```
 
-- [ ] **Step 6: Implementation `internal/users/users.go`**
+- [x] **Step 6: Implementation `internal/users/users.go`**
 
 ```go
 package users
@@ -2533,10 +2533,10 @@ func (h *Handler) handleGetUser(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 7: Run** `go test ./internal/users/ -v`
+- [x] **Step 7: Run** `go test ./internal/users/ -v`
 Expected: PASS (`TestCreateUser`, `TestCreateUserValidation`, `TestCreateUserDuplicateIsCaseInsensitive`, `TestListAndGetUsers`, `TestUserRoutesEnforceRules`).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/users/handler.go internal/users/service.go internal/users/users.go internal/users/helpers_test.go internal/users/users_test.go
@@ -2564,7 +2564,7 @@ Routen dieses Tasks: `PATCH /users/{id}` `rbac.Admin().WithSudo()`, `DELETE /use
 
 Entscheidung `reset-2fa` auf den letzten Admin bzw. sich selbst: erlaubt (Vertrag kennt nur `404`). Es sperrt niemanden aus, weil Admins ohne zweiten Faktor beim nächsten Login in den erzwungenen Setup-Flow (Stage `setup`, Stream A) kommen; das Passwort bleibt gültig.
 
-- [ ] **Step 1: Failing test `internal/users/manage_test.go`**
+- [x] **Step 1: Failing test `internal/users/manage_test.go`**
 
 ```go
 package users_test
@@ -2871,10 +2871,10 @@ func TestHandlersWithSQLRecorder(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/users/ -run 'TestDemote|TestChangeRole|TestUpdatePassword|TestDelete|TestReset2FA|TestHandlersWithSQLRecorder' -v`
+- [x] **Step 2: Run** `go test ./internal/users/ -run 'TestDemote|TestChangeRole|TestUpdatePassword|TestDelete|TestReset2FA|TestHandlersWithSQLRecorder' -v`
 Expected: FAIL – `405`/`404` statt der erwarteten Codes, weil die Routen noch nicht registriert sind (z. B. `code = 405`).
 
-- [ ] **Step 3: Implementation `internal/users/manage.go`**
+- [x] **Step 3: Implementation `internal/users/manage.go`**
 
 ```go
 package users
@@ -3150,7 +3150,7 @@ func (h *Handler) handleReset2FA(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 4: `Routes` in `internal/users/handler.go` erweitern**
+- [x] **Step 4: `Routes` in `internal/users/handler.go` erweitern**
 
 Ersetze
 
@@ -3169,10 +3169,10 @@ func (h *Handler) Routes(api *rbac.Router) {
 }
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/users/ -v`
+- [x] **Step 5: Run** `go test ./internal/users/ -v`
 Expected: PASS (Tests aus Task 6 und 7).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/users/manage.go internal/users/manage_test.go internal/users/handler.go
@@ -3200,7 +3200,7 @@ func loadGrants(ctx context.Context, q *store.Queries, userID int64) ([]grantJSO
 ```
 Routen dieses Tasks: `GET /users/{id}/permissions` `rbac.Admin()`, `PUT /users/{id}/permissions` `rbac.Admin().WithSudo()`.
 
-- [ ] **Step 1: Failing test `internal/users/permissions_test.go`**
+- [x] **Step 1: Failing test `internal/users/permissions_test.go`**
 
 ```go
 package users_test
@@ -3344,10 +3344,10 @@ func TestPermissionsUnknownUser(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/users/ -run 'Permissions' -v`
+- [x] **Step 2: Run** `go test ./internal/users/ -run 'Permissions' -v`
 Expected: FAIL (`code = 405` bzw. `404`, Routen fehlen).
 
-- [ ] **Step 3: Implementation `internal/users/permissions.go`**
+- [x] **Step 3: Implementation `internal/users/permissions.go`**
 
 ```go
 package users
@@ -3543,7 +3543,7 @@ func (h *Handler) handleSetPermissions(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 4: `Routes` in `internal/users/handler.go` erweitern**
+- [x] **Step 4: `Routes` in `internal/users/handler.go` erweitern**
 
 Ersetze
 
@@ -3564,10 +3564,10 @@ func (h *Handler) Routes(api *rbac.Router) {
 }
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/users/ -v`
+- [x] **Step 5: Run** `go test ./internal/users/ -v`
 Expected: PASS (Tasks 6–8).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/users/permissions.go internal/users/permissions_test.go internal/users/handler.go
@@ -3590,7 +3590,7 @@ Routen dieses Tasks (exakt laut OpenAPI-Tabelle): `GET /servers` `rbac.Authentic
 
 Sichtbarkeit: Admins sehen alle Server mit allen Rechten; Benutzer sehen nur Server, auf denen sie `server.view` haben, jeweils mit ihren effektiven Rechten. Nicht-Admins erhalten für fremde oder nicht existierende Server `403` (vom Router; verrät keine Existenz), Admins für nicht existierende Server `404`.
 
-- [ ] **Step 1: Failing test `internal/users/servers_test.go`**
+- [x] **Step 1: Failing test `internal/users/servers_test.go`**
 
 ```go
 package users_test
@@ -3731,10 +3731,10 @@ func TestServerPowerUnknownServerAsAdmin(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/users/ -run 'TestServer' -v`
+- [x] **Step 2: Run** `go test ./internal/users/ -run 'TestServer' -v`
 Expected: FAIL (`404`/`405` – Routen fehlen).
 
-- [ ] **Step 3: Implementation `internal/users/servers.go`**
+- [x] **Step 3: Implementation `internal/users/servers.go`**
 
 ```go
 package users
@@ -3927,7 +3927,7 @@ func (h *Handler) handleServerPower(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 4: `Routes` in `internal/users/handler.go` erweitern**
+- [x] **Step 4: `Routes` in `internal/users/handler.go` erweitern**
 
 Ersetze
 
@@ -3950,10 +3950,10 @@ func (h *Handler) Routes(api *rbac.Router) {
 }
 ```
 
-- [ ] **Step 5: Run** `go test ./internal/users/ -v`
+- [x] **Step 5: Run** `go test ./internal/users/ -v`
 Expected: PASS (Tasks 6–9).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/users/servers.go internal/users/servers_test.go internal/users/handler.go
@@ -3976,7 +3976,7 @@ func RunAdminCreate(ctx context.Context, db *sql.DB, c clock.Clock, rec audit.Re
 	args []string, stdin io.Reader, stdout io.Writer) error
 ```
 
-- [ ] **Step 1: Failing test `internal/users/cli_test.go`**
+- [x] **Step 1: Failing test `internal/users/cli_test.go`**
 
 ```go
 package users_test
@@ -4070,10 +4070,10 @@ func TestRunAdminCreateErrors(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/users/ -run TestRunAdminCreate -v`
+- [x] **Step 2: Run** `go test ./internal/users/ -run TestRunAdminCreate -v`
 Expected: FAIL – `undefined: users.RunAdminCreate`.
 
-- [ ] **Step 3: Implementation `internal/users/cli.go`**
+- [x] **Step 3: Implementation `internal/users/cli.go`**
 
 ```go
 package users
@@ -4145,10 +4145,10 @@ func readPasswordLine(r io.Reader) (string, error) {
 }
 ```
 
-- [ ] **Step 4: Run** `go test ./internal/users/ -v`
+- [x] **Step 4: Run** `go test ./internal/users/ -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/users/cli.go internal/users/cli_test.go
@@ -4168,7 +4168,7 @@ git commit -m "feat(users): add admin create CLI command" -m "Co-Authored-By: Cl
 
 Der Test mountet wie Phase 2 unter `/api` (im Test ist `Route()` erlaubt – das Verbot gilt für Produktivcode der Streams).
 
-- [ ] **Step 1: Test `internal/users/routes_test.go`**
+- [x] **Step 1: Test `internal/users/routes_test.go`**
 
 ```go
 package users_test
@@ -4260,10 +4260,10 @@ func TestRouteContract(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./internal/users/ -run TestRouteContract -v`
+- [x] **Step 2: Run** `go test ./internal/users/ -run TestRouteContract -v`
 Expected: PASS (alle 15 Routen mit exakter Regel, `Uncovered` leer, `200` für `/api/users/{id}`). Schlägt der Test fehl, ist der Produktivcode falsch, nicht der Test – die Regeln stammen aus dem verbindlichen OpenAPI-Vertrag.
 
-- [ ] **Step 3: Gesamtlauf**
+- [x] **Step 3: Gesamtlauf**
 
 ```bash
 go vet ./...
@@ -4273,7 +4273,7 @@ golangci-lint run ./internal/rbac/... ./internal/audit/... ./internal/users/...
 ```
 Expected: `go vet` ohne Ausgabe; alle Pakete `ok`; Race-Detector ohne `DATA RACE`; `golangci-lint` ohne Befunde (vor dem Merge zusätzlich `make test` und `make lint` laut Übersicht).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/users/routes_test.go
