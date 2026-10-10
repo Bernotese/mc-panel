@@ -35,6 +35,7 @@ Arbeitsbranch: `feat/instances` (von `main`, nachdem `docs/instances-spec` gemer
 - Labels: `mcpanel.instance=<id>`, `mcpanel.revision=<revision>`, `mcpanel.name=<name>`, `mcpanel.fqdn=<fqdn>`. Container ohne `mcpanel.instance` fasst der agent nie an.
 - Router: Container `mcpanel-router`, Port `25565/tcp`, Mount `<instances_dir>/router` → `/config` (ro), `-routes-config /config/routes.json`, **kein** `-routes-config-watch`, Neuladen per `POST /containers/mcpanel-router/kill?signal=SIGHUP`. Routen-Datei: `{"mappings":{"<fqdn>":"mcpanel-mc-<id>:25565"}}`.
 - Docker Engine API: Pfadpräfix `/v1.44`, Socket aus `docker_socket`.
+- Image-Referenz an Docker: immer `repo@sha256:<digest>` (Tag aus der Konfiguration entfernt), weil der containerd-Image-Store `name:tag@digest` beim Inspect nicht zuverlässig auflöst (Aufgabe 5 `docker.ParseImageRef`/`ImageRef.Pinned`).
 - Image-Defaults (gepinnt, verifiziert 2026-10-10):
   - `java8  = "itzg/minecraft-server:2026.9.2-java8@sha256:a23a59bc9bd520d2c1bae97225b8672771cf82c90073ea36dc18f18c199f325b"`
   - `java17 = "itzg/minecraft-server:2026.9.2-java17@sha256:0198cb9f0c7e7b1747645040e1245a6915c122662f3106f3b0979473a953ab61"`
@@ -127,9 +128,11 @@ package instancespec // github.com/Bernotese/mc-panel/internal/agent/instancespe
 type Type string // TypeVanilla … TypeCurseForge; var Types []Type
 type Java string // Java8, Java17, Java21, Java25; var Javas []Java
 const MinMemoryMiB, MaxMemoryMiB, MemoryStepMiB = 1024, 32768, 256
+
 var ErrInvalid error // alle Validierungsfehler wrappen ErrInvalid; Meldung "<feld>: <grund>"
 
-type Properties struct { /* Zeiger/Slices, json-Namen wie §7 der Spec, omitempty */ }
+type Properties struct { /* Zeiger/Slices, json-Namen wie §7 der Spec, omitempty */
+}
 type Spec struct {
 	Type             Type       `json:"type"`
 	Version          string     `json:"version"`
@@ -140,10 +143,11 @@ type Spec struct {
 	Properties       Properties `json:"properties"`
 	CurseForgeAPIKey *string    `json:"curseforge_api_key"`
 }
+
 func (s Spec) Validate() error
 func (p Properties) Validate() error
-func Resolve(name string, p Properties) Properties   // alle Felder gesetzt (Defaults aus §7)
-func Env(name string, s Spec) ([]string, error)      // validiert, dann "KEY=VALUE" in fester Reihenfolge
+func Resolve(name string, p Properties) Properties // alle Felder gesetzt (Defaults aus §7)
+func Env(name string, s Spec) ([]string, error)    // validiert, dann "KEY=VALUE" in fester Reihenfolge
 func JavaFor(t Type, version string) Java
 func ValidName(name string) bool
 func ValidBaseDomain(d string) error
@@ -708,11 +712,15 @@ func validSpec() instancespec.Spec {
 
 func TestValidSpecs(t *testing.T) {
 	cases := map[string]func(*instancespec.Spec){
-		"paper":          func(*instancespec.Spec) {},
-		"latest":         func(s *instancespec.Spec) { s.Version = "LATEST" },
-		"fabric loader":  func(s *instancespec.Spec) { s.Type = instancespec.TypeFabric; s.LoaderVersion = ptr("0.19.5") },
-		"neoforge":       func(s *instancespec.Spec) { s.Type = instancespec.TypeNeoForge; s.LoaderVersion = ptr("21.4.140") },
-		"modrinth":       func(s *instancespec.Spec) { s.Type = instancespec.TypeModrinth; s.Version = ""; s.Modpack = ptr("cobblemon-fabric") },
+		"paper":         func(*instancespec.Spec) {},
+		"latest":        func(s *instancespec.Spec) { s.Version = "LATEST" },
+		"fabric loader": func(s *instancespec.Spec) { s.Type = instancespec.TypeFabric; s.LoaderVersion = ptr("0.19.5") },
+		"neoforge":      func(s *instancespec.Spec) { s.Type = instancespec.TypeNeoForge; s.LoaderVersion = ptr("21.4.140") },
+		"modrinth": func(s *instancespec.Spec) {
+			s.Type = instancespec.TypeModrinth
+			s.Version = ""
+			s.Modpack = ptr("cobblemon-fabric")
+		},
 		"curseforge url": func(s *instancespec.Spec) {
 			s.Type = instancespec.TypeCurseForge
 			s.Version = ""
@@ -733,24 +741,32 @@ func TestValidSpecs(t *testing.T) {
 
 func TestInvalidSpecs(t *testing.T) {
 	cases := map[string]func(*instancespec.Spec){
-		"unknown type":         func(s *instancespec.Spec) { s.Type = "bukkit" },
-		"empty version":        func(s *instancespec.Spec) { s.Version = "" },
-		"version with space":   func(s *instancespec.Spec) { s.Version = "1.21 4" },
-		"version newline":      func(s *instancespec.Spec) { s.Version = "1.21\nEULA=FALSE" },
-		"version too long":     func(s *instancespec.Spec) { s.Version = strings.Repeat("1", 65) },
-		"loader on paper":      func(s *instancespec.Spec) { s.LoaderVersion = ptr("1") },
-		"bad loader":           func(s *instancespec.Spec) { s.Type = instancespec.TypeFabric; s.LoaderVersion = ptr("0.19 5") },
-		"modpack on paper":     func(s *instancespec.Spec) { s.Modpack = ptr("x") },
-		"modrinth no pack":     func(s *instancespec.Spec) { s.Type = instancespec.TypeModrinth; s.Version = "" },
-		"modrinth version":     func(s *instancespec.Spec) { s.Type = instancespec.TypeModrinth; s.Modpack = ptr("x") },
-		"modrinth bad slug":    func(s *instancespec.Spec) { s.Type = instancespec.TypeModrinth; s.Version = ""; s.Modpack = ptr("Bad Slug") },
+		"unknown type":       func(s *instancespec.Spec) { s.Type = "bukkit" },
+		"empty version":      func(s *instancespec.Spec) { s.Version = "" },
+		"version with space": func(s *instancespec.Spec) { s.Version = "1.21 4" },
+		"version newline":    func(s *instancespec.Spec) { s.Version = "1.21\nEULA=FALSE" },
+		"version too long":   func(s *instancespec.Spec) { s.Version = strings.Repeat("1", 65) },
+		"loader on paper":    func(s *instancespec.Spec) { s.LoaderVersion = ptr("1") },
+		"bad loader":         func(s *instancespec.Spec) { s.Type = instancespec.TypeFabric; s.LoaderVersion = ptr("0.19 5") },
+		"modpack on paper":   func(s *instancespec.Spec) { s.Modpack = ptr("x") },
+		"modrinth no pack":   func(s *instancespec.Spec) { s.Type = instancespec.TypeModrinth; s.Version = "" },
+		"modrinth version":   func(s *instancespec.Spec) { s.Type = instancespec.TypeModrinth; s.Modpack = ptr("x") },
+		"modrinth bad slug": func(s *instancespec.Spec) {
+			s.Type = instancespec.TypeModrinth
+			s.Version = ""
+			s.Modpack = ptr("Bad Slug")
+		},
 		"curseforge other url": func(s *instancespec.Spec) {
 			s.Type = instancespec.TypeCurseForge
 			s.Version = ""
 			s.Modpack = ptr("https://evil.example/minecraft/modpacks/x")
 			s.CurseForgeAPIKey = ptr("k")
 		},
-		"curseforge no key": func(s *instancespec.Spec) { s.Type = instancespec.TypeCurseForge; s.Version = ""; s.Modpack = ptr("atm10") },
+		"curseforge no key": func(s *instancespec.Spec) {
+			s.Type = instancespec.TypeCurseForge
+			s.Version = ""
+			s.Modpack = ptr("atm10")
+		},
 		"curseforge java8": func(s *instancespec.Spec) {
 			s.Type = instancespec.TypeCurseForge
 			s.Version = ""
@@ -758,8 +774,13 @@ func TestInvalidSpecs(t *testing.T) {
 			s.CurseForgeAPIKey = ptr("k")
 			s.Java = instancespec.Java8
 		},
-		"key on paper":     func(s *instancespec.Spec) { s.CurseForgeAPIKey = ptr("k") },
-		"key with newline": func(s *instancespec.Spec) { s.Type = instancespec.TypeCurseForge; s.Version = ""; s.Modpack = ptr("atm10"); s.CurseForgeAPIKey = ptr("k\nX=1") },
+		"key on paper": func(s *instancespec.Spec) { s.CurseForgeAPIKey = ptr("k") },
+		"key with newline": func(s *instancespec.Spec) {
+			s.Type = instancespec.TypeCurseForge
+			s.Version = ""
+			s.Modpack = ptr("atm10")
+			s.CurseForgeAPIKey = ptr("k\nX=1")
+		},
 		"unknown java":     func(s *instancespec.Spec) { s.Java = "java11" },
 		"memory too small": func(s *instancespec.Spec) { s.MemoryMiB = 768 },
 		"memory too large": func(s *instancespec.Spec) { s.MemoryMiB = 33024 },
@@ -1612,6 +1633,7 @@ import (
 	"net"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent"
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
@@ -1626,7 +1648,7 @@ func handlerServer(t *testing.T, h http.Handler) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &http.Server{Handler: h}
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: time.Second}
 	go func() { _ = srv.Serve(l) }()
 	t.Cleanup(func() { _ = srv.Close() })
 	return path
@@ -1683,7 +1705,7 @@ func TestClientInstanceCalls(t *testing.T) {
 	}
 }
 
-func TestClientValidatesBeforeSending(t *testing.T) {
+func TestClientInstanceCallsValidateBeforeSending(t *testing.T) {
 	calls := 0
 	path := handlerServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { calls++; w.WriteHeader(http.StatusAccepted) }))
 	c := agent.NewClient(path)
