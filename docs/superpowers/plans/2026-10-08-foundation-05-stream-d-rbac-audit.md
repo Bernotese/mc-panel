@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-Alle Punkte aus `docs/superpowers/plans/2026-10-08-foundation-00-overview.md`, Abschnitt „Global Constraints“, gelten vollständig (Modulpfad `mcpanel`, kein CGO, Unix-ms-Zeitstempel, `clock.Clock` statt `time.Now()`, keine Migrationen ändern, Phase-0-Dateien schreibgeschützt, Routen nur über `*rbac.Router` mit vollem Pfad relativ zu `/api`, nie `Route()` im Produktivcode, sqlc-Präfixe `Rbac…`/`Audit…`, keine neuen Go-Abhängigkeiten, Tests nur Standardbibliothek, Fehlercodes nur aus `internal/httpx/errors.go`, Conventional Commits mit `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`).
+Alle Punkte aus `docs/superpowers/plans/2026-10-08-foundation-00-overview.md`, Abschnitt „Global Constraints“, gelten vollständig (Modulpfad `github.com/Bernotese/mc-panel`, kein CGO, Unix-ms-Zeitstempel, `clock.Clock` statt `time.Now()`, keine Migrationen ändern, Phase-0-Dateien schreibgeschützt, Routen nur über `*rbac.Router` mit vollem Pfad relativ zu `/api`, nie `Route()` im Produktivcode, sqlc-Präfixe `Rbac…`/`Audit…`, keine neuen Go-Abhängigkeiten, Tests nur Standardbibliothek, Fehlercodes nur aus `internal/httpx/errors.go`, Conventional Commits mit `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`).
 
 Stream-spezifische, exakte Werte:
 
@@ -249,10 +249,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 func TestDBChecker(t *testing.T) {
@@ -338,7 +338,7 @@ import (
 	"context"
 	"fmt"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // DBChecker answers per-server permission questions from the permissions table.
@@ -372,7 +372,7 @@ func (c *DBChecker) HasServerPermission(ctx context.Context, userID, serverID in
 ```
 
 - [ ] **Step 6: Run** `go test ./internal/rbac/ -v`
-Expected: PASS (`TestDBChecker`, `TestDBCheckerThroughRouter` und die Phase-0-Tests `TestEnforcement`, `TestRoutesRegistry`, `TestZeroRulePanics`); letzte Zeile `ok  	mcpanel/internal/rbac`.
+Expected: PASS (`TestDBChecker`, `TestDBCheckerThroughRouter` und die Phase-0-Tests `TestEnforcement`, `TestRoutesRegistry`, `TestZeroRulePanics`); letzte Zeile `ok  	github.com/Bernotese/mc-panel/internal/rbac`.
 
 - [ ] **Step 7: Commit**
 
@@ -411,8 +411,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/rbac"
 )
 
 func noopHandler(http.ResponseWriter, *http.Request) {}
@@ -509,7 +509,7 @@ func Uncovered(mux chi.Routes, registered []RouteInfo, ignore func(method, patte
 ```
 
 - [ ] **Step 4: Run** `go test ./internal/rbac/ -v`
-Expected: PASS (alle Tests inkl. Phase 0); `ok  	mcpanel/internal/rbac`.
+Expected: PASS (alle Tests inkl. Phase 0); `ok  	github.com/Bernotese/mc-panel/internal/rbac`.
 
 - [ ] **Step 5: Commit**
 
@@ -596,8 +596,8 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func TestCanonicalAndHashVector(t *testing.T) {
@@ -657,7 +657,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // Canonical returns the exact bytes hashed for one audit row: the compact JSON array
@@ -718,10 +718,10 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 var t0 = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
@@ -777,10 +777,10 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 func TestRecordFillsActorAndChains(t *testing.T) {
@@ -956,10 +956,10 @@ import (
 	"fmt"
 	"sync"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // SQLRecorder appends entries to audit_log and links them with a SHA-256 hash chain.
@@ -1082,7 +1082,7 @@ func normalize(ctx context.Context, e Entry) (Entry, error) {
 Expected: PASS (`TestCanonicalAndHashVector`, `TestCanonicalDetails`, `TestRecordFillsActorAndChains`, `TestRecordRejectsInvalidEntries`, `TestRecordSurvivesCancelledContext`, `TestRecordConcurrent`, `TestRecordConcurrentAcrossConnections`).
 
 - [ ] **Step 12: Race-Detector** `CGO_ENABLED=1 go test -race ./internal/audit/`
-Expected: `ok  	mcpanel/internal/audit` ohne `DATA RACE`.
+Expected: `ok  	github.com/Bernotese/mc-panel/internal/audit` ohne `DATA RACE`.
 
 - [ ] **Step 13: Commit**
 
@@ -1125,10 +1125,10 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 // seed records n entries through the real recorder (one second apart).
@@ -1265,8 +1265,8 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 func TestRunAuditVerify(t *testing.T) {
@@ -1306,7 +1306,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const verifyBatch = 1000
@@ -1428,13 +1428,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 var rootAdmin = principal.Principal{UserID: 1, Username: "root", Role: principal.RoleAdmin, Stage: principal.StageFull}
@@ -1675,11 +1675,11 @@ import (
 	"strconv"
 	"strings"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const (
@@ -1868,7 +1868,7 @@ func parseListQuery(v url.Values) (store.AuditListParams, int, string) {
 ```
 
 - [ ] **Step 4: Run** `go test ./internal/audit/ -v`
-Expected: PASS (alle Audit-Tests); `ok  	mcpanel/internal/audit`.
+Expected: PASS (alle Audit-Tests); `ok  	github.com/Bernotese/mc-panel/internal/audit`.
 
 - [ ] **Step 5: Commit**
 
@@ -1929,14 +1929,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store/storetest"
-	"mcpanel/internal/users"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/users"
 )
 
 var t0 = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
@@ -2062,11 +2062,11 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/password"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 func TestCreateUser(t *testing.T) {
@@ -2240,13 +2240,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 type Handler struct {
@@ -2327,9 +2327,9 @@ import (
 	"strings"
 	"time"
 
-	"mcpanel/internal/password"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]{3,32}$`)
@@ -2410,11 +2410,11 @@ import (
 	"fmt"
 	"net/http"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func (h *Handler) userRoutes(api *rbac.Router) {
@@ -2579,12 +2579,12 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/password"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 const newPassword = "violet tractor 42 umbrella"
@@ -2886,13 +2886,13 @@ import (
 	"fmt"
 	"net/http"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/password"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 var (
@@ -3214,10 +3214,10 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 type grantResp struct {
@@ -3361,11 +3361,11 @@ import (
 	"net/http"
 	"slices"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // grantJSON is the OpenAPI schema PermissionGrant.
@@ -3602,8 +3602,8 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 type serverResp struct {
@@ -3747,11 +3747,11 @@ import (
 	"slices"
 	"strconv"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 var serverNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,31}$`)
@@ -3989,11 +3989,11 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/password"
-	"mcpanel/internal/store/storetest"
-	"mcpanel/internal/users"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/users"
 )
 
 func TestRunAdminCreate(t *testing.T) {
@@ -4088,10 +4088,10 @@ import (
 	"io"
 	"strings"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // RunAdminCreate implements `panel admin create -username <name>`. The password is the first
@@ -4182,13 +4182,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store/storetest"
-	"mcpanel/internal/users"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/users"
 )
 
 func TestRouteContract(t *testing.T) {
