@@ -72,13 +72,27 @@ make preview-down    # stoppt und entfernt den Container
 - Funktionstests gegen das echte Backend sind das nicht; dafür `make dev` oder ein Testserver.
 - Die CI baut das Image bei jedem PR mit (Job `web`), startet es aber nicht. Claude startet die Vorschau nie selbst.
 
+## Minecraft-Server lokal (optional)
+
+`make dev` startet den agent ohne Docker: Server lassen sich anlegen und konfigurieren, der Status bleibt „Docker nicht verfügbar“, und auf dem Mac entstehen keine Container. Wer lokal echte Minecraft-Container sehen will, startet bewusst:
+
+```bash
+MCPANEL_DEV_DOCKER=1 make dev
+```
+
+- Der dev-agent nutzt dann den Docker-Socket von OrbStack, Docker Desktop oder `/var/run/docker.sock` (in dieser Reihenfolge), legt das Netz `mcpanel-mc` und den Container `mcpanel-router` an und schreibt Instanzdaten nach `.dev/mc/`. Der Router veröffentlicht Port 25565 auf allen Netzwerkschnittstellen des Macs, ist also im lokalen Netz erreichbar.
+- Basisdomain in den Einstellungen: `mc.localhost`; für den Minecraft-Client `/etc/hosts` um `127.0.0.1 <name>.mc.localhost` ergänzen.
+- Aufräumen: `docker rm -f $(docker ps -aq --filter label=mcpanel.instance) mcpanel-router; docker network rm mcpanel-mc`.
+
+Funktionstests gegen echte Server (Clients, Modpacks, Neustarts) laufen getrennt auf einem Testserver; die Checkliste steht in `docs/dev/acceptance-tp2.md`.
+
 ## End-to-End-Tests (Playwright)
 
 Einmalig den Browser installieren: `cd web && npx playwright install chromium`.
 
 | Befehl | Wirkung |
 |---|---|
-| `npm run e2e` | Projekt `mock`: startet selbst `vite --mode mock` auf Port 5174 und testet `e2e/smoke.spec.ts` und `e2e/totp.spec.ts` gegen die Mock-API |
+| `npm run e2e` | Projekt `mock`: startet selbst `vite --mode mock` auf Port 5174 und testet `e2e/smoke.spec.ts`, `e2e/totp.spec.ts` und `e2e/servers.spec.ts` gegen die Mock-API |
 | `npm run e2e:real` | Projekt `real`: `e2e/login-totp.spec.ts` gegen ein laufendes `make dev`; braucht `E2E_BASE_URL`, `E2E_ADMIN_USER` und `E2E_ADMIN_PASSWORD` eines **frischen** Admins ohne 2FA |
 
 Der Real-Test richtet TOTP ein, meldet sich mit TOTP neu an, registriert über einen virtuellen Authenticator (Chrome DevTools Protocol, nur Chromium) einen Passkey im Profil (Sudo per TOTP) und meldet sich zuletzt mit dem Passkey an. Er wartet dabei ggf. auf den nächsten 30-s-TOTP-Schritt. Beispiel:
@@ -94,6 +108,8 @@ Ein zweiter Lauf braucht einen neuen Admin (anderer Benutzername) oder ein frisc
 In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er baut die Binaries, startet agent, `panel serve -dev` und Vite, legt `e2e-admin` an, führt `npm run e2e:real` (ohne Retries) und danach `npm run e2e` aus und lädt bei einem Fehlschlag die Logs sowie `test-results`/`playwright-report` als Artefakt hoch.
 
 ## Produktion: Listen-Adresse und Reverse Proxy
+
+- Der agent braucht Docker (Engine ≥ 25, API ≥ 1.44) und den Systembenutzer `mcpanel-mc` (eigene UID/GID, nicht die des panels); beides richtet später der Installer (Teilprojekt 6) ein. `instances_dir` (Standard `/srv/mc-panel`) darf kein Symlink sein und nur unter root-eigenen, nicht gruppen-/weltbeschreibbaren Verzeichnissen liegen.
 
 - Standard ohne `-dev` ist `listen = "unix:/run/mc-panel/panel.sock"`: das panel lauscht nur auf einem Unix-Socket (Modus 0660, Gruppe = primäre Gruppe des panel-Benutzers `mcpanel`). Ein verwaister Socket wird beim Start nur entfernt, wenn niemand mehr darauf lauscht. Das Socket-Verzeichnis liefern die systemd-Units des Installers (Teilprojekt 6). Verbindliche Vorgabe dafür: Das panel bekommt ein **eigenes** Runtime-Verzeichnis (z. B. `RuntimeDirectory=mc-panel-web`, Besitzer `mcpanel`), nicht `/run/mc-panel` des agents — systemd löscht das Runtime-Verzeichnis einer Unit bei deren Stopp, und `mcpanel` darf den agent-Socket nicht ersetzen können. Der Pfad im Beispiel unten ändert sich entsprechend.
 - Caddy terminiert TLS und spricht den Socket an:
@@ -134,6 +150,8 @@ In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er 
 | `web` | `cd web && npm ci && npm run lint && npm run typecheck && npm test && npm run build && npm run gen:api && git status --porcelain . && npm audit --audit-level=high` |
 | `openapi` | `npx --yes @redocly/cli@2.54.2 lint api/openapi.yaml --extends=minimal` |
 | `nftables` | nur in der CI (Linux, root): `go test -tags nftintegration -exec sudo ./internal/agent/...` und der Abnahmetest `sudo scripts/ci-acceptance.sh bin/panel bin/agent` (5 Fehlversuche → IP im nftables-Jail). Das Skript verändert den Host (Benutzer, Netz-Namespace, nftables) und ist nur für Wegwerf-Runner gedacht. |
+| `nftables` (Docker-Integration) | nur in der CI: `go test -tags dockerintegration -exec "sudo env MCPANEL_IT_STRICT=1" ./internal/agent/...` |
+| `instances` | nur in der CI: `sudo scripts/ci-instances.sh bin/agent` (echter agent + Docker + Paper-Server; verändert den Host) |
 | `build` | `make build`, `make release`, dann `file dist/*/panel dist/*/agent` |
 
 Linux-spezifische Dateien lokal linten: `GOOS=linux .dev/tools/golangci-lint run ./...`.

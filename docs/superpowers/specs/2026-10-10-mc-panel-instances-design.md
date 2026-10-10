@@ -95,6 +95,7 @@ Der agent hält keinen eigenen persistenten Zustand. Welche Container er verwalt
 - `mcpanel-mc` ist ein eigener Systembenutzer (kein Login, keine Shell), in der CI angelegt von `scripts/ci-acceptance.sh` bzw. `scripts/ci-instances.sh`, auf dem VPS später vom Installer. Die Container laufen direkt als `<uid>:<gid>` von `mcpanel-mc` (Docker `User`); itzg überspringt dann Benutzerwechsel und `chown`, deshalb legt der agent `instances/<id>` mit diesem Besitzer an.
 - Das panel (`mcpanel`) hat keinen Zugriff auf `/srv/mc-panel/instances`.
 - `deleted/` wird nicht automatisch geleert; das dokumentiert die UI beim Löschen.
+- Plattenplatz begrenzt das panel nicht selbst: In Produktion liegen `instances_dir` und Dockers Datenverzeichnis auf einem eigenen Dateisystem (oder mit Quotas), damit ein volllaufender Server nicht die panel-Datenbank und Logs blockiert – Vorgabe für den Installer (Teilprojekt 6).
 
 ### 3.4 Konfiguration
 
@@ -150,6 +151,7 @@ CREATE TABLE instance_settings (
 - sqlc-Queries in `internal/store/queries/servers.sql`, Präfix `Servers…`.
 - Ein Server ohne `instances`-Zeile (Stub aus TP1) heißt im UI „nicht eingerichtet“ und kann nur gelöscht werden.
 - `revision` beginnt bei 1. Der Container trägt die Revision als Label; Abweichung = „Neustart nötig“.
+- Server-IDs werden nie wiederverwendet (Zähler-Tabelle aus Migration `00003`): sonst könnte ein neuer Server Container und Welt eines gelöschten Servers erben, dessen Entfernen gescheitert ist.
 - `base_domain`: gültiger DNS-Name aus Labels nach `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`, mindestens zwei Labels, gesamt ≤ 200 Zeichen, kleingeschrieben gespeichert. FQDN eines Servers = `<name>.<base_domain>` (≤ 253 Zeichen).
 
 ## 5. Lebenszyklus
@@ -238,8 +240,10 @@ Der agent erzeugt aus einer gültigen Spec genau diese Konfiguration; nichts dav
 - Mount: `/srv/mc-panel/instances/<id>` → `/data` (bind, rw). Keine weiteren Mounts.
 - `HostConfig`: `CapDrop: ["ALL"]` ohne `CapAdd`, `SecurityOpt: ["no-new-privileges:true"]`, `Privileged: false`, `ReadonlyRootfs: false` (itzg schreibt außerhalb von `/data`), `Memory = memory_mib × 1.25 MiB`, `MemorySwap = Memory`, `PidsLimit: 1024`, `RestartPolicy: unless-stopped`, `LogConfig`: `json-file` mit `max-size=10m`, `max-file=3`.
 - `StopTimeout: 60`.
+- `CPUShares: 256` (cgroup-v2-Gewicht unter dem der Host-Dienste), damit ein ausgelasteter Server panel und agent nicht verdrängt.
+- Ein vorhandener `mcpanel-mc-<id>`, dessen Label `mcpanel.name` nicht zur Anfrage passt (die FQDN darf sich ändern, z. B. nach einem Wechsel der Basisdomain), gehört zu einem anderen Server: der agent übernimmt, startet oder ersetzt ihn nie, sondern meldet `last_error`. Teilen sich zwei Container eine FQDN, routet mc-router zum Container mit der höchsten ID.
 - Umgebung, fest: `EULA=TRUE`, `TYPE`, `VERSION`, `MEMORY=<memory_mib>M`, `ENABLE_AUTOPAUSE=false`, `ENABLE_RCON=true` (nur im internen Netz erreichbar; für TP3), `OVERRIDE_SERVER_PROPERTIES=true`; je nach Art `FABRIC_LOADER_VERSION`, `NEOFORGE_VERSION`, `MODRINTH_MODPACK` (bei `TYPE=MODRINTH`), `CF_SLUG`/`CF_PAGE_URL` und `CF_API_KEY` (bei `TYPE=AUTO_CURSEFORGE`; `type` → `TYPE`: vanilla→`VANILLA`, paper→`PAPER`, purpur→`PURPUR`, fabric→`FABRIC`, neoforge→`NEOFORGE`, modrinth→`MODRINTH`, curseforge→`AUTO_CURSEFORGE`).
-- Umgebung aus `properties` gemäß §7. Alle anderen itzg-Variablen (`JVM_OPTS`, `GENERIC_PACK`, `MODS`, `PLUGINS`, …) sind nicht setzbar.
+- Umgebung aus `properties` gemäß §7, dazu fest `EXISTING_OPS_FILE=SYNCHRONIZE` und `EXISTING_WHITELIST_FILE=SYNCHRONIZE`: Ops und Whitelist entsprechen nach jedem (Neu-)Start genau den Listen im panel (im Spiel vergebene Einträge werden überschrieben; die UI weist darauf hin). Sind die Listen leer bzw. ist die Whitelist aus, leert der agent vor dem Anlegen `ops.json` bzw. `whitelist.json`. Alle anderen itzg-Variablen (`JVM_OPTS`, `GENERIC_PACK`, `MODS`, `PLUGINS`, …) sind nicht setzbar.
 
 Router-Container `mcpanel-router`: Image `[images].router`, Netz `mcpanel-mc`, Port `25565/tcp` auf dem Host veröffentlicht, Mount `/srv/mc-panel/router` → `/config` (ro, Verzeichnis statt Einzeldatei, damit ein `rename` sichtbar wird), Start mit `-routes-config /config/routes.json` **ohne** `-routes-config-watch`, gleiche `HostConfig`-Härtung, `RestartPolicy: unless-stopped`; das Image läuft bereits als UID 65532. Routen-Datei: `{"mappings": {"<fqdn>": "mcpanel-mc-<id>:25565"}}`. Nach jedem Schreiben sendet der agent `SIGHUP` (`POST /containers/mcpanel-router/kill?signal=SIGHUP`): nur das Neuladen per SIGHUP entfernt gelöschte Routen, die Dateiüberwachung von mc-router fügt nur hinzu (verifiziert gegen mc-router 1.47.2). Der Router bekommt keinen Docker-Socket.
 
@@ -322,6 +326,8 @@ Alle Routen über `*rbac.Router`, in `api/openapi.yaml` beschrieben, mit MSW-Moc
 - `address` = `<name>.<base_domain>`; ohne Basisdomain `null`.
 - Ist der agent nicht erreichbar, liefern Lese-Endpunkte den Soll-Zustand mit `state: "unknown"`; schreibende Endpunkte speichern den Soll-Zustand und antworten normal (der Abgleich holt es nach). Ausnahme `DELETE` eines eingerichteten Servers: ohne agent `503 agent_unavailable`, damit keine verwaisten Container entstehen. Nicht eingerichtete Server (ohne `instances`-Zeile) löscht das panel ohne agent.
 - Scheitert ein `remove` nach dem `202` asynchron, bleibt der Container zurück und erscheint als unbekannter Container in den Einstellungen.
+- `last_error` sehen nur Admins im Klartext; andere Nutzer bekommen einen leeren Text und die UI einen allgemeinen Hinweis (Docker-Fehler enthalten Pfade, UIDs und Image-Digests).
+- Eine Änderung des CurseForge-Keys erhöht die `revision` aller CurseForge-Instanzen; laufende zeigen „Neustart nötig“.
 - Die FQDN gehört zur Container-Konfiguration (Label, Routen-Datei). Eine Änderung der Basisdomain erhöht deshalb die `revision` aller Instanzen: gestoppte Server legt der Abgleich neu an, laufende zeigen „Neustart nötig“ und sind bis dahin unter der alten Adresse erreichbar.
 
 ### 8.1 Fehlercodes

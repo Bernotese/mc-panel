@@ -48,7 +48,7 @@ CI fails if generated code is out of date. Commit regenerated files after you ch
 There are two binaries, built from `cmd/panel` and `cmd/agent`, and they are separated by privilege:
 
 - **panel** runs unprivileged as user `mcpanel`. It serves the web app and `/api`, and in production it listens on a Unix socket behind Caddy. It owns the SQLite DB (`modernc.org/sqlite`, no CGO). It also provides the CLI subcommands `serve`, `admin create`, `admin unlock` and `audit verify`.
-- **agent** runs as root and exposes a narrow JSON API over a Unix socket (`internal/agent`). It accepts connections only from the configured panel UID, checked via peer credentials. It validates every request strictly, rejecting unknown fields, and checks ban prefixes in `agentapi`. It manages the nftables sets `mcpanel_jail4`/`mcpanel_jail6` in table `inet mcpanel`. The design goal is that a compromised panel does not give root on the host. If the agent fails, the panel reports `503 agent_unavailable`; in-app jails still apply.
+- **agent** runs as root and exposes a narrow JSON API over a Unix socket (`internal/agent`). It accepts connections only from the configured panel UID, checked via peer credentials. It validates every request strictly, rejecting unknown fields, and checks ban prefixes in `agentapi`. It manages the nftables sets `mcpanel_jail4`/`mcpanel_jail6` in table `inet mcpanel` and is the only Docker client: Minecraft servers are containers built from a fixed, hardened template (`internal/agent/instances`), validated with `internal/agent/instancespec` (shared with the panel), and routed by hostname through the `mcpanel-router` container (mc-router, reloaded via SIGHUP). In dev mode Docker is off unless `MCPANEL_DEV_DOCKER=1`. The design goal is that a compromised panel does not give root on the host. If the agent fails, the panel reports `503 agent_unavailable`; in-app jails still apply.
 
 Linux-specific code sits behind interfaces and is chosen with build tags (`_linux.go` / `_other.go` / `_darwin.go`). On macOS the firewall is a no-op that only logs, and peer credentials use `LOCAL_PEERCRED`.
 
@@ -69,6 +69,14 @@ Linux-specific code sits behind interfaces and is chosen with build tags (`_linu
 - The audit log is append-only and hash-chained: `hash = SHA-256(prev_hash || canonical JSON)`, written serially in a transaction. The API never updates or deletes audit entries.
 - Tests use `storetest.Open(t)`, which returns a migrated temporary SQLite file, plus fixtures such as `storetest.CreateUser`.
 
+### Minecraft instances
+
+- The panel stores the desired state per server (`instances` table: type, version, java, memory, allowlisted properties, `desired_state`, `revision`) and `internal/servers` reconciles it with the agent every 10 s and after each user action. Spec changes bump `revision`; a running container with an older `mcpanel.revision` label shows "restart required".
+- Server name = subdomain (`<name>.<base_domain>`, base domain in `instance_settings`). Container `mcpanel-mc-<id>`, data in `<instances_dir>/instances/<id>`.
+- Only `instancespec.Env` decides container environment variables; never add itzg variables elsewhere.
+- Version catalogs (`internal/servers/catalog`) fetch fixed upstream URLs with a contact User-Agent and a 1 h cache.
+- Docker integration and the instance acceptance (`scripts/ci-instances.sh`) run only in CI.
+
 ### Frontend (`web/`)
 
 React + TypeScript + Vite, TanStack Router (file-based in `src/routes`) and Query, Tailwind and shadcn/ui (`src/components/ui`), react-i18next with `de` as the default and `en`. API types are generated from the OpenAPI spec, and the fetch wrapper in `src/api` sends the CSRF token (`X-CSRF-Token`) automatically. A global sudo dialog handles `sudo_required` and retries the action. No inline scripts or external CDNs are allowed (CSP). `npm run build` refuses to build with MSW active.
@@ -80,5 +88,5 @@ React + TypeScript + Vite, TanStack Router (file-based in `src/routes`) and Quer
 - Requests and DB calls always take a context (`NewRequestWithContext`, `QueryContext`/`ExecContext`).
 - Lint exceptions go into `.golangci.yml` as a targeted rule (path, linter and text, with a reason) or into `//nolint:<linter> // <reason>` on the line. Never disable a linter globally. The `common-false-positives` preset is deliberately off, so gosec G103/G204/G304 need a justification each time.
 - Imports are formatted with gofmt + goimports, with local prefix `github.com/Bernotese/mc-panel` (`golangci-lint fmt ./...`).
-- The string `mcpanel` (nftables table and sets, system user, `mcpanel.theme` localStorage key) is a runtime name, not the module path. Do not rename it.
+- The string `mcpanel` (nftables table and sets, system users `mcpanel`/`mcpanel-mc`, Docker names `mcpanel-mc-<id>`/`mcpanel-router`/network `mcpanel-mc`, labels `mcpanel.*`, `mcpanel.theme` localStorage key) is a runtime name, not the module path. Do not rename it.
 - Commits use Conventional Commits.

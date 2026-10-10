@@ -359,6 +359,8 @@ Damit steigt die Zahl der Operationen von 57 auf 61 (`web/src/mocks/handlers.tes
 |---|---|
 | keine `instances`-Zeile | `not_configured` (`desired_state: null`) |
 | agent nicht erreichbar oder Docker `unavailable` | `unknown` |
+| Container `missing`, keine `operation`, `last_error != ""` (agent- oder panel-seitig) | `error` |
+| agent meldet einen Container, dessen `name` nicht zur DB-Zeile passt | `error` (fremder Container, keine Aktionen) |
 | `operation` ∈ {pulling, creating} oder Container `missing` | `creating` |
 | `operation = starting` | `starting` |
 | `operation` ∈ {stopping, removing} | `stopping` |
@@ -425,7 +427,7 @@ Verhalten (in `web/src/mocks/handlers/servers.ts`):
 - Consumes: `storetest.Open`, `storetest.CreateServer` (TP1)
 - Produces: V1
 
-- [ ] **Step 1: Failing test schreiben** – `internal/store/servers_test.go`
+- [x] **Step 1: Failing test schreiben** – `internal/store/servers_test.go`
 
 ```go
 package store_test
@@ -537,12 +539,12 @@ func TestInstanceSettingsRow(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Test laufen lassen (rot)**
+- [x] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test ./internal/store -run 'TestInstance' -count=1`
 Expected: FAIL beim Kompilieren (`store.ServersCreateInstanceParams` undefiniert).
 
-- [ ] **Step 3: Migration schreiben** – `internal/store/migrations/00002_instances.sql`
+- [x] **Step 3: Migration schreiben** – `internal/store/migrations/00002_instances.sql`
 
 ```sql
 -- +goose Up
@@ -575,7 +577,7 @@ DROP TABLE instance_settings;
 DROP TABLE instances;
 ```
 
-- [ ] **Step 4: Queries schreiben** – `internal/store/queries/servers.sql`
+- [x] **Step 4: Queries schreiben** – `internal/store/queries/servers.sql`
 
 ```sql
 -- Sub-project 2: Minecraft instances and their settings. All query names start with "Servers".
@@ -615,17 +617,17 @@ SELECT * FROM instance_settings WHERE id = 1;
 UPDATE instance_settings SET base_domain = ?, curseforge_api_key = ?, updated_at = ? WHERE id = 1;
 ```
 
-- [ ] **Step 5: Code generieren**
+- [x] **Step 5: Code generieren**
 
 Run: `make generate`
 Expected: neue Datei `internal/store/servers.sql.go`, `internal/store/models.go` enthält `Instance` und `InstanceSetting`. Prüfen, dass die Feldnamen V1 entsprechen (`MemoryMib`, `CurseforgeApiKey`, `ServersListInstancesRow.Name`); weichen sie ab, die Tests an die generierten Namen anpassen und V1 in dieser Datei korrigieren.
 
-- [ ] **Step 6: Tests laufen lassen (grün)**
+- [x] **Step 6: Tests laufen lassen (grün)**
 
 Run: `go test ./internal/store -count=1`
 Expected: PASS (inkl. bestehender Tests; `TestMigrationsCreateTables` o. ä. bleibt grün).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/store/migrations/00002_instances.sql internal/store/queries/servers.sql internal/store/servers.sql.go internal/store/models.go internal/store/servers_test.go
@@ -647,7 +649,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Consumes: nichts (reines Paket, nur Standardbibliothek)
 - Produces: V2
 
-- [ ] **Step 1: Java-Fälle als gemeinsame Testdaten** – `internal/agent/instancespec/testdata/java_cases.json`
+- [x] **Step 1: Java-Fälle als gemeinsame Testdaten** – `internal/agent/instancespec/testdata/java_cases.json`
 
 ```json
 [
@@ -672,7 +674,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ]
 ```
 
-- [ ] **Step 2: Failing tests schreiben**
+- [x] **Step 2: Failing tests schreiben**
 
 `internal/agent/instancespec/java_test.go`:
 
@@ -1039,12 +1041,12 @@ func TestEnvRejectsInvalidSpec(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Tests laufen lassen (rot)**
+- [x] **Step 3: Tests laufen lassen (rot)**
 
 Run: `go test ./internal/agent/instancespec -count=1`
 Expected: FAIL beim Kompilieren (Paket existiert nicht).
 
-- [ ] **Step 4: Implementieren**
+- [x] **Step 4: Implementieren**
 
 `internal/agent/instancespec/instancespec.go`:
 
@@ -1552,17 +1554,17 @@ func Env(name string, s Spec) ([]string, error) {
 }
 ```
 
-- [ ] **Step 5: Tests laufen lassen (grün)**
+- [x] **Step 5: Tests laufen lassen (grün)**
 
 Run: `go test ./internal/agent/instancespec -count=1 -v`
 Expected: PASS für alle vier Testdateien.
 
-- [ ] **Step 6: Lint**
+- [x] **Step 6: Lint**
 
 Run: `golangci-lint run ./internal/agent/instancespec/...`
 Expected: keine Befunde.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/agent/instancespec
@@ -1586,7 +1588,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Consumes: V2 (`instancespec`)
 - Produces: V3
 
-- [ ] **Step 1: Failing tests schreiben**
+- [x] **Step 1: Failing tests schreiben**
 
 `internal/agent/agentapi/instances_test.go`:
 
@@ -1785,12 +1787,12 @@ In `internal/agent/client_test.go` `TestStatusErrorMapping` um zwei Fälle erwei
 
 Die Health-Vergleiche in `server_test.go:42` und `client_test.go:59` bekommen `Docker: "unavailable"` (Server ohne Docker-Backend, bis Aufgabe 9).
 
-- [ ] **Step 2: Tests laufen lassen (rot)**
+- [x] **Step 2: Tests laufen lassen (rot)**
 
 Run: `go test ./internal/agent/... -count=1`
 Expected: FAIL beim Kompilieren (`agentapi.EnsureRequest` undefiniert).
 
-- [ ] **Step 3: Implementieren**
+- [x] **Step 3: Implementieren**
 
 `internal/agent/agentapi/agentapi.go`: `HealthResponse` und `ErrorResponse` erweitern:
 
@@ -2025,17 +2027,17 @@ In `do` beim Fehlerfall den Code übernehmen:
 
 `internal/agent/server.go` `health`: `Docker: agentapi.DockerUnavailable` ergänzen (Aufgabe 9 setzt den echten Wert).
 
-- [ ] **Step 4: Tests laufen lassen (grün)**
+- [x] **Step 4: Tests laufen lassen (grün)**
 
 Run: `go test ./internal/agent/... ./internal/defense/... ./cmd/... -count=1`
 Expected: PASS (die Fakes in `defense` und `cmd/panel` sind unberührt).
 
-- [ ] **Step 5: Lint**
+- [x] **Step 5: Lint**
 
 Run: `make lint`
 Expected: keine Befunde.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/agentapi internal/agent/client.go internal/agent/client_test.go internal/agent/client_instances_test.go internal/agent/server.go internal/agent/server_test.go
