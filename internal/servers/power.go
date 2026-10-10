@@ -38,8 +38,7 @@ func (h *Handler) handleServerPower(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	in, ok := h.loadInstance(w, r, s)
-	if !ok {
+	if _, ok := h.loadInstance(w, r, s); !ok { // 409 for a server without instance
 		return
 	}
 	p, _ := principal.From(ctx) // guaranteed by the rbac rule
@@ -54,8 +53,7 @@ func (h *Handler) handleServerPower(w http.ResponseWriter, r *http.Request) {
 		// read again, so a server deleted meanwhile gets no agent call (no orphan container).
 		h.reconcile.mu.Lock()
 		defer h.reconcile.mu.Unlock()
-		var err error
-		in, err = h.q.ServersGetInstance(ctx, s.ID)
+		in, err := h.q.ServersGetInstance(ctx, s.ID)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeNotFound(w, r)
 			return
