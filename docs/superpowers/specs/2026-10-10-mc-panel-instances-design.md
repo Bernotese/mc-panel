@@ -25,7 +25,7 @@ Ein kompromittiertes panel darf keinen Root auf dem Host bekommen (TP1 §3). Zug
 
 - Konsole, Logs, Dateibrowser, Plugins/Mods-Verwaltung, Spieler-Verwaltung (Teilprojekt 3).
 - Backups (Teilprojekt 4), Spieler-/TPS-Monitoring und Alerts (Teilprojekt 5).
-- Installation von Docker auf dem VPS (Teilprojekt 6; in der VM erledigt es `vm-setup.sh`).
+- Installation von Docker auf dem VPS (Teilprojekt 6; in der CI ist Docker auf dem Runner vorinstalliert).
 - Bedrock Edition (UDP, kein Routing nach Hostname).
 - Eigener Port pro Server, schlafende Server (Auto-Pause/Wake), Umbenennen von Servern.
 - Jails aus TP1 auf Minecraft-Verkehr anwenden (Docker leitet ihn über die Forward-Chain, die Jail-Regel greift nur für das panel).
@@ -92,7 +92,7 @@ Der agent hält keinen eigenen persistenten Zustand. Welche Container er verwalt
 └── deleted/<name>-<zeitstempel>/  verschobene Daten gelöschter Server
 ```
 
-- `mcpanel-mc` ist ein eigener Systembenutzer (kein Login, keine Shell), angelegt von `vm-setup.sh` bzw. später vom Installer. Die Container laufen direkt als `<uid>:<gid>` von `mcpanel-mc` (Docker `User`); itzg überspringt dann Benutzerwechsel und `chown`, deshalb legt der agent `instances/<id>` mit diesem Besitzer an.
+- `mcpanel-mc` ist ein eigener Systembenutzer (kein Login, keine Shell), in der CI angelegt von `scripts/ci-acceptance.sh` bzw. `scripts/ci-instances.sh`, auf dem VPS später vom Installer. Die Container laufen direkt als `<uid>:<gid>` von `mcpanel-mc` (Docker `User`); itzg überspringt dann Benutzerwechsel und `chown`, deshalb legt der agent `instances/<id>` mit diesem Besitzer an.
 - Das panel (`mcpanel`) hat keinen Zugriff auf `/srv/mc-panel/instances`.
 - `deleted/` wird nicht automatisch geleert; das dokumentiert die UI beim Löschen.
 
@@ -114,7 +114,7 @@ router = "itzg/mc-router@sha256:…"
 
 - Image-Referenzen müssen einen Digest enthalten; ohne Digest startet der agent nicht.
 - Das panel wählt nur einen Schlüssel aus dem Enum `java8|java17|java21|java25`, nie ein Image.
-- Im Dev-Modus (`make dev` auf macOS) nutzt der agent den Docker-Socket von OrbStack/Docker Desktop, wenn vorhanden (`docker_socket` in der Dev-Konfiguration); sonst meldet er Docker als nicht verfügbar.
+- Im Dev-Modus (`make dev` auf macOS) ist Docker aus: kein Manager, keine Container, Status „Docker nicht verfügbar“ (auf dem Mac entsteht nichts ungefragt). Nur mit `MCPANEL_DEV_DOCKER=1` nutzt der dev-agent den Docker-Socket von OrbStack/Docker Desktop, wenn vorhanden.
 
 `panel.toml` bekommt keine neuen Pflichtschlüssel; Basisdomain und CurseForge-Key sind Laufzeit-Einstellungen in der DB (§4).
 
@@ -351,11 +351,11 @@ Bestehende shadcn-Komponenten; kein visuelles Redesign in diesem Teilprojekt.
 - **Aktualisierung:** TanStack Query alle 3 s, solange eine Operation läuft oder der Zustand von `desired_state` abweicht, sonst alle 15 s.
 - Texte `de`/`en`, mobil bedienbar, MSW-Mocks für alle neuen Operationen.
 
-## 10. Linux-VM und Entwicklung
+## 10. Entwicklung, CI und Abnahme
 
-- `scripts/vm-setup.sh` installiert zusätzlich Docker (Ubuntu-Paket `docker.io`), legt `mcpanel-mc` an, setzt im VM-Profil `base_domain` nicht (der Test legt sie per API fest) und nutzt die Lima-Weiterleitung für `25565` (der Router veröffentlicht den Port in der VM, Lima leitet ihn nach `127.0.0.1:25565` auf dem Mac). Basisdomain im VM-Test: `mc.localhost`. Der Minecraft-Client (Java) nutzt den macOS-Resolver, der `*.localhost` nur zu `::1` auflöst, während die Lima-Weiterleitung nur auf IPv4 lauscht; pro Server ist deshalb ein `/etc/hosts`-Eintrag `127.0.0.1 <name>.mc.localhost` nötig – dokumentiert in `docs/dev/linux-vm.md`.
-- `vm-setup.sh` setzt weiterhin den Zustand zurück; neu: es entfernt dabei alle Container mit Label `mcpanel.instance` und leert `/srv/mc-panel/instances`.
-- `make dev`: agent nutzt den Docker-Socket des Macs, falls vorhanden (§3.4).
+- **Mac:** nur `make check` (CLAUDE.md). `make dev` läuft ohne Docker (§3.4); die UI-Vorschau (`make preview`, Mock-API) zeigt die neuen Seiten ohne Backend.
+- **CI:** Unit-, Integrations- und Playwright-Tests wie bisher; zusätzlich die Docker-Integrationstests des agents (`dockerintegration`, Job `nftables`) und der neue Job `instances`: `scripts/ci-instances.sh` startet auf dem Wegwerf-Runner den echten agent mit Docker, legt einen Paper-Server an und prüft Routing über mc-router (Minecraft-Status-Ping mit Hostname, `scripts/mc-status.py`), Härtung, Absturz-Neustart und Löschen.
+- **Manuelle Abnahme:** echte Minecraft-Clients, mehrere Server-Arten und Host-Neustarts prüft der Nutzer getrennt auf einem Testserver anhand von `docs/dev/acceptance-tp2.md`.
 
 ## 11. Tests
 
@@ -377,11 +377,13 @@ Konventionen aus TP1 gelten unverändert (nur Standardbibliothek in Go-Tests, `c
 
 ## 12. Abnahmekriterien
 
-1. `make test` und `make lint` grün; `dockerintegration`-Tests in CI grün.
-2. In der VM legt ein Admin einen Paper-Server an; er startet, und ein Minecraft-Client verbindet sich über `<name>.<basisdomain>`.
-3. Je ein Server mit Vanilla, Fabric, NeoForge und einem Modrinth-Pack startet in der VM.
+Automatisch in der CI: 1, 7 sowie die agent-Seite von 2, 6 und 8 (`scripts/ci-instances.sh`). Manuell durch den Nutzer auf einem Testserver: 2–6 und 8 mit echtem Client (`docs/dev/acceptance-tp2.md`).
+
+1. Alle CI-Jobs grün, inklusive `dockerintegration` und `instances`.
+2. Ein Admin legt einen Paper-Server an; er startet, und ein Minecraft-Client verbindet sich über `<name>.<basisdomain>`.
+3. Je ein Server mit Vanilla, Fabric, NeoForge und einem Modrinth-Pack startet.
 4. Ein Nutzer mit `server.power` auf Server A kann A starten und stoppen, aber nicht ändern; Zugriff auf Server B → `403`.
 5. RAM oder MOTD ändern → „Neustart nötig“; nach dem Neustart gilt die neue Konfiguration, die Welt ist erhalten.
-6. `docker kill mcpanel-mc-<id>` → automatischer Neustart; nach einem VM-Neustart laufen alle Server mit `desired_state = running` wieder.
+6. Ein Absturz des Servers (z. B. `rcon-cli stop` im Container) → automatischer Neustart; nach einem Neustart des Hosts laufen alle Server mit `desired_state = running` wieder.
 7. `docker inspect` belegt: Caps auf das Minimum aus §5.4 reduziert, `no-new-privileges`, Speicherlimit, nur `/data` gemountet, keine veröffentlichten Ports außer am Router. Der panel-Benutzer hat keinen Zugriff auf `docker.sock` und `/srv/mc-panel/instances`.
 8. Löschen entfernt Container und Route, die Daten liegen unter `deleted/`; alle Admin-Aktionen stehen im Audit-Log, `panel audit verify` meldet OK.

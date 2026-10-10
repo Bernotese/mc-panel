@@ -18,9 +18,9 @@ Agent-spezifische, verbindliche Werte dieses Teilplans:
 
 | Thema | Wert |
 |---|---|
-| Eigene Pfade | `internal/config/` (nur `Agent`/`Images`), `internal/agent/docker/**`, `internal/agent/instances/**`, `internal/agent/server.go`, `cmd/agent/**`, `.golangci.yml` (Build-Tag), `.github/workflows/ci.yml` (ein Schritt) |
+| Eigene Pfade | `internal/config/` (nur `Agent`/`Images`), `internal/agent/docker/**`, `internal/agent/instances/**`, `internal/agent/server.go`, `cmd/agent/**`, `.golangci.yml` (Build-Tag), `.github/workflows/ci.yml` (ein Schritt), `scripts/ci-acceptance.sh` (Aufgabe 4) |
 | Konfiguration (Prod-Defaults) | `docker_socket = "/var/run/docker.sock"`, `instances_dir = "/srv/mc-panel"`, `mc_user = "mcpanel-mc"`, `[images]` = gepinnte Defaults aus der Übersicht; unbekannte Schlüssel (auch in `[images]`) → Startfehler |
-| Konfiguration (Dev) | `docker_socket` = erster existierender Pfad aus `$HOME/.orbstack/run/docker.sock`, `$HOME/.docker/run/docker.sock`, `/var/run/docker.sock` (sonst `/var/run/docker.sock` → Docker „unavailable“); `instances_dir = <root>/.dev/mc`; `mc_user = ""` = UID/GID des agent-Prozesses |
+| Konfiguration (Dev) | Docker ist im Dev-Modus **aus**: `docker_socket = ""` → kein Manager, `docker: unavailable` (nach `CLAUDE.md` legt nichts auf dem Mac ungefragt Container an). Nur mit `MCPANEL_DEV_DOCKER=1` im Environment ist `docker_socket` der erste existierende Pfad aus `$HOME/.orbstack/run/docker.sock`, `$HOME/.docker/run/docker.sock`, `/var/run/docker.sock` (sonst `/var/run/docker.sock` → „unavailable“); eine `agent.toml` mit `docker_socket` gilt immer; `instances_dir = <root>/.dev/mc`; `mc_user = ""` = UID/GID des agent-Prozesses |
 | Validierung | `docker_socket`, `instances_dir`: sauberer absoluter Pfad; `instances_dir` ≠ `/`, ohne `:` und `,` (Bind-Syntax); `mc_user` außerhalb von Dev Pflicht; jedes Image `^[A-Za-z0-9][A-Za-z0-9._/:-]*@sha256:[0-9a-f]{64}$`; `mc_user` mit UID 0 oder GID 0 außerhalb von Dev → Startfehler |
 | Image-Referenz an Docker | immer die gepinnte Form `repo@sha256:<hex>` (`docker.ImageRef.Pinned`); der Tag aus der Konfiguration ist nur Doku. Pull: `POST /images/create?fromImage=<repo>&tag=sha256:<hex>`; Inspect: `GET /images/<repo>@sha256:<hex>/json` |
 | Docker-Client | Präfix `/v1.44`, Basis-URL `http://docker`, kein Proxy, keine Redirects; Timeout 30 s pro Aufruf, Pull 30 min, Stop/Restart `t` + 30 s; Antwort ≤ 8 MiB, Pull-Stream ≤ 64 MiB, Fehlerkörper ≤ 64 KiB; Verbindungsfehler/kaputte Antworten → `docker.ErrUnavailable`; Nicht-2xx → `*docker.Error{StatusCode, Message}`; `304` bei Start/Stop = Erfolg |
@@ -184,13 +184,21 @@ func TestAgentInstanceDefaults(t *testing.T) {
 func TestDevAgentInstanceSettings(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("MCPANEL_DEV_DOCKER", "")
 	a := config.DevAgent("/repo")
 	if err := a.Validate(); err != nil {
 		t.Fatalf("dev agent invalid: %v", err)
 	}
+	// Docker is off in dev mode unless MCPANEL_DEV_DOCKER=1: make dev must not create
+	// containers on the developer machine on its own.
+	if a.InstancesDir != "/repo/.dev/mc" || a.MCUser != "" || a.DockerSocket != "" {
+		t.Fatalf("dev agent default = %+v", a)
+	}
+
+	t.Setenv("MCPANEL_DEV_DOCKER", "1")
 	// Without OrbStack/Docker Desktop the default path remains (it may or may not exist).
-	if a.InstancesDir != "/repo/.dev/mc" || a.MCUser != "" || a.DockerSocket != "/var/run/docker.sock" {
-		t.Fatalf("dev agent without docker = %+v", a)
+	if got := config.DevAgent("/repo").DockerSocket; got != "/var/run/docker.sock" {
+		t.Fatalf("opt-in without docker: docker_socket = %q", got)
 	}
 
 	desktop := filepath.Join(home, ".docker", "run", "docker.sock")
@@ -441,7 +449,10 @@ func DevAgent(root string) Agent {
 	a.Socket = filepath.Join(root, ".dev", "agent.sock")
 	a.PanelUID = os.Getuid()
 	a.Firewall = "noop"
-	a.DockerSocket = devDockerSocket()
+	a.DockerSocket = "" // Docker off: no manager, no containers on the developer machine
+	if os.Getenv("MCPANEL_DEV_DOCKER") == "1" {
+		a.DockerSocket = devDockerSocket()
+	}
 	a.InstancesDir = filepath.Join(root, ".dev", "mc")
 	a.MCUser = ""
 	return a
@@ -498,8 +509,11 @@ func (a Agent) Validate() error {
 	if a.Firewall != "nftables" && a.Firewall != "noop" {
 		errs = append(errs, fmt.Errorf("firewall must be \"nftables\" or \"noop\", got %q", a.Firewall))
 	}
-	if err := cleanAbsPath("docker_socket", a.DockerSocket); err != nil {
-		errs = append(errs, err)
+	// An empty docker_socket disables the instance manager; only allowed in dev mode.
+	if a.DockerSocket != "" || !a.Dev {
+		if err := cleanAbsPath("docker_socket", a.DockerSocket); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if err := cleanAbsPath("instances_dir", a.InstancesDir); err != nil {
 		errs = append(errs, err)
@@ -582,7 +596,31 @@ func mcUserIDs(cfg config.Agent, lookup func(name string) (*user.User, error)) (
 }
 ```
 
-Damit startet ein Prod-agent ohne existierenden Benutzer `mcpanel-mc` nicht mehr (Fehlermeldung nennt den `useradd`-Befehl). Die VM legt den Benutzer erst in Aufgabe 23 an; wer vorher in der VM testet, legt ihn einmalig per `sudo useradd --system --user-group --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin mcpanel-mc` an.
+Damit startet ein Prod-agent ohne existierenden Benutzer `mcpanel-mc` nicht mehr (Fehlermeldung nennt den `useradd`-Befehl). Das betrifft den CI-Abnahmetest `scripts/ci-acceptance.sh` (startet den agent im Prod-Modus); er wird in dieser Aufgabe mit angepasst:
+
+- [ ] **Step 4b: `scripts/ci-acceptance.sh` anpassen**
+
+Nach dem Block, der `mcpanel` anlegt, einfügen:
+
+```bash
+if ! id mcpanel-mc >/dev/null 2>&1; then
+  useradd --system --user-group --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin mcpanel-mc
+fi
+```
+
+und die erzeugte `agent.toml` um ein eigenes Instanzverzeichnis ergänzen (der Test prüft nur nftables; der Manager darf auf dem Wegwerf-Runner das Docker-Netz und den Router anlegen, schreibt aber nicht nach `/srv`):
+
+```bash
+cat >"$work/agent.toml" <<EOF
+socket = "$work/run/agent.sock"
+panel_uid = $(id -u mcpanel)
+firewall = "nftables"
+instances_dir = "$work/mc"
+mc_user = "mcpanel-mc"
+EOF
+```
+
+`shellcheck scripts/ci-acceptance.sh` muss sauber bleiben; ob der Abnahmetest weiter `PASS` meldet, zeigt der CI-Job `nftables` dieses PRs.
 
 - [ ] **Step 5: Tests laufen lassen (grün)**
 
@@ -4726,7 +4764,7 @@ func TestClientServerInstancesEndToEnd(t *testing.T) {
 }
 ```
 
-`cmd/agent/main_test.go` – ab dieser Aufgabe startet `run -dev` den Manager. Ohne eigene Werte würde er den Docker-Socket des Entwicklers (OrbStack) benutzen und nach `cmd/agent/.dev/mc` schreiben; deshalb bekommen alle Dev-Configs der Tests einen nicht existierenden Docker-Socket und ein temporäres `instances_dir`:
+`cmd/agent/main_test.go` – ab dieser Aufgabe startet `run` den Manager, sobald `docker_socket` gesetzt ist (im Dev-Modus nur mit `MCPANEL_DEV_DOCKER=1` oder per Config). Damit der Manager-Pfad getestet wird, ohne einen echten Docker-Daemon oder `cmd/agent/.dev/mc` zu berühren, bekommen alle Dev-Configs der Tests einen nicht existierenden Docker-Socket und ein temporäres `instances_dir`. Zusätzlich ein Test, dass `-dev` ohne Config keinen Manager baut (Health `docker: unavailable`, Instanz-Schreibzugriff `503 docker_unavailable`):
 
 1. Importe ergänzen:
 ```go
@@ -5206,7 +5244,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "", "path to agent.toml (default "+defaultConfigPath+" unless -dev)")
-	dev := fs.Bool("dev", false, "development mode: socket ./.dev/agent.sock (0600), noop firewall, local Docker (OrbStack/Docker Desktop), data in ./.dev/mc, text logs")
+	dev := fs.Bool("dev", false, "development mode: socket ./.dev/agent.sock (0600), noop firewall, Docker off unless MCPANEL_DEV_DOCKER=1, data in ./.dev/mc, text logs")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -5265,29 +5303,36 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("firewall: %w", err)
 	}
 
-	mgr := instances.New(instances.Config{
-		Docker:       docker.New(cfg.DockerSocket),
-		InstancesDir: cfg.InstancesDir,
-		UID:          mcUID,
-		GID:          mcGID,
-		Images:       cfg.Images,
-		Clock:        clock.Real{},
-		Log:          log,
-	})
-	runCtx, stopRun := context.WithCancel(ctx)
-	runDone := make(chan struct{})
-	go func() {
-		defer close(runDone)
-		mgr.Run(runCtx)
-	}()
-	// stopInstances ends the background loop and the queued operations.
-	stopInstances := func() {
-		stopRun()
-		<-runDone
-		mgr.Close()
+	// Without docker_socket (dev default) there is no instance manager: the server
+	// answers instance writes with 503 docker_unavailable and creates no containers.
+	var opts []agent.Option
+	stopInstances := func() {}
+	if cfg.DockerSocket != "" {
+		mgr := instances.New(instances.Config{
+			Docker:       docker.New(cfg.DockerSocket),
+			InstancesDir: cfg.InstancesDir,
+			UID:          mcUID,
+			GID:          mcGID,
+			Images:       cfg.Images,
+			Clock:        clock.Real{},
+			Log:          log,
+		})
+		runCtx, stopRun := context.WithCancel(ctx)
+		runDone := make(chan struct{})
+		go func() {
+			defer close(runDone)
+			mgr.Run(runCtx)
+		}()
+		// stopInstances ends the background loop and the queued operations.
+		stopInstances = func() {
+			stopRun()
+			<-runDone
+			mgr.Close()
+		}
+		opts = append(opts, agent.WithInstances(mgr))
 	}
 
-	srv := agent.NewServer(fw, version, log, agent.WithInstances(mgr))
+	srv := agent.NewServer(fw, version, log, opts...)
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(peercred.Wrap(l, peercred.AllowUIDs(panelUID, 0), log)) }()
 	log.Info("agent started", "version", version, "socket", cfg.Socket, "firewall", fw.Name(),
@@ -5378,7 +5423,7 @@ func newLogger(dev bool, w io.Writer) *slog.Logger {
 
 Reihenfolge beim Start: Listen → Firewall → Manager (`Run` startet sofort einen `Tick`: Ping, Routen-Datei, Router) → Server. Beim Herunterfahren: Server `Shutdown` (keine neuen Anfragen), dann Hintergrundschleife beenden und `mgr.Close()` (laufende Docker-Aufrufe werden abgebrochen; Docker führt z. B. ein begonnenes Stop selbst zu Ende, der Abgleich im panel holt den Rest nach). Auch wenn `Serve` unerwartet endet, wird der Manager geschlossen.
 
-Hinweis: `make dev` startet den agent mit `-dev`; auf einem Mac mit OrbStack/Docker Desktop legt er damit beim Start das Netz `mcpanel-mc` und den Container `mcpanel-router` an (Port 25565) und schreibt nach `./.dev/mc`. Im CI-Job `e2e` (Ubuntu-Runner mit Docker) passiert dasselbe; das ist harmlos und gewollt (Spec §10).
+Hinweis: `make dev` startet den agent mit `-dev` und ohne `agent.toml`; Docker ist dann aus, es entstehen keine Container und kein `./.dev/mc`. Wer lokal echte Minecraft-Container will, startet bewusst `MCPANEL_DEV_DOCKER=1 make dev` (Docker Desktop/OrbStack; legt Netz `mcpanel-mc` und Container `mcpanel-router` auf Port 25565 an). Der CI-Job `e2e` bleibt dadurch ebenfalls ohne Docker-Seiteneffekte.
 
 - [ ] **Step 5: Tests laufen lassen (grün, auch mit `-race`)**
 
@@ -5416,7 +5461,7 @@ Testimage statt itzg (spec §11): `busybox:1.37.0@sha256:bdf57e528e45e4433820e04
 
 Zwei Tests:
 - `TestIntegrationClientLifecycle` – eigene Namen (`mcpanel-it-<pid>`, Label `mcpanel.integration`, eigenes Netz), läuft überall: Pull, Netz idempotent, Create (Konflikt beim zweiten Mal), Start (zweimal), Inspect, Label-Filter, Kill SIGHUP (läuft weiter), Stats (Limit 64 MiB), Restart, Stop (zweimal), Remove, 404 danach.
-- `TestIntegrationManagerCycle` – der echte Manager mit den echten Namen (`mcpanel-mc-1`, `mcpanel-router`, Netz `mcpanel-mc`), Images per `[images]`-Override auf busybox, `Customize` setzt das Testkommando und entfernt beim Router die Portfreigabe (Port 25565 bleibt frei): ensure → Besitzer `65534:65534` und 0750 des Datenverzeichnisses, Route → start → Stats (Limit 1280 MiB) → restart → ensure mit `recreate` (neuer Container läuft wieder, Revision 2) → stop → remove (Archiv unter `deleted/it-…`, Route weg, Router läuft nach SIGHUP weiter). Existieren schon mc-panel-Ressourcen (z. B. in der VM mit laufendem agent), wird der Test übersprungen; mit `MCPANEL_IT_STRICT=1` (CI) schlägt er stattdessen fehl.
+- `TestIntegrationManagerCycle` – der echte Manager mit den echten Namen (`mcpanel-mc-1`, `mcpanel-router`, Netz `mcpanel-mc`), Images per `[images]`-Override auf busybox, `Customize` setzt das Testkommando und entfernt beim Router die Portfreigabe (Port 25565 bleibt frei): ensure → Besitzer `65534:65534` und 0750 des Datenverzeichnisses, Route → start → Stats (Limit 1280 MiB) → restart → ensure mit `recreate` (neuer Container läuft wieder, Revision 2) → stop → remove (Archiv unter `deleted/it-…`, Route weg, Router läuft nach SIGHUP weiter). Existieren schon mc-panel-Ressourcen (z. B. auf einem Host mit laufendem agent), wird der Test übersprungen; mit `MCPANEL_IT_STRICT=1` (CI) schlägt er stattdessen fehl.
 
 - [ ] **Step 1: Integrationstest schreiben** – `internal/agent/docker/integration_linux_test.go`
 
@@ -5430,7 +5475,7 @@ Zwei Tests:
 //
 // TestIntegrationClientLifecycle uses its own names and runs anywhere. The manager test
 // uses the real names (mcpanel-mc-<id>, mcpanel-router, network mcpanel-mc); on a host
-// where they exist (e.g. the VM with a running agent) it is skipped, with
+// where they exist (e.g. a host with a running agent) it is skipped, with
 // MCPANEL_IT_STRICT=1 (CI) it fails instead:
 //
 //	go test -tags dockerintegration -exec "sudo env MCPANEL_IT_STRICT=1" -count=1 ./internal/agent/...
@@ -5795,19 +5840,14 @@ GOOS=linux golangci-lint run ./internal/agent/... && golangci-lint run ./...
 ```
 Expected: keine Ausgabe von `go vet`, Kompilieren ohne Fehler, `0 issues.` (zweimal). Ohne das Tag (`go test ./...`) wird die Datei nicht gebaut.
 
-- [ ] **Step 3: Integrationstest ausführen (Linux mit Docker, als root)**
+- [ ] **Step 3: Integrationstest in der CI ausführen lassen**
 
-Run (Linux-Host oder CI; in der Lima-VM erst nach Aufgabe 23, die Docker installiert – dort Testbinary auf dem Mac bauen):
+Der Test braucht Linux, root und einen Docker-Daemon; er läuft nur in der CI (Schritt aus Step 4 im Job `nftables`), nie auf dem Mac. Nach dem Push auf den PR-Branch:
 ```bash
-go test -tags dockerintegration -exec "sudo env MCPANEL_IT_STRICT=1" -count=1 -v -run Integration ./internal/agent/docker/
-# Lima-VM (Go ist dort nicht installiert):
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c -tags dockerintegration -o .dev/bin/agent-docker.test ./internal/agent/docker
-limactl copy .dev/bin/agent-docker.test mcpanel:/tmp/agent-docker.test
-limactl shell mcpanel sudo /tmp/agent-docker.test -test.v -test.count=1 -test.run Integration
+gh pr checks <pr> --watch
+gh run view <run-id> --log | grep -E -- '--- (PASS|FAIL|SKIP): TestIntegration'
 ```
-Expected: `--- PASS: TestIntegrationClientLifecycle`, `--- PASS: TestIntegrationManagerCycle` (in der VM mit laufendem agent: `--- SKIP: TestIntegrationManagerCycle (… host is not clean …)`), `PASS`.
-
-Ist kein Linux mit Docker verfügbar, diesen Schritt dem CI-Lauf (Step 4) überlassen und das im PR vermerken.
+Expected: `--- PASS: TestIntegrationClientLifecycle`, `--- PASS: TestIntegrationManagerCycle` (mit `MCPANEL_IT_STRICT=1` ist ein `SKIP` ein Fehler).
 
 - [ ] **Step 4: CI-Schritt ergänzen** – `.github/workflows/ci.yml`, Job `nftables` („nftables integration (root)“), direkt nach dem Schritt `Integration tests as root` anfügen:
 
@@ -5848,7 +5888,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 5. **Router-Image-Wechsel.** Weicht das Image eines vorhandenen `mcpanel-router` vom konfigurierten ab (agent-Update mit neuem Digest), ersetzt der agent den Router-Container. Instanz-Container werden bei neuem itzg-Digest **nicht** automatisch ersetzt – das geschieht beim nächsten `recreate` (Revision), damit kein Server ungefragt neu startet.
 6. **Docker „unavailable“ ist ein Zustand, kein Fehler.** `GET /v1/instances` antwortet immer `200`; das panel leitet `unknown` aus `docker: "unavailable"` ab (V4). Schreibende Aufrufe antworten `503 docker_unavailable` erst nach einem frischen Ping (5 s Timeout).
 7. **Zustand im Speicher ist begrenzt.** Max. 4 offene Operationen pro Instanz und 256 Instanzen mit Zustand; Einträge verschwinden, sobald die Schlange leer und `last_error` leer ist bzw. nach erfolgreichem `remove`. Ein agent-Neustart verliert `last_error` und Warteschlangen (akzeptiert: der Abgleich im panel sendet erneut).
-8. **`mc_user` fehlt → agent startet nicht.** Lieber laut scheitern als Container als falscher Benutzer anlegen. UID/GID 0 sind außerhalb von Dev verboten. Konsequenz: Die Lima-VM braucht ab Aufgabe 4 den Benutzer `mcpanel-mc` (Aufgabe 23 legt ihn in `vm-setup.sh` an; bis dahin einmalig manuell, siehe Aufgabe 4 Step 4).
+8. **`mc_user` fehlt → agent startet nicht.** Lieber laut scheitern als Container als falscher Benutzer anlegen. UID/GID 0 sind außerhalb von Dev verboten. Konsequenz: Jede Umgebung mit Prod-agent braucht ab Aufgabe 4 den Benutzer `mcpanel-mc` – in der CI legt ihn `scripts/ci-acceptance.sh` an (Aufgabe 4 Step 4b), auf dem VPS später der Installer (Teilprojekt 6).
 9. **Kein Docker-SDK.** ~350 Zeilen eigener Client mit festem API-Pfad, Größen- und Zeitlimits; nur die 13 benötigten Aufrufe existieren. Der Fake-Daemon testet den echten Client über einen echten Unix-Socket; der Integrationstest prüft die Annahmen gegen echtes Docker.
 
 **Versionsannahmen (2026-10-10):** Docker Engine API v1.44 (älteste von Docker 29 akzeptierte; Ubuntu 26.04: Docker 29.1.3 / API 1.52; GitHub-Runner `ubuntu-24.04`: Docker ≥ 26). Verwendete Endpunkte und Felder siehe Aufgabe 5; One-Shot-Stats (`one-shot=true`) seit API 1.41. itzg/minecraft-server `2026.9.2` überspringt mit Docker-`User` den root-Pfad (kein gosu/chown) und schreibt nach `/tmp` (daher `ReadonlyRootfs: false`). itzg/mc-router `1.47.2`: `-routes-config` ohne `-routes-config-watch`, Neuladen per SIGHUP, Image läuft als UID 65532. busybox `1.37.0` Index-Digest wie in Aufgabe 10.
