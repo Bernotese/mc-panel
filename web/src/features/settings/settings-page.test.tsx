@@ -13,7 +13,8 @@ describe('SettingsPage', () => {
     const user = userEvent.setup()
     await renderWithProviders(<SettingsPage />, { me: loginAs('admin') })
     expect(await screen.findByRole('heading', { name: 'Minecraft-Server', level: 2 })).toBeInTheDocument()
-    const input = screen.getByLabelText('Basisdomain')
+    // The h2 renders right away; the cards follow once the settings have loaded.
+    const input = await screen.findByLabelText('Basisdomain')
     expect(input).toHaveValue('mc.example.com')
     expect(screen.getByText('*.mc.example.com')).toBeInTheDocument()
     const save = screen.getByRole('button', { name: 'Basisdomain speichern' })
