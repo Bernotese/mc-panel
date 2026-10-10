@@ -32,12 +32,15 @@ func TestRoutesFromContainers(t *testing.T) {
 		summary("mcpanel-mc-7", mcLabels("7", "seven", "other.mc.example.com")),
 		// invalid fqdn
 		summary("mcpanel-mc-8", mcLabels("8", "eight", "eight.mc.example.com\n")),
-		// duplicate fqdn: lowest id (1) wins
+		// duplicate fqdn: the highest id (9, the newest server) wins
 		summary("mcpanel-mc-9", mcLabels("9", "survival", "survival.mc.example.com")),
+		// also when it comes first in the listing
+		summary("mcpanel-mc-11", mcLabels("11", "creative", "creative.mc.example.com")),
+		summary("mcpanel-mc-10", mcLabels("10", "creative", "creative.mc.example.com")),
 	})
 	want := map[string]string{
-		"survival.mc.example.com": "mcpanel-mc-1:25565",
-		"creative.mc.example.com": "mcpanel-mc-2:25565",
+		"survival.mc.example.com": "mcpanel-mc-9:25565",
+		"creative.mc.example.com": "mcpanel-mc-11:25565",
 		"lobby.mc.example.com":    "mcpanel-mc-3:25565",
 	}
 	if !maps.Equal(got, want) {

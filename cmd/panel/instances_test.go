@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
 )
 
 // waitServer polls GET /servers/{id} until ok accepts the status (the reconcile loop runs in
@@ -84,5 +88,39 @@ func TestInstanceLifecycleEndToEnd(t *testing.T) {
 		if c, out := friend.do(tc.method, tc.path, tc.body); c != 403 {
 			t.Errorf("%s %s as friend = %d %v, want 403", tc.method, tc.path, c, out)
 		}
+	}
+}
+
+// The fake mirrors the agent's downgrade guard: an ensure with an older revision than the
+// container's is a no-op, even with recreate (a stale or replayed request).
+func TestFakeInstancesNeverDowngrades(t *testing.T) {
+	f := newFakeInstances()
+	ctx := context.Background()
+	ensure := func(rev int64, recreate bool) {
+		t.Helper()
+		req := agentapi.EnsureRequest{
+			ID: 1, Name: "survival", FQDN: "survival.mc.example.com", Revision: rev, Recreate: recreate,
+			Spec: instancespec.Spec{Type: instancespec.TypePaper, Version: "1.21.11", Java: instancespec.Java21, MemoryMiB: 4096},
+		}
+		if err := f.Ensure(ctx, req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	revision := func() int64 {
+		resp, _ := f.Instances(ctx)
+		return resp.Instances[0].Revision
+	}
+	ensure(2, false)
+	ensure(1, true)
+	if got := revision(); got != 2 {
+		t.Fatalf("revision after an older recreate = %d, want 2", got)
+	}
+	ensure(3, false)
+	if got := revision(); got != 2 {
+		t.Fatalf("revision after a newer ensure without recreate = %d, want 2", got)
+	}
+	ensure(3, true)
+	if got := revision(); got != 3 {
+		t.Fatalf("revision after a newer recreate = %d, want 3", got)
 	}
 }

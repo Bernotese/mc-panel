@@ -60,13 +60,21 @@ type attempt struct {
 	next     time.Time
 }
 
-// reconcileState is only touched by ReconcileOnce (under mu).
+// reconcileState is only touched under mu (ReconcileOnce, delete, restart).
 type reconcileState struct {
 	mu        sync.Mutex
 	attempts  map[int64]attempt
 	warned    map[int64]bool // unknown containers already logged
+	foreign   map[int64]bool // foreign containers already logged
 	agentDown bool
 }
+
+// panelError is a reconcile error that happened before the agent was called (for example no
+// base domain). The agent knows nothing about it, so the panel shows it as last_error.
+type panelError struct{ err error }
+
+func (e panelError) Error() string { return e.err.Error() }
+func (e panelError) Unwrap() error { return e.err }
 
 func isUnavailable(err error) bool {
 	return errors.Is(err, agentapi.ErrUnavailable) || errors.Is(err, agentapi.ErrDockerUnavailable) ||
@@ -129,12 +137,24 @@ func (h *Handler) ReconcileOnce(ctx context.Context) {
 		in := instanceFromListRow(row)
 		seen[in.ServerID] = true
 		st := snap.actualStatus(in.ServerID)
+		if foreignContainer(st, row.Name) {
+			delete(rs.attempts, in.ServerID)
+			h.setPanelError(in.ServerID, "")
+			if !rs.foreign[in.ServerID] {
+				rs.foreign[in.ServerID] = true
+				h.log.Warn("servers: container belongs to another server, leaving it alone",
+					"server_id", in.ServerID, "name", row.Name, "container_name", st.Name)
+			}
+			continue
+		}
+		delete(rs.foreign, in.ServerID)
 		act := decide(in.DesiredState, in.Revision, st)
 		if act == actNone {
 			// An operation in progress is the agent working on the last action, not its
 			// success: keep the attempt, or a permanently failing action loses its backoff.
 			if st.Operation == agentapi.OpNone {
 				delete(rs.attempts, in.ServerID)
+				h.setPanelError(in.ServerID, "")
 			}
 			continue
 		}
@@ -142,16 +162,22 @@ func (h *Handler) ReconcileOnce(ctx context.Context) {
 			continue
 		}
 		err := h.apply(ctx, row.Name, in, act, set)
+		var pe panelError
 		switch {
 		case err == nil:
 			acted = true
+			h.setPanelError(in.ServerID, "")
 		case isUnavailable(err):
 			// The action never reached the agent: it must not count for the backoff, so the
 			// stored wish is applied on the first pass after the agent answers again.
 			delete(rs.attempts, in.ServerID)
 			h.log.Warn("servers: reconcile aborted", "server_id", in.ServerID, "action", act.String(), "err", err)
 			return
+		case errors.As(err, &pe):
+			h.setPanelError(in.ServerID, pe.Error())
+			h.log.Error("servers: reconcile action failed", "server_id", in.ServerID, "action", act.String(), "err", err)
 		default:
+			h.setPanelError(in.ServerID, "")
 			h.log.Error("servers: reconcile action failed", "server_id", in.ServerID, "action", act.String(), "err", err)
 		}
 	}
@@ -160,6 +186,12 @@ func (h *Handler) ReconcileOnce(ctx context.Context) {
 			delete(rs.attempts, id)
 		}
 	}
+	for id := range rs.foreign {
+		if !seen[id] {
+			delete(rs.foreign, id)
+		}
+	}
+	h.keepPanelErrors(seen)
 	if acted {
 		h.Trigger() // look again soon: the agent may already be done
 	}
@@ -191,7 +223,7 @@ func (h *Handler) apply(ctx context.Context, name string, in store.Instance, act
 	case actEnsure, actRecreate:
 		req, err := ensureRequest(name, in, set, act == actRecreate)
 		if err != nil {
-			return err
+			return panelError{err}
 		}
 		return h.inst.Ensure(ctx, req)
 	case actStart:
@@ -203,14 +235,15 @@ func (h *Handler) apply(ctx context.Context, name string, in store.Instance, act
 }
 
 // warnUnknown logs every container with the mcpanel.instance label that the database does
-// not know, once per container. Such containers are never touched (spec §5.3).
+// not know, once per container. Such containers are never touched (spec §5.3). Entries in
+// state "missing" are queued work or a remembered error of the agent, not containers.
 func (h *Handler) warnUnknown(resp agentapi.InstancesResponse, rows []store.ServersListInstancesRow) {
 	known := make(map[int64]bool, len(rows))
 	for _, r := range rows {
 		known[r.ServerID] = true
 	}
 	for _, st := range resp.Instances {
-		if !known[st.ID] && !h.reconcile.warned[st.ID] {
+		if st.State != agentapi.StateMissing && !known[st.ID] && !h.reconcile.warned[st.ID] {
 			h.reconcile.warned[st.ID] = true
 			h.log.Warn("servers: container without database entry, leaving it alone", "server_id", st.ID, "name", st.Name)
 		}

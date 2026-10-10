@@ -231,3 +231,134 @@ func TestNeoForgeMC(t *testing.T) {
 		}
 	}
 }
+
+// Redirects are followed only to https on the same host: a compromised or misconfigured
+// upstream must not send the panel to another host (or to plain http).
+func TestCatalogRedirectsOnlyToSameHostHTTPS(t *testing.T) {
+	manifest, err := os.ReadFile("testdata/mojang_manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(manifest)
+	})
+	other := httptest.NewTLSServer(serve) // same test certificate, different host:port
+	t.Cleanup(other.Close)
+	plain := httptest.NewServer(serve)
+	t.Cleanup(plain.Close)
+	var (
+		mu     sync.Mutex
+		target string
+	)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/moved" {
+			serve(w, r)
+			return
+		}
+		mu.Lock()
+		to := target
+		mu.Unlock()
+		http.Redirect(w, r, to, http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	for _, tc := range []struct {
+		name, to string
+		ok       bool
+	}{
+		{"same host https", srv.URL + "/moved", true},
+		{"other host https", other.URL + "/mc/game/version_manifest_v2.json", false},
+		{"plain http", plain.URL + "/mc/game/version_manifest_v2.json", false},
+	} {
+		mu.Lock()
+		target = tc.to
+		mu.Unlock()
+		c := catalog.New(catalog.Options{
+			Clock: clock.NewFake(t0), HTTPClient: srv.Client(),
+			Upstreams: catalog.Upstreams{Mojang: srv.URL, Paper: srv.URL, Purpur: srv.URL, Fabric: srv.URL, NeoForge: srv.URL},
+		})
+		_, err := c.Get(context.Background(), instancespec.TypeVanilla)
+		if tc.ok && err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+		}
+		if !tc.ok && !errors.Is(err, catalog.ErrUnavailable) {
+			t.Errorf("%s: %v, want ErrUnavailable (redirect refused)", tc.name, err)
+		}
+	}
+}
+
+// One Get has an overall deadline across all its upstream requests (Paper asks up to 11),
+// so the API answers before the server's write timeout.
+func TestCatalogOverallDeadline(t *testing.T) {
+	if catalog.Deadline != 45*time.Second {
+		t.Fatalf("Deadline = %s, want 45 s (below the 60 s write timeout)", catalog.Deadline)
+	}
+	u := newUpstream(t)
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		u.srv.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(slow.Close)
+	c := catalog.New(catalog.Options{
+		Clock: clock.NewFake(t0), Timeout: time.Second, Deadline: 350 * time.Millisecond,
+		Upstreams: catalog.Upstreams{Mojang: slow.URL, Paper: slow.URL, Purpur: slow.URL, Fabric: slow.URL, NeoForge: slow.URL},
+	})
+	start := time.Now()
+	_, err := c.Get(context.Background(), instancespec.TypePaper)
+	if !errors.Is(err, catalog.ErrUnavailable) {
+		t.Fatalf("paper with 11 slow requests: %v, want ErrUnavailable after the deadline", err)
+	}
+	if d := time.Since(start); d > 900*time.Millisecond {
+		t.Fatalf("Get took %s, the deadline is 350 ms", d)
+	}
+}
+
+// Concurrent Gets of the same type share one upstream fetch.
+func TestCatalogConcurrentGetsShareOneFetch(t *testing.T) {
+	u := newUpstream(t)
+	release := make(chan struct{})
+	var (
+		mu sync.Mutex
+		n  int
+	)
+	gate := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n++
+		mu.Unlock()
+		<-release
+		u.srv.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(gate.Close)
+	c := catalog.New(catalog.Options{
+		Clock:     clock.NewFake(t0),
+		Upstreams: catalog.Upstreams{Mojang: gate.URL, Paper: gate.URL, Purpur: gate.URL, Fabric: gate.URL, NeoForge: gate.URL},
+	})
+	const callers = 5
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cat, err := c.Get(context.Background(), instancespec.TypeVanilla)
+			if err == nil && len(cat.Versions) == 0 {
+				err = errors.New("empty catalog")
+			}
+			errs <- err
+		}()
+	}
+	time.Sleep(200 * time.Millisecond) // all callers are waiting for the upstream
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if n != 1 {
+		t.Fatalf("upstream fetched %d times for %d concurrent callers, want 1", n, callers)
+	}
+}

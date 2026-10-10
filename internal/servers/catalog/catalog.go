@@ -19,6 +19,8 @@ import (
 const (
 	// Timeout per upstream request.
 	Timeout = 10 * time.Second
+	// Deadline bounds one Get across all its upstream requests (below the 60 s write timeout).
+	Deadline = 45 * time.Second
 	// MaxBytes limits every upstream response.
 	MaxBytes = 5 << 20
 	// CacheTTL is how long a fetched catalog is served from memory.
@@ -65,8 +67,9 @@ type Options struct {
 	Clock      clock.Clock
 	Version    string        // panel version for the User-Agent; "" = "dev"
 	Upstreams  Upstreams     // zero value = DefaultUpstreams
-	HTTPClient *http.Client  // nil = a client with Timeout
+	HTTPClient *http.Client  // nil = a client with Timeout; copied, redirects limited to same-host https
 	Timeout    time.Duration // per request; 0 = Timeout
+	Deadline   time.Duration // per Get; 0 = Deadline
 }
 
 type entry struct {
@@ -74,31 +77,58 @@ type entry struct {
 	cat Catalog
 }
 
+// call is one upstream fetch that concurrent Gets of the same type share.
+type call struct {
+	done chan struct{}
+	cat  Catalog
+	err  error
+}
+
 // Client fetches and caches catalogs. It is safe for concurrent use.
 type Client struct {
-	clock   clock.Clock
-	hc      *http.Client
-	ua      string
-	up      Upstreams
-	timeout time.Duration
+	clock    clock.Clock
+	hc       *http.Client
+	ua       string
+	up       Upstreams
+	timeout  time.Duration
+	deadline time.Duration
 
-	mu    sync.Mutex
-	cache map[instancespec.Type]entry
+	mu       sync.Mutex
+	cache    map[instancespec.Type]entry
+	inflight map[instancespec.Type]*call
 }
 
 func New(o Options) *Client {
-	c := &Client{clock: o.Clock, hc: o.HTTPClient, ua: UserAgent(o.Version), up: o.Upstreams, timeout: o.Timeout,
-		cache: map[instancespec.Type]entry{}}
+	c := &Client{clock: o.Clock, ua: UserAgent(o.Version), up: o.Upstreams, timeout: o.Timeout, deadline: o.Deadline,
+		cache: map[instancespec.Type]entry{}, inflight: map[instancespec.Type]*call{}}
 	if c.up == (Upstreams{}) {
 		c.up = DefaultUpstreams
 	}
 	if c.timeout <= 0 {
 		c.timeout = Timeout
 	}
-	if c.hc == nil {
-		c.hc = &http.Client{Timeout: c.timeout}
+	if c.deadline <= 0 {
+		c.deadline = Deadline
 	}
+	c.hc = &http.Client{Timeout: c.timeout}
+	if o.HTTPClient != nil {
+		hc := *o.HTTPClient
+		c.hc = &hc
+	}
+	c.hc.CheckRedirect = sameHostHTTPS
 	return c
+}
+
+// sameHostHTTPS follows a redirect only to https on the host of the original request, so an
+// upstream cannot send the panel to another host or to plain http.
+func sameHostHTTPS(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if req.URL.Scheme != "https" || req.URL.Host != via[0].URL.Host {
+		return fmt.Errorf("redirect to %s refused: only https on the same host", req.URL.Redacted())
+	}
+	return nil
 }
 
 // UserAgent is sent on every catalog request; the PaperMC Fill API requires a contact.
@@ -110,7 +140,8 @@ func UserAgent(version string) string {
 }
 
 // Get returns the catalog of t, from the cache if it is younger than CacheTTL. Failures are
-// not cached.
+// not cached. Concurrent Gets of the same type share one fetch, which has an overall
+// Deadline and is not cancelled when one of the waiting callers goes away.
 func (c *Client) Get(ctx context.Context, t instancespec.Type) (Catalog, error) {
 	fetch := map[instancespec.Type]func(context.Context) (Catalog, error){
 		instancespec.TypeVanilla:  c.vanilla,
@@ -123,11 +154,41 @@ func (c *Client) Get(ctx context.Context, t instancespec.Type) (Catalog, error) 
 		return Catalog{}, ErrUnsupported
 	}
 	c.mu.Lock()
-	e, ok := c.cache[t]
-	c.mu.Unlock()
-	if ok && c.clock.Now().Sub(e.at) < CacheTTL {
+	if e, ok := c.cache[t]; ok && c.clock.Now().Sub(e.at) < CacheTTL {
+		c.mu.Unlock()
 		return e.cat, nil
 	}
+	cl, ok := c.inflight[t]
+	if !ok {
+		cl = &call{done: make(chan struct{})}
+		c.inflight[t] = cl
+		go c.run(context.WithoutCancel(ctx), t, fetch, cl)
+	}
+	c.mu.Unlock()
+	select {
+	case <-cl.done:
+		return cl.cat, cl.err
+	case <-ctx.Done():
+		return Catalog{}, fmt.Errorf("%w: %s: %w", ErrUnavailable, t, ctx.Err())
+	}
+}
+
+// run performs the shared fetch of cl within the overall deadline and caches a success.
+func (c *Client) run(ctx context.Context, t instancespec.Type, fetch func(context.Context) (Catalog, error), cl *call) {
+	ctx, cancel := context.WithTimeout(ctx, c.deadline)
+	defer cancel()
+	cat, err := load(ctx, t, fetch)
+	c.mu.Lock()
+	if err == nil {
+		c.cache[t] = entry{at: c.clock.Now(), cat: cat}
+	}
+	delete(c.inflight, t)
+	c.mu.Unlock()
+	cl.cat, cl.err = cat, err
+	close(cl.done)
+}
+
+func load(ctx context.Context, t instancespec.Type, fetch func(context.Context) (Catalog, error)) (Catalog, error) {
 	cat, err := fetch(ctx)
 	if err != nil {
 		return Catalog{}, fmt.Errorf("%w: %s: %w", ErrUnavailable, t, err)
@@ -138,9 +199,6 @@ func (c *Client) Get(ctx context.Context, t instancespec.Type) (Catalog, error) 
 	if cat.Loaders == nil {
 		cat.Loaders = []string{}
 	}
-	c.mu.Lock()
-	c.cache[t] = entry{at: c.clock.Now(), cat: cat}
-	c.mu.Unlock()
 	return cat, nil
 }
 

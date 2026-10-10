@@ -35,10 +35,11 @@ const BADGE_VARIANTS: Record<ServerState, BadgeVariant> = {
 const TRANSITIONAL: ReadonlySet<ServerState> = new Set<ServerState>(['creating', 'starting', 'stopping', 'restarting'])
 
 const POWER_STATES: Record<PowerAction, ReadonlySet<ServerState>> = {
-  // unknown: the agent is away – the panel stores the wish and applies it later (spec §3.1).
+  // unknown: the agent is away – the panel stores a start/stop wish and applies it later (spec §3.1). A restart needs
+  // the agent right away (503 without it), so it is not offered then.
   start: new Set<ServerState>(['stopped', 'error', 'unknown']),
   stop: new Set<ServerState>(['running', 'starting', 'restarting', 'error', 'unknown']),
-  restart: new Set<ServerState>(['running', 'error', 'unknown']),
+  restart: new Set<ServerState>(['running', 'error']),
 }
 
 export function stateBadgeVariant(state: ServerState): BadgeVariant {

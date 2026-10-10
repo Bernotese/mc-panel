@@ -165,6 +165,11 @@ describe('CreateServerPage', () => {
     expect(
       screen.getByText('Ohne Online-Modus kann sich jeder mit beliebigem Namen anmelden – auch mit dem Namen eines Operators.'),
     ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Whitelist und Operatoren werden bei jedem Neustart auf diese Listen gesetzt. Änderungen im Spiel (/op, /whitelist add …) werden dabei überschrieben.',
+      ),
+    ).toBeInTheDocument()
     await user.type(screen.getByLabelText('Whitelist'), 'Notch, jeb_')
     await user.click(screen.getByRole('button', { name: 'Server anlegen' }))
     await waitFor(() =>

@@ -79,7 +79,7 @@ describe('SettingsPage', () => {
           base_domain: 'mc.example.com',
           curseforge_api_key_set: false,
           docker: 'unavailable',
-          unknown_containers: [{ id: 7, name: 'mcpanel-mc-7' }],
+          unknown_containers: [{ id: 7, name: 'oldworld' }],
         }),
       ),
     )
@@ -89,7 +89,7 @@ describe('SettingsPage', () => {
     expect(
       within(status).getByText('Der Agent erreicht Docker nicht. Prüfe auf dem Host, ob Docker läuft (systemctl status docker).'),
     ).toBeInTheDocument()
-    expect(within(status).getByText('mcpanel-mc-7 (ID 7)')).toBeInTheDocument()
+    expect(within(status).getByText('oldworld (ID 7)')).toBeInTheDocument()
   })
 
   it('reports an empty list of unknown containers', async () => {

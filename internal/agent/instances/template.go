@@ -33,6 +33,10 @@ const (
 	MinecraftPort      = 25565
 	StopTimeoutSeconds = 60
 	PidsLimit          = 1024
+	// CPUShares is the CPU weight of instance containers: 256 of Docker's default
+	// 1024 (cgroup v2 weight ≈ 10 instead of 100), so a busy server can use idle CPU
+	// but never starves panel, agent or router under contention.
+	CPUShares = 256
 	// RouterMemoryBytes caps mc-router (it needs a few MiB).
 	RouterMemoryBytes = 256 << 20
 
@@ -123,6 +127,7 @@ func InstanceContainer(h Host, req agentapi.EnsureRequest) (docker.ContainerConf
 			Memory:         memory,
 			MemorySwap:     memory,
 			PidsLimit:      PidsLimit,
+			CPUShares:      CPUShares,
 			LogConfig:      logConfig(),
 		},
 		NetworkingConfig: network(),
