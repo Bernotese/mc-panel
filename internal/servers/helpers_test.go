@@ -169,11 +169,15 @@ type fakeAgent struct {
 	mu        sync.Mutex
 	err       error // returned by every call while set
 	actionErr error // returned by Ensure, Power and Remove only
-	docker    string
-	inst      map[int64]agentapi.InstanceStatus
-	calls     []string // accepted calls
-	failed    []string // calls answered with an error
-	ensures   []agentapi.EnsureRequest
+	// blockEnsure, while set, holds every Ensure call until it is closed; entered gets one
+	// value per held call (both are set before the test starts the reconcile pass).
+	blockEnsure chan struct{}
+	entered     chan struct{}
+	docker      string
+	inst        map[int64]agentapi.InstanceStatus
+	calls       []string // accepted calls
+	failed      []string // calls answered with an error
+	ensures     []agentapi.EnsureRequest
 }
 
 func newFakeAgent() *fakeAgent {
@@ -243,6 +247,10 @@ func (f *fakeAgent) lastEnsure() agentapi.EnsureRequest {
 }
 
 func (f *fakeAgent) Ensure(_ context.Context, req agentapi.EnsureRequest) error {
+	if f.blockEnsure != nil {
+		f.entered <- struct{}{}
+		<-f.blockEnsure
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := req.Validate(); err != nil {
