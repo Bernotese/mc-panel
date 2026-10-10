@@ -50,7 +50,7 @@ func (h *Handler) handleListServers(w http.ResponseWriter, r *http.Request) {
 			httpx.Internal(w, r, err)
 			return
 		}
-		out = append(out, v)
+		out = append(out, redactFor(p, v))
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
@@ -91,6 +91,8 @@ func (h *Handler) loadInstance(w http.ResponseWriter, r *http.Request, s store.S
 // writeAgentError maps a failed synchronous agent call to the API error.
 func writeAgentError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, errForeignContainer):
+		writeConflict(w, r, err.Error())
 	case errors.Is(err, errBaseDomainMissing):
 		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeBaseDomainMissing, "set a base domain in the server settings first")
 	case errors.Is(err, agentapi.ErrDockerUnavailable):
@@ -129,7 +131,16 @@ func (h *Handler) handleGetServer(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, out)
+	httpx.WriteJSON(w, http.StatusOK, redactFor(p, out))
+}
+
+// redactFor hides the raw last_error from non-admins: it can name host paths, images and
+// Docker internals. The state (error) stays visible.
+func redactFor(p principal.Principal, v serverJSON) serverJSON {
+	if !p.IsAdmin() {
+		v.Status.LastError = ""
+	}
+	return v
 }
 
 // createServerRequest is the OpenAPI schema CreateServerRequest. Properties are decoded
@@ -197,8 +208,13 @@ func (h *Handler) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	)
 	// Server and instance row are written together: a taken name leaves no half instance.
 	err = h.inTx(ctx, func(q *store.Queries) error {
-		var err error
-		if s, err = q.RbacCreateServer(ctx, store.RbacCreateServerParams{Name: req.Name, CreatedAt: now}); err != nil {
+		// An explicit, never reused ID: a new server must not adopt the container or world of a
+		// deleted one (migration 00003).
+		id, err := q.ServersNextServerID(ctx)
+		if err != nil {
+			return err
+		}
+		if s, err = q.ServersCreateServer(ctx, store.ServersCreateServerParams{ID: id, Name: req.Name, CreatedAt: now}); err != nil {
 			return err
 		}
 		in, err = q.ServersCreateInstance(ctx, store.ServersCreateInstanceParams{
@@ -347,17 +363,19 @@ func (h *Handler) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// handleDeleteServer removes the container first (data goes to deleted/ on the host), then
-// the rows. Without the agent a configured server cannot be deleted, so no container is
-// orphaned; a server without instance needs no agent.
+// handleDeleteServer deletes the rows in a transaction and asks the agent to remove the
+// container (data goes to deleted/ on the host) while it is open: the rows are committed away
+// only once the agent accepted the remove, and a remove is only sent for rows that are gone.
+// Without the agent a configured server cannot be deleted, so no container is orphaned; a
+// server without instance needs no agent. A container of another server is never removed.
 func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	s, ok := h.loadServer(w, r)
 	if !ok {
 		return
 	}
-	// Exclude a concurrent reconcile pass: one that listed this server before the delete
-	// would otherwise recreate the container after the remove (orphan container).
+	// Exclude a concurrent reconcile pass or restart: one that read this server before the
+	// delete would otherwise recreate the container after the remove (orphan container).
 	h.reconcile.mu.Lock()
 	defer h.reconcile.mu.Unlock()
 	_, err := h.q.ServersGetInstance(ctx, s.ID)
@@ -366,13 +384,25 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
+	remove := configured
 	if configured {
-		if err := h.inst.Remove(ctx, s.ID); err != nil {
+		foreign, err := h.isForeign(ctx, s)
+		if err != nil {
 			writeAgentError(w, r, err)
 			return
 		}
+		if foreign {
+			h.log.Warn("servers: delete leaves the container of another server alone", "server_id", s.ID, "name", s.Name)
+			remove = false
+		}
 	}
-	n, err := h.q.RbacDeleteServer(ctx, s.ID)
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	n, err := h.q.WithTx(tx).RbacDeleteServer(ctx, s.ID)
 	if err != nil {
 		httpx.Internal(w, r, err)
 		return
@@ -381,7 +411,34 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 		writeNotFound(w, r)
 		return
 	}
+	if remove {
+		if err := h.inst.Remove(ctx, s.ID); err != nil {
+			writeAgentError(w, r, err) // the rollback keeps the rows
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		h.log.Error("servers: delete: commit failed after the agent accepted the remove", "server_id", s.ID, "err", err)
+		httpx.Internal(w, r, err)
+		return
+	}
+	delete(h.reconcile.attempts, s.ID)
+	delete(h.reconcile.foreign, s.ID)
+	h.setPanelError(s.ID, "")
 	h.record(ctx, audit.ActionServerDelete, serverTarget(s.ID), audit.ResultSuccess,
 		map[string]any{"name": s.Name, "configured": configured})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// isForeign asks the agent whether the container with the server's ID belongs to another
+// server (see foreignContainer).
+func (h *Handler) isForeign(ctx context.Context, s store.Server) (bool, error) {
+	resp, snap, err := h.refreshStatus(ctx)
+	if err != nil {
+		return false, err
+	}
+	if resp.Docker != agentapi.DockerOK {
+		return false, agentapi.ErrDockerUnavailable
+	}
+	return foreignContainer(snap.actualStatus(s.ID), s.Name), nil
 }

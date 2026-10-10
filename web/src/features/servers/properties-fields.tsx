@@ -140,6 +140,7 @@ export function PropertiesFields({ idPrefix, mode, serverName, value, error, onC
           )}
         </FieldRow>
       </div>
+      <p className="text-muted-foreground text-sm">{t('servers.props.lists_sync_hint')}</p>
       <p className="text-muted-foreground text-sm">{t('servers.props.world_hint')}</p>
       <div className="grid gap-4 sm:grid-cols-2">
         <FieldRow id={`${idPrefix}-seed`} label={t('servers.props.seed')} error={error('properties.seed')}>

@@ -2,6 +2,7 @@ package servers
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"math"
 	"net/http"
@@ -19,7 +20,7 @@ type powerRequest struct {
 	Action agentapi.PowerAction `json:"action"`
 }
 
-var errBaseDomainMissing = errors.New("servers: no base domain configured")
+var errBaseDomainMissing = errors.New("no base domain configured: set one in the server settings")
 
 // handleServerPower stores the user's wish (desired_state) and lets the reconcile loop apply
 // it, so start and stop work while the agent is down. Restart needs the agent right away.
@@ -37,8 +38,7 @@ func (h *Handler) handleServerPower(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	in, ok := h.loadInstance(w, r, s)
-	if !ok {
+	if _, ok := h.loadInstance(w, r, s); !ok { // 409 for a server without instance
 		return
 	}
 	p, _ := principal.From(ctx) // guaranteed by the rbac rule
@@ -49,6 +49,19 @@ func (h *Handler) handleServerPower(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Action == agentapi.PowerRestart {
+		// Like a reconcile pass, a restart must not overlap a delete: under the lock the row is
+		// read again, so a server deleted meanwhile gets no agent call (no orphan container).
+		h.reconcile.mu.Lock()
+		defer h.reconcile.mu.Unlock()
+		in, err := h.q.ServersGetInstance(ctx, s.ID)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeNotFound(w, r)
+			return
+		}
+		if err != nil {
+			httpx.Internal(w, r, err)
+			return
+		}
 		if err := h.restart(ctx, s, in); err != nil {
 			writeAgentError(w, r, err)
 			return
@@ -75,7 +88,7 @@ func (h *Handler) handleServerPower(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
 
-// restart applies a user's restart (spec §5.3): a container in the current revision is
+// restart applies a user's restart (spec §5.3); the caller holds the reconcile lock: a container in the current revision is
 // restarted, an outdated one is recreated with the new configuration (it starts again
 // because it ran before). A missing container is left to the reconcile loop, which creates
 // and starts it because the desired state becomes "running".
@@ -89,6 +102,8 @@ func (h *Handler) restart(ctx context.Context, s store.Server, in store.Instance
 	}
 	st := snap.actualStatus(in.ServerID)
 	switch {
+	case foreignContainer(st, s.Name):
+		return errForeignContainer
 	case st.State == agentapi.StateMissing:
 		return nil
 	case st.Revision >= in.Revision:

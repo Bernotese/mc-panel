@@ -6,6 +6,8 @@ import { renderWithProviders } from '@/test/render'
 import { ServerDetailPage } from './server-detail-page'
 
 const GIB = 1024 ** 3
+const LISTS_HINT =
+  'Whitelist und Operatoren werden bei jedem Neustart auf diese Listen gesetzt. Änderungen im Spiel (/op, /whitelist add …) werden dabei überschrieben.'
 
 function mockServer(id: number) {
   const server = db.servers.find((s) => s.id === id)
@@ -39,14 +41,34 @@ describe('ServerDetailPage', () => {
     expect(screen.queryByText('Neustart nötig')).not.toBeInTheDocument()
   })
 
-  it('shows the last error of a failed server', async () => {
+  it('shows admins the last error of a failed server', async () => {
     const survival = mockServer(1)
     survival.status = { ...survival.status, state: 'error', last_error: 'image pull failed: manifest unknown' }
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Letzter Fehler')
     expect(alert).toHaveTextContent('image pull failed: manifest unknown')
     expect(within(screen.getByRole('region', { name: 'Zustand' })).getByText('Fehler')).toBeInTheDocument()
+  })
+
+  it('shows other users a generic error without the details', async () => {
+    const survival = mockServer(1)
+    survival.status = { ...survival.status, state: 'error', last_error: 'image pull failed: manifest unknown' }
+    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Der Server meldet einen Fehler. Details sieht ein Admin.')
+    expect(screen.queryByText('image pull failed: manifest unknown')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Zustand' })).getByText('Fehler')).toBeInTheDocument()
+  })
+
+  it('offers no restart while the agent is unreachable', async () => {
+    const survival = mockServer(1)
+    survival.status = { ...survival.status, state: 'unknown' }
+    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
+    const controls = await screen.findByRole('group', { name: 'Steuerung für survival' })
+    expect(within(controls).getByRole('button', { name: 'Neu starten' })).toBeDisabled()
+    expect(within(controls).getByRole('button', { name: 'Starten' })).toBeEnabled()
+    expect(within(controls).getByRole('button', { name: 'Stoppen' })).toBeEnabled()
   })
 
   it('offers a restart while changes are pending and clears the banner afterwards', async () => {
@@ -110,6 +132,7 @@ describe('ServerDetailPage', () => {
     expect(screen.queryByRole('radio')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Eigenschaften' }))
+    expect(screen.getByText(LISTS_HINT)).toBeInTheDocument()
     const motd = screen.getByLabelText('Nachricht im Serverbrowser (MOTD)')
     expect(motd).toHaveValue('survival')
     await user.clear(motd)

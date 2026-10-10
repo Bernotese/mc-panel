@@ -1,6 +1,7 @@
 package servers
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
@@ -19,11 +20,18 @@ func TestDeriveStatusTable(t *testing.T) {
 		return s
 	}
 	c := func(state agentapi.ContainerState, op agentapi.Operation) agentapi.InstanceStatus {
-		return agentapi.InstanceStatus{ID: 1, Revision: 2, State: state, Operation: op}
+		return agentapi.InstanceStatus{ID: 1, Name: "survival", Revision: 2, State: state, Operation: op}
 	}
 	exited := func(code int, lastErr string) agentapi.InstanceStatus {
-		return agentapi.InstanceStatus{ID: 1, Revision: 2, State: agentapi.StateExited, ExitCode: code, LastError: lastErr}
+		return agentapi.InstanceStatus{ID: 1, Name: "survival", Revision: 2, State: agentapi.StateExited, ExitCode: code, LastError: lastErr}
 	}
+	missingErr := agentapi.InstanceStatus{ID: 1, Name: "survival", State: agentapi.StateMissing, LastError: "pull failed"}
+	panelErr := ok()
+	panelErr.PanelErrors = map[int64]string{1: "no base domain configured"}
+	foreign := c(agentapi.StateRunning, agentapi.OpNone)
+	foreign.Name = "oldworld"
+	foreignMissing := c(agentapi.StateMissing, agentapi.OpPulling)
+	foreignMissing.Name = "oldworld"
 	cases := []struct {
 		name string
 		in   *store.Instance
@@ -33,10 +41,15 @@ func TestDeriveStatusTable(t *testing.T) {
 		{"no instance row", nil, ok(), stateNotConfigured},
 		{"agent unreachable", in, Snapshot{}, stateUnknown},
 		{"docker unavailable", in, Snapshot{Reachable: true, Docker: agentapi.DockerUnavailable}, stateUnknown},
+		{"container of another server", in, ok(foreign), stateError},
+		{"missing entry with another name is no container", in, ok(foreignMissing), stateCreating},
 		{"pulling", in, ok(c(agentapi.StateMissing, agentapi.OpPulling)), stateCreating},
 		{"creating", in, ok(c(agentapi.StateMissing, agentapi.OpCreating)), stateCreating},
 		{"container not listed", in, ok(), stateCreating},
 		{"missing", in, ok(c(agentapi.StateMissing, agentapi.OpNone)), stateCreating},
+		{"missing with last_error (ensure failed for good)", in, ok(missingErr), stateError},
+		{"missing with last_error, wants stopped", stopped, ok(missingErr), stateError},
+		{"panel-side reconcile error", in, panelErr, stateError},
 		{"starting", in, ok(c(agentapi.StateCreated, agentapi.OpStarting)), stateStarting},
 		{"stopping", in, ok(c(agentapi.StateRunning, agentapi.OpStopping)), stateStopping},
 		{"removing", in, ok(c(agentapi.StateRunning, agentapi.OpRemoving)), stateStopping},
@@ -50,7 +63,7 @@ func TestDeriveStatusTable(t *testing.T) {
 		{"unknown container state", in, ok(c("paused", agentapi.OpNone)), stateUnknown},
 	}
 	for _, tc := range cases {
-		got := deriveStatus(tc.in, tc.snap)
+		got := deriveStatus("survival", tc.in, tc.snap)
 		if got.State != tc.want {
 			t.Errorf("%s: state %s, want %s", tc.name, got.State, tc.want)
 		}
@@ -74,10 +87,38 @@ func TestRestartRequired(t *testing.T) {
 		{agentapi.StateCreated, 1, false},
 	} {
 		snap := Snapshot{Reachable: true, Docker: agentapi.DockerOK, Instances: map[int64]agentapi.InstanceStatus{
-			1: {ID: 1, Revision: tc.rev, State: tc.state},
+			1: {ID: 1, Name: "survival", Revision: tc.rev, State: tc.state},
 		}}
-		if got := deriveStatus(in, snap).RestartRequired; got != tc.want {
+		if got := deriveStatus("survival", in, snap).RestartRequired; got != tc.want {
 			t.Errorf("%s rev %d: restart_required %t, want %t", tc.state, tc.rev, got, tc.want)
 		}
+	}
+}
+
+// last_error: the agent's own error wins; a panel-side reconcile error (one that never reached
+// the agent) fills it otherwise. A foreign container gets an explanation instead of its data.
+func TestDeriveStatusLastError(t *testing.T) {
+	in := &store.Instance{ServerID: 1, DesiredState: desiredRunning, Revision: 1}
+	snap := func(st agentapi.InstanceStatus, panelErr string) Snapshot {
+		s := Snapshot{Reachable: true, Docker: agentapi.DockerOK, Instances: map[int64]agentapi.InstanceStatus{1: st}}
+		if panelErr != "" {
+			s.PanelErrors = map[int64]string{1: panelErr}
+		}
+		return s
+	}
+	missing := agentapi.InstanceStatus{ID: 1, Name: "survival", State: agentapi.StateMissing}
+	if got := deriveStatus("survival", in, snap(missing, "no base domain configured")); got.LastError != "no base domain configured" {
+		t.Errorf("panel error not merged: %+v", got)
+	}
+	withAgentErr := missing
+	withAgentErr.LastError = "pull failed"
+	if got := deriveStatus("survival", in, snap(withAgentErr, "no base domain configured")); got.LastError != "pull failed" {
+		t.Errorf("agent error must win: %+v", got)
+	}
+	foreign := agentapi.InstanceStatus{ID: 1, Name: "oldworld", Revision: 7, State: agentapi.StateRunning, MemoryBytes: 1 << 30, StartedAt: 5}
+	got := deriveStatus("survival", in, snap(foreign, ""))
+	if got.State != stateError || !strings.Contains(got.LastError, "another server") || got.RestartRequired ||
+		got.MemoryBytes != 0 || got.StartedAt != 0 {
+		t.Errorf("foreign container = %+v", got)
 	}
 }
