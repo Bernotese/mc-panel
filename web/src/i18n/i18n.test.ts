@@ -24,6 +24,9 @@ const ERROR_CODES = [
   'jailed',
   'ip_blocked',
   'agent_unavailable',
+  'docker_unavailable',
+  'base_domain_missing',
+  'catalog_unavailable',
   'internal',
 ]
 
@@ -43,6 +46,10 @@ const DYNAMIC_KEYS = [
   ...['de', 'en'].map((l) => `profile.language.${l}`),
   ...['totp', 'webauthn', 'recovery'].map((m) => `second_factor.tab_${m}`),
   ...['dashboard', 'users', 'security', 'audit', 'profile'].map((k) => `nav.${k}`),
+  ...['not_configured', 'unknown', 'creating', 'starting', 'running', 'stopping', 'stopped', 'restarting', 'error'].map(
+    (s) => `servers.state.${s}`,
+  ),
+  ...['vanilla', 'paper', 'purpur', 'fabric', 'neoforge', 'modrinth', 'curseforge'].map((k) => `servers.type.${k}`),
 ]
 
 describe('i18n resources', () => {

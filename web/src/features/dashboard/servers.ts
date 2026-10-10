@@ -1,10 +1,2 @@
-import { queryOptions } from '@tanstack/react-query'
-import { api } from '@/api/client'
-import { unwrap } from '@/api/errors'
-
-export const serversKey = ['servers'] as const
-
-export const serversQueryOptions = queryOptions({
-  queryKey: serversKey,
-  queryFn: () => unwrap(api.GET('/servers')),
-})
+// Moved to @/features/servers/api; the dashboard and the permissions page switch over in task 18.
+export { serversKey, serversQueryOptions } from '@/features/servers/api'
