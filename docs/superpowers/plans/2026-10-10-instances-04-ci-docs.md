@@ -35,7 +35,7 @@ Es gelten alle Global Constraints aus `2026-10-10-instances-00-overview.md` und 
 - Consumes: agent-Endpunkte aus Aufgabe 9 (`GET /v1/instances`, `POST /v1/instances/ensure|power|remove`), Konfigurationsschlüssel aus Aufgabe 4 (`instances_dir`, `mc_user`), Container-/Label-Namen aus der Übersicht.
 - Produces: `scripts/mc-status.py HOST PORT SERVER_ADDRESS` (Exit 0 + JSON bei Antwort, sonst Exit 1); `scripts/ci-instances.sh AGENT_BINARY` endet mit `PASS: instance acceptance (agent path)`.
 
-- [ ] **Step 1: Status-Ping schreiben** – `scripts/mc-status.py`
+- [x] **Step 1: Status-Ping schreiben** – `scripts/mc-status.py`
 
 ```python
 #!/usr/bin/env python3
@@ -140,7 +140,7 @@ if __name__ == "__main__":
 
 Ausführbar machen: `chmod +x scripts/mc-status.py`.
 
-- [ ] **Step 2: Status-Ping gegen einen lokalen Fake prüfen** (reines Python ohne Netzwerk nach außen, keine Container – auf dem Mac erlaubt)
+- [x] **Step 2: Status-Ping gegen einen lokalen Fake prüfen** (reines Python ohne Netzwerk nach außen, keine Container – auf dem Mac erlaubt)
 
 ```bash
 python3 -I - <<'PY'
@@ -174,7 +174,7 @@ PY
 
 Expected: eine Zeile mit `{"version": {"name": "fake"}, "addr_ok": true}` und `0`, kein AssertionError.
 
-- [ ] **Step 3: Abnahmeskript schreiben** – `scripts/ci-instances.sh`
+- [x] **Step 3: Abnahmeskript schreiben** – `scripts/ci-instances.sh`
 
 ```bash
 #!/usr/bin/env bash
@@ -356,7 +356,7 @@ Ausführbar machen: `chmod +x scripts/ci-instances.sh`.
 
 Hinweise: Der Test erstellt mit `ensure` nur den Container (Aufgabe 8: neuer Container wird nicht automatisch gestartet), startet ihn mit `power start` und nutzt `firewall = "noop"`, weil hier nur der Instanz-Pfad geprüft wird (nftables prüft `scripts/ci-acceptance.sh`). `status_field` wertet einen festen Python-Ausdruck aus dem Skript selbst aus, nie Eingaben von außen.
 
-- [ ] **Step 4: CI-Job** – in `.github/workflows/ci.yml` nach dem Job `nftables` einfügen (Action-Versionen wie in den übrigen Jobs, per SHA gepinnt – aus dem Job `nftables` kopieren):
+- [x] **Step 4: CI-Job** – in `.github/workflows/ci.yml` nach dem Job `nftables` einfügen (Action-Versionen wie in den übrigen Jobs, per SHA gepinnt – aus dem Job `nftables` kopieren):
 
 ```yaml
   instances:
@@ -384,12 +384,12 @@ Hinweise: Der Test erstellt mit `ensure` nur den Container (Aufgabe 8: neuer Con
         run: sudo scripts/ci-instances.sh bin/agent
 ```
 
-- [ ] **Step 5: Lokal prüfen (nur statisch)**
+- [x] **Step 5: Lokal prüfen (nur statisch)**
 
 Run: `shellcheck scripts/ci-instances.sh scripts/ci-acceptance.sh && make check`
 Expected: keine Befunde, `make check` grün.
 
-- [ ] **Step 6: Commit, Push, CI abwarten**
+- [x] **Step 6: Commit, Push, CI abwarten**
 
 ```bash
 git add scripts/mc-status.py scripts/ci-instances.sh .github/workflows/ci.yml
@@ -414,7 +414,7 @@ Expected: Job `instances` grün; im Log `OK: container running`, `OK: route pres
 - Consumes: Ergebnisse der Aufgaben 4–23.
 - Produces: Doku; keine Code-Schnittstellen.
 
-- [ ] **Step 1: `docs/dev/README.md` ergänzen**
+- [x] **Step 1: `docs/dev/README.md` ergänzen**
 
 Neuer Abschnitt nach „UI-Vorschau in Docker“:
 
@@ -441,7 +441,7 @@ In der Tabelle „CI lokal nachstellen“ zwei Zeilen ergänzen:
 
 Im Abschnitt „Produktion“ ergänzen: „Der agent braucht Docker (Engine ≥ 25, API ≥ 1.44) und den Benutzer `mcpanel-mc`; beides richtet später der Installer (Teilprojekt 6) ein.“
 
-- [ ] **Step 2: `CLAUDE.md` aktualisieren**
+- [x] **Step 2: `CLAUDE.md` aktualisieren**
 
 Im Abschnitt „Architecture“ den agent-Absatz ersetzen durch:
 
@@ -467,7 +467,7 @@ Im Abschnitt „Conventions“ die Zeile zum String `mcpanel` ersetzen durch:
 - The string `mcpanel` (nftables table and sets, system users `mcpanel`/`mcpanel-mc`, Docker names `mcpanel-mc-<id>`/`mcpanel-router`/network `mcpanel-mc`, labels `mcpanel.*`, `mcpanel.theme` localStorage key) is a runtime name, not the module path. Do not rename it.
 ```
 
-- [ ] **Step 3: Prüfen und committen**
+- [x] **Step 3: Prüfen und committen**
 
 Run: `make check`
 Expected: grün.
@@ -491,7 +491,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Consumes: alle vorherigen Aufgaben.
 - Produces: grüne CI auf dem Gesamtstand, behobene Review-Befunde, Checkliste für den Nutzer.
 
-- [ ] **Step 1: Checkliste schreiben** – `docs/dev/acceptance-tp2.md`
+- [x] **Step 1: Checkliste schreiben** – `docs/dev/acceptance-tp2.md`
 
 ```markdown
 # Abnahme Teilprojekt 2 (manuell, Testserver)
@@ -512,7 +512,7 @@ Manuell auf einem Testserver (Ubuntu 26.04 mit Docker, Release-Archiv aus einem 
 Befunde als GitHub-Issue anlegen (`gh issue create`), mit Schritten zum Nachstellen.
 ```
 
-- [ ] **Step 2: Gesamtstand in der CI**
+- [x] **Step 2: Gesamtstand in der CI**
 
 Nach dem Push des letzten Teil-PRs auf `main` (bzw. auf dem Integrations-PR):
 
@@ -521,13 +521,13 @@ gh pr checks <pr> --watch
 ```
 Expected: alle Jobs grün (`go`, `web`, `openapi`, `nftables` inkl. Docker-Integration, `instances`, `e2e`, `build`); `make generate` ist durch den CI-Check „generated code up to date“ abgedeckt.
 
-- [ ] **Step 3: Security-Review** – Skill `security-review` auf dem Gesamtstand gegen `main` vor TP2. Schwerpunkte: Env-Injektion, Pfade (`instances/<id>`, `deleted/<name>-…` – keine Traversal-Möglichkeit über `name`), fremde Container, Secrets in Logs/Audit/`last_error`, SSRF über Kataloge (feste URLs), Rechte der neuen Routen, dev-Docker nur mit Opt-in. Jeden Befund mit `superpowers:receiving-code-review` bewerten; berechtigte mit Test + Fix als eigenen Commit beheben (Tests laufen in der CI).
+- [x] **Step 3: Security-Review** – Skill `security-review` auf dem Gesamtstand gegen `main` vor TP2. Schwerpunkte: Env-Injektion, Pfade (`instances/<id>`, `deleted/<name>-…` – keine Traversal-Möglichkeit über `name`), fremde Container, Secrets in Logs/Audit/`last_error`, SSRF über Kataloge (feste URLs), Rechte der neuen Routen, dev-Docker nur mit Opt-in. Jeden Befund mit `superpowers:receiving-code-review` bewerten; berechtigte mit Test + Fix als eigenen Commit beheben (Tests laufen in der CI).
 
-- [ ] **Step 4: Code-Review** – Skill `superpowers:requesting-code-review` für den Gesamtstand; Befunde wie in Step 3.
+- [x] **Step 4: Code-Review** – Skill `superpowers:requesting-code-review` für den Gesamtstand; Befunde wie in Step 3.
 
-- [ ] **Step 5: Pläne abhaken** – In `docs/superpowers/plans/2026-10-10-instances-0*.md` alle erledigten Checkboxen auf `- [x]` setzen, committen, PR.
+- [x] **Step 5: Pläne abhaken** – In `docs/superpowers/plans/2026-10-10-instances-0*.md` alle erledigten Checkboxen auf `- [x]` setzen, committen, PR.
 
-- [ ] **Step 6: Übergabe an den Nutzer** – Checkliste `docs/dev/acceptance-tp2.md` nennen; die manuelle Abnahme macht der Nutzer getrennt. Release-Tag nur nach ausdrücklicher Freigabe (ein `v*`-Tag veröffentlicht ein GitHub-Release).
+- [x] **Step 6: Übergabe an den Nutzer** – Checkliste `docs/dev/acceptance-tp2.md` nennen; die manuelle Abnahme macht der Nutzer getrennt. Release-Tag nur nach ausdrücklicher Freigabe (ein `v*`-Tag veröffentlicht ein GitHub-Release).
 
 ## Self-Review (dieser Datei)
 
