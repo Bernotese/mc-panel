@@ -12,7 +12,7 @@
 
 ## Plan-Dateien und Reihenfolge
 
-Die Aufgaben laufen **sequenziell** in dieser Reihenfolge (jede Aufgabe lässt `make test` und `make lint` grün zurück):
+Die Aufgaben bauen in dieser Nummerierung aufeinander auf; welche parallel laufen, regelt der Abschnitt „Ausführung“. Jede Aufgabe endet mit grüner CI auf ihrem PR-Branch:
 
 | Datei | Aufgaben | Inhalt |
 |---|---|---|
@@ -20,9 +20,26 @@ Die Aufgaben laufen **sequenziell** in dieser Reihenfolge (jede Aufgabe lässt `
 | `2026-10-10-instances-01-agent.md` | 4–10 | agent: Konfiguration, Docker-Client, Vorlage, Router, Manager, Endpunkte, Integrationstest |
 | `2026-10-10-instances-02-panel.md` | 11–16 | panel: Paket `servers`, Einstellungen, CRUD, Power + Abgleich, Kataloge, Verdrahtung |
 | `2026-10-10-instances-03-frontend.md` | 17–22 | Frontend: Grundlagen, Dashboard, Anlegen, Detailseite, Einstellungen, Playwright |
-| `2026-10-10-instances-04-vm-docs.md` | 23–25 | VM, `make dev` mit Docker, Doku, Abnahme und Reviews |
+| `2026-10-10-instances-04-ci-docs.md` | 23–25 | CI-Abnahme mit echtem Docker, Doku, Checkliste für die manuelle Abnahme, Reviews |
 
-Arbeitsbranch: `feat/instances` (von `main`). Voraussetzung: `docs/claude-md` (CLAUDE.md), `chore/vm-browser-access` (Caddy-Zugang zur VM) und `docs/instances-spec` (Spec + Pläne) sind in `main` gemerged.
+## Ausführung (Agent-Teams, CI statt lokaler Tests)
+
+Es gelten die Arbeitsregeln aus `CLAUDE.md`. Daraus folgt für alle Teilpläne:
+
+- **Lokal nur `make check`.** Schritte der Form „Run: `go test …`“, `make test`, `make lint`, `make test-race`, `golangci-lint …`, `npm test`, `npx vitest …`, `npm run lint`, `npx tsc …`, Playwright oder `shellcheck` gegen Docker/root werden **nicht** auf dem Mac ausgeführt. Stattdessen: `make check` lokal (Format, Vet, Build für macOS und Linux, `tsc`), dann Commit, Push auf den PR-Branch und `gh pr checks <pr> --watch`. Die „Expected: PASS“-Angaben der Schritte werden in den CI-Logs geprüft (`gh run view <id> --log-failed` bei Fehlern). `make generate` und `shellcheck` sind erlaubt (keine Tests).
+- **TDD bleibt:** Test zuerst schreiben, dann implementieren; die „rot“-Phase zeigt lokal `make check` (Kompilierfehler), die „grün“-Phase die CI. Eine Aufgabe ist erst fertig, wenn die CI ihres Commits grün ist.
+- **Nichts Systemnahes auf dem Mac:** keine Container, kein `MCPANEL_DEV_DOCKER=1`, kein `sudo`; Docker- und root-Tests laufen nur in der CI.
+- **Git:** nie auf `main`; ein Branch und Draft-PR pro Phase; jeder Teammate arbeitet in einem eigenen Worktree (`git worktree add ../mc-panel-wt/<branch> -b <branch> origin/main`). Mergen nur durch den Nutzer.
+
+| Phase | Branch / PR | Wer | Aufgaben | Startet, wenn |
+|---|---|---|---|---|
+| A | `feat/instances-contracts` | Lead | 1–3 | – |
+| B1 | `feat/instances-agent` | Teammate „agent“ | 4–10 | A gemerged |
+| B2 | `feat/instances-panel` | Teammate „panel“ | 11–16 | A gemerged |
+| C | `feat/instances-frontend` | Teammate „frontend“ | 17–22 | B2 gemerged |
+| D | `feat/instances-ci-docs` | Lead | 23–25 | B1 und C gemerged |
+
+B1 und B2 laufen parallel und berühren disjunkte Dateien: B1 nur `internal/config/`, `internal/agent/**` (außer `instancespec/` und `agentapi/`), `cmd/agent/`, `.golangci.yml`, `.github/workflows/ci.yml` und `scripts/ci-acceptance.sh`; B2 nur `internal/servers/`, `internal/users/`, `internal/httpx/`, `internal/audit/`, `api/openapi.yaml`, `cmd/panel/`, `web/src/api/`, `web/src/mocks/` und minimal `web/src/features/dashboard/`. Der Spawn-Prompt jedes Teammates nennt die Plan-Datei, die Aufgabennummern, den Branch und diesen Abschnitt.
 
 ## Global Constraints
 
@@ -80,7 +97,8 @@ api/openapi.yaml, web/src/api/schema.d.ts          (12–15) Vertrag
 cmd/panel/app.go                                   (16) Verdrahtung
 web/src/features/servers/, settings/               (17–22) Frontend
 web/src/mocks/handlers/servers.ts, db.ts           (12–15) Mocks
-scripts/vm-setup.sh, docs/dev/*.md, CLAUDE.md      (23–25)
+scripts/mc-status.py, scripts/ci-instances.sh     (23) CI-Abnahme
+docs/dev/*.md, CLAUDE.md                          (24–25)
 ```
 
 ## Verträge (für alle Teilpläne verbindlich)
