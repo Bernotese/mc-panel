@@ -27,7 +27,7 @@ Phase-1-Streams laufen parallel, jeder in eigenem Git-Worktree auf Branch `strea
 
 ## Global Constraints
 
-- Go-Modulpfad: `mcpanel` (kein GitHub-Pfad; späteres Umbenennen per Find & Replace).
+- Go-Modulpfad: `github.com/Bernotese/mc-panel`.
 - Kein CGO: `CGO_ENABLED=0` für alle Builds; SQLite nur über `modernc.org/sqlite`.
 - Release-Ziele: `linux/amd64`, `linux/arm64`. Entwicklung: `darwin/arm64`.
 - Zeitstempel in der DB: `INTEGER` Unix-Millisekunden (`*_at`-Spalten), Konvertierung per `time.UnixMilli` / `t.UnixMilli()`.

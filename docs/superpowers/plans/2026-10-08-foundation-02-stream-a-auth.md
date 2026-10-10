@@ -138,8 +138,8 @@ import (
 	"errors"
 	"testing"
 
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 func TestAuthQueries(t *testing.T) {
@@ -648,7 +648,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
 )
 
 func TestTOTPKey(t *testing.T) {
@@ -738,7 +738,7 @@ import (
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 
-	"mcpanel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
 )
 
 const (
@@ -874,11 +874,11 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 var sessionStart = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
@@ -1062,10 +1062,10 @@ import (
 	"net/netip"
 	"time"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const (
@@ -1273,7 +1273,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
 func TestSessionMiddleware(t *testing.T) {
@@ -1392,8 +1392,8 @@ import (
 	"net/http"
 	"time"
 
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
 const (
@@ -1565,17 +1565,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/password"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/secretbox"
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 const testPassword = "correct horse battery staple"
@@ -1824,9 +1824,9 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/password"
 )
 
 func TestLoginUserWithout2FAGetsFullSession(t *testing.T) {
@@ -2091,16 +2091,16 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/secretbox"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // Login attempt reasons (contract with stream B, stored in login_attempts.reason).
@@ -2360,12 +2360,12 @@ import (
 	"net/http"
 	"unicode/utf8"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/password"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const maxUsernameLen = 64
@@ -2552,9 +2552,9 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func (e *testEnv) preauthClient(username, role, ip string) (*client, int64, string) {
@@ -2748,11 +2748,11 @@ import (
 	"net/http"
 	"strconv"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const maxCodeLen = 32
@@ -2940,9 +2940,9 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // insertPasskeyRow adds a passkey row directly (counts as a 2FA method; not usable for login).
@@ -3137,11 +3137,11 @@ import (
 	"fmt"
 	"net/http"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 var (
@@ -3448,8 +3448,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/defense"
 )
 
 func TestSudoTOTPGrantsSudo(t *testing.T) {
@@ -3549,11 +3549,11 @@ package auth
 import (
 	"net/http"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 type sudoResponse struct {
@@ -3854,8 +3854,8 @@ import (
 	"sync"
 	"testing"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/notify"
 )
 
 func TestPasskeyRegistrationAndList(t *testing.T) {
@@ -4047,7 +4047,7 @@ import (
 
 	"github.com/go-webauthn/webauthn/webauthn"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const (
@@ -4141,9 +4141,9 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const maxPasskeyName = 64
@@ -4399,8 +4399,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/defense"
 )
 
 // passkeyUser creates a user with exactly one registered passkey (no TOTP).
@@ -4580,10 +4580,10 @@ import (
 
 	"github.com/go-webauthn/webauthn/protocol"
 
-	"mcpanel/internal/defense"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 type assertionRequest struct {
@@ -4791,9 +4791,9 @@ import (
 	"net/http"
 	"testing"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func TestUpdateLocale(t *testing.T) {
@@ -4904,11 +4904,11 @@ import (
 	"net/http"
 	"unicode/utf8"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/password"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 type updateMeRequest struct {
@@ -5087,7 +5087,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/audit"
 )
 
 func listSessions(t *testing.T, c *client, path string) []sessionJSON {
@@ -5233,10 +5233,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 type sessionJSON struct {
@@ -5419,8 +5419,8 @@ import (
 	"net/http"
 	"testing"
 
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
 )
 
 func TestRoutesMatchContract(t *testing.T) {

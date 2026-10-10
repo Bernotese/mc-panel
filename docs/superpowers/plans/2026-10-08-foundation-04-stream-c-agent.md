@@ -121,8 +121,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
 )
 
 func TestMaxTimeoutSeconds(t *testing.T) {
@@ -257,7 +257,7 @@ func TestFindOverlap(t *testing.T) {
 - [ ] **Step 2: Test laufen lassen (rot)**
 
 Run: `go test ./internal/agent/banrules/`
-Expected: FAIL – Build-Fehler, weil das Paket `mcpanel/internal/agent/banrules` keine Nicht-Test-Dateien enthält bzw. `banrules.CheckPrefix` undefiniert ist.
+Expected: FAIL – Build-Fehler, weil das Paket `github.com/Bernotese/mc-panel/internal/agent/banrules` keine Nicht-Test-Dateien enthält bzw. `banrules.CheckPrefix` undefiniert ist.
 
 - [ ] **Step 3: Implementierung** – `internal/agent/banrules/banrules.go`
 
@@ -274,7 +274,7 @@ import (
 	"net/netip"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 var (
@@ -376,7 +376,7 @@ func FindOverlap(p netip.Prefix, existing []netip.Prefix) (netip.Prefix, bool) {
 - [ ] **Step 4: Test laufen lassen (grün)**
 
 Run: `go test ./internal/agent/banrules/`
-Expected: `ok  	mcpanel/internal/agent/banrules`
+Expected: `ok  	github.com/Bernotese/mc-panel/internal/agent/banrules`
 
 - [ ] **Step 5: Commit**
 
@@ -428,7 +428,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent/peercred"
+	"github.com/Bernotese/mc-panel/internal/agent/peercred"
 )
 
 // socketPath returns a short socket path: Unix socket paths are limited to
@@ -729,7 +729,7 @@ func peerUID(int) (uint32, error) {
 - [ ] **Step 4: Tests laufen lassen (grün) + Linux-Compile-Check**
 
 Run: `go test ./internal/agent/peercred/ && GOOS=linux GOARCH=amd64 go vet ./internal/agent/peercred/`
-Expected: `ok  	mcpanel/internal/agent/peercred`, `go vet` ohne Ausgabe.
+Expected: `ok  	github.com/Bernotese/mc-panel/internal/agent/peercred`, `go vet` ohne Ausgabe.
 
 - [ ] **Step 5: Commit**
 
@@ -779,10 +779,10 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
-	"mcpanel/internal/agent/firewall"
-	"mcpanel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/firewall"
+	"github.com/Bernotese/mc-panel/internal/clock"
 )
 
 func newNoop(t *testing.T) (*firewall.Noop, *clock.Fake) {
@@ -952,8 +952,8 @@ import (
 	"slices"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
 )
 
 // Names of the nftables objects owned by mc-panel. Nothing outside the table
@@ -1002,9 +1002,9 @@ import (
 	"sync"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
-	"mcpanel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/clock"
 )
 
 // Noop keeps bans in memory and only logs them. No packet is ever dropped.
@@ -1082,7 +1082,7 @@ func (n *Noop) purgeLocked(now time.Time) {
 - [ ] **Step 4: Tests laufen lassen (grün, mit Race-Detector)**
 
 Run: `go test ./internal/agent/firewall/ && CGO_ENABLED=1 go test -race -run Noop ./internal/agent/firewall/`
-Expected: zweimal `ok  	mcpanel/internal/agent/firewall`
+Expected: zweimal `ok  	github.com/Bernotese/mc-panel/internal/agent/firewall`
 
 - [ ] **Step 5: Commit**
 
@@ -1134,7 +1134,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 func a16(s string) []byte {
@@ -1512,7 +1512,7 @@ func splitExisting(p netip.Prefix, entries []entry) (bool, []netip.Prefix) {
 - [ ] **Step 4: Tests laufen lassen (grün)**
 
 Run: `go test ./internal/agent/firewall/`
-Expected: `ok  	mcpanel/internal/agent/firewall`
+Expected: `ok  	github.com/Bernotese/mc-panel/internal/agent/firewall`
 
 - [ ] **Step 5: Commit**
 
@@ -1579,9 +1579,9 @@ import (
 	"github.com/google/nftables/expr"
 	"golang.org/x/sys/unix"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
-	"mcpanel/internal/agent/firewall"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/firewall"
 )
 
 // newNetNS creates a fresh network namespace and returns an fd referring to
@@ -1892,8 +1892,8 @@ import (
 	"github.com/google/nftables/expr"
 	"golang.org/x/sys/unix"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
 )
 
 // NFTables manages the table "inet mcpanel" with the sets mcpanel_jail4
@@ -2114,7 +2114,7 @@ GOOS=linux GOARCH=amd64 go vet -tags nftintegration ./internal/agent/firewall/
 GOOS=linux GOARCH=arm64 go vet ./internal/agent/firewall/
 go test ./internal/agent/firewall/
 ```
-Expected: `go vet` ohne Ausgabe; `ok  	mcpanel/internal/agent/firewall` (auf macOS laufen nur Noop- und nftkeys-Tests).
+Expected: `go vet` ohne Ausgabe; `ok  	github.com/Bernotese/mc-panel/internal/agent/firewall` (auf macOS laufen nur Noop- und nftkeys-Tests).
 
 - [ ] **Step 5: Integrationstest in der Linux-VM (root)**
 
@@ -2164,8 +2164,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
 )
 
 func TestChoose(t *testing.T) {
@@ -2223,9 +2223,9 @@ import (
 	"log/slog"
 	"runtime"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
 )
 
 // ErrUnsupported is returned when the configured backend cannot run on this OS.
@@ -2271,7 +2271,7 @@ package firewall
 import (
 	"log/slog"
 
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 func newNFTables(log *slog.Logger) (agentapi.Firewall, error) {
@@ -2293,7 +2293,7 @@ package firewall
 import (
 	"log/slog"
 
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 func newNFTables(*slog.Logger) (agentapi.Firewall, error) { return nil, ErrUnsupported }
@@ -2302,7 +2302,7 @@ func newNFTables(*slog.Logger) (agentapi.Firewall, error) { return nil, ErrUnsup
 - [ ] **Step 4: Tests laufen lassen (grün) + Linux-Compile-Check**
 
 Run: `go test ./internal/agent/firewall/ && GOOS=linux GOARCH=amd64 go vet ./internal/agent/firewall/`
-Expected: `ok  	mcpanel/internal/agent/firewall`; `go vet` ohne Ausgabe.
+Expected: `ok  	github.com/Bernotese/mc-panel/internal/agent/firewall`; `go vet` ohne Ausgabe.
 
 - [ ] **Step 5: Commit**
 
@@ -2358,9 +2358,9 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/firewall"
-	"mcpanel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/firewall"
+	"github.com/Bernotese/mc-panel/internal/clock"
 )
 
 // socketPath returns a short socket path: Unix socket paths are limited to
@@ -2434,7 +2434,7 @@ import (
 	"syscall"
 	"testing"
 
-	"mcpanel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/agent"
 )
 
 func TestListenCreatesSocketWithMode(t *testing.T) {
@@ -2553,7 +2553,7 @@ func TestListenRefusesSymlink(t *testing.T) {
 - [ ] **Step 3: Test laufen lassen (rot)**
 
 Run: `go test ./internal/agent/`
-Expected: FAIL – Build-Fehler (`agent.Listen`, `agent.ErrAlreadyRunning` undefiniert; Paket `mcpanel/internal/agent` hat keine Nicht-Test-Dateien).
+Expected: FAIL – Build-Fehler (`agent.Listen`, `agent.ErrAlreadyRunning` undefiniert; Paket `github.com/Bernotese/mc-panel/internal/agent` hat keine Nicht-Test-Dateien).
 
 - [ ] **Step 4: Implementierung** – `internal/agent/socket.go`
 
@@ -2629,7 +2629,7 @@ func removeStale(path string) error {
 - [ ] **Step 5: Tests laufen lassen (grün)**
 
 Run: `go test -run Listen ./internal/agent/`
-Expected: `ok  	mcpanel/internal/agent`
+Expected: `ok  	github.com/Bernotese/mc-panel/internal/agent`
 
 - [ ] **Step 6: Commit**
 
@@ -2675,9 +2675,9 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent"
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
 )
 
 const jsonCT = "application/json"
@@ -2885,9 +2885,9 @@ import (
 	"net/http"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
-	"mcpanel/internal/agent/peercred"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/peercred"
 )
 
 const maxRequestBytes = 4 << 10
@@ -3082,7 +3082,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 - [ ] **Step 4: Tests laufen lassen (grün)**
 
 Run: `go test -run 'Server|Listen' ./internal/agent/`
-Expected: `ok  	mcpanel/internal/agent`
+Expected: `ok  	github.com/Bernotese/mc-panel/internal/agent`
 
 - [ ] **Step 5: Commit**
 
@@ -3146,9 +3146,9 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent"
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/peercred"
+	"github.com/Bernotese/mc-panel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/peercred"
 )
 
 var _ agentapi.Client = (*agent.Client)(nil)
@@ -3464,8 +3464,8 @@ import (
 	"net/netip"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
 )
 
 const (
@@ -3625,7 +3625,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 - [ ] **Step 4: Tests laufen lassen (grün, auch mit Race-Detector)**
 
 Run: `go test ./internal/agent/... && CGO_ENABLED=1 go test -race ./internal/agent/...`
-Expected: `ok` für `mcpanel/internal/agent`, `…/agent/agentapi`, `…/agent/banrules`, `…/agent/firewall`, `…/agent/peercred` – in beiden Läufen, keine `DATA RACE`-Meldung.
+Expected: `ok` für `github.com/Bernotese/mc-panel/internal/agent`, `…/agent/agentapi`, `…/agent/banrules`, `…/agent/firewall`, `…/agent/peercred` – in beiden Läufen, keine `DATA RACE`-Meldung.
 
 - [ ] **Step 5: Commit**
 
@@ -3676,8 +3676,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent"
-	"mcpanel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/config"
 )
 
 // socketPath returns a short socket path (macOS limits them to 104 bytes).
@@ -3879,11 +3879,11 @@ import (
 	"syscall"
 	"time"
 
-	"mcpanel/internal/agent"
-	"mcpanel/internal/agent/firewall"
-	"mcpanel/internal/agent/peercred"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/agent/firewall"
+	"github.com/Bernotese/mc-panel/internal/agent/peercred"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
 )
 
 // version is set at build time: go build -ldflags "-X main.version=1.2.3".
@@ -4025,7 +4025,7 @@ go build -ldflags "-X main.version=0.0.0-test" -o /tmp/mcp-agent ./cmd/agent && 
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/agent
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./cmd/agent
 ```
-Expected: `ok  	mcpanel/cmd/agent`; Ausgabe `0.0.0-test`; beide Linux-Builds ohne Ausgabe.
+Expected: `ok  	github.com/Bernotese/mc-panel/cmd/agent`; Ausgabe `0.0.0-test`; beide Linux-Builds ohne Ausgabe.
 
 - [ ] **Step 5: Commit**
 
@@ -4152,8 +4152,8 @@ git commit -m "fix(agent): address verification findings" -m "Co-Authored-By: Cl
 
 ```go
 import (
-	"mcpanel/internal/agent"
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 // cfg is config.Panel; cfg.AgentSocket = /run/mc-panel/agent.sock (prod) or <root>/.dev/agent.sock (dev).
