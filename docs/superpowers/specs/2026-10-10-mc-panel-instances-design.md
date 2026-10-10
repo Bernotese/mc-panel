@@ -75,7 +75,7 @@ Browser ──▶ panel (mcpanel, unprivilegiert)            agent (root)
 ### 3.2 agent: Paket `internal/agent/instances`
 
 - **`spec`:** Validierung von `InstanceSpec` (§5.2) im eigenen Paket `internal/agent/instancespec`, analog zu `banrules`: das panel prüft damit vor dem Speichern, der agent prüft jede Anfrage erneut mit demselben Code (Verteidigung in der Tiefe: der agent vertraut dem panel nicht).
-- **`docker`:** schmaler Client für die Docker Engine API über den Unix-Socket. Unterstützt nur: Image inspizieren/ziehen, Netz inspizieren/anlegen, Container anlegen/starten/stoppen/entfernen/inspizieren/auflisten (Filter auf Label), Stats (ein Snapshot, kein Stream).
+- **`docker`:** schmaler Client für die Docker Engine API über den Unix-Socket, fest auf API-Version `/v1.44` (älteste von Docker 29 akzeptierte; Ubuntu 26.04 liefert Docker 29.1.3). Unterstützt nur: Image inspizieren/ziehen, Netz inspizieren/anlegen, Container anlegen/starten/stoppen/entfernen/inspizieren/auflisten (Filter auf Label), Stats (ein Snapshot, kein Stream).
 - **`template`:** reine Funktion `Spec → Docker-Container-Konfiguration` (§5.4).
 - **`router`:** erzeugt die Routen-Datei für mc-router und schreibt sie atomar (temporäre Datei + `rename`).
 - **Worker:** eine serielle Warteschlange pro Instanz für alle schreibenden Operationen (§5.1).
@@ -87,11 +87,12 @@ Der agent hält keinen eigenen persistenten Zustand. Welche Container er verwalt
 ```
 /srv/mc-panel/                     root:root 0755   (instances_dir)
 ├── instances/<id>/                mcpanel-mc 0750  → /data im Container
-├── router/routes.json             root:root 0644   → read-only im Router-Container
+├── router/                        root:root 0755   → /config (ro) im Router-Container
+│   └── routes.json                root:root 0644
 └── deleted/<name>-<zeitstempel>/  verschobene Daten gelöschter Server
 ```
 
-- `mcpanel-mc` ist ein eigener Systembenutzer (kein Login, keine Shell), angelegt von `vm-setup.sh` bzw. später vom Installer. UID/GID gehen als `UID`/`GID` an itzg.
+- `mcpanel-mc` ist ein eigener Systembenutzer (kein Login, keine Shell), angelegt von `vm-setup.sh` bzw. später vom Installer. Die Container laufen direkt als `<uid>:<gid>` von `mcpanel-mc` (Docker `User`); itzg überspringt dann Benutzerwechsel und `chown`, deshalb legt der agent `instances/<id>` mit diesem Besitzer an.
 - Das panel (`mcpanel`) hat keinen Zugriff auf `/srv/mc-panel/instances`.
 - `deleted/` wird nicht automatisch geleert; das dokumentiert die UI beim Löschen.
 
@@ -165,7 +166,7 @@ Feste Pfade wie in TP1, IDs im Body, `DisallowUnknownFields`, Peer-UID-Prüfung 
 | `POST /v1/instances/power` | `{id, action}` mit `start\|stop\|restart` | `202` |
 | `POST /v1/instances/remove` | `{id}` | `202` |
 
-`InstanceStatus`: `id`, `revision`, `state` (`created\|running\|restarting\|exited\|missing`), `exit_code`, `started_at` (Unix-ms), `memory_bytes`, `memory_limit_bytes`, `cpu_percent`, `operation` (`""\|pulling\|creating\|starting\|stopping\|removing`), `last_error` (Text, ≤ 500 Zeichen, ohne Secrets).
+`InstanceStatus` (RAM = `memory_stats.usage` minus `memory_stats.stats.inactive_file` bzw. `cache`, CPU nach der Formel der Docker-API aus `cpu_stats`/`precpu_stats`): `id`, `revision`, `state` (`created\|running\|restarting\|exited\|missing`), `exit_code`, `started_at` (Unix-ms), `memory_bytes`, `memory_limit_bytes`, `cpu_percent`, `operation` (`""\|pulling\|creating\|starting\|stopping\|removing`), `last_error` (Text, ≤ 500 Zeichen, ohne Secrets).
 
 - **ensure:** stellt sicher, dass `mcpanel-mc-<id>` in genau dieser Revision existiert. Fehlt das Image, wird es gezogen. Existiert ein Container mit älterer Revision und `recreate` ist `false`, passiert nichts. Mit `recreate: true` wird er gestoppt, entfernt und neu angelegt; lief er vorher, wird er danach gestartet. Legt das Datenverzeichnis an (Besitzer `mcpanel-mc`), falls es fehlt. Schreibt danach die Routen-Datei neu.
 - **power:** wirkt auf den vorhandenen Container; fehlt er, setzt der Worker `last_error`.
@@ -202,6 +203,7 @@ Regeln (panel und agent):
 | `memory_mib` | 1024–32768, Vielfaches von 256 |
 | `properties` | nur Schlüssel und Typen aus §7 |
 | `curseforge_api_key` | nur bei `type = curseforge`, Pflicht dort; `^[A-Za-z0-9$./_-]{1,128}$` |
+| Kombination | `type = curseforge` verlangt `java != java8` (das java8-Image unterstützt CurseForge nicht) |
 
 Zusätzlich prüft der agent jeden Wert, der in eine Umgebungsvariable geht, auf `=`-freie Schlüssel (fest im Code) und Werte ohne Steuerzeichen (`\x00`–`\x1f`, `\x7f`).
 
@@ -229,15 +231,16 @@ Der agent erzeugt aus einer gültigen Spec genau diese Konfiguration; nichts dav
 
 - Name `mcpanel-mc-<id>`, Hostname `<name>`.
 - Image aus `[images].<java>`.
+- `User: "<uid>:<gid>"` von `mcpanel-mc` – der Container startet nie als root (itzg-Doku „Running as alternate user/group ID“).
 - Labels: `mcpanel.instance=<id>`, `mcpanel.revision=<revision>`, `mcpanel.name=<name>`, `mcpanel.fqdn=<fqdn>`.
 - Netz: nur `mcpanel-mc` (bridge, vom agent angelegt). Keine veröffentlichten Ports.
 - Mount: `/srv/mc-panel/instances/<id>` → `/data` (bind, rw). Keine weiteren Mounts.
-- `HostConfig`: `CapDrop: ["ALL"]`, `CapAdd` nur, was itzg für den Wechsel auf `UID`/`GID` braucht (`CHOWN`, `SETUID`, `SETGID`, `DAC_OVERRIDE` – im Plan gegen das Image verifizieren und auf das Minimum reduzieren), `SecurityOpt: ["no-new-privileges"]`, `Privileged: false`, `ReadonlyRootfs: false` (itzg schreibt außerhalb von `/data`), `Memory = memory_mib × 1.25 MiB`, `MemorySwap = Memory`, `PidsLimit: 1024`, `RestartPolicy: unless-stopped`, `LogConfig`: `json-file` mit `max-size=10m`, `max-file=3`.
+- `HostConfig`: `CapDrop: ["ALL"]` ohne `CapAdd`, `SecurityOpt: ["no-new-privileges:true"]`, `Privileged: false`, `ReadonlyRootfs: false` (itzg schreibt außerhalb von `/data`), `Memory = memory_mib × 1.25 MiB`, `MemorySwap = Memory`, `PidsLimit: 1024`, `RestartPolicy: unless-stopped`, `LogConfig`: `json-file` mit `max-size=10m`, `max-file=3`.
 - `StopTimeout: 60`.
-- Umgebung, fest: `EULA=TRUE`, `TYPE`, `VERSION`, `MEMORY=<memory_mib>M`, `UID`, `GID`, `ENABLE_AUTOPAUSE=false`, `ENABLE_RCON=true` (nur im internen Netz erreichbar; für TP3), `OVERRIDE_SERVER_PROPERTIES=true`; je nach Art `FABRIC_LOADER_VERSION`, `NEOFORGE_VERSION`, `MODRINTH_PROJECT`, `CF_SLUG`/`CF_PAGE_URL`, `CF_API_KEY`.
+- Umgebung, fest: `EULA=TRUE`, `TYPE`, `VERSION`, `MEMORY=<memory_mib>M`, `ENABLE_AUTOPAUSE=false`, `ENABLE_RCON=true` (nur im internen Netz erreichbar; für TP3), `OVERRIDE_SERVER_PROPERTIES=true`; je nach Art `FABRIC_LOADER_VERSION`, `NEOFORGE_VERSION`, `MODRINTH_MODPACK` (bei `TYPE=MODRINTH`), `CF_SLUG`/`CF_PAGE_URL` und `CF_API_KEY` (bei `TYPE=AUTO_CURSEFORGE`; `type` → `TYPE`: vanilla→`VANILLA`, paper→`PAPER`, purpur→`PURPUR`, fabric→`FABRIC`, neoforge→`NEOFORGE`, modrinth→`MODRINTH`, curseforge→`AUTO_CURSEFORGE`).
 - Umgebung aus `properties` gemäß §7. Alle anderen itzg-Variablen (`JVM_OPTS`, `GENERIC_PACK`, `MODS`, `PLUGINS`, …) sind nicht setzbar.
 
-Router-Container `mcpanel-router`: Image `[images].router`, Netz `mcpanel-mc`, Port `25565/tcp` auf dem Host veröffentlicht, Mount `/srv/mc-panel/router` → `/config` (ro), Start mit Routen-Datei und Datei-Überwachung, gleiche `HostConfig`-Härtung (ohne `CapAdd`), `RestartPolicy: unless-stopped`. Der Router bekommt keinen Docker-Socket. Das genaue Format der Routen-Datei und die Flags werden im Plan gegen die gepinnte mc-router-Version verifiziert.
+Router-Container `mcpanel-router`: Image `[images].router`, Netz `mcpanel-mc`, Port `25565/tcp` auf dem Host veröffentlicht, Mount `/srv/mc-panel/router` → `/config` (ro, Verzeichnis statt Einzeldatei, damit ein `rename` sichtbar wird), Start mit `-routes-config /config/routes.json` **ohne** `-routes-config-watch`, gleiche `HostConfig`-Härtung, `RestartPolicy: unless-stopped`; das Image läuft bereits als UID 65532. Routen-Datei: `{"mappings": {"<fqdn>": "mcpanel-mc-<id>:25565"}}`. Nach jedem Schreiben sendet der agent `SIGHUP` (`POST /containers/mcpanel-router/kill?signal=SIGHUP`): nur das Neuladen per SIGHUP entfernt gelöschte Routen, die Dateiüberwachung von mc-router fügt nur hinzu (verifiziert gegen mc-router 1.47.2). Der Router bekommt keinen Docker-Socket.
 
 ### 5.5 Automatischer Neustart
 
@@ -252,15 +255,15 @@ Router-Container `mcpanel-router`: Image `[images].router`, Netz `mcpanel-mc`, P
 | Art | Quelle | Liefert |
 |---|---|---|
 | vanilla | `https://piston-meta.mojang.com/mc/game/version_manifest_v2.json` | Releases, neueste zuerst |
-| paper | PaperMC Fill-API v3 (`https://fill.papermc.io/v3/projects/paper`) | MC-Versionen mit stabilem Build |
-| purpur | `https://api.purpurmc.org/v2/purpur` | MC-Versionen |
+| paper | PaperMC Fill-API v3 (`https://fill.papermc.io/v3/projects/paper/versions`, je Version `…/versions/{v}/builds?channel=STABLE`) | MC-Versionen mit mindestens einem STABLE-Build (itzg nutzt per Default nur STABLE/RECOMMENDED; z. B. hat 26.3 derzeit keinen) |
+| purpur | `https://api.purpurmc.org/v2/purpur` | MC-Versionen bis einschließlich `metadata.current` (neuere gelten als experimentell) |
 | fabric | `https://meta.fabricmc.net/v2/versions/game`, `…/loader` | stabile Spielversionen, Loader-Versionen |
-| neoforge | NeoForged-Maven-API (`https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge`) | NeoForge-Versionen, nach MC-Version gruppiert |
+| neoforge | NeoForged-Maven-API (`https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge`) | NeoForge-Versionen ohne `-beta`/`-alpha`, nach MC-Version gruppiert (`20.4.x` → 1.20.4, `21.0.x` → 1.21, `26.1.2.x` → 26.1.2, `26.2.0.x` → 26.2) |
 | modrinth, curseforge | – | `404`; das Pack bestimmt die Version |
 
 - Antwort: `{versions: [{id, java}], loaders?: [string]}`; `java` ist die abgeleitete Empfehlung (§6.1).
 - Cache im Speicher 1 h pro Art; Timeout 10 s, Antwortgröße ≤ 5 MiB; Fehler → `502 catalog_unavailable` (das Formular bietet dann Freitext).
-- Die genauen Endpunkte und Antwortformate (insbesondere Fill-API v3 und NeoForged-Maven) werden im Plan gegen die echten Dienste verifiziert und als Beispielantworten in `testdata/` abgelegt.
+- Die Endpunkte und Formate sind gegen die Live-Dienste geprüft (2026-10-10); gekürzte echte Antworten liegen als Beispielantworten in `testdata/`. Die Fill-API verlangt einen User-Agent mit Kontakt: `mc-panel/<version> (https://github.com/Bernotese/mc-panel)` (gilt für alle Katalog-Abrufe). Paper fragt die STABLE-Builds nur für die neuesten 10 Versionen ab (ältere haben alle STABLE-Builds).
 
 ### 6.1 Java-Ableitung
 
