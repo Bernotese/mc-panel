@@ -84,9 +84,9 @@ Expected: keine Diffs durch Generatoren, alle Tests und Linter grün. Rote Tests
 **Interfaces:**
 - Consumes (aus den Wiring-Verträgen):
   - A: `auth.New(auth.Deps{DB, Config, Clock, Box, Guard, Geo, Audit, Notifier}) (*auth.Handler, error)`, `(*auth.Handler).Sessions().Middleware`, `auth.CSRF(origin string) func(http.Handler) http.Handler`, `(*auth.Handler).Routes(api *rbac.Router)`
-  - B: `defense.LoadGeo(path string, log *slog.Logger) (defense.GeoResolver, bool, func() error)`, `notify.NewDispatcher(db, box, clk, notify.DispatcherOptions{}) *notify.Dispatcher`, `defense.NewService(ctx, defense.Deps{DB, Clock, Geo, GeoAvailable, Audit, Notifier, Agent}) (*defense.Service, error)`, `svc.IPFilter`, `svc.APIRateLimit`, `svc.Run(ctx)`, `disp.Run(ctx)`, `defense.NewHandler(svc).Routes(api)`, `notify.NewHandler(notify.HandlerDeps{DB, Box, Dispatcher, Audit, Clock, Dev}).Routes(api)`, `defense.Unlock(ctx, db, rec, clk, stdout) (defense.UnlockResult, error)`
+  - B: `defense.LoadGeo(path string, log *slog.Logger) (defense.GeoResolver, bool, func() error)`, `notify.NewDispatcher(db, box, clk, notify.DispatcherOptions{Dev: cfg.Dev}) *notify.Dispatcher`, `defense.NewService(ctx, defense.Deps{DB, Clock, Geo, GeoAvailable, Audit, Notifier, Agent}) (*defense.Service, error)`, `svc.IPFilter`, `svc.APIRateLimit`, `svc.Run(ctx)`, `disp.Run(ctx)`, `defense.NewHandler(svc).Routes(api)`, `notify.NewHandler(notify.HandlerDeps{DB, Box, Dispatcher, Audit, Clock, Dev}).Routes(api)`, `defense.Unlock(ctx, db, rec, clk, stdout) (defense.UnlockResult, error)`
   - C: `agent.NewClient(socketPath string) *agent.Client`
-  - D: `rbac.NewDBChecker(db)`, `audit.NewSQLRecorder(db, clk)`, `audit.NewHandler(db, clk, n)`, `users.NewHandler(db, clk, rec, n)`, `users.RunAdminCreate(ctx, db, clk, rec, args, stdin, stdout) error`, `audit.RunAuditVerify(ctx, db, stdout) error`, `audit.ErrChainBroken`
+  - D: `rbac.NewDBChecker(db)`, `audit.NewSQLRecorder(db, clk)`, `auditapi.NewHandler(db, clk, n)`, `users.NewHandler(db, clk, rec, n)`, `users.RunAdminCreate(ctx, db, clk, rec, args, stdin, stdout) error`, `audit.RunAuditVerify(ctx, db, stdout) error`, `audit.ErrChainBroken`
 - Produces:
 ```go
 type appDeps struct {
@@ -160,7 +160,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 	geo, geoOK, closeGeo := defense.LoadGeo(cfg.GeoIPPath, slog.Default())
 
 	auditRec := audit.NewSQLRecorder(db, d.Clock)
-	disp := notify.NewDispatcher(db, box, d.Clock, notify.DispatcherOptions{})
+	disp := notify.NewDispatcher(db, box, d.Clock, notify.DispatcherOptions{Dev: cfg.Dev})
 	svc, err := defense.NewService(ctx, defense.Deps{
 		DB: db, Clock: d.Clock, Geo: geo, GeoAvailable: geoOK,
 		Audit: auditRec, Notifier: disp, Agent: d.Agent,
@@ -178,7 +178,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		return nil, fmt.Errorf("auth: %w", err)
 	}
 	usersH := users.NewHandler(db, d.Clock, auditRec, disp)
-	auditH := audit.NewHandler(db, d.Clock, disp)
+	auditH := auditapi.NewHandler(db, d.Clock, disp)
 	defenseH := defense.NewHandler(svc)
 	notifyH := notify.NewHandler(notify.HandlerDeps{
 		DB: db, Box: box, Dispatcher: disp, Audit: auditRec, Clock: d.Clock, Dev: cfg.Dev,

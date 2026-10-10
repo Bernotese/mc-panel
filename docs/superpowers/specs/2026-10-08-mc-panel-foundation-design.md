@@ -51,7 +51,7 @@ Docker/Minecraft-Instanzen, Installer, Caddy-Konfiguration, Backups, Monitoring.
 ## 3. Architektur
 
 ```
-Internet ─443─▶ Caddy ─▶ 127.0.0.1:8080  panel  (User mcpanel, SQLite, React via go:embed)
+Internet ─443─▶ Caddy ─▶ /run/mc-panel/panel.sock  panel  (User mcpanel, SQLite, React via go:embed)
                                             │  Unix-Socket (0660, Gruppe mcpanel)
                                             │  + Peer-UID-Prüfung
                                             ▼
@@ -63,7 +63,7 @@ Internet ─443─▶ Caddy ─▶ 127.0.0.1:8080  panel  (User mcpanel, SQLite,
 
 ### 3.1 Prozesse
 
-- **panel**: öffentliche Web-App + API. Läuft unprivilegiert, lauscht nur auf `127.0.0.1`. Kennt den Docker-Socket nicht.
+- **panel**: öffentliche Web-App + API. Läuft unprivilegiert, lauscht in Prod auf dem Unix-Socket `/run/mc-panel/panel.sock` (0660, nur Caddy erreicht ihn; `listen = "unix:…"`, Dev: `127.0.0.1:8080`). Kennt den Docker-Socket nicht.
 - **agent**: kleine, privilegierte Komponente mit enger, strikt validierter JSON-API über Unix-Socket. Akzeptiert nur Verbindungen von der konfigurierten panel-UID (Peer-Credentials). Jede Anfrage wird gegen ein Schema validiert; unbekannte Felder werden abgelehnt.
 - Ziel: Eine Schwachstelle im panel führt nicht direkt zu Root auf dem Host.
 
@@ -104,7 +104,7 @@ Linux-spezifisches liegt hinter Interfaces, Implementierungen per Build-Tag:
 - Prod: `/etc/mc-panel/panel.toml`, `/etc/mc-panel/agent.toml`, Daten unter `/var/lib/mc-panel/`, Socket `/run/mc-panel/agent.sock`.
 - Dev (`--dev`): alles unter `./.dev/`, Socket `./.dev/agent.sock`, Logs als Text.
 - Secrets (z. B. Webhook-URLs) werden in der DB gespeichert, im UI nur maskiert angezeigt.
-- `trusted_proxies`: standardmäßig nur `127.0.0.1/32` und `::1/128`; nur von dort wird `X-Forwarded-For` übernommen.
+- `trusted_proxies`: standardmäßig nur `127.0.0.1/32` und `::1/128`; nur von dort wird `X-Forwarded-For` übernommen. Verbindungen über den Unix-Socket gelten immer als vom Proxy kommend (X-Forwarded-For, rechtester nicht vertrauenswürdiger Eintrag; ohne verwertbares X-Forwarded-For wird der Request abgewiesen). Loopback ist nur im Dev-Modus von der Admin-Allowlist ausgenommen.
 
 ### 3.5 Entwicklung und Release
 
@@ -180,6 +180,8 @@ Token-Bucket (In-Memory, pro Prozess):
 | Login | Benutzername | 5/min |
 | 2FA | Pre-Auth-Session + IP | 5/min |
 | API allgemein | Session | 300/min |
+| 2FA/Sudo-Fehlversuche | Benutzer | 10 Fehlversuche / 15 min → 2FA für 15 min gesperrt (`429`) |
+| `server.power` | Benutzer | 10/min |
 
 Überschreitung → `429` mit `Retry-After`.
 
@@ -188,7 +190,7 @@ Token-Bucket (In-Memory, pro Prozess):
 - Fehlversuche (Passwort oder 2FA) pro IP: 5 in 10 min → Sperre 15 min.
 - Wiederholungstäter: Dauer verdoppelt sich pro erneuter Sperre innerhalb von 30 Tagen, maximal 7 Tage.
 - Gesperrte IPs erhalten `403` für alle Requests (Middleware vor Routing) und werden über den agent in das nftables-Set eingetragen (mit Timeout = Sperrdauer). Bei agent-Ausfall bleibt die App-Sperre wirksam; Sync wird nachgeholt.
-- Konten werden nie gesperrt (verhindert, dass Angreifer den Admin aussperren).
+- Konten werden nie wegen fehlgeschlagener Passwort-Logins gesperrt (verhindert, dass anonyme Angreifer den Admin aussperren). Einzige Ausnahme: Nach 10 falschen 2FA-/Sudo-Codes in 15 min wird der zweite Faktor dieses Benutzers für 15 min gesperrt — das kann nur jemand auslösen, der das Passwort bereits kennt; ohne diese Grenze wäre das Raten von 2FA-Codes über rotierende IPs unbegrenzt. Aufheben: Passwort ändern (beendet die fremden Sessions) bzw. panel neu starten.
 - Allowlist-IPs werden nie gejailt.
 - Admin kann Jails aufheben (Sudo) oder manuell IPs sperren.
 
