@@ -277,6 +277,30 @@ jobs:
       - name: Acceptance check 5 (nftables)
         run: sudo scripts/ci-acceptance.sh bin/panel bin/agent
 
+  instances:
+    name: Instance acceptance (Docker, root)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build agent
+        run: go build -o bin/agent ./cmd/agent
+
+      # Real agent + Docker + itzg Paper server: routing by hostname, hardening,
+      # automatic restart after a crash, removal.
+      - name: Instance acceptance
+        run: sudo scripts/ci-instances.sh bin/agent
+
   build:
     name: Build & release snapshot
     needs:
