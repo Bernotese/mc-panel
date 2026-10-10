@@ -151,7 +151,9 @@ export const de = {
   },
   dashboard: {
     title: 'Server',
-    description: 'Deine Minecraft-Server. Die Instanzverwaltung folgt in einem späteren Teilprojekt.',
+    description: 'Deine Minecraft-Server auf einen Blick.',
+    base_domain_missing_title: 'Keine Basisdomain festgelegt',
+    base_domain_missing: 'Server sind unter <name>.<basisdomain> erreichbar. Solange keine Basisdomain eingetragen ist, kannst du keine Server anlegen.',
     empty: 'Keine Server verfügbar.',
     create_server: 'Server anlegen',
     create_description: 'Legt einen Paper-Server an (neueste Version, 4 GiB RAM). Mit „Anlegen“ akzeptierst du die Minecraft-EULA (aka.ms/MinecraftEULA).',
@@ -163,23 +165,6 @@ export const de = {
     delete_for: '{{name}} löschen',
     delete_title: 'Server „{{name}}“ löschen?',
     delete_description: 'Alle Rechte auf diesen Server werden entfernt.',
-    stub_hint: 'Stub-Server (noch ohne Instanz)',
-    permissions_label: 'Deine Rechte',
-    power_group: 'Steuerung für {{name}}',
-    no_power: 'Keine Berechtigung für Start/Stopp.',
-    power: {
-      start: 'Starten',
-      stop: 'Stoppen',
-      restart: 'Neu starten',
-    },
-    power_noun: {
-      start: 'Start',
-      stop: 'Stopp',
-      restart: 'Neustart',
-    },
-    stop_title: 'Server „{{name}}“ stoppen?',
-    stop_description: 'Spieler werden getrennt, sobald der Server heruntergefahren wird.',
-    power_requested: '{{action}} für „{{name}}“ angefordert.',
   },
   servers: {
     state: {
@@ -206,7 +191,31 @@ export const de = {
       version: '{{type}} {{version}}',
       latest: '{{type}} (neueste Version)',
       modpack: '{{type}}: {{modpack}}',
+    },    power: {
+      start: 'Starten',
+      stop: 'Stoppen',
+      restart: 'Neu starten',
     },
+    power_noun: {
+      start: 'Start',
+      stop: 'Stopp',
+      restart: 'Neustart',
+    },
+    power_group: 'Steuerung für {{name}}',
+    no_power: 'Keine Berechtigung für Start/Stopp.',
+    stop_title: 'Server „{{name}}“ stoppen?',
+    stop_description: 'Spieler werden getrennt, sobald der Server heruntergefahren wird.',
+    power_requested: '{{action}} für „{{name}}“ angefordert.',
+    address: {
+      missing: 'Noch keine Adresse – es fehlt die Basisdomain.',
+      copy: 'Adresse {{address}} kopieren',
+      copied: 'Adresse kopiert.',
+      copy_failed: 'Kopieren fehlgeschlagen.',
+    },
+    memory_usage: 'RAM: {{used}} / {{limit}} GiB',
+    restart_required: 'Neustart nötig',
+    not_configured_hint: 'Noch ohne Minecraft-Instanz – kann nur gelöscht werden.',
+
     validation: {
       name_required: 'Gib einen Namen ein.',
       name_invalid: 'Nur Kleinbuchstaben, Ziffern und Bindestrich, 2–32 Zeichen, am Anfang und Ende kein Bindestrich.',
