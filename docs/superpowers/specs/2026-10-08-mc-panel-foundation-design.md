@@ -180,6 +180,8 @@ Token-Bucket (In-Memory, pro Prozess):
 | Login | Benutzername | 5/min |
 | 2FA | Pre-Auth-Session + IP | 5/min |
 | API allgemein | Session | 300/min |
+| 2FA/Sudo-Fehlversuche | Benutzer | 10 Fehlversuche / 15 min → 2FA für 15 min gesperrt (`429`) |
+| `server.power` | Benutzer | 10/min |
 
 Überschreitung → `429` mit `Retry-After`.
 
@@ -188,7 +190,7 @@ Token-Bucket (In-Memory, pro Prozess):
 - Fehlversuche (Passwort oder 2FA) pro IP: 5 in 10 min → Sperre 15 min.
 - Wiederholungstäter: Dauer verdoppelt sich pro erneuter Sperre innerhalb von 30 Tagen, maximal 7 Tage.
 - Gesperrte IPs erhalten `403` für alle Requests (Middleware vor Routing) und werden über den agent in das nftables-Set eingetragen (mit Timeout = Sperrdauer). Bei agent-Ausfall bleibt die App-Sperre wirksam; Sync wird nachgeholt.
-- Konten werden nie gesperrt (verhindert, dass Angreifer den Admin aussperren).
+- Konten werden nie wegen fehlgeschlagener Passwort-Logins gesperrt (verhindert, dass anonyme Angreifer den Admin aussperren). Einzige Ausnahme: Nach 10 falschen 2FA-/Sudo-Codes in 15 min wird der zweite Faktor dieses Benutzers für 15 min gesperrt — das kann nur jemand auslösen, der das Passwort bereits kennt; ohne diese Grenze wäre das Raten von 2FA-Codes über rotierende IPs unbegrenzt. Aufheben: Passwort ändern (beendet die fremden Sessions) bzw. panel neu starten.
 - Allowlist-IPs werden nie gejailt.
 - Admin kann Jails aufheben (Sudo) oder manuell IPs sperren.
 

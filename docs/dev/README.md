@@ -80,7 +80,7 @@ In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er 
 
 ## Produktion: Listen-Adresse und Reverse Proxy
 
-- Standard ohne `-dev` ist `listen = "unix:/run/mc-panel/panel.sock"`: das panel lauscht nur auf einem Unix-Socket (Modus 0660, Gruppe = primäre Gruppe des panel-Benutzers `mcpanel`). Ein verwaister Socket wird beim Start nur entfernt, wenn niemand mehr darauf lauscht. Das Verzeichnis `/run/mc-panel` muss für `mcpanel` beschreibbar sein; die systemd-Units dafür liefert der Installer (Teilprojekt 6).
+- Standard ohne `-dev` ist `listen = "unix:/run/mc-panel/panel.sock"`: das panel lauscht nur auf einem Unix-Socket (Modus 0660, Gruppe = primäre Gruppe des panel-Benutzers `mcpanel`). Ein verwaister Socket wird beim Start nur entfernt, wenn niemand mehr darauf lauscht. Das Socket-Verzeichnis liefern die systemd-Units des Installers (Teilprojekt 6). Verbindliche Vorgabe dafür: Das panel bekommt ein **eigenes** Runtime-Verzeichnis (z. B. `RuntimeDirectory=mc-panel-web`, Besitzer `mcpanel`), nicht `/run/mc-panel` des agents — systemd löscht das Runtime-Verzeichnis einer Unit bei deren Stopp, und `mcpanel` darf den agent-Socket nicht ersetzen können. Der Pfad im Beispiel unten ändert sich entsprechend.
 - Caddy terminiert TLS und spricht den Socket an:
 
   ```
@@ -89,10 +89,13 @@ In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er 
   }
   ```
 
-  Der Caddy-Benutzer braucht Zugriff auf den Socket (z. B. `usermod -aG mcpanel caddy`). Der agent prüft die Peer-UID, Caddy kann den agent-Socket daher trotzdem nicht nutzen.
-- Requests über den Unix-Socket gelten als vom Proxy kommend: die Client-IP ist der rechteste nicht vertrauenswürdige Eintrag in `X-Forwarded-For` (Caddy setzt ihn). Fehlt ein verwertbarer Eintrag, wird der Request abgewiesen (`403 ip_blocked`); Health-Checks direkt am Socket brauchen deshalb einen Header, z. B. `curl --unix-socket /run/mc-panel/panel.sock -H 'X-Forwarded-For: 127.0.0.1' http://panel/api/health`.
+  Caddy bekommt Zugriff über eine **eigene** Socket-Gruppe (z. B. Gruppe `caddy` als Socket-Gruppe), **nicht** durch Aufnahme in die Gruppe `mcpanel` (sonst könnte Caddy den agent-Socket löschen oder ersetzen).
+- Requests über den Unix-Socket gelten als vom Proxy kommend: die Client-IP ist der rechteste nicht vertrauenswürdige Eintrag in `X-Forwarded-For` (Caddy setzt ihn). Fehlt ein verwertbarer Eintrag, wird der Request abgewiesen (`403 ip_blocked`); Health-Checks direkt am Socket brauchen deshalb einen Header, z. B. `curl --unix-socket /run/mc-panel/panel.sock -H 'X-Forwarded-For: 127.0.0.1' http://panel/api/health`. Aktive Caddy-Health-Checks (`health_uri`) senden kein `X-Forwarded-For` und würden mit `403` scheitern — entweder `health_headers` setzen oder auf aktive Checks verzichten. Andere Proxys müssen `X-Forwarded-For` ohne Port setzen, sonst `403`.
 - TCP bleibt möglich (`listen = "127.0.0.1:8080"`); dann wird `X-Forwarded-For` nur von `trusted_proxies` übernommen. Loopback ist nur im Dev-Modus von „Admin-Login nur aus Allowlist“ ausgenommen.
 - Außerhalb des Dev-Modus sendet das panel `Strict-Transport-Security: max-age=31536000`.
+- CLI-Befehle auf dem Server immer als panel-Benutzer ausführen (`sudo -u mcpanel panel admin unlock …`), sonst entstehen root-eigene `panel.db-wal`/`-shm`, die der Dienst nicht öffnen kann.
+- Eine 2FA-Sperre (10 falsche Codes in 15 min) hebt `admin unlock` nicht auf; sie endet nach 15 min oder mit einem panel-Neustart.
+- Die nftables-Sets fassen je 65 536 Einträge; ist ein Set voll, schlägt der Firewall-Ban fehl (wird geloggt), die Sperre in der App gilt trotzdem.
 
 ## Make-Targets
 
