@@ -25,7 +25,9 @@ export function ServerDetailPage({ serverId }: { serverId: number }) {
   })
 
   if (query.isPending) return <p className="text-muted-foreground">{t('common.loading')}</p>
-  if (!query.data) {
+  // A failed refetch keeps the old data: after 403/404 the server is gone or hidden, so stale data must not look live.
+  const gone = isApiError(query.error, 'not_found') || isApiError(query.error, 'forbidden')
+  if (!query.data || gone) {
     let message = errorMessage(query.error, t)
     if (isApiError(query.error, 'not_found')) message = t('servers.detail.not_found')
     else if (isApiError(query.error, 'forbidden')) message = t('servers.detail.forbidden')
