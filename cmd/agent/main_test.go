@@ -18,6 +18,9 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/docker/dockertest"
+	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
 	"github.com/Bernotese/mc-panel/internal/config"
 )
 
@@ -30,6 +33,12 @@ func socketPath(t *testing.T) string {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return filepath.Join(dir, "a.sock")
+}
+
+// devConfig is a -dev config that never touches a real Docker daemon or ./.dev/mc.
+func devConfig(t *testing.T, sock, dockerSock string) string {
+	t.Helper()
+	return fmt.Sprintf("socket = %q\ndocker_socket = %q\ninstances_dir = %q\n", sock, dockerSock, t.TempDir())
 }
 
 func writeConfig(t *testing.T, content string) string {
@@ -77,7 +86,7 @@ func waitForSocket(t *testing.T, path string, done <-chan error) {
 
 func TestRunDevServesHealthAndShutsDown(t *testing.T) {
 	sock := socketPath(t)
-	cfg := writeConfig(t, fmt.Sprintf("socket = %q\n", sock))
+	cfg := writeConfig(t, devConfig(t, sock, filepath.Join(t.TempDir(), "no-docker.sock")))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var stdout, stderr syncBuffer
@@ -89,7 +98,7 @@ func TestRunDevServesHealthAndShutsDown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
-	if h.Status != "ok" || h.Firewall != "noop" || h.Version != version {
+	if h.Status != "ok" || h.Firewall != "noop" || h.Version != version || h.Docker != "unavailable" {
 		t.Fatalf("health = %+v", h)
 	}
 	if fi, err := os.Lstat(sock); err != nil || fi.Mode().Perm() != 0o600 {
@@ -138,7 +147,7 @@ func TestRunFailsWhenFirewallUnavailable(t *testing.T) {
 		t.Skip("as root this would modify the host firewall")
 	}
 	sock := socketPath(t)
-	cfg := writeConfig(t, fmt.Sprintf("socket = %q\nfirewall = \"nftables\"\n", sock))
+	cfg := writeConfig(t, devConfig(t, sock, filepath.Join(t.TempDir(), "no-docker.sock"))+"firewall = \"nftables\"\n")
 	err := run(context.Background(), []string{"-dev", "-config", cfg}, io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "firewall") {
 		t.Fatalf("run = %v, want firewall error", err)
@@ -198,9 +207,158 @@ func TestRunRefusesSecondStartBeforeTouchingFirewall(t *testing.T) {
 	}
 	defer func() { _ = first.Close() }()
 	// firewall = "nftables" would fail (or modify nftables on Linux) if it were set up first.
-	cfg := writeConfig(t, fmt.Sprintf("socket = %q\nfirewall = \"nftables\"\n", sock))
+	cfg := writeConfig(t, devConfig(t, sock, filepath.Join(t.TempDir(), "no-docker.sock"))+"firewall = \"nftables\"\n")
 	err = run(context.Background(), []string{"-dev", "-config", cfg}, io.Discard, io.Discard)
 	if !errors.Is(err, agent.ErrAlreadyRunning) {
 		t.Fatalf("run = %v, want ErrAlreadyRunning", err)
+	}
+}
+
+func TestMCUserIDs(t *testing.T) {
+	noLookup := func(string) (*user.User, error) { return nil, errors.New("lookup must not run") }
+	uid, gid, err := mcUserIDs(config.Agent{Dev: true}, -1, noLookup)
+	if err != nil || uid != os.Getuid() || gid != os.Getgid() {
+		t.Fatalf("dev without mc_user = %d:%d, %v; want own ids", uid, gid, err)
+	}
+	if _, _, err := mcUserIDs(config.Agent{}, 990, noLookup); err == nil {
+		t.Fatal("prod without mc_user must fail")
+	}
+
+	var asked string
+	uid, gid, err = mcUserIDs(config.Agent{MCUser: "mcpanel-mc"}, 990, func(name string) (*user.User, error) {
+		asked = name
+		return &user.User{Username: name, Uid: "996", Gid: "995"}, nil
+	})
+	if err != nil || uid != 996 || gid != 995 || asked != "mcpanel-mc" {
+		t.Fatalf("prod = %d:%d, %v (asked %q)", uid, gid, err, asked)
+	}
+
+	for name, u := range map[string]*user.User{
+		"root uid":        {Uid: "0", Gid: "995"},
+		"root gid":        {Uid: "996", Gid: "0"},
+		"non-numeric uid": {Uid: "mc", Gid: "995"},
+		"non-numeric gid": {Uid: "996", Gid: "staff"},
+		"negative uid":    {Uid: "-1", Gid: "995"},
+	} {
+		if _, _, err := mcUserIDs(config.Agent{MCUser: "mcpanel-mc"}, 990, func(string) (*user.User, error) { return u, nil }); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	if _, _, err := mcUserIDs(config.Agent{MCUser: "mcpanel-mc"}, 990, func(name string) (*user.User, error) {
+		return nil, user.UnknownUserError(name)
+	}); err == nil || !strings.Contains(err.Error(), "useradd") {
+		t.Fatalf("unknown mc_user: %v", err)
+	}
+	if _, _, err := mcUserIDs(config.Agent{Dev: true, MCUser: "me"}, -1, func(string) (*user.User, error) {
+		return &user.User{Uid: "0", Gid: "0"}, nil
+	}); err != nil {
+		t.Fatalf("dev may run as root (e.g. agent -dev under sudo): %v", err)
+	}
+}
+
+// TestRunDevManagesInstances runs the whole agent against the fake Docker daemon:
+// the background loop creates the router, and an ensure through the real client
+// creates the instance container.
+func TestRunDevManagesInstances(t *testing.T) {
+	d := dockertest.New(t)
+	sock := socketPath(t)
+	cfg := writeConfig(t, devConfig(t, sock, d.Socket))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, []string{"-dev", "-config", cfg}, io.Discard, io.Discard) }()
+	waitForSocket(t, sock, done)
+
+	c := agent.NewClient(sock)
+	waitFor(t, "router running", func() bool {
+		st, err := c.Instances(context.Background())
+		return err == nil && st.Docker == agentapi.DockerOK && st.Router.State == agentapi.StateRunning
+	})
+	if h, err := c.Health(context.Background()); err != nil || h.Docker != agentapi.DockerOK {
+		t.Fatalf("health = %+v, %v", h, err)
+	}
+	err := c.Ensure(context.Background(), agentapi.EnsureRequest{
+		ID: 1, Name: "survival", FQDN: "survival.mc.example.com", Revision: 1,
+		Spec: instancespec.Spec{Type: instancespec.TypePaper, Version: "1.21.4", Java: instancespec.Java21, MemoryMiB: 4096},
+	})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitFor(t, "instance created", func() bool {
+		st, err := c.Instances(context.Background())
+		return err == nil && len(st.Instances) == 1 && st.Instances[0].State == agentapi.StateCreated && st.Instances[0].Operation == ""
+	})
+	if ctr, ok := d.Container("mcpanel-mc-1"); !ok || ctr.Config.User != fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()) {
+		t.Fatalf("container = %+v, %v; dev mode runs it as the agent's own uid:gid", ctr, ok)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not return after cancel")
+	}
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for: %s", what)
+}
+
+// TestMCUserIDsSeparatesPanelAndContainers: the Minecraft containers must not share
+// the panel's uid or primary group (they could read panel.db or the agent socket),
+// and with Docker enabled even dev mode refuses root.
+func TestMCUserIDsSeparatesPanelAndContainers(t *testing.T) {
+	prod := config.Agent{PanelUID: 998, MCUser: "mcpanel-mc"}
+	as := func(uid, gid string) func(string) (*user.User, error) {
+		return func(name string) (*user.User, error) { return &user.User{Username: name, Uid: uid, Gid: gid}, nil }
+	}
+	if _, _, err := mcUserIDs(prod, 990, as("998", "995")); err == nil {
+		t.Error("mc_user with the panel's uid must be refused")
+	}
+	if _, _, err := mcUserIDs(prod, 990, as("996", "990")); err == nil {
+		t.Error("mc_user with the panel's primary gid must be refused")
+	}
+	if uid, gid, err := mcUserIDs(prod, 990, as("996", "995")); err != nil || uid != 996 || gid != 995 {
+		t.Errorf("separate user = %d:%d, %v", uid, gid, err)
+	}
+	devDocker := config.Agent{Dev: true, MCUser: "me", DockerSocket: "/var/run/docker.sock"}
+	for name, ids := range map[string][2]string{"uid 0": {"0", "20"}, "gid 0": {"501", "0"}} {
+		if _, _, err := mcUserIDs(devDocker, -1, as(ids[0], ids[1])); err == nil {
+			t.Errorf("dev with Docker, %s: want error", name)
+		}
+	}
+	if _, _, err := mcUserIDs(devDocker, -1, as("501", "20")); err != nil {
+		t.Errorf("dev with Docker as a normal user: %v", err)
+	}
+}
+
+// TestCheckImages: config validation only applies a regex; every configured image
+// must also be accepted by the Docker client, or the agent refuses to start.
+func TestCheckImages(t *testing.T) {
+	if err := checkImages(config.DefaultImages()); err != nil {
+		t.Fatalf("default images: %v", err)
+	}
+	digest := "@sha256:" + strings.Repeat("ab", 32)
+	for key, mod := range map[string]func(*config.Images){
+		"java8":  func(i *config.Images) { i.Java8 = "Itzg/minecraft-server" + digest },
+		"java17": func(i *config.Images) { i.Java17 = "itzg//minecraft-server" + digest },
+		"router": func(i *config.Images) { i.Router = "itzg/mc-router/" + digest },
+	} {
+		imgs := config.DefaultImages()
+		mod(&imgs)
+		if err := checkImages(imgs); err == nil || !strings.Contains(err.Error(), "images."+key) {
+			t.Errorf("%s: checkImages = %v, want an error naming images.%s", key, err, key)
+		}
 	}
 }

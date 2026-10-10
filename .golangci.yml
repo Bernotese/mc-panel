@@ -7,9 +7,10 @@ version: "2"
 run:
   timeout: 5m
   tests: true
-  # Lint the Linux-only nftables integration tests too (they only compile with this tag).
+  # Lint the Linux-only integration tests too (they only compile with these tags).
   build-tags:
     - nftintegration
+    - dockerintegration
   modules-download-mode: readonly
 
 linters:
