@@ -9,9 +9,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
 // Checker answers per-server permission questions (implemented in stream D).

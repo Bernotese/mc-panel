@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/password"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 // A saturated argon2 limiter answers 429 rate_limited with Retry-After: 1 and changes nothing.

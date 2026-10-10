@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func TestUnlock(t *testing.T) {

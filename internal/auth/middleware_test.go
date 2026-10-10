@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
 func TestSessionMiddleware(t *testing.T) {

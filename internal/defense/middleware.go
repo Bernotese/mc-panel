@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
 // blockReason returns why ip is blocked by deny rules or the country filter

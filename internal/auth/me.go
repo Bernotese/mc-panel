@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"unicode/utf8"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/password"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 type updateMeRequest struct {

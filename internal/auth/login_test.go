@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/password"
 )
 
 func TestLoginUserWithout2FAGetsFullSession(t *testing.T) {

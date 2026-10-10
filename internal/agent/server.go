@@ -14,9 +14,9 @@ import (
 	"net/http"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
-	"mcpanel/internal/agent/peercred"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/peercred"
 )
 
 const maxRequestBytes = 4 << 10

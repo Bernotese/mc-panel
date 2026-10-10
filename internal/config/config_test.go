@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/config"
 )
 
 func TestDefaultPanelIsValidAfterSettingPublicURL(t *testing.T) {

@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/agent/banrules"
-	"mcpanel/internal/agent/firewall"
-	"mcpanel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/firewall"
+	"github.com/Bernotese/mc-panel/internal/clock"
 )
 
 func newNoop(t *testing.T) (*firewall.Noop, *clock.Fake) {

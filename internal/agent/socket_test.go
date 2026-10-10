@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"testing"
 
-	"mcpanel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/agent"
 )
 
 func TestListenCreatesSocketWithMode(t *testing.T) {

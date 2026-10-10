@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // Canonical returns the exact bytes hashed for one audit row: the compact JSON array

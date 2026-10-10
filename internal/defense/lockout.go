@@ -5,8 +5,8 @@ import (
 	"slices"
 	"time"
 
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // allowedPermanently is like allowed but ignores allow rules that expire.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/audit"
 )
 
 func listSessions(t *testing.T, c *client, path string) []sessionJSON {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"unicode/utf8"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const verifyBatch = 1000

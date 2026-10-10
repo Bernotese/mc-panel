@@ -3,11 +3,11 @@ package auth
 import (
 	"net/http"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 type sudoResponse struct {

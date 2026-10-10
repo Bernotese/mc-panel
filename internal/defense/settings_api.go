@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const maxAllowedCountries = 300
