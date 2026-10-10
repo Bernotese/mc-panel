@@ -15,8 +15,11 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
 import { Route as AppProfileRouteImport } from './routes/_app/profile'
 import { Route as AppSecurityRouteImport } from './routes/_app/security'
+import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as LoginIndexRouteImport } from './routes/login/index'
 import { Route as Login2faRouteImport } from './routes/login/2fa'
+import { Route as AppServersIdRouteImport } from './routes/_app/servers/$id'
+import { Route as AppServersNewRouteImport } from './routes/_app/servers/new'
 import { Route as AppUsersIndexRouteImport } from './routes/_app/users/index'
 import { Route as AppUsersIdPermissionsRouteImport } from './routes/_app/users/$id.permissions'
 
@@ -49,6 +52,11 @@ const AppSecurityRoute = AppSecurityRouteImport.update({
   path: '/security',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
 const LoginIndexRoute = LoginIndexRouteImport.update({
   id: '/login/',
   path: '/login/',
@@ -58,6 +66,16 @@ const Login2faRoute = Login2faRouteImport.update({
   id: '/login/2fa',
   path: '/login/2fa',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppServersIdRoute = AppServersIdRouteImport.update({
+  id: '/servers/$id',
+  path: '/servers/$id',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppServersNewRoute = AppServersNewRouteImport.update({
+  id: '/servers/new',
+  path: '/servers/new',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppUsersIndexRoute = AppUsersIndexRouteImport.update({
   id: '/users/',
@@ -76,8 +94,11 @@ export interface FileRoutesByFullPath {
   '/audit': typeof AppAuditRoute
   '/profile': typeof AppProfileRoute
   '/security': typeof AppSecurityRoute
+  '/settings': typeof AppSettingsRoute
   '/login/2fa': typeof Login2faRoute
   '/login/': typeof LoginIndexRoute
+  '/servers/$id': typeof AppServersIdRoute
+  '/servers/new': typeof AppServersNewRoute
   '/users/': typeof AppUsersIndexRoute
   '/users/$id/permissions': typeof AppUsersIdPermissionsRoute
 }
@@ -86,9 +107,12 @@ export interface FileRoutesByTo {
   '/audit': typeof AppAuditRoute
   '/profile': typeof AppProfileRoute
   '/security': typeof AppSecurityRoute
+  '/settings': typeof AppSettingsRoute
   '/login/2fa': typeof Login2faRoute
   '/': typeof AppIndexRoute
   '/login': typeof LoginIndexRoute
+  '/servers/$id': typeof AppServersIdRoute
+  '/servers/new': typeof AppServersNewRoute
   '/users': typeof AppUsersIndexRoute
   '/users/$id/permissions': typeof AppUsersIdPermissionsRoute
 }
@@ -99,9 +123,12 @@ export interface FileRoutesById {
   '/_app/audit': typeof AppAuditRoute
   '/_app/profile': typeof AppProfileRoute
   '/_app/security': typeof AppSecurityRoute
+  '/_app/settings': typeof AppSettingsRoute
   '/login/2fa': typeof Login2faRoute
   '/_app/': typeof AppIndexRoute
   '/login/': typeof LoginIndexRoute
+  '/_app/servers/$id': typeof AppServersIdRoute
+  '/_app/servers/new': typeof AppServersNewRoute
   '/_app/users/': typeof AppUsersIndexRoute
   '/_app/users/$id/permissions': typeof AppUsersIdPermissionsRoute
 }
@@ -113,8 +140,11 @@ export interface FileRouteTypes {
     | '/audit'
     | '/profile'
     | '/security'
+    | '/settings'
     | '/login/2fa'
     | '/login/'
+    | '/servers/$id'
+    | '/servers/new'
     | '/users/'
     | '/users/$id/permissions'
   fileRoutesByTo: FileRoutesByTo
@@ -123,9 +153,12 @@ export interface FileRouteTypes {
     | '/audit'
     | '/profile'
     | '/security'
+    | '/settings'
     | '/login/2fa'
     | '/'
     | '/login'
+    | '/servers/$id'
+    | '/servers/new'
     | '/users'
     | '/users/$id/permissions'
   id:
@@ -135,9 +168,12 @@ export interface FileRouteTypes {
     | '/_app/audit'
     | '/_app/profile'
     | '/_app/security'
+    | '/_app/settings'
     | '/login/2fa'
     | '/_app/'
     | '/login/'
+    | '/_app/servers/$id'
+    | '/_app/servers/new'
     | '/_app/users/'
     | '/_app/users/$id/permissions'
   fileRoutesById: FileRoutesById
@@ -193,6 +229,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSecurityRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/login/': {
       id: '/login/'
       path: '/login'
@@ -206,6 +249,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/login/2fa'
       preLoaderRoute: typeof Login2faRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_app/servers/$id': {
+      id: '/_app/servers/$id'
+      path: '/servers/$id'
+      fullPath: '/servers/$id'
+      preLoaderRoute: typeof AppServersIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/servers/new': {
+      id: '/_app/servers/new'
+      path: '/servers/new'
+      fullPath: '/servers/new'
+      preLoaderRoute: typeof AppServersNewRouteImport
+      parentRoute: typeof AppRoute
     }
     '/_app/users/': {
       id: '/_app/users/'
@@ -228,7 +285,10 @@ interface AppRouteChildren {
   AppAuditRoute: typeof AppAuditRoute
   AppProfileRoute: typeof AppProfileRoute
   AppSecurityRoute: typeof AppSecurityRoute
+  AppSettingsRoute: typeof AppSettingsRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppServersIdRoute: typeof AppServersIdRoute
+  AppServersNewRoute: typeof AppServersNewRoute
   AppUsersIndexRoute: typeof AppUsersIndexRoute
   AppUsersIdPermissionsRoute: typeof AppUsersIdPermissionsRoute
 }
@@ -237,7 +297,10 @@ const AppRouteChildren: AppRouteChildren = {
   AppAuditRoute: AppAuditRoute,
   AppProfileRoute: AppProfileRoute,
   AppSecurityRoute: AppSecurityRoute,
+  AppSettingsRoute: AppSettingsRoute,
   AppIndexRoute: AppIndexRoute,
+  AppServersIdRoute: AppServersIdRoute,
+  AppServersNewRoute: AppServersNewRoute,
   AppUsersIndexRoute: AppUsersIndexRoute,
   AppUsersIdPermissionsRoute: AppUsersIdPermissionsRoute,
 }

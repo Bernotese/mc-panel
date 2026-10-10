@@ -59,6 +59,9 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   'jailed',
   'ip_blocked',
   'agent_unavailable',
+  'docker_unavailable',
+  'base_domain_missing',
+  'catalog_unavailable',
   'internal',
 ])
 
