@@ -500,6 +500,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/servers/catalog/{type}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getServerCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/servers/settings": {
         parameters: {
             query?: never;
@@ -986,6 +1002,17 @@ export interface components {
         PowerResponse: {
             /** @enum {string} */
             status: "accepted";
+        };
+        CatalogVersion: {
+            /** @description Minecraft version for every type, also neoforge (itzg picks the newest NeoForge build for it) */
+            id: string;
+            java: components["schemas"]["JavaVersion"];
+        };
+        Catalog: {
+            /** @description Newest first */
+            versions: components["schemas"]["CatalogVersion"][];
+            /** @description fabric: stable loader versions, newest first; all other types: [] */
+            loaders: string[];
         };
         UnknownContainer: {
             /** Format: int64 */
@@ -2188,6 +2215,48 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description conflict (name taken) or base_domain_missing */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getServerCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                type: components["schemas"]["InstanceType"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Catalog"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description No catalog for modrinth/curseforge (the pack decides the version) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description catalog_unavailable: upstream not reachable or invalid; the form falls back to free text */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

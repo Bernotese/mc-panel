@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/httpx"
@@ -27,6 +28,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/secretbox"
 	"github.com/Bernotese/mc-panel/internal/servers"
+	"github.com/Bernotese/mc-panel/internal/servers/catalog"
 	"github.com/Bernotese/mc-panel/internal/store"
 	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
@@ -36,16 +38,17 @@ var t0 = time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 // env is a real database plus the servers handler mounted on a real rbac.Router
 // (with the DB-backed checker), so every request also exercises the route rule.
 type env struct {
-	t      *testing.T
-	db     *sql.DB
-	clk    *clock.Fake
-	rec    *audit.MemoryRecorder
-	box    *secretbox.Box
-	agent  *fakeAgent
-	logs   *bytes.Buffer // reconcile log output
-	h      *servers.Handler
-	mux    http.Handler
-	rootID int64
+	t       *testing.T
+	db      *sql.DB
+	clk     *clock.Fake
+	rec     *audit.MemoryRecorder
+	box     *secretbox.Box
+	agent   *fakeAgent
+	catalog *fakeCatalog
+	logs    *bytes.Buffer // reconcile log output
+	h       *servers.Handler
+	mux     http.Handler
+	rootID  int64
 }
 
 func newEnv(t *testing.T) *env {
@@ -55,10 +58,13 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &env{t: t, db: db, clk: clock.NewFake(t0), rec: &audit.MemoryRecorder{}, box: box, agent: newFakeAgent(), logs: &bytes.Buffer{}}
+	e := &env{
+		t: t, db: db, clk: clock.NewFake(t0), rec: &audit.MemoryRecorder{}, box: box,
+		agent: newFakeAgent(), catalog: &fakeCatalog{}, logs: &bytes.Buffer{},
+	}
 	e.h = servers.NewHandler(servers.Deps{
 		DB: db, Clock: e.clk, Audit: e.rec, Box: box, Instances: e.agent,
-		Log: slog.New(slog.NewTextHandler(e.logs, nil)),
+		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog,
 	})
 	mux := chi.NewRouter()
 	e.h.Routes(rbac.NewRouter(mux, rbac.NewDBChecker(db), e.clk))
@@ -259,4 +265,19 @@ func (f *fakeAgent) Remove(_ context.Context, id int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.record(fmt.Sprintf("remove %d", id))
+}
+
+// fakeCatalog is a servers.CatalogSource with a fixed answer.
+type fakeCatalog struct {
+	mu    sync.Mutex
+	cat   catalog.Catalog
+	err   error
+	asked []instancespec.Type
+}
+
+func (f *fakeCatalog) Get(_ context.Context, t instancespec.Type) (catalog.Catalog, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, t)
+	return f.cat, f.err
 }

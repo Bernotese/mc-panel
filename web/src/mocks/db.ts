@@ -3,7 +3,9 @@ import type {
   AttemptStage,
   AuditEntry,
   AuditResult,
+  Catalog,
   InstanceConfig,
+  InstanceType,
   IPRule,
   Jail,
   Locale,
@@ -167,6 +169,7 @@ export interface MockDb {
   currentSessionId: number | null
   servers: MockServer[]
   serverSettings: MockServerSettings
+  catalogs: Partial<Record<InstanceType, Catalog>>
   grants: Map<number, PermissionGrant[]>
   audit: AuditEntry[]
   attempts: LoginAttempt[]
@@ -325,6 +328,48 @@ function seed(now: number): MockDb {
       { id: 3, name: 'lobby', instance: null, status: notConfiguredStatus(), revision: 0, runningRevision: 0 },
     ],
     serverSettings: { base_domain: 'mc.example.com', curseforge_api_key_set: false, docker: 'ok' },
+    catalogs: {
+      vanilla: {
+        versions: [
+          { id: '26.3', java: 'java25' },
+          { id: '26.2', java: 'java25' },
+          { id: '1.21.11', java: 'java21' },
+          { id: '1.20.4', java: 'java17' },
+          { id: '1.16.5', java: 'java8' },
+        ],
+        loaders: [],
+      },
+      paper: {
+        versions: [
+          { id: '26.2', java: 'java25' },
+          { id: '1.21.11', java: 'java21' },
+          { id: '1.20.4', java: 'java17' },
+        ],
+        loaders: [],
+      },
+      purpur: {
+        versions: [
+          { id: '26.2', java: 'java25' },
+          { id: '1.21.11', java: 'java21' },
+        ],
+        loaders: [],
+      },
+      fabric: {
+        versions: [
+          { id: '26.3', java: 'java25' },
+          { id: '1.21.11', java: 'java21' },
+        ],
+        loaders: ['0.19.5', '0.19.4'],
+      },
+      // Minecraft versions like every other type (plan 02, task 15); the NeoForge build is optional (loader_version).
+      neoforge: {
+        versions: [
+          { id: '26.2', java: 'java25' },
+          { id: '1.21.11', java: 'java21' },
+        ],
+        loaders: [],
+      },
+    },
     grants: new Map<number, PermissionGrant[]>([
       [
         2,

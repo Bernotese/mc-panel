@@ -432,6 +432,18 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: 'conflict (name taken) or base_domain_missing', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/catalog/{type}:
+    get:
+      operationId: getServerCatalog
+      tags: [servers]
+      parameters:
+        - { name: type, in: path, required: true, schema: { $ref: '#/components/schemas/InstanceType' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Catalog' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'No catalog for modrinth/curseforge (the pack decides the version)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: 'catalog_unavailable: upstream not reachable or invalid; the form falls back to free text', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /servers/settings:
     get:
       operationId: getServerSettings
@@ -934,6 +946,18 @@ components:
       type: object
       required: [status]
       properties: { status: { type: string, enum: [accepted] } }
+    CatalogVersion:
+      type: object
+      required: [id, java]
+      properties:
+        id: { type: string, description: 'Minecraft version for every type, also neoforge (itzg picks the newest NeoForge build for it)' }
+        java: { $ref: '#/components/schemas/JavaVersion' }
+    Catalog:
+      type: object
+      required: [versions, loaders]
+      properties:
+        versions: { type: array, items: { $ref: '#/components/schemas/CatalogVersion' }, description: Newest first }
+        loaders: { type: array, items: { type: string }, description: 'fabric: stable loader versions, newest first; all other types: []' }
     UnknownContainer:
       type: object
       required: [id, name]
