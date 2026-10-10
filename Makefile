@@ -2,7 +2,7 @@ SHELL := /bin/bash
 GO ?= go
 export CGO_ENABLED ?= 0
 
-.PHONY: generate check test test-go test-race test-web lint dev web-build build release clean
+.PHONY: generate check test test-go test-race test-web lint dev preview preview-logs preview-down web-build build release clean
 
 generate:
 	sqlc generate
@@ -35,6 +35,19 @@ lint:
 
 dev:
 	./scripts/dev.sh
+
+# UI preview in Docker (mock API, no backend); only the user starts it.
+PREVIEW := docker compose -f compose.preview.yaml
+
+preview:
+	$(PREVIEW) up --build --detach
+	@echo "UI preview: http://localhost:5180  (admin / correct-horse-battery, TOTP 123456)"
+
+preview-logs:
+	$(PREVIEW) logs --follow
+
+preview-down:
+	$(PREVIEW) down
 
 web-build:
 	cd web && npm run build

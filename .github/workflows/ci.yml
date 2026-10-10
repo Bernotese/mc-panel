@@ -127,6 +127,10 @@ jobs:
       - name: npm audit
         run: npm audit --audit-level=high
 
+      # The UI preview image (make preview) must keep building; it is never started in CI.
+      - name: Build UI preview image
+        run: docker build --file Dockerfile.preview --tag mcpanel-preview:ci .
+
   openapi:
     name: OpenAPI lint
     runs-on: ubuntu-24.04

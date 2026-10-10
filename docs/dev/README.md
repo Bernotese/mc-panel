@@ -56,6 +56,22 @@ cd web && npm run dev:mock    # Vite mit MSW-Mock-API, kein Go-Prozess nötig
 
 Der Mock deckt jede Operation aus `api/openapi.yaml` ab (`src/mocks/handlers.test.ts` prüft das). `npm run build` verweigert einen Build mit aktivem Mock.
 
+## UI-Vorschau in Docker
+
+Zum Durchklicken der Oberfläche ohne lokale Node-Installation: derselbe Mock-Modus, aber in einem Container (Docker Desktop). Kein Backend, keine Datenbank – die Daten kommen aus der MSW-Mock-API und setzen sich bei jedem Neuladen zurück.
+
+```bash
+make preview         # baut das Image und startet den Container im Hintergrund
+make preview-logs    # Logs des Vite-Servers
+make preview-down    # stoppt und entfernt den Container
+```
+
+- Adresse: http://localhost:5180 (nur von diesem Mac erreichbar; Port 5180, damit `make dev` auf 5173 frei bleibt).
+- Login: `admin` / `correct-horse-battery`, TOTP-Code `123456`; eingeschränkter Benutzer: `alice` (gleiches Passwort).
+- `web/src` ist in den Container eingebunden: Änderungen am Frontend erscheinen sofort. Nach Änderungen an `package.json` erneut `make preview` (baut neu).
+- Funktionstests gegen das echte Backend sind das nicht; dafür `make dev` oder ein Testserver.
+- Die CI baut das Image bei jedem PR mit (Job `web`), startet es aber nicht. Claude startet die Vorschau nie selbst.
+
 ## End-to-End-Tests (Playwright)
 
 Einmalig den Browser installieren: `cd web && npx playwright install chromium`.
