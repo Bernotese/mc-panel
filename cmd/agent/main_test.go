@@ -362,3 +362,96 @@ func TestCheckImages(t *testing.T) {
 		}
 	}
 }
+
+// startDevAgent runs the agent in dev mode against the fake Docker daemon d and
+// returns its socket and a stop function that waits for run to return cleanly.
+func startDevAgent(t *testing.T, d *dockertest.Daemon) (string, func()) {
+	t.Helper()
+	sock := socketPath(t)
+	cfg := writeConfig(t, devConfig(t, sock, d.Socket))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, []string{"-dev", "-config", cfg}, io.Discard, io.Discard) }()
+	waitForSocket(t, sock, done)
+	stopped := false
+	stop := func() {
+		t.Helper()
+		if stopped {
+			return
+		}
+		stopped = true
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("run: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Error("run did not return after cancel")
+		}
+	}
+	t.Cleanup(stop)
+	return sock, stop
+}
+
+// TestRunHealthIsCorrectFromFirstRequest: with Docker enabled the agent checks
+// Docker once before it serves, so the very first /v1/health already reports
+// docker "ok" instead of the "unavailable" of a not yet run background check.
+func TestRunHealthIsCorrectFromFirstRequest(t *testing.T) {
+	d := dockertest.New(t)
+	arrived, release := d.Hold(dockertest.OpPing)
+	defer release()
+	go func() {
+		<-arrived
+		time.Sleep(time.Second) // a slow but healthy daemon (below the 2 s ping bound)
+		release()
+	}()
+	sock, stop := startDevAgent(t, d)
+	h, err := agent.NewClient(sock).Health(context.Background())
+	if err != nil || h.Docker != agentapi.DockerOK {
+		t.Fatalf("first health = %+v, %v; want docker ok", h, err)
+	}
+	stop()
+}
+
+// TestRunAnswersBeforePanelTimeoutWhenDockerHangs: with a hanging Docker daemon
+// the agent still answers within the panel client's 3 s timeout: GET /v1/instances
+// reports docker "unavailable" and a write gets 503 docker_unavailable.
+func TestRunAnswersBeforePanelTimeoutWhenDockerHangs(t *testing.T) {
+	d := dockertest.New(t)
+	sock, stop := startDevAgent(t, d)
+	c := agent.NewClient(sock) // the panel's client, agent.DefaultTimeout = 3 s
+	waitFor(t, "router running", func() bool {
+		st, err := c.Instances(context.Background())
+		return err == nil && st.Docker == agentapi.DockerOK && st.Router.State == agentapi.StateRunning
+	})
+
+	var releases []func()
+	for _, op := range []string{dockertest.OpList, dockertest.OpInspect, dockertest.OpPing} {
+		_, release := d.Hold(op)
+		releases = append(releases, release)
+	}
+	defer func() {
+		for _, r := range releases {
+			r()
+		}
+	}()
+	st, err := c.Instances(context.Background())
+	if err != nil {
+		t.Fatalf("GET /v1/instances = %v; must answer before the panel's timeout", err)
+	}
+	if st.Docker != agentapi.DockerUnavailable {
+		t.Fatalf("docker = %q, want unavailable", st.Docker)
+	}
+	err = c.Ensure(context.Background(), agentapi.EnsureRequest{
+		ID: 1, Name: "survival", FQDN: "survival.mc.example.com", Revision: 1,
+		Spec: instancespec.Spec{Type: instancespec.TypePaper, Version: "1.21.4", Java: instancespec.Java21, MemoryMiB: 4096},
+	})
+	if !errors.Is(err, agentapi.ErrDockerUnavailable) {
+		t.Fatalf("ensure = %v; want 503 docker_unavailable before the panel's timeout", err)
+	}
+	for _, r := range releases {
+		r()
+	}
+	stop()
+}
