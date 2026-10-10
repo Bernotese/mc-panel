@@ -5,14 +5,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 mc-panel is a self-hosted Minecraft server panel: a Go backend with an embedded React SPA, released as static `linux/amd64` and `linux/arm64` binaries. Development happens locally on macOS (Apple Silicon); production is an Ubuntu 26.04 LTS VPS (panel and agent as systemd services behind Caddy). Project docs are written in German:
 
 - `docs/dev/README.md`: toolchain versions, CLI commands, CI jobs and how to reproduce them locally, lint conventions, release process, production setup.
-- `docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`: architecture and security requirements.
+- `docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`: architecture, security requirements and the roadmap of sub-projects (1 foundation and 2 instances are done).
+- `docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md`: Minecraft instances (sub-project 2); manual acceptance checklist in `docs/dev/acceptance-tp2.md`.
 
 ## Working rules
 
 - **Checks on the Mac:** only `make check` (gofmt, `go vet` and `go build` for macOS and Linux incl. the root-only integration test files, TypeScript types; ~10 s). Do not run `make test`, `make test-race`, `make lint`, Playwright or `make release` locally unless the user asks: CI runs all of them on every PR. After pushing, wait for CI with `gh pr checks <n> --watch` and fix failures from the CI logs (`gh run view <id> --log-failed`).
 - **Nothing system-level on the Mac without asking:** never install or uninstall software (brew, npm -g), create VMs or Docker containers/images, use `sudo`, or change system settings automatically. Propose the command and let the user run it (`! <command>`). Scripts that change the host (`scripts/ci-acceptance.sh`) are for CI runners only.
+- **Test VM:** `claude@192.168.1.117` is an internal Ubuntu 26.04 VM for manual testing (passwordless sudo, outbound internet only). Unlike the Mac, Claude may install and change anything there. `make deploy-testvm [REF=<pushed branch, tag or sha>]` builds that ref on the VM from GitHub and redeploys it; the UI is at `https://panel.192-168-1-117.sslip.io/` (Caddy `tls internal`). Details in `docs/dev/README.md` ("Test-VM").
 - **Git and GitHub:** the repo is `Bernotese/mc-panel`; use `gh`. Never commit to or push `main`. Every change goes on a branch (`feat/…`, `fix/…`, `docs/…`, `chore/…`) and into a PR whose CI must be green. Merging PRs, deleting remote branches and pushing tags (a `v*` tag publishes a GitHub release) only after the user says so.
-- **Implementation with agent teams:** plan tasks (`docs/superpowers/plans/`) are implemented by Claude Code agent teams (enabled in `.claude/settings.json`). The lead splits the work into tasks with disjoint file sets and integrates; teammates load this file but not the lead's conversation, so each spawn prompt names the plan file, the task numbers and the branch. Each teammate works in its own git worktree on its own branch (`git worktree add ../mc-panel-wt/<branch> -b <branch> origin/main`), runs `make check` before reporting a task done, and never edits files assigned to another teammate. Keep teams small (3–5 teammates) and shut teammates down when their work is merged.
+- **Implementation with agent teams:** plan tasks (`docs/superpowers/plans/`; a sub-project's plans are deleted once it is merged, its spec stays) are implemented by Claude Code agent teams (enabled in `.claude/settings.json`). The lead splits the work into tasks with disjoint file sets and integrates; teammates load this file but not the lead's conversation, so each spawn prompt names the plan file, the task numbers and the branch. Each teammate works in its own git worktree on its own branch (`git worktree add ../mc-panel-wt/<branch> -b <branch> origin/main`), runs `make check` before reporting a task done, and never edits files assigned to another teammate. Keep teams small (3–5 teammates) and shut teammates down when their work is merged.
 
 ## Commands
 
@@ -47,14 +49,14 @@ CI fails if generated code is out of date. Commit regenerated files after you ch
 
 There are two binaries, built from `cmd/panel` and `cmd/agent`, and they are separated by privilege:
 
-- **panel** runs unprivileged as user `mcpanel`. It serves the web app and `/api`, and in production it listens on a Unix socket behind Caddy. It owns the SQLite DB (`modernc.org/sqlite`, no CGO). It also provides the CLI subcommands `serve`, `admin create`, `admin unlock` and `audit verify`.
+- **panel** runs unprivileged as user `mcpanel`. It serves the web app and `/api`, and in production it listens on a Unix socket behind Caddy. It owns the SQLite DB (`modernc.org/sqlite`, no CGO). It also provides the CLI subcommands `serve`, `version`, `admin create`, `admin unlock` and `audit verify`.
 - **agent** runs as root and exposes a narrow JSON API over a Unix socket (`internal/agent`). It accepts connections only from the configured panel UID, checked via peer credentials. It validates every request strictly, rejecting unknown fields, and checks ban prefixes in `agentapi`. It manages the nftables sets `mcpanel_jail4`/`mcpanel_jail6` in table `inet mcpanel` and is the only Docker client: Minecraft servers are containers built from a fixed, hardened template (`internal/agent/instances`), validated with `internal/agent/instancespec` (shared with the panel), and routed by hostname through the `mcpanel-router` container (mc-router, reloaded via SIGHUP). In dev mode Docker is off unless `MCPANEL_DEV_DOCKER=1`. The design goal is that a compromised panel does not give root on the host. If the agent fails, the panel reports `503 agent_unavailable`; in-app jails still apply.
 
 Linux-specific code sits behind interfaces and is chosen with build tags (`_linux.go` / `_other.go` / `_darwin.go`). On macOS the firewall is a no-op that only logs, and peer credentials use `LOCAL_PEERCRED`.
 
 ### Request path and routing
 
-`cmd/panel/app.go` (`buildApp`) is the only place that wires the packages together. Each feature package (`auth`, `defense`, `notify`, `users`, `audit/auditapi`) has a `Handler` with a `Routes(api *rbac.Router)` method.
+`cmd/panel/app.go` (`buildApp`) is the only place that wires the packages together. Each feature package (`auth`, `defense`, `notify`, `users`, `servers`, `audit/auditapi`) has a `Handler` with a `Routes(api *rbac.Router)` method.
 
 - Register routes only through `*rbac.Router`, with paths relative to `/api`, and give every route a `Rule`: `rbac.Public()`, `Authenticated()`, `Admin()` or `Server(perm, "param")`, optionally with `.WithSudo()`. Registering a route without a rule panics, and `TestEveryRouteDeclaresARule` catches any route added to chi directly. Feature code never calls `Route()`; it is used once, for `/api`.
 - `cmd/panel/openapi_test.go` requires the registered routes to match the operations in `api/openapi.yaml` exactly. It also requires the `httpx` `Code*` error constants to match the contract's error enum. A new endpoint therefore needs a handler, an OpenAPI entry, regenerated TS types and an MSW mock handler (`web/src/mocks/handlers.test.ts` checks that every operation has a mock).
@@ -64,7 +66,7 @@ Linux-specific code sits behind interfaces and is chosen with build tags (`_linu
 ### Data
 
 - There is one goose migration set in `internal/store/migrations`. Migrations run at startup, and the panel refuses to start if one fails.
-- sqlc queries are split by domain in `internal/store/queries/*.sql`, and each generates its own `internal/store/<name>.sql.go` (`emit_interface: false`). Query names carry a domain prefix (`Auth…`, `Defense…`, `Rbac…`, `Audit…`).
+- sqlc queries are split by domain in `internal/store/queries/*.sql`, and each generates its own `internal/store/<name>.sql.go` (`emit_interface: false`). Query names carry a domain prefix (`Auth…`, `Defense…`, `Rbac…`, `Audit…`, `Servers…`).
 - Timestamps are `INTEGER` Unix milliseconds (`*_at` columns); convert with `time.UnixMilli` / `t.UnixMilli()`.
 - The audit log is append-only and hash-chained: `hash = SHA-256(prev_hash || canonical JSON)`, written serially in a transaction. The API never updates or deletes audit entries.
 - Tests use `storetest.Open(t)`, which returns a migrated temporary SQLite file, plus fixtures such as `storetest.CreateUser`.
