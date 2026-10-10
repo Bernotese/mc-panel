@@ -10,7 +10,7 @@ const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../
 describe('mock coverage', () => {
   it('mocks every operationId of api/openapi.yaml exactly once', () => {
     const ids = [...openapiYaml.matchAll(/operationId:\s*(\w+)/g)].map((m) => m[1]).sort()
-    expect(ids).toHaveLength(59)
+    expect(ids).toHaveLength(60)
     expect(operations.map((o) => o.operationId).sort()).toEqual(ids)
   })
 })
@@ -84,6 +84,36 @@ describe('mock behaviour', () => {
     expect(await get()).toMatchObject({ base_domain: null, curseforge_api_key_set: false })
     const bad = await callApi('PUT', '/servers/settings', { body: { base_domain: 'localhost' }, csrf: me.csrf_token })
     expect(field(bad.body, 'error')).toBe('validation_failed')
+  })
+
+  it('creates a server that is running on the next read', async () => {
+    const me = loginAs('admin', { sudo: true })
+    const body = { name: 'skyblock', type: 'fabric', version: '1.20.4', memory_mib: 2048, eula_accepted: true }
+    const created = await callApi('POST', '/servers', { body, csrf: me.csrf_token })
+    expect(created.status).toBe(201)
+    expect(created.body).toMatchObject({
+      address: 'skyblock.mc.example.com',
+      instance: { type: 'fabric', java: 'java17', properties: { motd: 'skyblock', max_players: 20 } },
+      status: { state: 'creating', operation: 'pulling', desired_state: 'running' },
+    })
+    const id = field(created.body, 'id') as number
+    expect(field((await callApi('GET', `/servers/${id}`)).body, 'status')).toMatchObject({ state: 'running', operation: '' })
+    expect((await callApi('POST', '/servers', { body, csrf: me.csrf_token })).status).toBe(409)
+    const noEula = await callApi('POST', '/servers', { body: { ...body, name: 'other', eula_accepted: false }, csrf: me.csrf_token })
+    expect(field(noEula.body, 'error')).toBe('validation_failed')
+    db.serverSettings.base_domain = null
+    const noDomain = await callApi('POST', '/servers', { body: { ...body, name: 'other' }, csrf: me.csrf_token })
+    expect(noDomain.status).toBe(409)
+    expect(field(noDomain.body, 'error')).toBe('base_domain_missing')
+  })
+
+  it('marks a running server as restart_required after an update, a stopped one not', async () => {
+    const me = loginAs('admin', { sudo: true })
+    const running = await callApi('PATCH', '/servers/1', { body: { memory_mib: 6144 }, csrf: me.csrf_token })
+    expect(running.body).toMatchObject({ instance: { memory_mib: 6144 }, status: { state: 'running', restart_required: true } })
+    const stopped = await callApi('PATCH', '/servers/2', { body: { properties: { motd: 'Hi' } }, csrf: me.csrf_token })
+    expect(stopped.body).toMatchObject({ instance: { properties: { motd: 'Hi', gamemode: 'survival' } }, status: { restart_required: false } })
+    expect((await callApi('PATCH', '/servers/3', { body: { memory_mib: 2048 }, csrf: me.csrf_token })).status).toBe(409)
   })
 
   it('buckets the overview series by range', async () => {

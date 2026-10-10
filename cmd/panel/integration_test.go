@@ -176,8 +176,8 @@ func TestRouteCoverage(t *testing.T) {
 	if un := rbac.Uncovered(e.app.Mux, e.app.Routes, func(_, p string) bool { return p == "/*" }); len(un) != 0 {
 		t.Fatalf("routes registered without rbac rule: %v", un)
 	}
-	if n := len(e.app.Routes); n != 59 {
-		t.Fatalf("registered %d API routes, OpenAPI defines 59 operations (incl. GET /health)", n)
+	if n := len(e.app.Routes); n != 60 {
+		t.Fatalf("registered %d API routes, OpenAPI defines 60 operations (incl. GET /health)", n)
 	}
 }
 
@@ -186,12 +186,16 @@ func TestFullFlowPermissionsAndAudit(t *testing.T) {
 	admin, secret := loginAdminWithTOTP(e)
 
 	// sudo required for admin mutations
-	if c, out := admin.do("POST", "/servers", map[string]string{"name": "survival"}); c != 403 || out["error"] != "sudo_required" {
+	if c, out := admin.do("POST", "/servers", paperServer("survival")); c != 403 || out["error"] != "sudo_required" {
 		t.Fatalf("POST /servers without sudo = %d %v", c, out)
 	}
 	sudo(e, admin, secret)
-	a := admin.must(201, "POST", "/servers", map[string]string{"name": "survival"})
-	b := admin.must(201, "POST", "/servers", map[string]string{"name": "creative"})
+	if c, out := admin.do("POST", "/servers", paperServer("survival")); c != 409 || out["error"] != "base_domain_missing" {
+		t.Fatalf("POST /servers without base domain = %d %v", c, out)
+	}
+	admin.must(200, "PUT", "/servers/settings", map[string]any{"base_domain": "mc.example.com"})
+	a := admin.must(201, "POST", "/servers", paperServer("survival"))
+	b := admin.must(201, "POST", "/servers", paperServer("creative"))
 	srvA, srvB := int64(a["id"].(float64)), int64(b["id"].(float64))
 
 	u := admin.must(201, "POST", "/users", map[string]string{"username": "maxUser", "password": "another long secret 42", "role": "user"})
@@ -227,12 +231,17 @@ func TestFullFlowPermissionsAndAudit(t *testing.T) {
 	for _, it := range page["items"].([]any) {
 		seen[it.(map[string]any)["action"].(string)] = true
 	}
-	for _, want := range []string{audit.ActionTOTPEnable, audit.ActionSudo, audit.ActionServerCreate,
-		audit.ActionUserCreate, audit.ActionPermissionsSet, audit.ActionServerPower} {
+	for _, want := range []string{audit.ActionTOTPEnable, audit.ActionSudo, audit.ActionServerSettingsUpdate,
+		audit.ActionServerCreate, audit.ActionUserCreate, audit.ActionPermissionsSet, audit.ActionServerPower} {
 		if !seen[want] {
 			t.Errorf("audit log misses %s (have %v)", want, seen)
 		}
 	}
+}
+
+// paperServer is a valid CreateServerRequest.
+func paperServer(name string) map[string]any {
+	return map[string]any{"name": name, "type": "paper", "version": "1.21.11", "memory_mib": 4096, "eula_accepted": true}
 }
 
 func (c *client) doList(method, path string) (int, []map[string]any) {

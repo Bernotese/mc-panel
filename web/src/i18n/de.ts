@@ -151,7 +151,7 @@ export const de = {
     description: 'Deine Minecraft-Server. Die Instanzverwaltung folgt in einem späteren Teilprojekt.',
     empty: 'Keine Server verfügbar.',
     create_server: 'Server anlegen',
-    create_description: 'Legt einen Stub-Server an, damit Rechte vergeben werden können.',
+    create_description: 'Legt einen Paper-Server an (neueste Version, 4 GiB RAM). Mit „Anlegen“ akzeptierst du die Minecraft-EULA (aka.ms/MinecraftEULA).',
     name_label: 'Name',
     name_hint: '2–32 Zeichen: Kleinbuchstaben, Ziffern, Bindestrich.',
     name_invalid: 'Der Name entspricht nicht den Regeln.',
