@@ -23,6 +23,28 @@ type AuditLog struct {
 	Hash      string
 }
 
+type Instance struct {
+	ServerID      int64
+	Type          string
+	Version       string
+	LoaderVersion sql.NullString
+	Modpack       sql.NullString
+	Java          string
+	MemoryMib     int64
+	Properties    string
+	DesiredState  string
+	Revision      int64
+	CreatedAt     int64
+	UpdatedAt     int64
+}
+
+type InstanceSetting struct {
+	ID               int64
+	BaseDomain       sql.NullString
+	CurseforgeApiKey []byte
+	UpdatedAt        int64
+}
+
 type IpRule struct {
 	ID        int64
 	Cidr      string
