@@ -47,7 +47,7 @@ func (s Snapshot) actualStatus(id int64) agentapi.InstanceStatus {
 
 // deriveStatus implements the state table of the plan (contract V4). in == nil means the
 // server has no instance yet (TP1 stub).
-func deriveStatus(in *store.Instance, snap Snapshot) statusJSON {
+func deriveStatus(_ string, in *store.Instance, snap Snapshot) statusJSON {
 	if in == nil {
 		return statusJSON{State: stateNotConfigured}
 	}

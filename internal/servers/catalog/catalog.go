@@ -19,6 +19,8 @@ import (
 const (
 	// Timeout per upstream request.
 	Timeout = 10 * time.Second
+	// Deadline bounds one Get across all its upstream requests (below the 60 s write timeout).
+	Deadline = 45 * time.Second
 	// MaxBytes limits every upstream response.
 	MaxBytes = 5 << 20
 	// CacheTTL is how long a fetched catalog is served from memory.
@@ -67,6 +69,7 @@ type Options struct {
 	Upstreams  Upstreams     // zero value = DefaultUpstreams
 	HTTPClient *http.Client  // nil = a client with Timeout
 	Timeout    time.Duration // per request; 0 = Timeout
+	Deadline   time.Duration // per Get; 0 = Deadline
 }
 
 type entry struct {

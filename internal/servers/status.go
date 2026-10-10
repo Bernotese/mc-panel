@@ -19,6 +19,8 @@ type Snapshot struct {
 	Docker    string // agentapi.DockerOK or agentapi.DockerUnavailable (only if Reachable)
 	At        time.Time
 	Instances map[int64]agentapi.InstanceStatus // by server id
+	// PanelErrors are reconcile errors that never reached the agent, by server id.
+	PanelErrors map[int64]string
 }
 
 type statusCache struct {

@@ -17,9 +17,10 @@ func (e *env) pass() []string {
 	return e.agent.takeCalls()
 }
 
-// container returns the agent status of instance id in state s with revision rev.
-func container(id, rev int64, s agentapi.ContainerState, op agentapi.Operation) agentapi.InstanceStatus {
-	return agentapi.InstanceStatus{ID: id, Name: "survival", Revision: rev, State: s, Operation: op}
+// container returns the agent status of instance id (container label mcpanel.name = name) in
+// state s with revision rev.
+func container(name string, id, rev int64, s agentapi.ContainerState, op agentapi.Operation) agentapi.InstanceStatus {
+	return agentapi.InstanceStatus{ID: id, Name: name, Revision: rev, State: s, Operation: op}
 }
 
 // Every row of the table in spec §5.3 (plus the plan's refinement: a container that is not
@@ -63,7 +64,7 @@ func TestReconcileTable(t *testing.T) {
 			}
 			mustExec(t, e.db, `UPDATE instances SET desired_state = ?, revision = ? WHERE server_id = ?`, tc.desired, tc.revision, id)
 			if tc.state != missing {
-				e.agent.set(container(id, tc.crev, tc.state, tc.op))
+				e.agent.set(container("survival", id, tc.crev, tc.state, tc.op))
 			}
 			var want []string
 			if tc.want != "" {
@@ -97,7 +98,7 @@ func TestReconcileAgentOutageAndRecovery(t *testing.T) {
 	setBaseDomain(t, e.db, "mc.example.com")
 	admin := e.admin()
 	id := createInstance(t, e.db, "survival")
-	e.agent.set(container(id, 1, agentapi.StateRunning, ""))
+	e.agent.set(container("survival", id, 1, agentapi.StateRunning, ""))
 	e.agent.setErr(agentapi.ErrUnavailable)
 	if calls := e.pass(); len(calls) != 0 {
 		t.Fatalf("calls while down = %v", calls)
@@ -119,7 +120,7 @@ func TestReconcileAgentOutageAndRecovery(t *testing.T) {
 	if !strings.Contains(e.logs.String(), "reconcile resumed") {
 		t.Fatalf("recovery not logged:\n%s", e.logs)
 	}
-	e.agent.set(container(id, 1, agentapi.StateExited, ""))
+	e.agent.set(container("survival", id, 1, agentapi.StateExited, ""))
 	e.h.ReconcileOnce(context.Background())
 	if st := e.get(t, id).Status.State; st != "stopped" {
 		t.Fatalf("state after recovery = %s", st)
@@ -149,7 +150,7 @@ func TestReconcileBacksOff(t *testing.T) {
 	}
 	// the agent keeps failing to create alpha: 10 s, 20 s, 40 s … between attempts, 5 min max
 	e.agent.set(agentapi.InstanceStatus{ID: a, Name: "alpha", State: agentapi.StateMissing, LastError: "pull failed"})
-	e.agent.set(container(b, 1, agentapi.StateRunning, ""))
+	e.agent.set(container("beta", b, 1, agentapi.StateRunning, ""))
 	var at []time.Duration
 	for elapsed := 10 * time.Second; elapsed <= 10*time.Minute; elapsed += 10 * time.Second {
 		e.clk.Advance(10 * time.Second)
@@ -198,8 +199,8 @@ func TestReconcileAfterBaseDomainChange(t *testing.T) {
 	up := createInstance(t, e.db, "alpha")
 	down := createInstance(t, e.db, "beta")
 	mustExec(t, e.db, `UPDATE instances SET desired_state = 'stopped' WHERE server_id = ?`, down)
-	e.agent.set(container(up, 1, agentapi.StateRunning, ""))
-	e.agent.set(container(down, 1, agentapi.StateExited, ""))
+	e.agent.set(container("alpha", up, 1, agentapi.StateRunning, ""))
+	e.agent.set(container("beta", down, 1, agentapi.StateExited, ""))
 	if calls := e.pass(); len(calls) != 0 {
 		t.Fatalf("steady state = %v", calls)
 	}
@@ -232,7 +233,7 @@ func TestReconcileWithoutBaseDomainDoesNotEnsure(t *testing.T) {
 	e := newEnv(t)
 	a := createInstance(t, e.db, "alpha")
 	b := createInstance(t, e.db, "beta")
-	e.agent.set(container(b, 1, agentapi.StateExited, ""))
+	e.agent.set(container("beta", b, 1, agentapi.StateExited, ""))
 	if calls := e.pass(); !slices.Equal(calls, []string{fmt.Sprintf("power %d start", b)}) {
 		t.Fatalf("calls = %v (alpha %d cannot be created without base domain)", calls, a)
 	}

@@ -95,7 +95,7 @@ func (d viewData) server(s store.Server, perms []rbac.Permission) (serverJSON, e
 // view builds the Server schema; in == nil is a server without instance ("not configured",
 // all instance fields null).
 func view(s store.Server, perms []rbac.Permission, in *store.Instance, baseDomain *string, snap Snapshot) (serverJSON, error) {
-	out := serverJSON{ID: s.ID, Name: s.Name, Permissions: perms, Status: deriveStatus(in, snap)}
+	out := serverJSON{ID: s.ID, Name: s.Name, Permissions: perms, Status: deriveStatus(s.Name, in, snap)}
 	if in == nil {
 		return out, nil
 	}
