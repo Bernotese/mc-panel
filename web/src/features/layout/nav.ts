@@ -1,7 +1,7 @@
-import { LayoutDashboard, ScrollText, ShieldCheck, UserRound, Users, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, ScrollText, Settings, ShieldCheck, UserRound, Users, type LucideIcon } from 'lucide-react'
 import type { Role } from '@/api/types'
 
-export type NavPath = '/' | '/users' | '/security' | '/audit' | '/profile'
+export type NavPath = '/' | '/users' | '/security' | '/audit' | '/settings' | '/profile'
 
 export interface NavItem {
   to: NavPath
@@ -15,6 +15,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { to: '/users', labelKey: 'nav.users', icon: Users, adminOnly: true },
   { to: '/security', labelKey: 'nav.security', icon: ShieldCheck, adminOnly: true },
   { to: '/audit', labelKey: 'nav.audit', icon: ScrollText, adminOnly: true },
+  { to: '/settings', labelKey: 'nav.settings', icon: Settings, adminOnly: true },
   { to: '/profile', labelKey: 'nav.profile', icon: UserRound, adminOnly: false },
 ]
 

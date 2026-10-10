@@ -24,6 +24,9 @@ const ERROR_CODES = [
   'jailed',
   'ip_blocked',
   'agent_unavailable',
+  'docker_unavailable',
+  'base_domain_missing',
+  'catalog_unavailable',
   'internal',
 ]
 
@@ -31,7 +34,7 @@ const ERROR_CODES = [
 const DYNAMIC_KEYS = [
   ...['view', 'power', 'console', 'files', 'plugins', 'backups'].map((p) => `permission.server.${p}`),
   ...['light', 'dark', 'system'].map((p) => `theme.${p}`),
-  ...['start', 'stop', 'restart'].flatMap((a) => [`dashboard.power.${a}`, `dashboard.power_noun.${a}`]),
+  ...['start', 'stop', 'restart'].flatMap((a) => [`servers.power.${a}`, `servers.power_noun.${a}`]),
   ...['admin', 'user'].map((r) => `users.role.${r}`),
   ...['24h', '7d', '30d'].map((r) => `security.overview.ranges.${r}`),
   ...['password', 'totp', 'webauthn', 'recovery', 'sudo'].map((s) => `security.attempts.stage.${s}`),
@@ -42,7 +45,29 @@ const DYNAMIC_KEYS = [
   ...['overview', 'attempts', 'jails', 'ip_rules', 'settings', 'notifiers'].map((tab) => `security.tabs.${tab}`),
   ...['de', 'en'].map((l) => `profile.language.${l}`),
   ...['totp', 'webauthn', 'recovery'].map((m) => `second_factor.tab_${m}`),
-  ...['dashboard', 'users', 'security', 'audit', 'profile'].map((k) => `nav.${k}`),
+  ...['dashboard', 'users', 'security', 'audit', 'settings', 'profile'].map((k) => `nav.${k}`),
+  ...['ok', 'unavailable', 'unknown'].map((d) => `settings.docker.${d}`),
+  ...['not_configured', 'unknown', 'creating', 'starting', 'running', 'stopping', 'stopped', 'restarting', 'error'].map(
+    (s) => `servers.state.${s}`,
+  ),
+  ...['vanilla', 'paper', 'purpur', 'fabric', 'neoforge', 'modrinth', 'curseforge'].map((k) => `servers.type.${k}`),
+  ...['vanilla', 'paper', 'purpur', 'fabric', 'neoforge', 'modrinth', 'curseforge'].map((k) => `servers.type_description.${k}`),
+  ...['peaceful', 'easy', 'normal', 'hard'].map((d) => `servers.difficulty.${d}`),
+  ...['survival', 'creative', 'adventure', 'spectator'].map((g) => `servers.gamemode.${g}`),
+  ...['normal', 'flat', 'large_biomes', 'amplified'].map((l) => `servers.level_type.${l}`),
+  ...[
+    'pvp',
+    'hardcore',
+    'allow_flight',
+    'enable_command_block',
+    'online_mode',
+    'whitelist_enabled',
+    'max_players',
+    'view_distance',
+    'simulation_distance',
+    'spawn_protection',
+  ].map((p) => `servers.props.${p}`),
+  ...['pulling', 'creating', 'starting', 'stopping', 'removing'].map((o) => `servers.operation.${o}`),
 ]
 
 describe('i18n resources', () => {

@@ -68,4 +68,32 @@ describe('app router with the real guards', () => {
     expect(await screen.findByText('Deine IP-Adresse ist vorübergehend gesperrt.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Erneut versuchen' })).toBeInTheDocument()
   })
+
+  it('keeps regular users out of the create server page', async () => {
+    const queryClient = createTestQueryClient()
+    applyMe(queryClient, loginAs('alice'))
+    const { router } = await mountApp('/servers/new', queryClient)
+    await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  })
+
+  it('renders the 404 page for a malformed server id', async () => {
+    const queryClient = createTestQueryClient()
+    applyMe(queryClient, loginAs('admin'))
+    await mountApp('/servers/abc', queryClient)
+    expect(await screen.findByText('Seite nicht gefunden')).toBeInTheDocument()
+  })
+
+  it('opens the detail page of a server', async () => {
+    const queryClient = createTestQueryClient()
+    applyMe(queryClient, loginAs('alice'))
+    await mountApp('/servers/1', queryClient)
+    expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
+  })
+
+  it('keeps regular users out of the settings page', async () => {
+    const queryClient = createTestQueryClient()
+    applyMe(queryClient, loginAs('alice'))
+    const { router } = await mountApp('/settings', queryClient)
+    await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  })
 })

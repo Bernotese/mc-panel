@@ -1,0 +1,496 @@
+import { useQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
+import { useId, useState, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
+import { isSudoCancelled } from '@/api/errors'
+import type { Catalog, InstanceType, JavaVersion } from '@/api/types'
+import { NativeSelect } from '@/components/native-select'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { errorMessage } from '@/lib/error-message'
+import { cn } from '@/lib/utils'
+import { catalogQueryOptions } from './api'
+import { CollapsibleSection } from './collapsible-section'
+import { FieldRow } from './field-row'
+import {
+  effectiveJava,
+  effectiveVersion,
+  EULA_URL,
+  PROPERTY_FIELDS,
+  resolveServerForm,
+  sameFormValue,
+  validateServerForm,
+  type FormContext,
+  type FormField,
+  type ServerFormResult,
+  type ServerFormValue,
+} from './form-model'
+import { javaLabel, serverAddress } from './format'
+import { PropertiesFields } from './properties-fields'
+import {
+  DEFAULT_MEMORY_MIB,
+  INSTANCE_TYPES,
+  isModpack,
+  JAVA_VERSIONS,
+  MAX_MEMORY_MIB,
+  MEMORY_STEP_MIB,
+  memoryMiBFromGiB,
+  MIN_MEMORY_MIB,
+  type FieldError,
+} from './validation'
+
+type Shown = (field: FormField) => FieldError | undefined
+type Update = (patch: Partial<ServerFormValue>, ...fields: FormField[]) => void
+
+export interface ServerFormProps {
+  mode: 'create' | 'edit'
+  initial: ServerFormValue
+  /** create only: live address preview */
+  baseDomain?: string | null
+  /** create only: CurseForge can only be chosen with a stored API key */
+  curseforgeKeySet?: boolean
+  submitLabel: string
+  pending: boolean
+  /** Error of the surrounding mutation, rendered below the form (a cancelled sudo dialog is not an error). */
+  error: unknown
+  notice?: ReactNode
+  onSubmit(result: ServerFormResult): void
+}
+
+/** Shared form for creating (name, type, EULA) and editing (everything else) a server. */
+export function ServerForm({
+  mode,
+  initial,
+  baseDomain = null,
+  curseforgeKeySet = false,
+  submitLabel,
+  pending,
+  error,
+  notice,
+  onSubmit,
+}: ServerFormProps) {
+  const { t } = useTranslation()
+  const id = useId()
+  const [value, setValue] = useState<ServerFormValue>(initial)
+  const [touched, setTouched] = useState<ReadonlySet<FormField>>(() => new Set())
+  const [submitted, setSubmitted] = useState(false)
+  const modpack = isModpack(value.type)
+  const catalog = useQuery({ ...catalogQueryOptions(value.type), enabled: !modpack })
+  const ctx: FormContext = { mode, catalog: catalog.data, curseforgeKeySet }
+  const errors = validateServerForm(value, ctx)
+  const hasErrors = Object.keys(errors).length > 0
+  const dirty = mode === 'create' || !sameFormValue(value, initial)
+  const shown: Shown = (field) => (submitted || touched.has(field) ? errors[field] : undefined)
+
+  const update: Update = (patch, ...fields) => {
+    setValue({ ...value, ...patch })
+    if (fields.length > 0) setTouched(new Set([...touched, ...fields]))
+  }
+
+  function changeType(type: InstanceType) {
+    // Version, loader, modpack and java override belong to the previous type.
+    update({ type, version: '', manualVersion: false, loaderVersion: '', modpack: '', javaOverride: '' })
+  }
+
+  return (
+    <form
+      className="max-w-3xl space-y-6"
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault()
+        setSubmitted(true)
+        const result = resolveServerForm(value, ctx)
+        if (result) onSubmit(result)
+      }}
+    >
+      {mode === 'create' ? (
+        <>
+          <NameField id={`${id}-name`} name={value.name} baseDomain={baseDomain} error={shown('name')} onChange={(name) => update({ name }, 'name')} />
+          <TypeField id={`${id}-type`} type={value.type} curseforgeKeySet={curseforgeKeySet} error={shown('type')} onChange={changeType} />
+        </>
+      ) : (
+        <p className="text-sm">
+          <span className="font-medium">{t('servers.form.type')}:</span> {t(`servers.type.${value.type}`)}
+        </p>
+      )}
+      <VersionFields
+        id={id}
+        value={value}
+        catalog={catalog.data}
+        catalogPending={!modpack && catalog.isPending}
+        catalogFailed={catalog.isError}
+        shown={shown}
+        update={update}
+      />
+      <MemoryField id={`${id}-memory`} text={value.memoryGiB} error={shown('memory')} onChange={(memoryGiB) => update({ memoryGiB }, 'memory')} />
+      <CollapsibleSection
+        title={t('servers.form.advanced')}
+        description={t('servers.form.advanced_description')}
+        forceOpen={submitted && (errors.java !== undefined || (value.type === 'neoforge' && errors.loader_version !== undefined))}
+      >
+        <AdvancedFields id={id} value={value} catalog={catalog.data} shown={shown} update={update} />
+      </CollapsibleSection>
+      <CollapsibleSection
+        title={t('servers.form.properties')}
+        description={t('servers.form.properties_description')}
+        forceOpen={submitted && PROPERTY_FIELDS.some((f) => errors[f] !== undefined)}
+      >
+        <PropertiesFields
+          idPrefix={`${id}-prop`}
+          mode={mode}
+          serverName={value.name.trim()}
+          value={value.properties}
+          error={shown}
+          onChange={(patch, field) => update({ properties: { ...value.properties, ...patch } }, ...(field ? [field] : []))}
+        />
+      </CollapsibleSection>
+      {mode === 'create' ? (
+        <EulaField id={`${id}-eula`} checked={value.eulaAccepted} error={shown('eula')} onChange={(eulaAccepted) => update({ eulaAccepted }, 'eula')} />
+      ) : null}
+      <div className="space-y-3">
+        {notice ? <p className="text-muted-foreground text-sm">{notice}</p> : null}
+        {submitted && hasErrors ? (
+          <p role="alert" className="text-destructive text-sm">
+            {t('servers.form.fix_errors')}
+          </p>
+        ) : null}
+        {error && !isSudoCancelled(error) ? (
+          <p role="alert" className="text-destructive text-sm">
+            {errorMessage(error, t)}
+          </p>
+        ) : null}
+        <Button type="submit" disabled={pending || !dirty}>
+          {submitLabel}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function NameField({
+  id,
+  name,
+  baseDomain,
+  error,
+  onChange,
+}: {
+  id: string
+  name: string
+  baseDomain: string | null
+  error: FieldError | undefined
+  onChange(name: string): void
+}) {
+  const { t } = useTranslation()
+  const address = serverAddress(name.trim() || '<name>', baseDomain)
+  return (
+    <div className="space-y-2">
+      <FieldRow id={id} label={t('servers.form.name')} hint={t('servers.form.name_hint')} error={error}>
+        {(c) => (
+          <Input
+            {...c}
+            className="sm:w-80"
+            value={name}
+            autoCapitalize="none"
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={32}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        )}
+      </FieldRow>
+      <p className="text-sm" aria-live="polite">
+        {address ? t('servers.form.address_preview', { address }) : t('servers.form.address_unavailable')}
+      </p>
+    </div>
+  )
+}
+
+function TypeField({
+  id,
+  type,
+  curseforgeKeySet,
+  error,
+  onChange,
+}: {
+  id: string
+  type: InstanceType
+  curseforgeKeySet: boolean
+  error: FieldError | undefined
+  onChange(type: InstanceType): void
+}) {
+  const { t } = useTranslation()
+  return (
+    <fieldset className="space-y-2" aria-describedby={error ? `${id}-error` : undefined}>
+      <legend className="mb-2 text-sm font-medium">{t('servers.form.type')}</legend>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {INSTANCE_TYPES.map((option) => {
+          const optionId = `${id}-${option}`
+          const disabled = option === 'curseforge' && !curseforgeKeySet
+          return (
+            <div key={option} className={cn('flex items-start gap-3 rounded-md border p-3', type === option && 'border-primary', disabled && 'opacity-60')}>
+              <input
+                id={optionId}
+                type="radio"
+                name={id}
+                value={option}
+                checked={type === option}
+                disabled={disabled}
+                aria-describedby={`${optionId}-description`}
+                className="accent-primary mt-0.5 size-4"
+                onChange={() => onChange(option)}
+              />
+              <div className="space-y-0.5">
+                <Label htmlFor={optionId}>{t(`servers.type.${option}`)}</Label>
+                <p id={`${optionId}-description`} className="text-muted-foreground text-sm">
+                  {t(`servers.type_description.${option}`)}
+                </p>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {curseforgeKeySet ? null : (
+        <p className="text-muted-foreground text-sm">
+          {t('servers.form.curseforge_key_hint')}{' '}
+          <Link to="/settings" className="text-primary underline underline-offset-4">
+            {t('settings.link')}
+          </Link>
+        </p>
+      )}
+      {error ? (
+        <p id={`${id}-error`} className="text-destructive text-sm">
+          {t(error.key, error.params ?? {})}
+        </p>
+      ) : null}
+    </fieldset>
+  )
+}
+
+interface VersionFieldsProps {
+  id: string
+  value: ServerFormValue
+  catalog: Catalog | undefined
+  catalogPending: boolean
+  catalogFailed: boolean
+  shown: Shown
+  update: Update
+}
+
+function VersionFields({ id, value, catalog, catalogPending, catalogFailed, shown, update }: VersionFieldsProps) {
+  const { t } = useTranslation()
+  if (isModpack(value.type)) {
+    const modrinth = value.type === 'modrinth'
+    return (
+      <FieldRow
+        id={`${id}-modpack`}
+        label={modrinth ? t('servers.form.modpack_modrinth') : t('servers.form.modpack_curseforge')}
+        hint={modrinth ? t('servers.form.modpack_modrinth_hint') : t('servers.form.modpack_curseforge_hint')}
+        error={shown('modpack')}
+      >
+        {(c) => (
+          <Input
+            {...c}
+            value={value.modpack}
+            autoCapitalize="none"
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(e) => update({ modpack: e.target.value }, 'modpack')}
+          />
+        )}
+      </FieldRow>
+    )
+  }
+
+  const versions = catalog?.versions ?? []
+  // A failed or empty catalog turns the version into free text (spec §6: 502 → Freitext).
+  const listAvailable = !catalogFailed && (catalogPending || versions.length > 0)
+  const current = effectiveVersion(value, catalog)
+  const listed = current === 'LATEST' || versions.some((v) => v.id === current)
+  const useList = listAvailable && !value.manualVersion && (catalogPending || value.version === '' || listed)
+  let hint = t('servers.form.version_manual_hint')
+  if (useList) hint = t('servers.form.version_hint')
+  else if (!listAvailable) hint = t('servers.form.version_catalog_failed')
+  const loaders = catalog?.loaders ?? []
+  const loaderOptions = value.loaderVersion !== '' && !loaders.includes(value.loaderVersion) ? [value.loaderVersion, ...loaders] : loaders
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1">
+        <FieldRow id={`${id}-version`} label={t('servers.form.version')} hint={hint} error={shown('version')}>
+          {(c) =>
+            useList ? (
+              <NativeSelect
+                {...c}
+                className="w-full sm:w-64"
+                value={catalogPending ? '' : current}
+                disabled={catalogPending}
+                onChange={(e) => update({ version: e.target.value }, 'version')}
+              >
+                {catalogPending ? <option value="">{t('servers.form.version_loading')}</option> : null}
+                {versions.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.id}
+                  </option>
+                ))}
+                <option value="LATEST">{t('servers.form.version_latest')}</option>
+              </NativeSelect>
+            ) : (
+              <Input
+                {...c}
+                className="sm:w-64"
+                value={value.version}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="1.21.11"
+                onChange={(e) => update({ version: e.target.value }, 'version')}
+              />
+            )
+          }
+        </FieldRow>
+        {listAvailable && !catalogPending ? (
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto px-0"
+            onClick={() => (useList ? update({ manualVersion: true, version: current }) : update({ manualVersion: false, version: '' }))}
+          >
+            {useList ? t('servers.form.version_manual') : t('servers.form.version_from_list')}
+          </Button>
+        ) : null}
+      </div>
+      {value.type === 'fabric' ? (
+        <FieldRow id={`${id}-loader`} label={t('servers.form.fabric_loader')} error={shown('loader_version')}>
+          {(c) => (
+            <NativeSelect {...c} className="w-full sm:w-64" value={value.loaderVersion} onChange={(e) => update({ loaderVersion: e.target.value }, 'loader_version')}>
+              <option value="">{t('servers.form.loader_latest')}</option>
+              {loaderOptions.map((loader) => (
+                <option key={loader} value={loader}>
+                  {loader}
+                </option>
+              ))}
+            </NativeSelect>
+          )}
+        </FieldRow>
+      ) : null}
+    </div>
+  )
+}
+
+function MemoryField({ id, text, error, onChange }: { id: string; text: string; error: FieldError | undefined; onChange(text: string): void }) {
+  const { t } = useTranslation()
+  const mib = memoryMiBFromGiB(text)
+  const slider = mib !== null && mib >= MIN_MEMORY_MIB && mib <= MAX_MEMORY_MIB ? mib / 1024 : DEFAULT_MEMORY_MIB / 1024
+  return (
+    <FieldRow id={id} label={t('servers.form.memory')} hint={t('servers.form.memory_hint')} error={error}>
+      {(c) => (
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={MIN_MEMORY_MIB / 1024}
+            max={MAX_MEMORY_MIB / 1024}
+            step={MEMORY_STEP_MIB / 1024}
+            value={slider}
+            aria-label={t('servers.form.memory_slider')}
+            aria-valuetext={`${slider} GiB`}
+            className="accent-primary h-2 min-w-0 flex-1"
+            onChange={(e) => onChange(e.target.value)}
+          />
+          <Input
+            {...c}
+            type="number"
+            inputMode="decimal"
+            min={MIN_MEMORY_MIB / 1024}
+            max={MAX_MEMORY_MIB / 1024}
+            step={MEMORY_STEP_MIB / 1024}
+            className="w-24"
+            value={text}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      )}
+    </FieldRow>
+  )
+}
+
+function AdvancedFields({
+  id,
+  value,
+  catalog,
+  shown,
+  update,
+}: {
+  id: string
+  value: ServerFormValue
+  catalog: Catalog | undefined
+  shown: Shown
+  update: Update
+}) {
+  const { t } = useTranslation()
+  const derived = effectiveJava({ ...value, javaOverride: '' }, catalog)
+  return (
+    <>
+      <FieldRow id={`${id}-java`} label={t('servers.form.java')} hint={t('servers.form.java_hint')} error={shown('java')}>
+        {(c) => (
+          <NativeSelect
+            {...c}
+            className="w-full sm:w-64"
+            value={value.javaOverride}
+            onChange={(e) => update({ javaOverride: e.target.value as JavaVersion | '' }, 'java')}
+          >
+            <option value="">{t('servers.form.java_auto', { java: javaLabel(derived) })}</option>
+            {JAVA_VERSIONS.map((java) => (
+              <option key={java} value={java}>
+                {javaLabel(java)}
+              </option>
+            ))}
+          </NativeSelect>
+        )}
+      </FieldRow>
+      {value.type === 'neoforge' ? (
+        <FieldRow id={`${id}-neoforge`} label={t('servers.form.neoforge_version')} hint={t('servers.form.neoforge_version_hint')} error={shown('loader_version')}>
+          {(c) => (
+            <Input
+              {...c}
+              className="sm:w-64"
+              value={value.loaderVersion}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="21.11.38"
+              onChange={(e) => update({ loaderVersion: e.target.value }, 'loader_version')}
+            />
+          )}
+        </FieldRow>
+      ) : null}
+    </>
+  )
+}
+
+function EulaField({ id, checked, error, onChange }: { id: string; checked: boolean; error: FieldError | undefined; onChange(checked: boolean): void }) {
+  const { t } = useTranslation()
+  return (
+    <div className="space-y-1">
+      <div className="flex items-start gap-2">
+        <input
+          id={id}
+          type="checkbox"
+          className="accent-primary mt-0.5 size-4"
+          checked={checked}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={`${id}-message`}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        <Label htmlFor={id} className="leading-snug">
+          {t('servers.form.eula')}
+        </Label>
+      </div>
+      <p id={`${id}-message`} className={cn('text-sm', error ? 'text-destructive' : 'text-muted-foreground')}>
+        {error ? t(error.key, error.params ?? {}) : t('servers.form.eula_hint')}{' '}
+        <a href={EULA_URL} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-4">
+          {t('servers.form.eula_link')}
+        </a>
+      </p>
+    </div>
+  )
+}
