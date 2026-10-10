@@ -500,6 +500,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/servers/catalog/{type}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getServerCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getServerSettings"];
+        put: operations["updateServerSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/servers/{id}": {
         parameters: {
             query?: never;
@@ -513,7 +545,7 @@ export interface paths {
         delete: operations["deleteServer"];
         options?: never;
         head?: never;
-        patch?: never;
+        patch: operations["updateServer"];
         trace?: never;
     };
     "/servers/{id}/power": {
@@ -746,7 +778,7 @@ export interface components {
     schemas: {
         Error: {
             /** @enum {string} */
-            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "internal";
+            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "internal";
             message: string;
             request_id?: string;
         };
@@ -871,16 +903,98 @@ export interface components {
             role?: components["schemas"]["Role"];
             password?: string;
         };
+        /** @enum {string} */
+        InstanceType: "vanilla" | "paper" | "purpur" | "fabric" | "neoforge" | "modrinth" | "curseforge";
+        /** @enum {string} */
+        JavaVersion: "java8" | "java17" | "java21" | "java25";
+        /** @enum {string} */
+        ServerState: "not_configured" | "unknown" | "creating" | "starting" | "running" | "stopping" | "stopped" | "restarting" | "error";
+        ServerProperties: {
+            motd?: string;
+            /** @enum {string} */
+            difficulty?: "peaceful" | "easy" | "normal" | "hard";
+            /** @enum {string} */
+            gamemode?: "survival" | "creative" | "adventure" | "spectator";
+            max_players?: number;
+            pvp?: boolean;
+            hardcore?: boolean;
+            allow_flight?: boolean;
+            enable_command_block?: boolean;
+            online_mode?: boolean;
+            whitelist_enabled?: boolean;
+            whitelist?: string[];
+            ops?: string[];
+            view_distance?: number;
+            simulation_distance?: number;
+            spawn_protection?: number;
+            seed?: string;
+            /** @enum {string} */
+            level_type?: "normal" | "flat" | "large_biomes" | "amplified";
+        };
+        InstanceConfig: {
+            type: components["schemas"]["InstanceType"];
+            /** @description 'LATEST', a version, or '' for modpacks */
+            version: string;
+            loader_version: string | null;
+            modpack: string | null;
+            java: components["schemas"]["JavaVersion"];
+            memory_mib: number;
+            /** @description All fields set (defaults resolved) */
+            properties: components["schemas"]["ServerProperties"];
+        };
+        ServerStatus: {
+            state: components["schemas"]["ServerState"];
+            /** @enum {string|null} */
+            desired_state: "running" | "stopped" | null;
+            restart_required: boolean;
+            /** @enum {string} */
+            operation: "" | "pulling" | "creating" | "starting" | "stopping" | "removing";
+            last_error: string;
+            /**
+             * Format: int64
+             * @description Unix ms; 0 = not running
+             */
+            started_at: number;
+            /** Format: int64 */
+            memory_bytes: number;
+            /** Format: int64 */
+            memory_limit_bytes: number;
+            cpu_percent: number;
+        };
         Server: {
             /** Format: int64 */
             id: number;
             name: string;
             /** @description Effective permissions of the caller (admins get all) */
             permissions: components["schemas"]["Permission"][];
+            /** @description <name>.<base_domain>; null without base domain */
+            address: string | null;
+            instance: components["schemas"]["InstanceConfig"] | null;
+            status: components["schemas"]["ServerStatus"];
         };
         CreateServerRequest: {
             name: string;
+            type: components["schemas"]["InstanceType"];
+            version: string;
+            loader_version?: string | null;
+            modpack?: string | null;
+            /** @description Derived from type/version if omitted */
+            java?: components["schemas"]["JavaVersion"];
+            memory_mib: number;
+            properties?: components["schemas"]["ServerProperties"];
+            /** @constant */
+            eula_accepted: true;
         };
+        /** @description Omitted fields stay unchanged; properties replaces the whole object. */
+        UpdateServerRequest: {
+            version?: string;
+            loader_version?: string | null;
+            modpack?: string | null;
+            java?: components["schemas"]["JavaVersion"];
+            memory_mib?: number;
+            properties?: components["schemas"]["ServerProperties"];
+        };
+        /** @description start/stop set the desired state (applied by the reconcile loop, works without agent); restart needs the agent */
         PowerRequest: {
             /** @enum {string} */
             action: "start" | "stop" | "restart";
@@ -888,6 +1002,34 @@ export interface components {
         PowerResponse: {
             /** @enum {string} */
             status: "accepted";
+        };
+        CatalogVersion: {
+            /** @description Minecraft version for every type, also neoforge (itzg picks the newest NeoForge build for it) */
+            id: string;
+            java: components["schemas"]["JavaVersion"];
+        };
+        Catalog: {
+            /** @description Newest first */
+            versions: components["schemas"]["CatalogVersion"][];
+            /** @description fabric: stable loader versions, newest first; all other types: [] */
+            loaders: string[];
+        };
+        UnknownContainer: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        ServerSettings: {
+            base_domain: string | null;
+            curseforge_api_key_set: boolean;
+            /** @enum {string} */
+            docker: "ok" | "unavailable" | "unknown";
+            unknown_containers: components["schemas"]["UnknownContainer"][];
+        };
+        /** @description Omitted fields stay unchanged; null removes the value. */
+        UpdateServerSettingsRequest: {
+            base_domain?: string | null;
+            curseforge_api_key?: string | null;
         };
         PermissionGrant: {
             /** Format: int64 */
@@ -1119,6 +1261,15 @@ export interface components {
         };
         /** @description Rate limited (Retry-After header set) */
         TooManyRequests: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Agent or Docker not available (agent_unavailable, docker_unavailable) */
+        ServiceUnavailable: {
             headers: {
                 [name: string]: unknown;
             };
@@ -2062,7 +2213,108 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            /** @description conflict (name taken) or base_domain_missing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getServerCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                type: components["schemas"]["InstanceType"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Catalog"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description No catalog for modrinth/curseforge (the pack decides the version) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description catalog_unavailable: upstream not reachable or invalid; the form falls back to free text */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getServerSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateServerSettings: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateServerSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerSettings"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getServer: {
@@ -2113,6 +2365,41 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateServer: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateServerRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Server"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     serverPower: {
@@ -2145,7 +2432,17 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description conflict (server not configured) or base_domain_missing (restart) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listAudit: {

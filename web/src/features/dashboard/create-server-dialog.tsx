@@ -12,7 +12,7 @@ import { errorMessage } from '@/lib/error-message'
 import { cn } from '@/lib/utils'
 import { serversKey } from './servers'
 
-const SERVER_NAME = /^[a-z0-9][a-z0-9-]{1,31}$/
+const SERVER_NAME = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/
 
 export function CreateServerDialog({ open, onOpenChange }: { open: boolean; onOpenChange(open: boolean): void }) {
   const { t } = useTranslation()
@@ -22,8 +22,11 @@ export function CreateServerDialog({ open, onOpenChange }: { open: boolean; onOp
   const trimmed = name.trim()
   const invalid = trimmed !== '' && !SERVER_NAME.test(trimmed)
 
+  // Interim until the full form (/servers/new, task 19): a Paper server, latest version, 4 GiB.
+  // The dialog description tells the admin that creating the server accepts the Minecraft EULA.
   const create = useMutation({
-    mutationFn: () => unwrap(api.POST('/servers', { body: { name: trimmed } })),
+    mutationFn: () =>
+      unwrap(api.POST('/servers', { body: { name: trimmed, type: 'paper', version: 'LATEST', memory_mib: 4096, eula_accepted: true } })),
     onSuccess: (server) => {
       toast.success(t('dashboard.created', { name: server.name }))
       setName('')
