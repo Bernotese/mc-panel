@@ -13,6 +13,7 @@ import (
 // (JVM_OPTS, GENERIC_PACK, MODS, PLUGINS, ...) would let the panel smuggle in code.
 var allowedKeys = []string{
 	"EULA", "TYPE", "VERSION", "MEMORY", "ENABLE_AUTOPAUSE", "ENABLE_RCON", "OVERRIDE_SERVER_PROPERTIES",
+	"EXISTING_OPS_FILE", "EXISTING_WHITELIST_FILE",
 	"FABRIC_LOADER_VERSION", "NEOFORGE_VERSION", "MODRINTH_MODPACK", "CF_SLUG", "CF_PAGE_URL", "CF_API_KEY",
 	"MOTD", "DIFFICULTY", "MODE", "MAX_PLAYERS", "PVP", "HARDCORE", "ALLOW_FLIGHT", "ENABLE_COMMAND_BLOCK",
 	"ONLINE_MODE", "ENABLE_WHITELIST", "WHITELIST", "OPS", "VIEW_DISTANCE", "SIMULATION_DISTANCE",
@@ -29,6 +30,7 @@ func TestEnvPaper(t *testing.T) {
 	want := []string{
 		"EULA=TRUE", "TYPE=PAPER", "VERSION=1.21.4", "MEMORY=4096M", "ENABLE_AUTOPAUSE=false",
 		"ENABLE_RCON=true", "OVERRIDE_SERVER_PROPERTIES=true",
+		"EXISTING_OPS_FILE=SYNCHRONIZE", "EXISTING_WHITELIST_FILE=SYNCHRONIZE",
 		"MOTD=Hallo", "DIFFICULTY=normal", "MODE=survival", "MAX_PLAYERS=20", "PVP=true", "HARDCORE=false",
 		"ALLOW_FLIGHT=false", "ENABLE_COMMAND_BLOCK=false", "ONLINE_MODE=true", "ENABLE_WHITELIST=true",
 		"WHITELIST=Notch,jeb_", "VIEW_DISTANCE=10", "SIMULATION_DISTANCE=10", "SPAWN_PROTECTION=16",
@@ -98,6 +100,25 @@ func TestEnvPerType(t *testing.T) {
 				t.Errorf("%s: must not set %s", c.spec.Type, n)
 			}
 		}
+	}
+}
+
+// A whitelist that is switched off must not be sent: itzg enables whitelisting as soon as
+// WHITELIST is set.
+func TestEnvOmitsDisabledWhitelist(t *testing.T) {
+	s := validSpec()
+	s.Properties = instancespec.Properties{Whitelist: []string{"Notch"}, WhitelistEnabled: ptr(false)}
+	env, err := instancespec.Env("survival", s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "WHITELIST=") {
+			t.Fatalf("disabled whitelist must not be sent: %q", env)
+		}
+	}
+	if !slices.Contains(env, "ENABLE_WHITELIST=false") {
+		t.Fatalf("missing ENABLE_WHITELIST=false in %q", env)
 	}
 }
 

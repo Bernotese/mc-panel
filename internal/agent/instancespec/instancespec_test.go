@@ -107,7 +107,7 @@ func TestNamesAndDomains(t *testing.T) {
 			t.Errorf("ValidName(%q) = false", n)
 		}
 	}
-	for _, n := range []string{"", "a", "-x", "Upper", "a_b", "a.b", strings.Repeat("a", 33)} {
+	for _, n := range []string{"", "a", "-x", "x-", "Upper", "a_b", "a.b", strings.Repeat("a", 33)} {
 		if instancespec.ValidName(n) {
 			t.Errorf("ValidName(%q) = true", n)
 		}

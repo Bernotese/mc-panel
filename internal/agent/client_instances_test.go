@@ -88,10 +88,10 @@ func TestClientInstanceCallsValidateBeforeSending(t *testing.T) {
 	if err := c.Ensure(ctx, agentapi.EnsureRequest{ID: 1, Name: "survival"}); !errors.Is(err, instancespec.ErrInvalid) {
 		t.Fatalf("Ensure invalid: %v", err)
 	}
-	if err := c.Power(ctx, 1, "kill"); !errors.Is(err, agent.ErrInvalid) {
+	if err := c.Power(ctx, 1, "kill"); !errors.Is(err, agent.ErrInvalid) || !errors.Is(err, instancespec.ErrInvalid) {
 		t.Fatalf("Power invalid: %v", err)
 	}
-	if err := c.Remove(ctx, 0); !errors.Is(err, agent.ErrInvalid) {
+	if err := c.Remove(ctx, 0); !errors.Is(err, agent.ErrInvalid) || !errors.Is(err, instancespec.ErrInvalid) {
 		t.Fatalf("Remove invalid: %v", err)
 	}
 	if calls != 0 {
@@ -108,6 +108,8 @@ func TestClientInstanceErrors(t *testing.T) {
 		{http.StatusServiceUnavailable, `{"error":"docker unavailable","code":"docker_unavailable"}`, agentapi.ErrDockerUnavailable},
 		{http.StatusTooManyRequests, `{"error":"queue full","code":"busy"}`, agentapi.ErrBusy},
 		{http.StatusBadRequest, `{"error":"bad"}`, agent.ErrInvalid},
+		// One sentinel for the panel: an agent-side 400 is a validation error too.
+		{http.StatusBadRequest, `{"error":"bad"}`, instancespec.ErrInvalid},
 	} {
 		path := handlerServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
