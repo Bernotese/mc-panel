@@ -131,7 +131,7 @@ Linux-spezifische Dateien lokal linten: `GOOS=linux .dev/tools/golangci-lint run
 - Requests und DB-Zugriffe immer mit Kontext: `http.NewRequestWithContext`, `QueryContext`/`ExecContext`/`PingContext`. Ausnahme ist `net.Listen` im agent (`cmd/agent/`, `internal/agent/`).
 - Dateimodus `0660` (agent-Socket, Spec §3) ist nur in `cmd/agent/` und `internal/agent/` für gosec G302 freigegeben, sofern er als Literal (`0o660`) in der Zeile steht; überall sonst und für andere Modi über `0600` ist eine Begründung nötig (z. B. `internal/unixsock`, das den Modus der Sockets von agent und panel setzt).
 - In Tests sind feste Test-Passwörter, `math/rand` und lockere Dateimodi erlaubt.
-- Formatierung: `gofmt` + `goimports` mit lokalem Präfix `mcpanel` (`golangci-lint fmt ./...`).
+- Formatierung: `gofmt` + `goimports` mit lokalem Präfix `github.com/Bernotese/mc-panel` (`golangci-lint fmt ./...`).
 
 ## Release
 

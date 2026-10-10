@@ -17,7 +17,7 @@ Gelten zusätzlich zu allen Global Constraints aus `2026-10-08-foundation-00-ove
 - **Eigene Pfade (nur diese anlegen/ändern):** `.github/**`, `.golangci.yml`, `.goreleaser.yaml`, `docs/dev/**`, `scripts/vm-setup.sh`, `scripts/vm-test.sh`. Kein Anwendungscode, nichts unter `web/`, `cmd/`, `internal/`.
 - **Phase-0-Dateien sind schreibgeschützt** (`Makefile`, `go.mod`, `.gitignore`, `scripts/dev.sh`, …). Einzige Ausnahme: reine Whitespace-Formatierung durch `gofmt` in Task 1 Step 5 (nachweisbar per `git diff -w --exit-code`).
 - Arbeitsort: eigener Worktree auf Branch `stream/f`, abgezweigt vom Tag `phase0`.
-- Build-Invarianten: Modul `mcpanel`, `CGO_ENABLED=0` für alle Release-Builds, Ziele nur `linux/amd64` und `linux/arm64`, Frontend liegt nach `make web-build` in `internal/webui/dist/` (mit `.gitkeep`), `web/go.mod` hält `web/` aus `./...` heraus.
+- Build-Invarianten: Modul `github.com/Bernotese/mc-panel`, `CGO_ENABLED=0` für alle Release-Builds, Ziele nur `linux/amd64` und `linux/arm64`, Frontend liegt nach `make web-build` in `internal/webui/dist/` (mit `.gitkeep`), `web/go.mod` hält `web/` aus `./...` heraus.
 - Version wird ausschließlich per `-ldflags "-X main.version={{ .Version }}"` gesetzt (Tag `v1.2.3` → `1.2.3`).
 - GitHub Actions: jede `uses:`-Referenz ist auf einen vollständigen Commit-SHA gepinnt, mit Versionskommentar (`# v7.0.1`). Die SHAs unten wurden am 2026-10-08 per `git ls-remote` aufgelöst.
 - Werkzeugversionen sind gepinnt (siehe Tech Stack). Lokal werden versionssensible Werkzeuge (golangci-lint, actionlint, govulncheck) mit derselben Version wie in CI aufgerufen.
@@ -1601,7 +1601,7 @@ Linux-spezifische Dateien lokal linten: `GOOS=linux .dev/tools/golangci-lint run
 - Requests und DB-Zugriffe immer mit Kontext: `http.NewRequestWithContext`, `QueryContext`/`ExecContext`/`PingContext`. Ausnahme ist `net.Listen` im agent (`cmd/agent/`, `internal/agent/`).
 - Dateimodus `0660` (agent-Socket, Spec §3) ist für gosec G302 freigegeben, sofern er als Literal (`0o660`) in der Zeile steht; andere Modi über `0600` brauchen eine Begründung.
 - In Tests sind feste Test-Passwörter, `math/rand` und lockere Dateimodi erlaubt.
-- Formatierung: `gofmt` + `goimports` mit lokalem Präfix `mcpanel` (`golangci-lint fmt ./...`).
+- Formatierung: `gofmt` + `goimports` mit lokalem Präfix `github.com/Bernotese/mc-panel` (`golangci-lint fmt ./...`).
 
 ## Release
 

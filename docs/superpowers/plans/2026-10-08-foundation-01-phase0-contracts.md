@@ -59,7 +59,7 @@ web/  (Vite-Scaffold), web/go.mod
 **Files:**
 - Create: `go.mod`, `.gitignore`, `internal/deps/deps.go`, `web/go.mod`
 
-**Interfaces:** Produces: Modul `mcpanel`.
+**Interfaces:** Produces: Modul `github.com/Bernotese/mc-panel`.
 
 - [ ] **Step 1: Toolchain installieren**
 
@@ -73,7 +73,7 @@ Expected: alle Versionen werden ausgegeben.
 
 ```bash
 cd /Users/jannes/Workspace/mc-panel
-go mod init mcpanel
+go mod init github.com/Bernotese/mc-panel
 ```
 
 - [ ] **Step 3: `.gitignore` schreiben**
@@ -121,7 +121,7 @@ import (
 
 ```
 // Separate empty module so that `go ./...` and golangci-lint skip web/node_modules.
-module mcpanel/web
+module github.com/Bernotese/mc-panel/web
 ```
 
 - [ ] **Step 6: Abhängigkeiten holen**
@@ -167,7 +167,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/clock"
 )
 
 func TestFakeAdvance(t *testing.T) {
@@ -288,7 +288,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/config"
 )
 
 func TestDefaultPanelIsValidAfterSettingPublicURL(t *testing.T) {
@@ -664,7 +664,7 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/httpx"
 )
 
 func TestWriteError(t *testing.T) {
@@ -1104,7 +1104,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mcpanel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
 )
 
 func TestSealOpenRoundTrip(t *testing.T) {
@@ -1505,8 +1505,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 func TestMigrateIsIdempotentAndCreatesTables(t *testing.T) {
@@ -1707,7 +1707,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func Open(t testing.TB) *sql.DB {
@@ -1773,7 +1773,7 @@ import (
 	"context"
 	"testing"
 
-	"mcpanel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
 func TestContextRoundTrip(t *testing.T) {
@@ -1796,7 +1796,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 func TestValidateBanPrefix(t *testing.T) {
@@ -2289,9 +2289,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
 )
 
 type fakeChecker map[[2]int64][]rbac.Permission
@@ -2416,7 +2416,7 @@ import (
 	"fmt"
 	"slices"
 
-	"mcpanel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
 type Permission string
@@ -2521,9 +2521,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
 // Checker answers per-server permission questions (implemented in stream D).
@@ -3101,7 +3101,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"mcpanel/internal/webui"
+	"github.com/Bernotese/mc-panel/internal/webui"
 )
 
 func get(h http.Handler, path string) (int, string, http.Header) {
@@ -3162,7 +3162,7 @@ import (
 	"path"
 	"strings"
 
-	"mcpanel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/httpx"
 )
 
 //go:embed all:dist
@@ -3235,13 +3235,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/secretbox"
-	"mcpanel/internal/store"
-	"mcpanel/internal/webui"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/webui"
 )
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
@@ -3629,7 +3629,7 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/password"
 )
 
 func TestValidate(t *testing.T) {

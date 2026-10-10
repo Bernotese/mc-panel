@@ -373,11 +373,11 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 var t0 = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
@@ -474,7 +474,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func TestReloadBuildsSnapshot(t *testing.T) {
@@ -578,11 +578,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // Rate limits (spec §7.1).
@@ -704,7 +704,7 @@ import (
 	"slices"
 	"time"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 type ruleEntry struct {
@@ -888,7 +888,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func wantRateLimited(t *testing.T, err error, max time.Duration) {
@@ -1030,7 +1030,7 @@ import (
 	"strings"
 	"time"
 
-	"mcpanel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/httpx"
 )
 
 func normalizeUsername(u string) string { return strings.ToLower(strings.TrimSpace(u)) }
@@ -1163,10 +1163,10 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 func (e *env) fail(t *testing.T, ip string, n int) {
@@ -1409,10 +1409,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 var _ LoginGuard = (*Service)(nil)
@@ -1623,9 +1623,9 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func okHandler() http.Handler {
@@ -1788,8 +1788,8 @@ import (
 	"strings"
 	"time"
 
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
 // blockReason returns why ip is blocked by deny rules or the country filter
@@ -2307,7 +2307,7 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 // fakeAgent is an in-memory agentapi.Client.
@@ -2599,8 +2599,8 @@ import (
 	"sync"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // isUnavailable reports transient agent failures that must be retried later.
@@ -2917,9 +2917,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
 )
 
 type denyChecker struct{}
@@ -2994,8 +2994,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
 )
 
 func TestListJails(t *testing.T) {
@@ -3125,10 +3125,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // Handler serves the security-center API (/api/security/...).
@@ -3236,9 +3236,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const (
@@ -3403,7 +3403,7 @@ func (h *Handler) liftJail(w http.ResponseWriter, r *http.Request) {
 ```go
 package defense
 
-import "mcpanel/internal/rbac"
+import "github.com/Bernotese/mc-panel/internal/rbac"
 
 // Routes registers the security-center endpoints with full paths relative to /api.
 func (h *Handler) Routes(api *rbac.Router) {
@@ -3475,9 +3475,9 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func ruleBody(cidr, kind string) map[string]any {
@@ -3594,7 +3594,7 @@ import (
 	"slices"
 	"time"
 
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // locksOut reports why ip would be locked out of the panel under this snapshot.
@@ -3656,9 +3656,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const maxRuleCommentLen = 200
@@ -3821,7 +3821,7 @@ func (h *Handler) deleteIPRule(w http.ResponseWriter, r *http.Request) {
 ```go
 package defense
 
-import "mcpanel/internal/rbac"
+import "github.com/Bernotese/mc-panel/internal/rbac"
 
 // Routes registers the security-center endpoints with full paths relative to /api.
 func (h *Handler) Routes(api *rbac.Router) {
@@ -3873,9 +3873,9 @@ import (
 	"slices"
 	"testing"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func settingsBody(enforce, allowlistOnly bool, countries []string) map[string]any {
@@ -3983,9 +3983,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const maxAllowedCountries = 300
@@ -4090,7 +4090,7 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) {
 ```go
 package defense
 
-import "mcpanel/internal/rbac"
+import "github.com/Bernotese/mc-panel/internal/rbac"
 
 // Routes registers the security-center endpoints with full paths relative to /api.
 func (h *Handler) Routes(api *rbac.Router) {
@@ -4221,8 +4221,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 type overviewJSON struct {
@@ -4424,7 +4424,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/rbac"
 )
 
 // TestRoutesDeclareRules pins every security route to the rule from the OpenAPI table.
@@ -4472,8 +4472,8 @@ import (
 	"strings"
 	"time"
 
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 type rangeSpec struct{ total, bucket time.Duration }
@@ -4725,7 +4725,7 @@ func (h *Handler) agentStatus(w http.ResponseWriter, r *http.Request) {
 ```go
 package defense
 
-import "mcpanel/internal/rbac"
+import "github.com/Bernotese/mc-panel/internal/rbac"
 
 // Routes registers the security-center endpoints with full paths relative to /api.
 func (h *Handler) Routes(api *rbac.Router) {
@@ -4797,8 +4797,8 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func TestUnlock(t *testing.T) {
@@ -4879,9 +4879,9 @@ import (
 	"slices"
 	"strings"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // UnlockResult summarizes what Unlock changed.
@@ -5000,7 +5000,7 @@ import (
 	"strings"
 	"testing"
 
-	"mcpanel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
 )
 
 const testWebhook = "https://discord.com/api/webhooks/123456789012345678/SuperSecretToken_abc-XYZ"
@@ -5111,7 +5111,7 @@ import (
 	"strings"
 	"unicode"
 
-	"mcpanel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
 )
 
 type Kind string
@@ -5798,10 +5798,10 @@ import (
 	"testing"
 	"time"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/secretbox"
-	"mcpanel/internal/store"
-	"mcpanel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
 var dT0 = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
@@ -6025,9 +6025,9 @@ import (
 	"sync"
 	"time"
 
-	"mcpanel/internal/clock"
-	"mcpanel/internal/secretbox"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const (
@@ -6272,10 +6272,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/principal"
-	"mcpanel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
+	"github.com/Bernotese/mc-panel/internal/rbac"
 )
 
 type noPerms struct{}
@@ -6524,12 +6524,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/secretbox"
-	"mcpanel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 const maxNotifierNameLen = 64
