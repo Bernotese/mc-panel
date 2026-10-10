@@ -84,7 +84,24 @@ MCPANEL_DEV_DOCKER=1 make dev
 - Basisdomain in den Einstellungen: `mc.localhost`; für den Minecraft-Client `/etc/hosts` um `127.0.0.1 <name>.mc.localhost` ergänzen.
 - Aufräumen: `docker rm -f $(docker ps -aq --filter label=mcpanel.instance) mcpanel-router; docker network rm mcpanel-mc`.
 
-Funktionstests gegen echte Server (Clients, Modpacks, Neustarts) laufen getrennt auf einem Testserver; die Checkliste steht in `docs/dev/acceptance-tp2.md`.
+Funktionstests gegen echte Server (Clients, Modpacks, Neustarts) laufen getrennt auf der Test-VM (nächster Abschnitt); die Checkliste steht in `docs/dev/acceptance-tp2.md`.
+
+## Test-VM
+
+Für manuelle Tests gegen das echte Backend mit Docker, nftables und Caddy gibt es eine interne VM: Ubuntu 26.04, `claude@192.168.1.117`, passwortloses `sudo`, ausgehender Internetzugang, aber von außen nicht erreichbar. Anders als auf dem Mac darf Claude dort alles installieren und umbauen.
+
+```bash
+make deploy-testvm                         # main von GitHub
+make deploy-testvm REF=feat/mein-branch    # beliebiger Branch, Tag oder Commit (muss gepusht sein)
+make deploy-testvm TESTVM=user@andere-vm   # andere VM
+```
+
+- `scripts/testvm-deploy.sh` läuft per `ssh … bash -s` auf der VM. Beim ersten Lauf installiert es Docker, Caddy, nftables, Go (Version aus `go.mod`, nach `/usr/local/go`) und Node.js 24 (nach `/usr/local/lib/nodejs`). Danach holt es das Repo mit dem Deploy-Key der VM nach `~/mc-panel`, baut panel und agent (Version `0.0.0-testvm+<commit>`), installiert sie nach `/usr/local/bin`, schreibt Konfiguration, systemd-Units (`mcpanel-agent`, `mcpanel-panel`, starten auch nach einem Neustart) und Caddyfile neu und startet die Dienste neu. Daten bleiben erhalten (`/var/lib/mc-panel`, `/srv/mc-panel`).
+- Adressen über [sslip.io](https://sslip.io) (öffentliches Wildcard-DNS, das auf die IP im Namen auflöst): Panel <https://panel.192-168-1-117.sslip.io/>, Basisdomain für Minecraft `mc.192-168-1-117.sslip.io`, im Client also `<server>.mc.192-168-1-117.sslip.io`. `https://192.168.1.117` leitet auf den Panel-Namen um.
+- TLS: Let's Encrypt erreicht die VM nicht, deshalb signiert Caddy mit seiner internen CA (`tls internal`). Bis die CA vertraut ist, warnt der Browser; die Warnung lässt sich wegklicken (TOTP-Login geht), Passkeys aber nicht (WebAuthn verweigert Seiten mit Zertifikatsfehlern). Die CA vertrauen: `scp claude@192.168.1.117:caddy-root.crt /tmp/ && sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /tmp/caddy-root.crt` (systemweit, also nur durch den Nutzer). Das Root-Zertifikat bleibt über Deploys gleich.
+- Erster Admin: `ssh claude@192.168.1.117 "printf '%s\n' '<passwort>' | sudo -u mcpanel panel admin create -config /etc/mc-panel/panel.toml -username admin"`.
+- Logs: `ssh claude@192.168.1.117 journalctl -u mcpanel-agent -u mcpanel-panel -f`. Konfiguration: `/etc/mc-panel/{panel,agent}.toml`; Änderungen dort überschreibt der nächste Deploy, also im Skript ändern.
+- Das panel lauscht auf der VM auf `127.0.0.1:8080` (wie in `docs/dev/acceptance-tp2.md`), nicht auf dem Unix-Socket aus dem Produktionsprofil; die endgültigen Units liefert der Installer (Teilprojekt 6).
 
 ## End-to-End-Tests (Playwright)
 
@@ -140,6 +157,7 @@ In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er 
 | `make generate` | `sqlc generate` und `npm run gen:api` |
 | `make build` | Frontend bauen, dann `bin/panel` (und `bin/agent`) für das Host-System |
 | `make release` | GoReleaser-Snapshot nach `dist/`: Archive für linux/amd64 und linux/arm64 plus `checksums.txt` |
+| `make deploy-testvm` | baut `REF` (Standard `main`) auf der Test-VM aus GitHub und deployt ihn dort (siehe „Test-VM“) |
 | `make clean` | entfernt `bin/`, `dist/`, `.dev/` und das gebaute Frontend |
 
 ## CI lokal nachstellen

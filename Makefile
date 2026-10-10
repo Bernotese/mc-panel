@@ -2,7 +2,7 @@ SHELL := /bin/bash
 GO ?= go
 export CGO_ENABLED ?= 0
 
-.PHONY: generate check test test-go test-race test-web lint dev preview preview-logs preview-down web-build build release clean
+.PHONY: generate check test test-go test-race test-web lint dev preview preview-logs preview-down web-build build release deploy-testvm clean
 
 generate:
 	sqlc generate
@@ -14,7 +14,7 @@ generate:
 check:
 	@files="$$(gofmt -l $$(git ls-files '*.go'))"; if [ -n "$$files" ]; then echo "gofmt needed:"; echo "$$files"; exit 1; fi
 	$(GO) vet ./...
-	GOOS=linux $(GO) vet -tags nftintegration ./...
+	GOOS=linux $(GO) vet -tags nftintegration,dockerintegration ./...
 	GOOS=linux GOARCH=arm64 $(GO) build ./...
 	cd web && npm run typecheck
 
@@ -58,6 +58,13 @@ build: web-build
 
 release:
 	goreleaser release --clean --snapshot
+
+# Builds REF on the internal test VM from GitHub and (re)deploys it there (docs/dev/README.md, "Test-VM").
+TESTVM ?= claude@192.168.1.117
+REF ?= main
+
+deploy-testvm:
+	ssh $(TESTVM) 'bash -s -- $(REF)' < scripts/testvm-deploy.sh
 
 clean:
 	rm -rf bin dist .dev

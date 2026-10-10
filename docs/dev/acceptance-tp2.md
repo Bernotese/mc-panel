@@ -6,6 +6,8 @@ Manuell auf einem Testserver (Ubuntu 26.04 mit Docker, Release-Archiv aus einem 
 
 ## Testserver einrichten (bis der Installer aus Teilprojekt 6 existiert)
 
+Auf der internen Test-VM erledigt das `make deploy-testvm` (`docs/dev/README.md`, „Test-VM“); dort ist die Basisdomain `mc.192-168-1-117.sslip.io` und die Units sind dauerhaft, Kriterium 6 braucht also keinen manuellen Neustart der Dienste. Für einen anderen Server von Hand:
+
 Als root auf einem frischen Ubuntu 26.04 (DNS: `panel.<domain>` und `*.mc.<domain>` zeigen auf den Server; Ports 80, 443 und 25565 offen):
 
 ```bash
