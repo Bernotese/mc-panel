@@ -56,7 +56,7 @@ func TestClientHealth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
-	if h != (agentapi.HealthResponse{Status: "ok", Version: "test", Firewall: "noop"}) {
+	if h != (agentapi.HealthResponse{Status: "ok", Version: "test", Firewall: "noop", Docker: "unavailable"}) {
 		t.Fatalf("health = %+v", h)
 	}
 }
@@ -333,6 +333,17 @@ func TestStatusErrorMapping(t *testing.T) {
 			t.Errorf("status %d: unavailable=%v invalid=%v conflict=%v", tc.code,
 				errors.Is(err, agentapi.ErrUnavailable), errors.Is(err, agent.ErrInvalid), errors.Is(err, agent.ErrConflict))
 		}
+	}
+	busy := error(&agent.StatusError{StatusCode: 429, Message: "queue full", Code: agentapi.ErrorCodeBusy})
+	if !errors.Is(busy, agentapi.ErrBusy) || errors.Is(busy, agent.ErrInvalid) {
+		t.Errorf("429 busy must map to ErrBusy only")
+	}
+	docker := error(&agent.StatusError{StatusCode: 503, Message: "docker unavailable", Code: agentapi.ErrorCodeDockerUnavailable})
+	if !errors.Is(docker, agentapi.ErrDockerUnavailable) || !errors.Is(docker, agentapi.ErrUnavailable) {
+		t.Errorf("503 docker_unavailable must map to ErrDockerUnavailable and ErrUnavailable")
+	}
+	if errors.Is(&agent.StatusError{StatusCode: 503, Message: "x"}, agentapi.ErrDockerUnavailable) {
+		t.Errorf("503 without code must not be ErrDockerUnavailable")
 	}
 }
 

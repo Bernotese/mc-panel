@@ -1,0 +1,20 @@
+[
+  { "type": "vanilla", "version": "1.8.9", "java": "java8" },
+  { "type": "paper", "version": "1.16.5", "java": "java8" },
+  { "type": "paper", "version": "1.17", "java": "java17" },
+  { "type": "paper", "version": "1.17.1", "java": "java17" },
+  { "type": "fabric", "version": "1.18.2", "java": "java17" },
+  { "type": "paper", "version": "1.20.4", "java": "java17" },
+  { "type": "paper", "version": "1.20.5", "java": "java21" },
+  { "type": "neoforge", "version": "1.20.6", "java": "java21" },
+  { "type": "purpur", "version": "1.21", "java": "java21" },
+  { "type": "paper", "version": "1.21.11", "java": "java21" },
+  { "type": "vanilla", "version": "26.1", "java": "java25" },
+  { "type": "paper", "version": "26.1.2", "java": "java25" },
+  { "type": "vanilla", "version": "26.3", "java": "java25" },
+  { "type": "vanilla", "version": "LATEST", "java": "java25" },
+  { "type": "fabric", "version": "26.4-snapshot-3", "java": "java25" },
+  { "type": "paper", "version": "1.20.4-rc1", "java": "java17" },
+  { "type": "modrinth", "version": "", "java": "java21" },
+  { "type": "curseforge", "version": "", "java": "java21" }
+]

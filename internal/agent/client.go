@@ -13,6 +13,7 @@ import (
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
 )
 
 const (
@@ -33,20 +34,27 @@ var (
 type StatusError struct {
 	StatusCode int
 	Message    string
+	Code       string // agentapi.ErrorCode*, may be empty
 }
 
 func (e *StatusError) Error() string {
 	return fmt.Sprintf("agent: HTTP %d: %s", e.StatusCode, e.Message)
 }
 
-// Is maps status codes to the sentinel errors: 409 -> ErrConflict, other 4xx
-// -> ErrInvalid, everything else non-2xx -> agentapi.ErrUnavailable.
+// Is maps status codes to the sentinel errors: 409 -> ErrConflict, 429 -> agentapi.ErrBusy,
+// other 4xx -> ErrInvalid, everything else non-2xx -> agentapi.ErrUnavailable; a 503 with
+// code docker_unavailable additionally matches agentapi.ErrDockerUnavailable.
 func (e *StatusError) Is(target error) bool {
 	switch {
+	case target == agentapi.ErrDockerUnavailable:
+		return e.StatusCode == http.StatusServiceUnavailable && e.Code == agentapi.ErrorCodeDockerUnavailable
 	case e.StatusCode == http.StatusConflict:
 		return target == banrules.ErrConflict
+	case e.StatusCode == http.StatusTooManyRequests:
+		return target == agentapi.ErrBusy
 	case e.StatusCode >= 400 && e.StatusCode < 500:
-		return target == banrules.ErrInvalid
+		// Firewall callers check banrules.ErrInvalid, instance callers instancespec.ErrInvalid.
+		return target == banrules.ErrInvalid || target == instancespec.ErrInvalid
 	default:
 		// 1xx, 3xx, 5xx and anything else the agent never sends: treat as
 		// a transient/unknown condition, never as a permanent rejection.
@@ -123,6 +131,37 @@ func (c *Client) Bans(ctx context.Context) ([]agentapi.Ban, error) {
 	return out.Bans, nil
 }
 
+var _ agentapi.InstancesClient = (*Client)(nil)
+
+func (c *Client) Instances(ctx context.Context) (agentapi.InstancesResponse, error) {
+	var out agentapi.InstancesResponse
+	if err := c.do(ctx, http.MethodGet, agentapi.PathInstances, nil, &out); err != nil {
+		return agentapi.InstancesResponse{}, err
+	}
+	return out, nil
+}
+
+func (c *Client) Ensure(ctx context.Context, req agentapi.EnsureRequest) error {
+	if err := req.Validate(); err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodPost, agentapi.PathInstanceEnsure, req, nil)
+}
+
+func (c *Client) Power(ctx context.Context, id int64, action agentapi.PowerAction) error {
+	if id <= 0 || !agentapi.ValidPowerAction(action) {
+		return fmt.Errorf("%w: %w: power: id must be > 0 and action start, stop or restart", ErrInvalid, instancespec.ErrInvalid)
+	}
+	return c.do(ctx, http.MethodPost, agentapi.PathInstancePower, agentapi.PowerRequest{ID: id, Action: action}, nil)
+}
+
+func (c *Client) Remove(ctx context.Context, id int64) error {
+	if id <= 0 {
+		return fmt.Errorf("%w: %w: remove: id must be > 0", ErrInvalid, instancespec.ErrInvalid)
+	}
+	return c.do(ctx, http.MethodPost, agentapi.PathInstanceRemove, agentapi.RemoveRequest{ID: id}, nil)
+}
+
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -163,7 +202,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		if json.Unmarshal(data, &er) == nil && er.Error != "" {
 			msg = er.Error
 		}
-		return &StatusError{StatusCode: resp.StatusCode, Message: msg}
+		return &StatusError{StatusCode: resp.StatusCode, Message: msg, Code: er.Code}
 	}
 	if out == nil {
 		return nil

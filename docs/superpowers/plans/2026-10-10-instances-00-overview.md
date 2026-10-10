@@ -45,7 +45,7 @@ B1 und B2 laufen parallel und berühren disjunkte Dateien: B1 nur `internal/conf
 
 - Alle Global Constraints aus TP1 gelten weiter (`docs/superpowers/plans/2026-10-08-foundation-00-overview.md`, Abschnitt „Global Constraints“) und alle Konventionen aus `CLAUDE.md`: `clock.Clock` statt `time.Now()`, Kontext überall, Go-Tests nur mit Standardbibliothek, keine neuen Go-Abhängigkeiten, Lint-Ausnahmen nur gezielt mit Begründung, Conventional Commits mit Abschluss `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Schema-Änderungen nur in `internal/store/migrations/00002_instances.sql` (Aufgabe 1). Queries nur in `internal/store/queries/servers.sql`, Namenspräfix `Servers…`.
-- Servername = Subdomain: `^[a-z0-9][a-z0-9-]{1,31}$` (`instancespec.ValidName`).
+- Servername = Subdomain: `^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$` (`instancespec.ValidName`).
 - `type` ∈ `vanilla|paper|purpur|fabric|neoforge|modrinth|curseforge`; `java` ∈ `java8|java17|java21|java25`; `memory_mib` 1024–32768, Vielfaches von 256.
 - itzg-`TYPE`: vanilla→`VANILLA`, paper→`PAPER`, purpur→`PURPUR`, fabric→`FABRIC`, neoforge→`NEOFORGE`, modrinth→`MODRINTH` (Pack in `MODRINTH_MODPACK`), curseforge→`AUTO_CURSEFORGE` (`CF_SLUG` bzw. `CF_PAGE_URL`, `CF_API_KEY`).
 - Container: Name `mcpanel-mc-<id>`, `User "<uid>:<gid>"` von `mcpanel-mc`, `CapDrop ["ALL"]` ohne `CapAdd`, `SecurityOpt ["no-new-privileges:true"]`, `Memory = memory_mib × 1.25 MiB`, `MemorySwap = Memory`, `PidsLimit 1024`, `RestartPolicy unless-stopped`, `StopTimeout 60`, Log `json-file` `max-size=10m` `max-file=3`, einziger Mount `<instances_dir>/instances/<id>` → `/data`, Netz `mcpanel-mc`, keine Ports.
@@ -280,7 +280,7 @@ Neue/geänderte Schemas in `api/openapi.yaml` (unter `components.schemas`), verb
       additionalProperties: false
       required: [name, type, version, memory_mib, eula_accepted]
       properties:
-        name: { type: string, pattern: '^[a-z0-9][a-z0-9-]{1,31}$' }
+        name: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$' }
         type: { $ref: '#/components/schemas/InstanceType' }
         version: { type: string }
         loader_version: { type: [string, 'null'] }
@@ -1104,7 +1104,7 @@ const (
 var ErrInvalid = errors.New("invalid instance spec")
 
 var (
-	nameRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,31}$`)
+	nameRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$`)
 	labelRe   = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	versionRe = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.\-+_]{0,63}$`)
 	slugRe    = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)

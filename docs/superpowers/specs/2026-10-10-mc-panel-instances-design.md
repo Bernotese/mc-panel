@@ -38,7 +38,7 @@ Ein kompromittiertes panel darf keinen Root auf dem Host bekommen (TP1 §3). Zug
 | Docker-Zugriff | Nur der agent (root) spricht mit Docker | Hält TP1-Sicherheitsmodell; Alternativen siehe §2.1 |
 | Docker-Client | Eigener schmaler Client über `net/http` auf dem Unix-Socket | Nur die nötigen Aufrufe, keine große SDK-Abhängigkeit |
 | Erreichbarkeit | Subdomain pro Server über `itzg/mc-router` auf Port 25565 | Ein Port für alle, keine Port-Verwaltung; braucht Wildcard-DNS |
-| Subdomain | = Servername (`^[a-z0-9][a-z0-9-]{1,31}$` ist ein gültiges DNS-Label) | Kein zusätzliches Feld |
+| Subdomain | = Servername (`^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$` ist ein gültiges DNS-Label) | Kein zusätzliches Feld |
 | Konfiguration | Allowlist-Eigenschaften in der DB, als itzg-Umgebungsvariablen gesetzt | Kein Dateizugriff für das panel; freies Editieren kommt mit TP3 |
 | Arten | vanilla, paper, purpur, fabric, neoforge, modrinth, curseforge | Wunsch des Betreibers |
 
