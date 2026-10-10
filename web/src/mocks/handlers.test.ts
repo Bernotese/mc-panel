@@ -10,7 +10,7 @@ const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../
 describe('mock coverage', () => {
   it('mocks every operationId of api/openapi.yaml exactly once', () => {
     const ids = [...openapiYaml.matchAll(/operationId:\s*(\w+)/g)].map((m) => m[1]).sort()
-    expect(ids).toHaveLength(57)
+    expect(ids).toHaveLength(59)
     expect(operations.map((o) => o.operationId).sort()).toEqual(ids)
   })
 })
@@ -69,6 +69,21 @@ describe('mock behaviour', () => {
     expect(page.items).toHaveLength(5)
     expect(page.items.every((e) => e.result === 'denied')).toBe(true)
     expect(page.next_cursor).toBe('5')
+  })
+
+  it('keeps server settings: absent stays, null removes, the key is write-only', async () => {
+    const me = loginAs('admin', { sudo: true })
+    const get = async () => (await callApi('GET', '/servers/settings')).body
+    expect(await get()).toEqual({ base_domain: 'mc.example.com', curseforge_api_key_set: false, docker: 'ok', unknown_containers: [] })
+    await callApi('PUT', '/servers/settings', { body: { curseforge_api_key: 'abc$123' }, csrf: me.csrf_token })
+    expect(field(await get(), 'curseforge_api_key_set')).toBe(true)
+    expect(JSON.stringify(await get())).not.toContain('abc$123')
+    await callApi('PUT', '/servers/settings', { body: { base_domain: 'Play.Example.org' }, csrf: me.csrf_token })
+    expect(await get()).toMatchObject({ base_domain: 'play.example.org', curseforge_api_key_set: true })
+    await callApi('PUT', '/servers/settings', { body: { base_domain: null, curseforge_api_key: null }, csrf: me.csrf_token })
+    expect(await get()).toMatchObject({ base_domain: null, curseforge_api_key_set: false })
+    const bad = await callApi('PUT', '/servers/settings', { body: { base_domain: 'localhost' }, csrf: me.csrf_token })
+    expect(field(bad.body, 'error')).toBe('validation_failed')
   })
 
   it('buckets the overview series by range', async () => {

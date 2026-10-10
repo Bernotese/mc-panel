@@ -24,6 +24,9 @@ const (
 	CodeJailed             = "jailed"
 	CodeIPBlocked          = "ip_blocked"
 	CodeAgentUnavailable   = "agent_unavailable"
+	CodeDockerUnavailable  = "docker_unavailable"
+	CodeBaseDomainMissing  = "base_domain_missing"
+	CodeCatalogUnavailable = "catalog_unavailable"
 	CodeInternal           = "internal"
 )
 
