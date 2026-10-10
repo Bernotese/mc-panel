@@ -121,18 +121,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"mcpanel/internal/agent/agentapi"
-	"mcpanel/internal/audit"
-	"mcpanel/internal/auth"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/httpx"
-	"mcpanel/internal/notify"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/secretbox"
-	"mcpanel/internal/users"
-	"mcpanel/internal/webui"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/auth"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/users"
+	"github.com/Bernotese/mc-panel/internal/webui"
 )
 
 type appDeps struct {
@@ -313,13 +313,13 @@ import (
 	"syscall"
 	"time"
 
-	"mcpanel/internal/agent"
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
-	"mcpanel/internal/defense"
-	"mcpanel/internal/store"
-	"mcpanel/internal/users"
+	"github.com/Bernotese/mc-panel/internal/agent"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/users"
 )
 
 var version = "dev"
@@ -544,7 +544,7 @@ import (
 	"sync"
 	"time"
 
-	"mcpanel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 type fakeAgent struct {
@@ -610,12 +610,12 @@ import (
 
 	"github.com/pquerna/otp/totp"
 
-	"mcpanel/internal/audit"
-	"mcpanel/internal/clock"
-	"mcpanel/internal/config"
-	"mcpanel/internal/rbac"
-	"mcpanel/internal/store/storetest"
-	"mcpanel/internal/users"
+	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
+	"github.com/Bernotese/mc-panel/internal/users"
 )
 
 const adminPW = "mc-panel integration pw 1"
@@ -930,7 +930,7 @@ func agentClientForMissingSocket(t *testing.T) *agent.Client {
 	return agent.NewClient(t.TempDir() + "/missing.sock")
 }
 ```
-und den Import `"mcpanel/internal/agent"`.
+und den Import `"github.com/Bernotese/mc-panel/internal/agent"`.
 
 - [ ] **Step 3: Run** `go test ./cmd/panel/ -run . -count=1 -v`
 Expected: alle fünf Tests PASS. Typische Integrationsfehler und ihr Ort: `TestRouteCoverage` ≠ 57 → ein Stream registriert eine Route zu viel/zu wenig (mit Phase-0-Tabelle abgleichen); `csrf_invalid` bei legitimen Requests → Origin-Vergleich in `auth.CSRF` vs. `cfg.Origin()`; Jail nicht synchronisiert → `svc.Run`-Kick nach `addJail` (Stream B Task 7).
