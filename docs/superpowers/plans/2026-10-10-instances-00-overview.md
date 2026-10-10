@@ -293,7 +293,7 @@ Neue/geänderte Schemas in `api/openapi.yaml` (unter `components.schemas`), verb
       required: [versions, loaders]
       properties:
         versions: { type: array, items: { $ref: '#/components/schemas/CatalogVersion' }, description: Newest first }
-        loaders: { type: array, items: { type: string }, description: 'fabric: loader versions; neoforge: [] (versions carry the NeoForge version as id, see catalog section); others: []' }
+        loaders: { type: array, items: { type: string }, description: 'fabric: stable loader versions, newest first; all other types: []' }
     UnknownContainer:
       type: object
       required: [id, name]
@@ -316,6 +316,8 @@ Neue/geänderte Schemas in `api/openapi.yaml` (unter `components.schemas`), verb
         base_domain: { type: [string, 'null'] }
         curseforge_api_key: { type: [string, 'null'] }
 ```
+
+**NeoForge im Katalog:** `versions` sind **Minecraft-Versionen** (aus den stabilen NeoForge-Versionen abgeleitet, dedupliziert, neueste zuerst), `loaders` ist `[]`. `loader_version` bleibt `null`, außer der Admin trägt unter „Erweitert“ eine NeoForge-Version ein; ohne sie wählt itzg die neueste stabile NeoForge-Version für die MC-Version.
 
 Neue/geänderte Operationen:
 
@@ -379,7 +381,7 @@ Seed (ersetzt die bisherigen drei Stub-Server, IDs und Namen bleiben):
 | 3 | lobby | `null` | `not_configured` | `null` |
 
 `serverSettings`: `{ base_domain: 'mc.example.com', curseforge_api_key_set: false, docker: 'ok' }`.
-`catalogs`: `vanilla` (`26.3`, `26.2`, `1.21.11`, `1.20.4`, `1.16.5` mit passendem `java`), `paper` (`26.2`, `1.21.11`, `1.20.4`), `purpur` (`26.2`, `1.21.11`), `fabric` (Versionen `26.3`, `1.21.11`; `loaders: ['0.19.5', '0.19.4']`), `neoforge` (Versionen `26.2.0.89` → java25, `21.11.38` → java21; `loaders: []`).
+`catalogs`: `vanilla` (`26.3`, `26.2`, `1.21.11`, `1.20.4`, `1.16.5` mit passendem `java`), `paper` (`26.2`, `1.21.11`, `1.20.4`), `purpur` (`26.2`, `1.21.11`), `fabric` (Versionen `26.3`, `1.21.11`; `loaders: ['0.19.5', '0.19.4']`), `neoforge` (Minecraft-Versionen `26.2` → java25, `1.21.11` → java21; `loaders: []`).
 
 Verhalten (in `web/src/mocks/handlers/servers.ts`):
 
