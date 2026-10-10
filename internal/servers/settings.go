@@ -137,7 +137,7 @@ func (h *Handler) settingsBody(ctx context.Context) (settingsJSON, error) {
 		Docker:              dockerUnknown,
 		UnknownContainers:   []unknownContainerJSON{},
 	}
-	resp, err := h.refreshStatus(ctx)
+	resp, _, err := h.refreshStatus(ctx)
 	switch {
 	case err == nil && resp.Docker == agentapi.DockerOK:
 		out.Docker = dockerOK
