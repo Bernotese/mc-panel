@@ -42,6 +42,7 @@ type instanceState struct {
 	running   bool
 	op        agentapi.Operation
 	lastError string
+	errSeq    uint64 // when lastError was set (Manager.errSeq), for eviction
 	name      string
 }
 
@@ -56,7 +57,7 @@ func (m *Manager) enqueue(ctx context.Context, id int64, j job) error {
 	}
 	st := m.inst[id]
 	if st == nil {
-		if len(m.inst) >= MaxTrackedInstances {
+		if len(m.inst) >= MaxTrackedInstances && !m.evictErrorOnly() {
 			return agentapi.ErrBusy
 		}
 		st = &instanceState{}
@@ -112,6 +113,8 @@ func (m *Manager) work(id int64) {
 		st.op = agentapi.OpNone
 		if err != nil {
 			st.lastError = sanitizeError(err, secretsOf(j)...)
+			m.errSeq++
+			st.errSeq = m.errSeq
 		} else {
 			st.lastError = ""
 		}
@@ -123,6 +126,29 @@ func (m *Manager) work(id int64) {
 			m.log.Info("instance operation done", "id", id, "op", j.kind, "action", j.action)
 		}
 	}
+}
+
+// evictErrorOnly drops the oldest entry that only keeps a last_error (no queued or
+// running work), so stale errors never make the agent busy. The caller holds m.mu.
+func (m *Manager) evictErrorOnly() bool {
+	var (
+		victim int64
+		oldest uint64
+		found  bool
+	)
+	for id, st := range m.inst {
+		if st.running || len(st.pending) > 0 {
+			continue
+		}
+		if !found || st.errSeq < oldest {
+			victim, oldest, found = id, st.errSeq, true
+		}
+	}
+	if found {
+		delete(m.inst, victim)
+		m.log.Debug("instance error evicted", "id", victim)
+	}
+	return found
 }
 
 func initialOp(j job) agentapi.Operation {

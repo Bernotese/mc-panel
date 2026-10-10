@@ -25,7 +25,10 @@ const (
 	LabelName     = "mcpanel.name"
 	LabelFQDN     = "mcpanel.fqdn"
 	LabelRouter   = "mcpanel.router"
-	LabelNetwork  = "mcpanel.network"
+	// LabelRouterTemplate carries the SHA-256 of the router's container template; a
+	// different value (agent upgrade) replaces the router container.
+	LabelRouterTemplate = "mcpanel.router-template"
+	LabelNetwork        = "mcpanel.network"
 
 	MinecraftPort      = 25565
 	StopTimeoutSeconds = 60

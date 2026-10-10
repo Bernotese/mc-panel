@@ -79,6 +79,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if err := checkImages(cfg.Images); err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
 	log := newLogger(cfg.Dev, stderr)
 
 	panelUID, err := uidFromConfig(cfg.PanelUID)
@@ -92,6 +95,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	mcUID, mcGID, err := mcUserIDs(cfg, gid, user.Lookup)
 	if err != nil {
 		return err
+	}
+	if cfg.DockerSocket != "" {
+		// Production: the tree the root agent writes into must not be changeable
+		// by an unprivileged user. Dev mode only refuses a symlink.
+		if err := instances.CheckInstancesDir(cfg.InstancesDir, !cfg.Dev, 0); err != nil {
+			return err
+		}
 	}
 	if cfg.Dev {
 		if err := os.MkdirAll(filepath.Dir(cfg.Socket), 0o750); err != nil {
@@ -185,14 +195,22 @@ func socketPerms(cfg config.Agent, lookup func(uid string) (*user.User, error)) 
 }
 
 // mcUserIDs resolves mc_user to the uid:gid the Minecraft containers run as. In dev
-// mode an empty mc_user means the agent's own ids. Outside dev mode root (uid or
-// gid 0) is refused: the containers must never run as root on the host.
+// mode an empty mc_user means the agent's own ids. Root (uid or gid 0) is refused
+// outside dev mode and in dev mode with Docker enabled: the containers must never
+// run as root on the host. Outside dev mode the user must also differ from the
+// panel user (uid panel_uid, primary gid panelGID), so a container can read
+// neither the panel's data nor the agent socket.
 func mcUserIDs(cfg config.Agent, panelGID int, lookup func(name string) (*user.User, error)) (int, int, error) {
+	noRoot := !cfg.Dev || cfg.DockerSocket != ""
 	if cfg.MCUser == "" {
 		if !cfg.Dev {
 			return 0, 0, errors.New("mc_user must be set")
 		}
-		return os.Getuid(), os.Getgid(), nil
+		uid, gid := os.Getuid(), os.Getgid()
+		if noRoot && (uid == 0 || gid == 0) {
+			return 0, 0, errors.New("agent -dev runs as root with Docker enabled: set mc_user to an unprivileged user")
+		}
+		return uid, gid, nil
 	}
 	u, err := lookup(cfg.MCUser)
 	if err != nil {
@@ -207,14 +225,30 @@ func mcUserIDs(cfg config.Agent, panelGID int, lookup func(name string) (*user.U
 	if err != nil || gid < 0 {
 		return 0, 0, fmt.Errorf("mc_user %q has invalid gid %q", cfg.MCUser, u.Gid)
 	}
-	if !cfg.Dev && (uid == 0 || gid == 0) {
+	if noRoot && (uid == 0 || gid == 0) {
 		return 0, 0, fmt.Errorf("mc_user %q resolves to uid %d gid %d: Minecraft containers must not run as root", cfg.MCUser, uid, gid)
+	}
+	if !cfg.Dev && (uid == cfg.PanelUID || gid == panelGID) {
+		return 0, 0, fmt.Errorf("mc_user %q (uid %d gid %d) must be a separate user from the panel (uid %d, gid %d)",
+			cfg.MCUser, uid, gid, cfg.PanelUID, panelGID)
 	}
 	return uid, gid, nil
 }
 
-// checkImages is a stub (red phase).
-func checkImages(config.Images) error { return nil }
+// checkImages applies the Docker client's own parser to every configured image:
+// the config regex alone would let through references (e.g. upper case) that the
+// client refuses later, at the first pull.
+func checkImages(imgs config.Images) error {
+	var errs []error
+	for _, e := range []struct{ key, ref string }{
+		{"java8", imgs.Java8}, {"java17", imgs.Java17}, {"java21", imgs.Java21}, {"java25", imgs.Java25}, {"router", imgs.Router},
+	} {
+		if _, err := docker.ParseImageRef(e.ref); err != nil {
+			errs = append(errs, fmt.Errorf("images.%s: %w", e.key, err))
+		}
+	}
+	return errors.Join(errs...)
+}
 
 func uidFromConfig(uid int) (uint32, error) {
 	if uid < 0 || int64(uid) > math.MaxUint32 {

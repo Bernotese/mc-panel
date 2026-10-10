@@ -1,13 +1,18 @@
 package instances
 
 import (
+	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +26,10 @@ import (
 const (
 	// SampleInterval is the period of the background loop (Docker check, router, stats).
 	SampleInterval = 10 * time.Second
+
+	// DefaultStatusTimeout bounds Status well below the agent server's write timeout
+	// (10 s), so a hanging Docker call never breaks the GET /v1/instances answer.
+	DefaultStatusTimeout = 5 * time.Second
 
 	pingTimeout = 5 * time.Second
 )
@@ -59,7 +68,12 @@ type Manager struct {
 	ctx    context.Context // cancelled by Close; bounds all queued work
 	cancel context.CancelFunc
 
+	statusTimeout time.Duration
+
 	routerMu sync.Mutex // serialises routes file + router container changes
+	// lastApplied is the routes file content the running router has loaded (nil:
+	// unknown, e.g. after an agent restart). Guarded by routerMu.
+	lastApplied []byte
 
 	mu        sync.Mutex
 	idle      *sync.Cond
@@ -69,20 +83,22 @@ type Manager struct {
 	stats     map[int64]sample
 	dockerOK  bool
 	routerErr string
+	errSeq    uint64 // orders error-only tracker entries for eviction
 }
 
 func New(cfg Config) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{
-		dc:        cfg.Docker,
-		host:      Host{InstancesDir: cfg.InstancesDir, UID: cfg.UID, GID: cfg.GID, Images: cfg.Images},
-		clock:     cfg.Clock,
-		log:       cfg.Log,
-		customize: cfg.Customize,
-		ctx:       ctx,
-		cancel:    cancel,
-		inst:      map[int64]*instanceState{},
-		stats:     map[int64]sample{},
+		dc:            cfg.Docker,
+		host:          Host{InstancesDir: cfg.InstancesDir, UID: cfg.UID, GID: cfg.GID, Images: cfg.Images},
+		clock:         cfg.Clock,
+		log:           cfg.Log,
+		customize:     cfg.Customize,
+		ctx:           ctx,
+		statusTimeout: cmp.Or(cfg.StatusTimeout, DefaultStatusTimeout),
+		cancel:        cancel,
+		inst:          map[int64]*instanceState{},
+		stats:         map[int64]sample{},
 	}
 	m.idle = sync.NewCond(&m.mu)
 	return m
@@ -149,7 +165,12 @@ func (m *Manager) ensure(ctx context.Context, req agentapi.EnsureRequest) error 
 		if err := checkManaged(info, req.ID); err != nil {
 			return err
 		}
-		if labelRevision(info.Config.Labels) == req.Revision || !req.Recreate {
+		// Never downgrade: an older revision (a stale or replayed request) is a no-op,
+		// even with recreate.
+		if have := labelRevision(info.Config.Labels); have >= req.Revision || !req.Recreate {
+			if have > req.Revision {
+				m.log.Info("ensure with an older revision ignored", "id", req.ID, "revision", req.Revision, "container_revision", have)
+			}
 			m.refreshRouterAfter(ctx)
 			return nil
 		}
@@ -252,6 +273,11 @@ func (m *Manager) remove(ctx context.Context, id int64) error {
 		if err := checkManaged(info, id); err != nil {
 			return err
 		}
+	}
+	if err := m.ensureLayout(); err != nil {
+		return err
+	}
+	if exists {
 		if n := info.Config.Labels[LabelName]; instancespec.ValidName(n) {
 			instName = n
 		}
@@ -316,8 +342,7 @@ func (m *Manager) refreshRouter(ctx context.Context) error {
 	}
 	// Always write the file before the router container exists: without the watch
 	// flag a missing file is silently skipped at start.
-	changed, err := WriteRoutes(RouterDir(m.host.InstancesDir), data)
-	if err != nil {
+	if _, err := WriteRoutes(RouterDir(m.host.InstancesDir), data); err != nil {
 		return err
 	}
 	cfg, err := RouterContainer(m.host)
@@ -327,10 +352,18 @@ func (m *Manager) refreshRouter(ctx context.Context) error {
 	if m.customize != nil {
 		m.customize(RouterName, &cfg)
 	}
+	template, err := templateHash(cfg)
+	if err != nil {
+		return err
+	}
+	if cfg.Labels == nil {
+		cfg.Labels = map[string]string{}
+	}
+	cfg.Labels[LabelRouterTemplate] = template
 	info, err := m.dc.Inspect(ctx, RouterName)
 	switch {
 	case docker.IsNotFound(err):
-		return m.createRouter(ctx, cfg)
+		return m.createRouter(ctx, cfg, data)
 	case err != nil:
 		return err
 	}
@@ -338,29 +371,42 @@ func (m *Manager) refreshRouter(ctx context.Context) error {
 		return fmt.Errorf("container %s exists but is not managed by mc-panel (label %s=1 missing); leaving it untouched",
 			RouterName, LabelRouter)
 	}
-	if info.Config.Image != cfg.Image { // the agent was upgraded to a new pinned router image
-		m.log.Info("replacing router container", "old_image", info.Config.Image, "new_image", cfg.Image)
+	// Replace the router after an agent upgrade with a new pinned image or template.
+	if info.Config.Labels[LabelRouterTemplate] != template || !sameImage(info.Config.Image, cfg.Image) {
+		m.log.Info("replacing router container", "old_image", info.Config.Image, "new_image", cfg.Image,
+			"old_template", info.Config.Labels[LabelRouterTemplate], "new_template", template)
 		if err := m.ensureImage(ctx, -1, cfg.Image); err != nil {
 			return err
 		}
 		if err := m.dc.Remove(ctx, RouterName, true); err != nil && !docker.IsNotFound(err) {
 			return err
 		}
-		return m.createRouter(ctx, cfg)
+		return m.createRouter(ctx, cfg, data)
 	}
 	if !info.State.Running {
-		return m.dc.Start(ctx, RouterName) // a fresh start reads the current file
-	}
-	if changed {
-		if err := m.dc.Kill(ctx, RouterName, "SIGHUP"); err != nil && !docker.IsConflict(err) {
+		if err := m.dc.Start(ctx, RouterName); err != nil { // a fresh start reads the current file
 			return err
 		}
-		m.log.Info("router reloaded", "routes", len(data))
+		m.lastApplied = data
+		return nil
+	}
+	// Reload until the running router has seen this content: a failed SIGHUP is
+	// retried in the next round even though the file no longer changes.
+	if !bytes.Equal(data, m.lastApplied) {
+		if err := m.dc.Kill(ctx, RouterName, "SIGHUP"); err != nil {
+			if docker.IsConflict(err) { // stopped meanwhile; the next round starts it
+				return nil
+			}
+			return err
+		}
+		m.lastApplied = data
+		m.log.Info("router reloaded", "bytes", len(data))
 	}
 	return nil
 }
 
-func (m *Manager) createRouter(ctx context.Context, cfg docker.ContainerConfig) error {
+// createRouter creates and starts the router; data is the routes file it will read.
+func (m *Manager) createRouter(ctx context.Context, cfg docker.ContainerConfig, data []byte) error {
 	if err := m.ensureImage(ctx, -1, cfg.Image); err != nil {
 		return err
 	}
@@ -371,7 +417,47 @@ func (m *Manager) createRouter(ctx context.Context, cfg docker.ContainerConfig) 
 		return err
 	}
 	m.log.Info("router container created", "image", cfg.Image)
-	return m.dc.Start(ctx, RouterName)
+	if err := m.dc.Start(ctx, RouterName); err != nil {
+		return err
+	}
+	m.lastApplied = data
+	return nil
+}
+
+// templateHash is the SHA-256 of the router template's canonical JSON
+// (encoding/json: fixed field order, sorted map keys).
+func templateHash(cfg docker.ContainerConfig) (string, error) {
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// sameImage compares two image references after Docker's normalisation
+// ("docker.io/", "library/"). A reference that does not parse (e.g. an image ID)
+// is not a reason to replace anything: the template hash covers the image as well.
+func sameImage(have, want string) bool {
+	h, err := docker.ParseImageRef(have)
+	if err != nil {
+		return true
+	}
+	w, err := docker.ParseImageRef(want)
+	if err != nil {
+		return true
+	}
+	return h.Digest == w.Digest && normalizeRepo(h.Repo) == normalizeRepo(w.Repo)
+}
+
+func normalizeRepo(repo string) string {
+	for _, p := range []string{"docker.io/", "index.docker.io/", "registry-1.docker.io/"} {
+		if r, ok := strings.CutPrefix(repo, p); ok {
+			repo = r
+			break
+		}
+	}
+	return strings.TrimPrefix(repo, "library/")
 }
 
 // dockerAvailable uses the cached state and re-checks right away when it is bad,
@@ -440,6 +526,8 @@ func startedAtMillis(s string) int64 {
 // cached stats. Instances with queued work or a last_error but no container are
 // reported with state "missing".
 func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
+	ctx, cancel := context.WithTimeout(ctx, m.statusTimeout)
+	defer cancel()
 	resp := agentapi.InstancesResponse{
 		Docker:    agentapi.DockerUnavailable,
 		Instances: []agentapi.InstanceStatus{},
@@ -508,6 +596,18 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 
 	if info, err := m.dc.Inspect(ctx, RouterName); err == nil && info.Config.Labels[LabelRouter] == "1" {
 		resp.Router.State = mapState(info.State.Status)
+	}
+	// A Docker call ran into the deadline: the data may be partial, so report
+	// Docker as unavailable rather than a half-filled answer.
+	if err := ctx.Err(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			m.setDocker(false, fmt.Errorf("instance status: %w", err))
+		}
+		return agentapi.InstancesResponse{
+			Docker:    agentapi.DockerUnavailable,
+			Instances: []agentapi.InstanceStatus{},
+			Router:    agentapi.RouterStatus{State: agentapi.StateMissing, LastError: resp.Router.LastError},
+		}
 	}
 	return resp
 }
