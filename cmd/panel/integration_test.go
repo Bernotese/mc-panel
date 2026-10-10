@@ -28,12 +28,13 @@ import (
 const adminPW = "mc-panel integration pw 1"
 
 type env struct {
-	t     *testing.T
-	srv   *httptest.Server
-	app   *app
-	clk   *clock.Fake
-	agent *fakeAgent
-	cfg   config.Panel
+	t         *testing.T
+	srv       *httptest.Server
+	app       *app
+	clk       *clock.Fake
+	agent     *fakeAgent
+	instances *fakeInstances
+	cfg       config.Panel
 }
 
 func newEnv(t *testing.T) *env {
@@ -56,8 +57,9 @@ func newEnv(t *testing.T) *env {
 	db := storetest.Open(t)
 	clk := clock.NewFake(time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC))
 	fa := newFakeAgent()
+	fi := newFakeInstances()
 	ctx, cancel := context.WithCancel(context.Background())
-	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clk, Agent: fa})
+	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clk, Agent: fa, Instances: fi, Version: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +72,7 @@ func newEnv(t *testing.T) *env {
 		[]string{"-username", "admin"}, strings.NewReader(adminPW+"\n"), io.Discard); err != nil {
 		t.Fatalf("admin create: %v", err)
 	}
-	return &env{t: t, srv: srv, app: a, clk: clk, agent: fa, cfg: cfg}
+	return &env{t: t, srv: srv, app: a, clk: clk, agent: fa, instances: fi, cfg: cfg}
 }
 
 type client struct {
@@ -176,8 +178,8 @@ func TestRouteCoverage(t *testing.T) {
 	if un := rbac.Uncovered(e.app.Mux, e.app.Routes, func(_, p string) bool { return p == "/*" }); len(un) != 0 {
 		t.Fatalf("routes registered without rbac rule: %v", un)
 	}
-	if n := len(e.app.Routes); n != 57 {
-		t.Fatalf("registered %d API routes, OpenAPI defines 57 operations (incl. GET /health)", n)
+	if n := len(e.app.Routes); n != 61 {
+		t.Fatalf("registered %d API routes, OpenAPI defines 61 operations (incl. GET /health)", n)
 	}
 }
 
@@ -186,12 +188,16 @@ func TestFullFlowPermissionsAndAudit(t *testing.T) {
 	admin, secret := loginAdminWithTOTP(e)
 
 	// sudo required for admin mutations
-	if c, out := admin.do("POST", "/servers", map[string]string{"name": "survival"}); c != 403 || out["error"] != "sudo_required" {
+	if c, out := admin.do("POST", "/servers", paperServer("survival")); c != 403 || out["error"] != "sudo_required" {
 		t.Fatalf("POST /servers without sudo = %d %v", c, out)
 	}
 	sudo(e, admin, secret)
-	a := admin.must(201, "POST", "/servers", map[string]string{"name": "survival"})
-	b := admin.must(201, "POST", "/servers", map[string]string{"name": "creative"})
+	if c, out := admin.do("POST", "/servers", paperServer("survival")); c != 409 || out["error"] != "base_domain_missing" {
+		t.Fatalf("POST /servers without base domain = %d %v", c, out)
+	}
+	admin.must(200, "PUT", "/servers/settings", map[string]any{"base_domain": "mc.example.com"})
+	a := admin.must(201, "POST", "/servers", paperServer("survival"))
+	b := admin.must(201, "POST", "/servers", paperServer("creative"))
 	srvA, srvB := int64(a["id"].(float64)), int64(b["id"].(float64))
 
 	u := admin.must(201, "POST", "/users", map[string]string{"username": "maxUser", "password": "another long secret 42", "role": "user"})
@@ -209,8 +215,8 @@ func TestFullFlowPermissionsAndAudit(t *testing.T) {
 	if code != 200 || len(list) != 1 || int64(list[0]["id"].(float64)) != srvA {
 		t.Fatalf("GET /servers as maxUser = %d %v", code, list)
 	}
-	maxUser.must(202, "POST", fmt.Sprintf("/servers/%d/power", srvA), map[string]string{"action": "restart"})
-	if c, out := maxUser.do("POST", fmt.Sprintf("/servers/%d/power", srvB), map[string]string{"action": "restart"}); c != 403 || out["error"] != "forbidden" {
+	maxUser.must(202, "POST", fmt.Sprintf("/servers/%d/power", srvA), map[string]string{"action": "stop"})
+	if c, out := maxUser.do("POST", fmt.Sprintf("/servers/%d/power", srvB), map[string]string{"action": "stop"}); c != 403 || out["error"] != "forbidden" {
 		t.Fatalf("power on B = %d %v", c, out)
 	}
 	if c, _ := maxUser.do("GET", "/users", nil); c != 403 {
@@ -227,12 +233,17 @@ func TestFullFlowPermissionsAndAudit(t *testing.T) {
 	for _, it := range page["items"].([]any) {
 		seen[it.(map[string]any)["action"].(string)] = true
 	}
-	for _, want := range []string{audit.ActionTOTPEnable, audit.ActionSudo, audit.ActionServerCreate,
-		audit.ActionUserCreate, audit.ActionPermissionsSet, audit.ActionServerPower} {
+	for _, want := range []string{audit.ActionTOTPEnable, audit.ActionSudo, audit.ActionServerSettingsUpdate,
+		audit.ActionServerCreate, audit.ActionUserCreate, audit.ActionPermissionsSet, audit.ActionServerPower} {
 		if !seen[want] {
 			t.Errorf("audit log misses %s (have %v)", want, seen)
 		}
 	}
+}
+
+// paperServer is a valid CreateServerRequest.
+func paperServer(name string) map[string]any {
+	return map[string]any{"name": name, "type": "paper", "version": "1.21.11", "memory_mib": 4096, "eula_accepted": true}
 }
 
 func (c *client) doList(method, path string) (int, []map[string]any) {
@@ -330,7 +341,8 @@ func TestAgentDownStillWorks(t *testing.T) {
 	db := storetest.Open(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clock.Real{}, Agent: agentClientForMissingSocket(t)})
+	ac := agentClientForMissingSocket(t)
+	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clock.Real{}, Agent: ac, Instances: ac})
 	if err != nil {
 		t.Fatalf("buildApp must succeed without agent: %v", err)
 	}

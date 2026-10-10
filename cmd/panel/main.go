@@ -231,7 +231,8 @@ func serve(args []string) error {
 
 	password.Warmup()
 
-	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clock.Real{}, Agent: agent.NewClient(cfg.AgentSocket)})
+	ac := agent.NewClient(cfg.AgentSocket) // firewall and instance API share one client
+	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clock.Real{}, Agent: ac, Instances: ac, Version: version})
 	if err != nil {
 		return err
 	}
