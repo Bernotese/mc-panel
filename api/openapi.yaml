@@ -1,0 +1,991 @@
+openapi: 3.1.0
+info:
+  title: mc-panel API
+  version: 0.1.0
+servers:
+  - url: /api
+security:
+  - session: []
+tags:
+  - { name: health, description: 'Health check (public)' }
+  - { name: auth, description: 'Login, second factor and sudo' }
+  - { name: me, description: 'Current user: profile, 2FA, sessions' }
+  - { name: admin, description: 'Admin-only session management' }
+  - { name: users, description: 'User management' }
+  - { name: servers, description: 'Servers and power control' }
+  - { name: audit, description: 'Audit log' }
+  - { name: security, description: 'Security center: attempts, jails, IP rules, settings, notifiers, agent' }
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [health]
+      security: []
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LoginRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204': { description: No content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/2fa/totp:
+    post:
+      operationId: verifyTotp
+      tags: [auth]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CodeRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /auth/2fa/recovery:
+    post:
+      operationId: verifyRecovery
+      tags: [auth]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CodeRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /auth/2fa/webauthn/begin:
+    post:
+      operationId: beginWebAuthnLogin
+      tags: [auth]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/WebAuthnOptions' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /auth/2fa/webauthn/finish:
+    post:
+      operationId: finishWebAuthnLogin
+      tags: [auth]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/WebAuthnAssertion' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /auth/sudo/totp:
+    post:
+      operationId: sudoTotp
+      tags: [auth]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CodeRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SudoResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /auth/sudo/webauthn/begin:
+    post:
+      operationId: beginSudoWebAuthn
+      tags: [auth]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/WebAuthnOptions' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /auth/sudo/webauthn/finish:
+    post:
+      operationId: finishSudoWebAuthn
+      tags: [auth]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/WebAuthnAssertion' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SudoResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /me:
+    patch:
+      operationId: updateMe
+      tags: [me]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateMeRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /me/password:
+    post:
+      operationId: changePassword
+      tags: [me]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PasswordChangeRequest' } } }
+      responses:
+        '204': { description: No content }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /me/totp/setup:
+    post:
+      operationId: setupTotp
+      tags: [me]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TotpSetupResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/totp/enable:
+    post:
+      operationId: enableTotp
+      tags: [me]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CodeRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/RecoveryCodesResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /me/totp:
+    delete:
+      operationId: disableTotp
+      tags: [me]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204': { description: No content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/passkeys/begin:
+    post:
+      operationId: beginPasskeyRegistration
+      tags: [me]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/WebAuthnOptions' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /me/passkeys/finish:
+    post:
+      operationId: finishPasskeyRegistration
+      tags: [me]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PasskeyRegistration' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/PasskeyCreated' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /me/passkeys:
+    get:
+      operationId: listPasskeys
+      tags: [me]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Passkey' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /me/passkeys/{id}:
+    delete:
+      operationId: deletePasskey
+      tags: [me]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204': { description: No content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/recovery-codes:
+    post:
+      operationId: regenerateRecoveryCodes
+      tags: [me]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/RecoveryCodesResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /me/sessions:
+    get:
+      operationId: listMySessions
+      tags: [me]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Session' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /me/sessions/{id}:
+    delete:
+      operationId: revokeMySession
+      tags: [me]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204': { description: No content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /me/sessions/revoke-others:
+    post:
+      operationId: revokeOtherSessions
+      tags: [me]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204': { description: No content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /admin/sessions:
+    get:
+      operationId: listAllSessions
+      tags: [admin]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Session' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /admin/sessions/{id}:
+    delete:
+      operationId: revokeAnySession
+      tags: [admin]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204': { description: No content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/User' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createUser
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateUserRequest' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /users/{id}:
+    get:
+      operationId: getUser
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateUser
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateUserRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      operationId: deleteUser
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204': { description: No content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /users/{id}/reset-2fa:
+    post:
+      operationId: resetUser2fa
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204': { description: No content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /users/{id}/permissions:
+    get:
+      operationId: getUserPermissions
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/UserPermissions' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: setUserPermissions
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UserPermissions' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/UserPermissions' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /servers:
+    get:
+      operationId: listServers
+      tags: [servers]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Server' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createServer
+      tags: [servers]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateServerRequest' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Server' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /servers/{id}:
+    get:
+      operationId: getServer
+      tags: [servers]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Server' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteServer
+      tags: [servers]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204': { description: No content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /servers/{id}/power:
+    post:
+      operationId: serverPower
+      tags: [servers]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PowerRequest' } } }
+      responses:
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/PowerResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /audit:
+    get:
+      operationId: listAudit
+      tags: [audit]
+      parameters:
+        - { name: actor, in: query, required: false, schema: { type: string } }
+        - { name: action, in: query, required: false, schema: { type: string } }
+        - { name: result, in: query, required: false, schema: { type: string, enum: [success, failure, denied] } }
+        - { name: from, in: query, required: false, schema: { type: integer, format: int64 } }
+        - { name: to, in: query, required: false, schema: { type: integer, format: int64 } }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuditPage' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /audit/verify:
+    get:
+      operationId: verifyAudit
+      tags: [audit]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuditVerify' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /security/overview:
+    get:
+      operationId: getSecurityOverview
+      tags: [security]
+      parameters:
+        - { name: range, in: query, required: false, schema: { type: string, enum: [24h, 7d, 30d], default: 24h } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SecurityOverview' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /security/attempts:
+    get:
+      operationId: listLoginAttempts
+      tags: [security]
+      parameters:
+        - { name: success, in: query, required: false, schema: { type: boolean } }
+        - { name: ip, in: query, required: false, schema: { type: string } }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/LoginAttemptPage' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /security/jails:
+    get:
+      operationId: listJails
+      tags: [security]
+      parameters:
+        - { name: active, in: query, required: false, schema: { type: boolean, default: true } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Jail' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createJail
+      tags: [security]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateJailRequest' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Jail' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /security/jails/{id}:
+    delete:
+      operationId: liftJail
+      tags: [security]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204': { description: No content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /security/ip-rules:
+    get:
+      operationId: listIPRules
+      tags: [security]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/IPRule' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createIPRule
+      tags: [security]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateIPRuleRequest' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/IPRule' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /security/ip-rules/{id}:
+    delete:
+      operationId: deleteIPRule
+      tags: [security]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204': { description: No content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /security/settings:
+    get:
+      operationId: getSecuritySettings
+      tags: [security]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SecuritySettingsResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      operationId: updateSecuritySettings
+      tags: [security]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SecuritySettings' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SecuritySettingsResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /security/notifiers:
+    get:
+      operationId: listNotifiers
+      tags: [security]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Notifier' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createNotifier
+      tags: [security]
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateNotifierRequest' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Notifier' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /security/notifiers/{id}:
+    patch:
+      operationId: updateNotifier
+      tags: [security]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateNotifierRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Notifier' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteNotifier
+      tags: [security]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204': { description: No content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /security/notifiers/{id}/test:
+    post:
+      operationId: testNotifier
+      tags: [security]
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204': { description: No content }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /security/agent:
+    get:
+      operationId: getAgentStatus
+      tags: [security]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AgentStatus' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+components:
+  securitySchemes:
+    session: { type: apiKey, in: cookie, name: __Host-sid }
+  parameters:
+    CSRF: { name: X-CSRF-Token, in: header, required: true, schema: { type: string } }
+    IdPath: { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+    Cursor: { name: cursor, in: query, required: false, schema: { type: string } }
+    Limit: { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+  responses:
+    BadRequest: { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Unauthorized: { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Forbidden: { description: 'Forbidden (forbidden, sudo_required, setup_2fa_required, csrf_invalid, ip_blocked, jailed)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    NotFound: { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Conflict: { description: Conflict, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    TooManyRequests: { description: Rate limited (Retry-After header set), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, internal] }
+        message: { type: string }
+        request_id: { type: string }
+    Role: { type: string, enum: [admin, user] }
+    Stage: { type: string, enum: [preauth, setup, full] }
+    Locale: { type: string, enum: [de, en] }
+    Permission: { type: string, enum: [server.view, server.power, server.console, server.files, server.plugins, server.backups] }
+    SecondFactor: { type: string, enum: [totp, webauthn, recovery] }
+    Me:
+      type: object
+      required: [id, username, role, stage, locale, totp_enabled, passkey_count, recovery_codes_remaining, second_factors, sudo_until, csrf_token]
+      properties:
+        id: { type: integer, format: int64 }
+        username: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        stage: { $ref: '#/components/schemas/Stage' }
+        locale: { $ref: '#/components/schemas/Locale' }
+        totp_enabled: { type: boolean }
+        passkey_count: { type: integer }
+        recovery_codes_remaining: { type: integer }
+        second_factors: { type: array, items: { $ref: '#/components/schemas/SecondFactor' }, description: Methods usable in preauth stage }
+        sudo_until: { type: integer, format: int64, description: Unix ms; 0 = no sudo }
+        csrf_token: { type: string }
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties: { username: { type: string, maxLength: 64 }, password: { type: string, maxLength: 256 } }
+    CodeRequest:
+      type: object
+      required: [code]
+      properties: { code: { type: string, maxLength: 32 } }
+    WebAuthnOptions: { type: object, additionalProperties: true, description: 'CredentialCreationOptions / CredentialRequestOptions JSON ({publicKey: ...})' }
+    WebAuthnAssertion:
+      type: object
+      required: [credential]
+      properties: { credential: { type: object, additionalProperties: true } }
+    PasskeyRegistration:
+      type: object
+      required: [name, credential]
+      properties: { name: { type: string, minLength: 1, maxLength: 64 }, credential: { type: object, additionalProperties: true } }
+    SudoResponse:
+      type: object
+      required: [sudo_until]
+      properties: { sudo_until: { type: integer, format: int64 } }
+    PasswordChangeRequest:
+      type: object
+      required: [current_password, new_password]
+      properties: { current_password: { type: string, maxLength: 256 }, new_password: { type: string, minLength: 12, maxLength: 256 } }
+    UpdateMeRequest:
+      type: object
+      required: [locale]
+      properties: { locale: { $ref: '#/components/schemas/Locale' } }
+    TotpSetupResponse:
+      type: object
+      required: [secret, otpauth_url]
+      properties: { secret: { type: string }, otpauth_url: { type: string } }
+    RecoveryCodesResponse:
+      type: object
+      required: [codes]
+      properties: { codes: { type: array, items: { type: string }, description: Empty if the user already had recovery codes } }
+    Passkey:
+      type: object
+      required: [id, name, created_at, last_used_at]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        created_at: { type: integer, format: int64 }
+        last_used_at: { type: [integer, "null"], format: int64 }
+    PasskeyCreated:
+      type: object
+      required: [passkey, recovery_codes]
+      properties: { passkey: { $ref: '#/components/schemas/Passkey' }, recovery_codes: { type: array, items: { type: string } } }
+    Session:
+      type: object
+      required: [id, user_id, username, current, ip, country, user_agent, created_at, last_seen_at, expires_at]
+      properties:
+        id: { type: integer, format: int64 }
+        user_id: { type: integer, format: int64 }
+        username: { type: string }
+        current: { type: boolean }
+        ip: { type: string }
+        country: { type: string }
+        user_agent: { type: string }
+        created_at: { type: integer, format: int64 }
+        last_seen_at: { type: integer, format: int64 }
+        expires_at: { type: integer, format: int64 }
+    User:
+      type: object
+      required: [id, username, role, totp_enabled, passkey_count, created_at, last_login_at]
+      properties:
+        id: { type: integer, format: int64 }
+        username: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        totp_enabled: { type: boolean }
+        passkey_count: { type: integer }
+        created_at: { type: integer, format: int64 }
+        last_login_at: { type: [integer, "null"], format: int64 }
+    CreateUserRequest:
+      type: object
+      required: [username, password, role]
+      properties:
+        username: { type: string, pattern: '^[a-zA-Z0-9_.-]{3,32}$' }
+        password: { type: string, minLength: 12, maxLength: 256 }
+        role: { $ref: '#/components/schemas/Role' }
+    UpdateUserRequest:
+      type: object
+      properties:
+        role: { $ref: '#/components/schemas/Role' }
+        password: { type: string, minLength: 12, maxLength: 256 }
+    Server:
+      type: object
+      required: [id, name, permissions]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        permissions: { type: array, items: { $ref: '#/components/schemas/Permission' }, description: Effective permissions of the caller (admins get all) }
+    CreateServerRequest:
+      type: object
+      required: [name]
+      properties: { name: { type: string, pattern: '^[a-z0-9][a-z0-9-]{1,31}$' } }
+    PowerRequest:
+      type: object
+      required: [action]
+      properties: { action: { type: string, enum: [start, stop, restart] } }
+    PowerResponse:
+      type: object
+      required: [status]
+      properties: { status: { type: string, enum: [accepted] } }
+    PermissionGrant:
+      type: object
+      required: [server_id, permissions]
+      properties:
+        server_id: { type: integer, format: int64 }
+        permissions: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+    UserPermissions:
+      type: object
+      required: [grants]
+      properties: { grants: { type: array, items: { $ref: '#/components/schemas/PermissionGrant' } } }
+    AuditEntry:
+      type: object
+      required: [id, ts, actor_type, actor_id, actor_name, action, target, ip, result, details, hash]
+      properties:
+        id: { type: integer, format: int64 }
+        ts: { type: integer, format: int64 }
+        actor_type: { type: string, enum: [user, system, cli] }
+        actor_id: { type: [integer, "null"], format: int64 }
+        actor_name: { type: string }
+        action: { type: string }
+        target: { type: string }
+        ip: { type: string }
+        result: { type: string, enum: [success, failure, denied] }
+        details: { type: object, additionalProperties: true }
+        hash: { type: string }
+    AuditPage:
+      type: object
+      required: [items, next_cursor]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/AuditEntry' } }, next_cursor: { type: [string, "null"] } }
+    AuditVerify:
+      type: object
+      required: [ok, checked, first_bad_id]
+      properties: { ok: { type: boolean }, checked: { type: integer }, first_bad_id: { type: [integer, "null"], format: int64 } }
+    SeriesPoint:
+      type: object
+      required: [t, success, failure]
+      properties: { t: { type: integer, format: int64 }, success: { type: integer }, failure: { type: integer } }
+    IPCount:
+      type: object
+      required: [ip_key, country, failures]
+      properties: { ip_key: { type: string }, country: { type: string }, failures: { type: integer } }
+    CountryCount:
+      type: object
+      required: [country, failures]
+      properties: { country: { type: string }, failures: { type: integer } }
+    NewDeviceLogin:
+      type: object
+      required: [ts, username, ip, country, user_agent]
+      properties: { ts: { type: integer, format: int64 }, username: { type: string }, ip: { type: string }, country: { type: string }, user_agent: { type: string } }
+    SecurityOverview:
+      type: object
+      required: [range, series, top_ips, top_countries, active_jails, failures_total, new_device_logins]
+      properties:
+        range: { type: string, enum: [24h, 7d, 30d] }
+        series: { type: array, items: { $ref: '#/components/schemas/SeriesPoint' } }
+        top_ips: { type: array, items: { $ref: '#/components/schemas/IPCount' } }
+        top_countries: { type: array, items: { $ref: '#/components/schemas/CountryCount' } }
+        active_jails: { type: integer }
+        failures_total: { type: integer }
+        new_device_logins: { type: array, items: { $ref: '#/components/schemas/NewDeviceLogin' } }
+    LoginAttempt:
+      type: object
+      required: [id, ts, ip, username, stage, success, reason, country, user_agent]
+      properties:
+        id: { type: integer, format: int64 }
+        ts: { type: integer, format: int64 }
+        ip: { type: string }
+        username: { type: string }
+        stage: { type: string, enum: [password, totp, webauthn, recovery, sudo] }
+        success: { type: boolean }
+        reason: { type: string }
+        country: { type: string }
+        user_agent: { type: string }
+    LoginAttemptPage:
+      type: object
+      required: [items, next_cursor]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/LoginAttempt' } }, next_cursor: { type: [string, "null"] } }
+    Jail:
+      type: object
+      required: [id, ip_key, reason, level, manual, created_at, expires_at, lifted_at, lifted_by, firewall_synced]
+      properties:
+        id: { type: integer, format: int64 }
+        ip_key: { type: string }
+        reason: { type: string }
+        level: { type: integer }
+        manual: { type: boolean }
+        created_at: { type: integer, format: int64 }
+        expires_at: { type: integer, format: int64 }
+        lifted_at: { type: [integer, "null"], format: int64 }
+        lifted_by: { type: [string, "null"] }
+        firewall_synced: { type: boolean }
+    CreateJailRequest:
+      type: object
+      required: [ip, duration_minutes, reason]
+      properties:
+        ip: { type: string, description: IP address; normalized to /32 or /64 }
+        duration_minutes: { type: integer, minimum: 1, maximum: 10080 }
+        reason: { type: string, maxLength: 200 }
+    IPRule:
+      type: object
+      required: [id, cidr, kind, comment, expires_at, created_by, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        cidr: { type: string }
+        kind: { type: string, enum: [allow, deny] }
+        comment: { type: string }
+        expires_at: { type: [integer, "null"], format: int64 }
+        created_by: { type: string }
+        created_at: { type: integer, format: int64 }
+    CreateIPRuleRequest:
+      type: object
+      required: [cidr, kind, comment]
+      properties:
+        cidr: { type: string }
+        kind: { type: string, enum: [allow, deny] }
+        comment: { type: string, maxLength: 200 }
+        expires_at: { type: [integer, "null"], format: int64 }
+    SecuritySettings:
+      type: object
+      required: [enforce_2fa_for_users, admin_allowlist_only, allowed_countries]
+      properties:
+        enforce_2fa_for_users: { type: boolean }
+        admin_allowlist_only: { type: boolean }
+        allowed_countries: { type: array, items: { type: string, pattern: '^[A-Z]{2}$' } }
+    SecuritySettingsResponse:
+      allOf:
+        - $ref: '#/components/schemas/SecuritySettings'
+        - type: object
+          required: [geoip_available]
+          properties: { geoip_available: { type: boolean } }
+    Notifier:
+      type: object
+      required: [id, kind, name, enabled, target_masked, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { type: string, enum: [discord, ntfy] }
+        name: { type: string }
+        enabled: { type: boolean }
+        target_masked: { type: string, description: 'e.g. https://discord.com/api/webhooks/…/****' }
+        created_at: { type: integer, format: int64 }
+    CreateNotifierRequest:
+      type: object
+      required: [kind, name, enabled, url]
+      properties:
+        kind: { type: string, enum: [discord, ntfy] }
+        name: { type: string, minLength: 1, maxLength: 64 }
+        enabled: { type: boolean }
+        url: { type: string, description: 'discord: webhook URL; ntfy: server base URL' }
+        topic: { type: string, description: ntfy only }
+        token: { type: string, description: ntfy access token (optional) }
+    UpdateNotifierRequest:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        enabled: { type: boolean }
+        url: { type: string }
+        topic: { type: string }
+        token: { type: string }
+    AgentStatus:
+      type: object
+      required: [reachable, firewall, version, pending_sync]
+      properties:
+        reachable: { type: boolean }
+        firewall: { type: string }
+        version: { type: string }
+        pending_sync: { type: integer }
+    Health:
+      type: object
+      required: [status]
+      properties: { status: { type: string, enum: [ok] } }

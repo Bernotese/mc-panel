@@ -1,0 +1,108 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# GoReleaser v2 configuration for mc-panel (spec §3.5).
+# Local snapshot: `make release`. Tagged release: .github/workflows/release.yml (tags v*).
+# Requires GoReleaser >= v2.8 (archives.ids); CI pins v2.18.2.
+version: 2
+
+project_name: mc-panel
+
+git:
+  # Milestone tags such as "phase0" are not SemVer; without this GoReleaser aborts when
+  # it finds one as the nearest tag (snapshot name and changelog range need a SemVer tag).
+  ignore_tags:
+    - "phase*"
+
+before:
+  hooks:
+    # Builds the React app into internal/webui/dist, which cmd/panel embeds via go:embed.
+    # The release workflow runs this step itself (without GITHUB_TOKEN) and passes --skip=before.
+    - make web-build
+
+builds:
+  - id: panel
+    main: ./cmd/panel
+    binary: panel
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    hooks:
+      post:
+        - cmd: >-
+            sh -c 'go version -m "{{ .Path }}" | grep -q "CGO_ENABLED=0" || { echo "cgo detected in {{ .Path }}" >&2; exit 1; }'
+          output: true
+        # "index.html" alone proves nothing (net/http contains that literal); the hashed Vite
+        # entry "/assets/index-" only exists when the real frontend build was embedded.
+        - cmd: >-
+            sh -c 'grep -aq "/assets/index-" "{{ .Path }}" || { echo "no embedded frontend in {{ .Path }} - run make web-build" >&2; exit 1; }'
+          output: true
+
+  - id: agent
+    main: ./cmd/agent
+    binary: agent
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    hooks:
+      post:
+        - cmd: >-
+            sh -c 'go version -m "{{ .Path }}" | grep -q "CGO_ENABLED=0" || { echo "cgo detected in {{ .Path }}" >&2; exit 1; }'
+          output: true
+
+archives:
+  - id: default
+    ids:
+      - panel
+      - agent
+    formats:
+      - tar.gz
+    name_template: "mc-panel_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # Binaries only: "none*" matches nothing and disables the default README/LICENSE globs.
+    files:
+      - none*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - '^(docs|test|ci|chore|style)(\(.+\))?!?:'
+      - "^Merge "
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Bug fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: Other changes
+      order: 999
+
+release:
+  name_template: "mc-panel {{ .Version }}"
+  prerelease: auto
+  draft: false
