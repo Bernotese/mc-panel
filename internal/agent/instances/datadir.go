@@ -149,3 +149,6 @@ func (m *Manager) emptyListFile(id int64, dir, file string) (err error) {
 	m.log.Info("instance list file cleared", "id", id, "file", file)
 	return nil
 }
+
+// CheckInstancesDir is a stub (red phase).
+func CheckInstancesDir(dir string, strict bool, trustedUID uint32) error { return nil }

@@ -89,7 +89,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	mcUID, mcGID, err := mcUserIDs(cfg, user.Lookup)
+	mcUID, mcGID, err := mcUserIDs(cfg, gid, user.Lookup)
 	if err != nil {
 		return err
 	}
@@ -187,7 +187,7 @@ func socketPerms(cfg config.Agent, lookup func(uid string) (*user.User, error)) 
 // mcUserIDs resolves mc_user to the uid:gid the Minecraft containers run as. In dev
 // mode an empty mc_user means the agent's own ids. Outside dev mode root (uid or
 // gid 0) is refused: the containers must never run as root on the host.
-func mcUserIDs(cfg config.Agent, lookup func(name string) (*user.User, error)) (int, int, error) {
+func mcUserIDs(cfg config.Agent, panelGID int, lookup func(name string) (*user.User, error)) (int, int, error) {
 	if cfg.MCUser == "" {
 		if !cfg.Dev {
 			return 0, 0, errors.New("mc_user must be set")
@@ -212,6 +212,9 @@ func mcUserIDs(cfg config.Agent, lookup func(name string) (*user.User, error)) (
 	}
 	return uid, gid, nil
 }
+
+// checkImages is a stub (red phase).
+func checkImages(config.Images) error { return nil }
 
 func uidFromConfig(uid int) (uint32, error) {
 	if uid < 0 || int64(uid) > math.MaxUint32 {

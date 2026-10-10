@@ -65,13 +65,18 @@ type Daemon struct {
 	seq        int
 	containers map[string]*Container // by name
 	images     map[string]bool       // pinned refs "repo@sha256:…"
-	networks   map[string]map[string]string
+	networks   map[string]network
 	pulls      []string
 	calls      []string
 	fail       map[string]failure
 	pullError  string
 	holds      map[string]*hold
 	stats      map[string]docker.Stats
+}
+
+type network struct {
+	driver string
+	labels map[string]string
 }
 
 type hold struct {
@@ -91,7 +96,7 @@ func New(t testing.TB) *Daemon {
 		now:        time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC),
 		containers: map[string]*Container{},
 		images:     map[string]bool{},
-		networks:   map[string]map[string]string{},
+		networks:   map[string]network{},
 		fail:       map[string]failure{},
 		holds:      map[string]*hold{},
 		stats:      map[string]docker.Stats{},
@@ -170,6 +175,23 @@ func (d *Daemon) HasNetwork(name string) bool {
 	defer d.mu.Unlock()
 	_, ok := d.networks[name]
 	return ok
+}
+
+// AddNetwork seeds a network, e.g. a foreign one mc-panel must not adopt.
+func (d *Daemon) AddNetwork(name, driver string, labels map[string]string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.networks[name] = network{driver: driver, labels: labels}
+}
+
+// SetImage changes the image a container reports on inspect, e.g. to the form
+// Docker normalises a reference to ("docker.io/…").
+func (d *Daemon) SetImage(name, image string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if c, ok := d.containers[name]; ok {
+		c.Config.Image = image
+	}
 }
 
 // HasImage reports whether the pinned image is present.
@@ -374,12 +396,12 @@ func (d *Daemon) pull(w http.ResponseWriter, target string) {
 
 func (d *Daemon) network(w http.ResponseWriter, r *http.Request, name string) {
 	if r.Method == http.MethodGet {
-		labels, ok := d.networks[name]
+		n, ok := d.networks[name]
 		if !ok {
 			writeError(w, http.StatusNotFound, "network "+name+" not found")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"Name": name, "Driver": "bridge", "Labels": labels})
+		writeJSON(w, http.StatusOK, map[string]any{"Name": name, "Driver": n.driver, "Labels": n.labels})
 		return
 	}
 	var req struct {
@@ -395,7 +417,7 @@ func (d *Daemon) network(w http.ResponseWriter, r *http.Request, name string) {
 		writeError(w, http.StatusConflict, "network with name "+req.Name+" already exists")
 		return
 	}
-	d.networks[req.Name] = req.Labels
+	d.networks[req.Name] = network{driver: req.Driver, labels: req.Labels}
 	writeJSON(w, http.StatusCreated, map[string]string{"Id": "net-" + req.Name})
 }
 

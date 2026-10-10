@@ -302,6 +302,18 @@ func TestIntegrationManagerCycle(t *testing.T) {
 	if err != nil || !strings.Contains(string(routes), `"it.mc.localhost": "mcpanel-mc-1:25565"`) {
 		t.Fatalf("routes = %s, %v", routes, err)
 	}
+	// The router must survive the background loop: Docker's own spelling of the image
+	// reference or the template label must never cause a replacement loop.
+	router, err := c.Inspect(ctx, instances.RouterName)
+	if err != nil || !router.State.Running {
+		t.Fatalf("router: %+v, %v", router.State, err)
+	}
+	for range 3 {
+		m.Tick(ctx)
+	}
+	if again, err := c.Inspect(ctx, instances.RouterName); err != nil || again.ID != router.ID || !again.State.Running {
+		t.Fatalf("router replaced or stopped by Tick: %s -> %+v, %v", router.ID, again, err)
+	}
 
 	run(func() error { return m.Power(ctx, 1, agentapi.PowerStart) })
 	if s := status(); s.State != agentapi.StateRunning || s.StartedAt == 0 {
