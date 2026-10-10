@@ -4,7 +4,7 @@ import { ALL_PERMISSIONS } from '@/api/types'
 import { db, nextId, recordAudit } from '../db'
 import { API, apiError, guard, idParam, noContent, op, readJson, serverPermissions, type MockOperation } from './util'
 
-const SERVER_NAME = /^[a-z0-9][a-z0-9-]{1,31}$/
+const SERVER_NAME = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/
 const ACTIONS: PowerAction[] = ['start', 'stop', 'restart']
 
 export const serverOperations: MockOperation[] = [
@@ -27,7 +27,7 @@ export const serverOperations: MockOperation[] = [
       if (g instanceof Response) return g
       const body = await readJson<{ name?: string }>(request)
       const name = body?.name ?? ''
-      if (!SERVER_NAME.test(name)) return apiError(400, 'validation_failed', 'name must match ^[a-z0-9][a-z0-9-]{1,31}$')
+      if (!SERVER_NAME.test(name)) return apiError(400, 'validation_failed', 'name must match ^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$')
       if (db.servers.some((s) => s.name === name)) return apiError(409, 'conflict', 'server name taken')
       const server = { id: nextId(), name }
       db.servers.push(server)

@@ -30,7 +30,8 @@ func TestRouteContract(t *testing.T) {
 	})
 	mux.Handle("/*", http.NotFoundHandler())
 
-	// Exactly the rules from the OpenAPI table in the Phase-0 plan (rows marked "D").
+	// Exactly the rules from the OpenAPI table in the Phase-0 plan (rows marked "D", without the
+	// server routes, which moved to internal/servers).
 	want := map[string]rbac.Rule{
 		"GET /api/users":                  rbac.Admin(),
 		"POST /api/users":                 rbac.Admin().WithSudo(),
@@ -40,11 +41,6 @@ func TestRouteContract(t *testing.T) {
 		"POST /api/users/{id}/reset-2fa":  rbac.Admin().WithSudo(),
 		"GET /api/users/{id}/permissions": rbac.Admin(),
 		"PUT /api/users/{id}/permissions": rbac.Admin().WithSudo(),
-		"GET /api/servers":                rbac.Authenticated(),
-		"POST /api/servers":               rbac.Admin().WithSudo(),
-		"GET /api/servers/{id}":           rbac.Server(rbac.PermServerView, "id"),
-		"DELETE /api/servers/{id}":        rbac.Admin().WithSudo(),
-		"POST /api/servers/{id}/power":    rbac.Server(rbac.PermServerPower, "id"),
 		"GET /api/audit":                  rbac.Admin(),
 		"GET /api/audit/verify":           rbac.Admin(),
 	}

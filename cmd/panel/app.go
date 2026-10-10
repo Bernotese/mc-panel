@@ -22,6 +22,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/servers"
 	"github.com/Bernotese/mc-panel/internal/users"
 	"github.com/Bernotese/mc-panel/internal/webui"
 )
@@ -98,6 +99,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		return nil, fmt.Errorf("auth: %w", err)
 	}
 	usersH := users.NewHandler(db, d.Clock, auditRec, disp)
+	serversH := servers.NewHandler(servers.Deps{DB: db, Clock: d.Clock, Audit: auditRec})
 	auditH := auditapi.NewHandler(db, d.Clock, disp)
 	defenseH := defense.NewHandler(svc)
 	notifyH := notify.NewHandler(notify.HandlerDeps{
@@ -133,6 +135,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		defenseH.Routes(api)
 		notifyH.Routes(api)
 		usersH.Routes(api)
+		serversH.Routes(api)
 		auditH.Routes(api)
 	})
 	mux.Handle("/*", webui.Handler())

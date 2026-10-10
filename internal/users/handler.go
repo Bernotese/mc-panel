@@ -1,5 +1,5 @@
-// Package users implements user management, per-server permissions, the server stub API
-// and the `panel admin create` CLI command (stream D).
+// Package users implements user management, per-server permissions and the
+// `panel admin create` CLI command (stream D). The server API lives in internal/servers.
 package users
 
 import (
@@ -26,20 +26,18 @@ type Handler struct {
 	clock    clock.Clock
 	rec      audit.Recorder
 	notifier notify.Notifier
-	power    *powerLimiter
 }
 
 // NewHandler expects db from store.Open (BEGIN IMMEDIATE transactions).
 func NewHandler(db *sql.DB, c clock.Clock, rec audit.Recorder, n notify.Notifier) *Handler {
-	return &Handler{db: db, q: store.New(db), clock: c, rec: rec, notifier: n, power: newPowerLimiter()}
+	return &Handler{db: db, q: store.New(db), clock: c, rec: rec, notifier: n}
 }
 
-// Routes registers all stream-D user, permission and server routes (paths relative to /api).
+// Routes registers all user and permission routes (paths relative to /api).
 func (h *Handler) Routes(api *rbac.Router) {
 	h.userRoutes(api)
 	h.manageRoutes(api)
 	h.permissionRoutes(api)
-	h.serverRoutes(api)
 }
 
 // pathID parses the {id} URL parameter; false for non-numeric or non-positive values.
