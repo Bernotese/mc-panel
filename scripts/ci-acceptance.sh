@@ -54,6 +54,9 @@ echo "== setup: user mcpanel, binaries, test network"
 if ! id mcpanel >/dev/null 2>&1; then
   useradd --system --user-group --no-create-home --shell /usr/sbin/nologin mcpanel
 fi
+if ! id mcpanel-mc >/dev/null 2>&1; then
+  useradd --system --user-group --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin mcpanel-mc
+fi
 install -d -m 0755 "$work/bin"
 install -m 0755 "$1" "$work/bin/panel"
 install -m 0755 "$2" "$work/bin/agent"
@@ -74,6 +77,8 @@ cat >"$work/agent.toml" <<EOF
 socket = "$work/run/agent.sock"
 panel_uid = $(id -u mcpanel)
 firewall = "nftables"
+instances_dir = "$work/mc"
+mc_user = "mcpanel-mc"
 EOF
 cat >"$work/panel.toml" <<EOF
 listen = "192.0.2.1:8080"

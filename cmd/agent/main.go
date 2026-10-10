@@ -86,6 +86,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	mcUID, mcGID, err := mcUserIDs(cfg, user.Lookup)
+	if err != nil {
+		return err
+	}
 	if cfg.Dev {
 		if err := os.MkdirAll(filepath.Dir(cfg.Socket), 0o750); err != nil {
 			return err
@@ -107,7 +111,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(peercred.Wrap(l, peercred.AllowUIDs(panelUID, 0), log)) }()
 	log.Info("agent started", "version", version, "socket", cfg.Socket, "firewall", fw.Name(),
-		"panel_uid", panelUID, "socket_mode", fmt.Sprintf("%#o", mode), "dev", cfg.Dev)
+		"panel_uid", panelUID, "socket_mode", fmt.Sprintf("%#o", mode), "dev", cfg.Dev,
+		"docker_socket", cfg.DockerSocket, "instances_dir", cfg.InstancesDir, "mc_uid", mcUID, "mc_gid", mcGID)
 
 	select {
 	case err := <-errc:
@@ -142,6 +147,35 @@ func socketPerms(cfg config.Agent, lookup func(uid string) (*user.User, error)) 
 		return 0, 0, fmt.Errorf("panel_uid %d has non-numeric gid %q: %w", cfg.PanelUID, u.Gid, err)
 	}
 	return 0o660, gid, nil
+}
+
+// mcUserIDs resolves mc_user to the uid:gid the Minecraft containers run as. In dev
+// mode an empty mc_user means the agent's own ids. Outside dev mode root (uid or
+// gid 0) is refused: the containers must never run as root on the host.
+func mcUserIDs(cfg config.Agent, lookup func(name string) (*user.User, error)) (int, int, error) {
+	if cfg.MCUser == "" {
+		if !cfg.Dev {
+			return 0, 0, errors.New("mc_user must be set")
+		}
+		return os.Getuid(), os.Getgid(), nil
+	}
+	u, err := lookup(cfg.MCUser)
+	if err != nil {
+		return 0, 0, fmt.Errorf("look up mc_user %q (create it with: useradd --system --no-create-home --shell /usr/sbin/nologin %s): %w",
+			cfg.MCUser, cfg.MCUser, err)
+	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil || uid < 0 {
+		return 0, 0, fmt.Errorf("mc_user %q has invalid uid %q", cfg.MCUser, u.Uid)
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil || gid < 0 {
+		return 0, 0, fmt.Errorf("mc_user %q has invalid gid %q", cfg.MCUser, u.Gid)
+	}
+	if !cfg.Dev && (uid == 0 || gid == 0) {
+		return 0, 0, fmt.Errorf("mc_user %q resolves to uid %d gid %d: Minecraft containers must not run as root", cfg.MCUser, uid, gid)
+	}
+	return uid, gid, nil
 }
 
 func uidFromConfig(uid int) (uint32, error) {
