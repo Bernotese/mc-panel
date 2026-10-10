@@ -16,6 +16,7 @@ Es gelten alle Global Constraints aus `2026-10-10-instances-00-overview.md`. Zus
 
 | Thema | Wert |
 |---|---|
+| Zwischenstand VM | Ab Aufgabe 4 startet der agent in Produktion nur, wenn `mc_user` existiert; wer zwischen Aufgabe 4 und 23 in der VM testet, legt ihn vorher an: `limactl shell mcpanel sudo useradd --system --user-group --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin mcpanel-mc` |
 | Voraussetzung | Branch `chore/vm-browser-access` (Caddy-Zugang `https://mcpanel.localhost:8443`, `trusted_proxies = ["192.0.2.1/32"]`) ist in `main` gemerged, bevor `feat/instances` abzweigt |
 | Docker in der VM | Paket `docker.io`, Dienst `docker` aktiviert |
 | Minecraft-Benutzer | System-Benutzer `mcpanel-mc` (eigene Gruppe, kein Login, Home `/nonexistent`) |
@@ -395,8 +396,15 @@ echo "OK: restarted (started_at $before -> $(started_at))"
 
 echo "== remove"
 agent -X POST http://agent/v1/instances/remove -d '{"id": 9001}'
-gone() { ! docker inspect mcpanel-mc-9001 >/dev/null 2>&1; }
-wait_for 180 "container removed" gone
+# The instance leaves GET /v1/instances only after the whole remove (container, routes,
+# data move) has finished; checking docker inspect alone would race the routes rewrite.
+gone() {
+  ! docker inspect mcpanel-mc-9001 >/dev/null 2>&1 &&
+    agent http://agent/v1/instances | python3 -I -c '
+import json, sys
+sys.exit(any(i["id"] == 9001 for i in json.load(sys.stdin)["instances"]))'
+}
+wait_for 180 "remove finished" gone
 if grep -q 'vmtest.mc.localhost' /srv/mc-panel/router/routes.json; then
   echo "FAIL: route still present after remove" >&2
   exit 1
@@ -611,8 +619,7 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c -tags dockerintegration -o .dev
 limactl copy .dev/bin/agent-docker.test mcpanel:/tmp/agent-docker.test
 limactl shell mcpanel sudo /tmp/agent-docker.test -test.v -test.count=1
 ```
-Liegt der Integrationstest (Aufgabe 10) in einem anderen Paket, den Paketpfad entsprechend anpassen (bei mehreren Paketen je ein Binary).
-Expected: `PASS`. (CI führt denselben Test im Linux-Job aus.)
+Expected: `PASS`. Läuft der echte agent in der VM (Router und Netz `mcpanel-mc` existieren), überspringt `TestIntegrationManagerCycle` sich absichtlich, um den Host nicht zu verändern; die Client-Tests laufen trotzdem. Vollständig und strikt (`MCPANEL_IT_STRICT=1`) läuft der Test im Linux-Job der CI.
 
 - [ ] **Step 3: VM-Abnahme**
 
