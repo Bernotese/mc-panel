@@ -53,6 +53,8 @@ describe('SettingsPage', () => {
     expect(await screen.findByText('Nicht hinterlegt')).toBeInTheDocument()
     const key = screen.getByLabelText('API-Key')
     expect(key).toHaveAttribute('type', 'password')
+    // A password manager must not offer the admin's login password here (it would end up in a container env).
+    expect(key).toHaveAttribute('autocomplete', 'new-password')
     await user.type(key, '$2a$10$abcdef')
     await user.click(screen.getByRole('button', { name: 'Key speichern' }))
 
