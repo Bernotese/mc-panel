@@ -1,0 +1,16 @@
+# UI preview: the Vite dev server in mock mode (MSW in the browser), no Go backend and no
+# database. Started by the user with `make preview` (see docs/dev/README.md); CI only builds it.
+FROM node:24.21.0-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
+
+RUN mkdir /app && chown node:node /app
+WORKDIR /app
+USER node
+
+COPY --chown=node:node package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY --chown=node:node . .
+
+# Same port inside and outside the container, so Vite's HMR client connects to the right one.
+EXPOSE 5180
+CMD ["npx", "vite", "--mode", "mock", "--host", "0.0.0.0", "--port", "5180", "--strictPort"]

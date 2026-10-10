@@ -1,0 +1,18 @@
+# UI preview of mc-panel: the frontend against the MSW mock API, no backend.
+# Start and stop it yourself: `make preview` / `make preview-down` (docs/dev/README.md).
+name: mcpanel-preview
+
+services:
+  web:
+    build:
+      context: web
+      dockerfile: Dockerfile.preview
+    image: mcpanel-preview:local
+    container_name: mcpanel-preview
+    init: true
+    ports:
+      - "127.0.0.1:5180:5180"
+    volumes:
+      # Live edits from the checkout; the router plugin may rewrite src/routeTree.gen.ts
+      # exactly as `npm run dev:mock` does locally.
+      - ./web/src:/app/src

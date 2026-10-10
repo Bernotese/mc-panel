@@ -22,6 +22,7 @@ make dev                    # agent + `panel serve -dev` + Vite; UI at http://lo
 printf '%s\n' '<pw>' | .dev/bin/panel admin create -dev -username admin   # first admin (while make dev runs)
 
 make check                  # the local check (format, vet, build for macOS + Linux, tsc)
+make preview                # UI preview in Docker at http://localhost:5180 (mock API); the user starts it, never Claude
 make generate               # sqlc generate + regenerate web/src/api/schema.d.ts from api/openapi.yaml
 
 # CI runs these on every PR; locally only on request:
