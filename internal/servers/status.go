@@ -37,8 +37,11 @@ func (h *Handler) snapshot() Snapshot {
 	return s
 }
 
-// refreshStatus asks the agent for the actual state and caches the answer (or the failure).
-func (h *Handler) refreshStatus(ctx context.Context) (agentapi.InstancesResponse, error) {
+// refreshStatus asks the agent for the actual state, caches the answer (or the failure) and
+// returns it together with the snapshot built from it; callers use that snapshot, not the
+// cache, which a concurrent refresh may already have replaced. A failure caused by the
+// caller's own context (client gone, timeout) is not cached: it says nothing about the agent.
+func (h *Handler) refreshStatus(ctx context.Context) (agentapi.InstancesResponse, Snapshot, error) {
 	resp, err := h.inst.Instances(ctx)
 	snap := Snapshot{At: h.clock.Now()}
 	switch {
@@ -51,8 +54,11 @@ func (h *Handler) refreshStatus(ctx context.Context) (agentapi.InstancesResponse
 	case errors.Is(err, agentapi.ErrDockerUnavailable):
 		snap.Reachable, snap.Docker = true, agentapi.DockerUnavailable
 	}
+	if err != nil && ctx.Err() != nil {
+		return resp, snap, err
+	}
 	h.status.mu.Lock()
 	h.status.snap = snap
 	h.status.mu.Unlock()
-	return resp, err
+	return resp, snap, err
 }

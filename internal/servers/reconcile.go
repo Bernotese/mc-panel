@@ -96,7 +96,7 @@ func (h *Handler) ReconcileOnce(ctx context.Context) {
 	rs := &h.reconcile
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	resp, err := h.refreshStatus(ctx)
+	resp, snap, err := h.refreshStatus(ctx)
 	if err == nil && resp.Docker != agentapi.DockerOK {
 		err = agentapi.ErrDockerUnavailable
 	}
@@ -121,7 +121,6 @@ func (h *Handler) ReconcileOnce(ctx context.Context) {
 		h.log.Error("servers: reconcile: load settings", "err", err)
 		return
 	}
-	snap := h.snapshot()
 	h.warnUnknown(resp, rows)
 	now := h.clock.Now()
 	seen := make(map[int64]bool, len(rows))
@@ -129,9 +128,14 @@ func (h *Handler) ReconcileOnce(ctx context.Context) {
 	for _, row := range rows {
 		in := instanceFromListRow(row)
 		seen[in.ServerID] = true
-		act := decide(in.DesiredState, in.Revision, snap.actualStatus(in.ServerID))
+		st := snap.actualStatus(in.ServerID)
+		act := decide(in.DesiredState, in.Revision, st)
 		if act == actNone {
-			delete(rs.attempts, in.ServerID)
+			// An operation in progress is the agent working on the last action, not its
+			// success: keep the attempt, or a permanently failing action loses its backoff.
+			if st.Operation == agentapi.OpNone {
+				delete(rs.attempts, in.ServerID)
+			}
 			continue
 		}
 		if !rs.allow(in, act, now) {
@@ -142,6 +146,9 @@ func (h *Handler) ReconcileOnce(ctx context.Context) {
 		case err == nil:
 			acted = true
 		case isUnavailable(err):
+			// The action never reached the agent: it must not count for the backoff, so the
+			// stored wish is applied on the first pass after the agent answers again.
+			delete(rs.attempts, in.ServerID)
 			h.log.Warn("servers: reconcile aborted", "server_id", in.ServerID, "action", act.String(), "err", err)
 			return
 		default:

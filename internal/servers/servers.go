@@ -356,6 +356,10 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Exclude a concurrent reconcile pass: one that listed this server before the delete
+	// would otherwise recreate the container after the remove (orphan container).
+	h.reconcile.mu.Lock()
+	defer h.reconcile.mu.Unlock()
 	_, err := h.q.ServersGetInstance(ctx, s.ID)
 	configured := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {

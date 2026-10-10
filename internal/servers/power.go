@@ -80,14 +80,14 @@ func (h *Handler) handleServerPower(w http.ResponseWriter, r *http.Request) {
 // because it ran before). A missing container is left to the reconcile loop, which creates
 // and starts it because the desired state becomes "running".
 func (h *Handler) restart(ctx context.Context, s store.Server, in store.Instance) error {
-	resp, err := h.refreshStatus(ctx)
+	resp, snap, err := h.refreshStatus(ctx)
 	if err != nil {
 		return err
 	}
 	if resp.Docker != agentapi.DockerOK {
 		return agentapi.ErrDockerUnavailable
 	}
-	st := h.snapshot().actualStatus(in.ServerID)
+	st := snap.actualStatus(in.ServerID)
 	switch {
 	case st.State == agentapi.StateMissing:
 		return nil
