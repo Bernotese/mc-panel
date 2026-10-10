@@ -100,6 +100,7 @@ In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er 
 
 | Target | Wirkung |
 |---|---|
+| `make check` | einziger lokaler Check auf dem Mac (~10 s): gofmt, `go vet` + `go build` für macOS und Linux (inkl. Integrationstest-Dateien), `tsc`. Tests, Race, Lint und E2E laufen in der CI |
 | `make dev` | baut agent und panel, startet agent + `panel serve -dev` + Vite-Dev-Server, alles unter `./.dev/`; endet ein Prozess, stoppt das Skript alle |
 | `make test` | Go-Tests (`test-go`) und Frontend-Tests (`test-web`) |
 | `make test-race` | Go-Tests mit Race-Detector (`CGO_ENABLED=1`) |

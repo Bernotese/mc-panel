@@ -2,10 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-mc-panel is a self-hosted Minecraft server panel: a Go backend with an embedded React SPA, released as static `linux/amd64` and `linux/arm64` binaries. Development happens on macOS (Apple Silicon). Project docs are written in German:
+mc-panel is a self-hosted Minecraft server panel: a Go backend with an embedded React SPA, released as static `linux/amd64` and `linux/arm64` binaries. Development happens locally on macOS (Apple Silicon); production is an Ubuntu 26.04 LTS VPS (panel and agent as systemd services behind Caddy). Project docs are written in German:
 
 - `docs/dev/README.md`: toolchain versions, CLI commands, CI jobs and how to reproduce them locally, lint conventions, release process, production setup.
 - `docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`: architecture and security requirements.
+
+## Working rules
+
+- **Checks on the Mac:** only `make check` (gofmt, `go vet` and `go build` for macOS and Linux incl. the root-only integration test files, TypeScript types; ~10 s). Do not run `make test`, `make test-race`, `make lint`, Playwright or `make release` locally unless the user asks: CI runs all of them on every PR. After pushing, wait for CI with `gh pr checks <n> --watch` and fix failures from the CI logs (`gh run view <id> --log-failed`).
+- **Nothing system-level on the Mac without asking:** never install or uninstall software (brew, npm -g), create VMs or Docker containers/images, use `sudo`, or change system settings automatically. Propose the command and let the user run it (`! <command>`). Scripts that change the host (`scripts/ci-acceptance.sh`) are for CI runners only.
+- **Git and GitHub:** the repo is `Bernotese/mc-panel`; use `gh`. Never commit to or push `main`. Every change goes on a branch (`feat/…`, `fix/…`, `docs/…`, `chore/…`) and into a PR whose CI must be green. Merging PRs, deleting remote branches and pushing tags (a `v*` tag publishes a GitHub release) only after the user says so.
+- **Implementation with agent teams:** plan tasks (`docs/superpowers/plans/`) are implemented by Claude Code agent teams (enabled in `.claude/settings.json`). The lead splits the work into tasks with disjoint file sets and integrates; teammates load this file but not the lead's conversation, so each spawn prompt names the plan file, the task numbers and the branch. Each teammate works in its own git worktree on its own branch (`git worktree add ../mc-panel-wt/<branch> -b <branch> origin/main`), runs `make check` before reporting a task done, and never edits files assigned to another teammate. Keep teams small (3–5 teammates) and shut teammates down when their work is merged.
 
 ## Commands
 
@@ -14,10 +21,13 @@ mc-panel is a self-hosted Minecraft server panel: a Go backend with an embedded 
 make dev                    # agent + `panel serve -dev` + Vite; UI at http://localhost:5173, all state in ./.dev/
 printf '%s\n' '<pw>' | .dev/bin/panel admin create -dev -username admin   # first admin (while make dev runs)
 
+make check                  # the local check (format, vet, build for macOS + Linux, tsc)
+make generate               # sqlc generate + regenerate web/src/api/schema.d.ts from api/openapi.yaml
+
+# CI runs these on every PR; locally only on request:
 make test                   # go test ./... + vitest
 make test-race              # needs CGO_ENABLED=1 (Makefile sets it)
 make lint                   # golangci-lint + eslint + tsc
-make generate               # sqlc generate + regenerate web/src/api/schema.d.ts from api/openapi.yaml
 make build                  # web build, then bin/panel and bin/agent
 make clean                  # also wipes .dev/ (resets the dev DB)
 
@@ -28,7 +38,7 @@ cd web && npm run e2e                                 # Playwright against the m
 GOOS=linux golangci-lint run ./...                    # lint Linux-only files from macOS
 ```
 
-CI uses golangci-lint v2.14.0. For an exact local match, install it into `.dev/tools` as described in `docs/dev/README.md`. nftables integration tests run only on Linux as root: `go test -tags nftintegration -exec sudo ./internal/agent/...`.
+CI uses golangci-lint v2.14.0 (`docs/dev/README.md` describes an exact local install). nftables integration tests and the end-to-end jail check (`scripts/ci-acceptance.sh`) run only in CI on Linux as root.
 
 CI fails if generated code is out of date. Commit regenerated files after you change SQL queries (`internal/store/*.sql.go`) or `api/openapi.yaml` (`web/src/api/schema.d.ts`).
 
