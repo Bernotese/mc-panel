@@ -2225,6 +2225,7 @@ func TestInstanceContainerGolden(t *testing.T) {
 		Env: []string{
 			"EULA=TRUE", "TYPE=PAPER", "VERSION=1.21.4", "MEMORY=4096M", "ENABLE_AUTOPAUSE=false",
 			"ENABLE_RCON=true", "OVERRIDE_SERVER_PROPERTIES=true",
+			"EXISTING_OPS_FILE=SYNCHRONIZE", "EXISTING_WHITELIST_FILE=SYNCHRONIZE",
 			"MOTD=Hallo", "DIFFICULTY=normal", "MODE=survival", "MAX_PLAYERS=20", "PVP=true", "HARDCORE=false",
 			"ALLOW_FLIGHT=false", "ENABLE_COMMAND_BLOCK=false", "ONLINE_MODE=true", "ENABLE_WHITELIST=false",
 			"OPS=Notch", "VIEW_DISTANCE=10", "SIMULATION_DISTANCE=10", "SPAWN_PROTECTION=16",
@@ -2291,6 +2292,7 @@ func TestRouterContainerGolden(t *testing.T) {
 // allowedEnvKeys mirrors the allowlist of instancespec.Env: the template must never add anything.
 var allowedEnvKeys = []string{
 	"EULA", "TYPE", "VERSION", "MEMORY", "ENABLE_AUTOPAUSE", "ENABLE_RCON", "OVERRIDE_SERVER_PROPERTIES",
+	"EXISTING_OPS_FILE", "EXISTING_WHITELIST_FILE",
 	"FABRIC_LOADER_VERSION", "NEOFORGE_VERSION", "MODRINTH_MODPACK", "CF_SLUG", "CF_PAGE_URL", "CF_API_KEY",
 	"MOTD", "DIFFICULTY", "MODE", "MAX_PLAYERS", "PVP", "HARDCORE", "ALLOW_FLIGHT", "ENABLE_COMMAND_BLOCK",
 	"ONLINE_MODE", "ENABLE_WHITELIST", "WHITELIST", "OPS", "VIEW_DISTANCE", "SIMULATION_DISTANCE",
@@ -2913,6 +2915,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ---
 
 ### Task 8: Manager – Warteschlangen, ensure/power/remove, Router, Status, Stats
+
+> **Nachtrag aus dem Review von Phase A (verbindlich):** `instancespec.Env` setzt `EXISTING_OPS_FILE=SYNCHRONIZE` und `EXISTING_WHITELIST_FILE=SYNCHRONIZE`; leere Listen (bzw. eine ausgeschaltete Whitelist) schickt es aber gar nicht, und dann fasst itzg `ops.json`/`whitelist.json` nicht an – ein zuletzt entfernter Op bliebe Op. Deshalb gilt zusätzlich: Bei jedem `ensure`, das einen Container (neu) anlegt, schreibt der Worker vorher `[]` in `<instances_dir>/instances/<id>/ops.json`, wenn `spec.properties.ops` leer ist, und in `whitelist.json`, wenn die Whitelist aus oder leer ist – nur wenn die Datei existiert, mit Besitzer `uid:gid` und Modus `0644`, atomar (temporäre Datei + `rename`). Test im Manager-Test mit dem Fake-Daemon: vorhandene `ops.json` mit einem Eintrag + Spec ohne Ops → nach `ensure` enthält die Datei `[]`; Spec mit Ops → Datei unverändert.
 
 **Files:**
 - Create: `internal/agent/instances/worker.go` (Warteschlange pro Instanz, `last_error`, `Wait`, `Close`)

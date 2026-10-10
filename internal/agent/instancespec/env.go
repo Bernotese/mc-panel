@@ -28,6 +28,10 @@ func Env(name string, s Spec) ([]string, error) {
 		"ENABLE_AUTOPAUSE=false",
 		"ENABLE_RCON=true",
 		"OVERRIDE_SERVER_PROPERTIES=true",
+		// itzg's default only merges names into ops.json/whitelist.json; synchronizing
+		// makes a name removed in the panel lose its op or whitelist entry.
+		"EXISTING_OPS_FILE=SYNCHRONIZE",
+		"EXISTING_WHITELIST_FILE=SYNCHRONIZE",
 	)
 	switch s.Type {
 	case TypeFabric:
@@ -63,8 +67,9 @@ func Env(name string, s Spec) ([]string, error) {
 		"ENABLE_WHITELIST="+b(*p.WhitelistEnabled),
 	)
 	// Empty lists are omitted: itzg clears a property for an empty value but leaves it
-	// alone when the variable is unset.
-	if len(p.Whitelist) > 0 {
+	// alone when the variable is unset. WHITELIST is only sent while the whitelist is on,
+	// because itzg turns whitelisting on as soon as the variable is set.
+	if *p.WhitelistEnabled && len(p.Whitelist) > 0 {
 		env = append(env, "WHITELIST="+strings.Join(p.Whitelist, ","))
 	}
 	if len(p.Ops) > 0 {
@@ -79,5 +84,12 @@ func Env(name string, s Spec) ([]string, error) {
 		env = append(env, "SEED="+*p.Seed)
 	}
 	env = append(env, "LEVEL_TYPE=minecraft:"+*p.LevelType)
+	// Defence in depth (spec §5.2): no value may carry a control character, whatever
+	// future field validation might miss.
+	for _, kv := range env {
+		if strings.ContainsFunc(kv, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+			return nil, invalid("env", "control character in %s", strings.SplitN(kv, "=", 2)[0])
+		}
+	}
 	return env, nil
 }

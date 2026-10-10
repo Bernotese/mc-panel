@@ -13,6 +13,7 @@ import (
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/agent/banrules"
+	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
 )
 
 const (
@@ -52,7 +53,8 @@ func (e *StatusError) Is(target error) bool {
 	case e.StatusCode == http.StatusTooManyRequests:
 		return target == agentapi.ErrBusy
 	case e.StatusCode >= 400 && e.StatusCode < 500:
-		return target == banrules.ErrInvalid
+		// Firewall callers check banrules.ErrInvalid, instance callers instancespec.ErrInvalid.
+		return target == banrules.ErrInvalid || target == instancespec.ErrInvalid
 	default:
 		// 1xx, 3xx, 5xx and anything else the agent never sends: treat as
 		// a transient/unknown condition, never as a permanent rejection.
@@ -148,14 +150,14 @@ func (c *Client) Ensure(ctx context.Context, req agentapi.EnsureRequest) error {
 
 func (c *Client) Power(ctx context.Context, id int64, action agentapi.PowerAction) error {
 	if id <= 0 || !agentapi.ValidPowerAction(action) {
-		return fmt.Errorf("%w: power: id must be > 0 and action start, stop or restart", ErrInvalid)
+		return fmt.Errorf("%w: %w: power: id must be > 0 and action start, stop or restart", ErrInvalid, instancespec.ErrInvalid)
 	}
 	return c.do(ctx, http.MethodPost, agentapi.PathInstancePower, agentapi.PowerRequest{ID: id, Action: action}, nil)
 }
 
 func (c *Client) Remove(ctx context.Context, id int64) error {
 	if id <= 0 {
-		return fmt.Errorf("%w: remove: id must be > 0", ErrInvalid)
+		return fmt.Errorf("%w: %w: remove: id must be > 0", ErrInvalid, instancespec.ErrInvalid)
 	}
 	return c.do(ctx, http.MethodPost, agentapi.PathInstanceRemove, agentapi.RemoveRequest{ID: id}, nil)
 }

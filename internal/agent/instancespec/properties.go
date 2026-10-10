@@ -88,7 +88,9 @@ func (p Properties) Validate() error {
 }
 
 // printable allows any printable Unicode (including § color codes) but no control
-// characters, so a value can never break out of its environment variable.
+// characters, so a value can never break out of its environment variable, and no
+// backslash: server.properties is read with java.util.Properties, where a trailing
+// backslash continues the line and "\u" without four hex digits aborts the load.
 func printable(field, s string, maxRunes int) error {
 	if !utf8.ValidString(s) || utf8.RuneCountInString(s) > maxRunes {
 		return invalid(field, "must be valid UTF-8 with at most %d characters", maxRunes)
@@ -96,6 +98,9 @@ func printable(field, s string, maxRunes int) error {
 	for _, r := range s {
 		if !unicode.IsPrint(r) {
 			return invalid(field, "must not contain control characters")
+		}
+		if r == '\\' {
+			return invalid(field, "must not contain a backslash")
 		}
 	}
 	return nil
