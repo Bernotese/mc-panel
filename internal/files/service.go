@@ -73,10 +73,7 @@ func New(cfg Config) *Service {
 
 // Close cancels running extract jobs (they end as failed and remove their temp folders) and
 // waits for them. It may be called more than once.
-func (s *Service) Close() {
-	s.jobs.cancel()
-	s.jobs.wg.Wait()
-}
+func (s *Service) Close() { s.jobs.close() }
 
 func (s *Service) instanceDir(id int64) string {
 	return filepath.Join(s.cfg.InstancesDir, "instances", strconv.FormatInt(id, 10))

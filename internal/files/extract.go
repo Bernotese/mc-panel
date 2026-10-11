@@ -8,7 +8,10 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"sort"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/config"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
@@ -41,6 +44,16 @@ func (s *Service) Extract(ctx context.Context, req filesapi.ExtractRequest) (fil
 	case dest == src || strings.HasPrefix(src, dest+"/"):
 		return filesapi.Job{}, fmt.Errorf("%w: the destination must not contain the archive", filesapi.ErrInvalid)
 	}
+	// The slot is taken before the archive is parsed: pre-checks are throttled like jobs.
+	if err := s.jobs.acquire(req.ID); err != nil {
+		return filesapi.Job{}, err
+	}
+	ownSlot := true
+	defer func() {
+		if ownSlot {
+			s.jobs.release(req.ID)
+		}
+	}()
 	root, err := s.open(req.ID)
 	if err != nil {
 		return filesapi.Job{}, err
@@ -66,6 +79,9 @@ func (s *Service) Extract(ctx context.Context, req filesapi.ExtractRequest) (fil
 			_ = f.Close()
 		}
 	}()
+	if err := checkCentralDirectory(f, st.Size(), s.cfg.Limits.MaxExtractEntries); err != nil {
+		return filesapi.Job{}, err
+	}
 	zr, err := zip.NewReader(f, st.Size())
 	if err != nil {
 		return filesapi.Job{}, fmt.Errorf("%w: %s is not a valid zip archive: %w", filesapi.ErrInvalid, src, err)
@@ -78,24 +94,22 @@ func (s *Service) Extract(ctx context.Context, req filesapi.ExtractRequest) (fil
 	if err != nil {
 		return filesapi.Job{}, err
 	}
-	job, err := s.jobs.start(req.ID, src, dest, plan, s.clock.Now())
+	ownSlot = false // start owns the slot from here on (it gives it back on error)
+	job, err := s.jobs.start(req.ID, src, dest, plan, s.clock.Now, func(jctx context.Context) error {
+		defer root.Close()
+		defer f.Close()
+		defer res.release()
+		err := s.extract(jctx, root, zr, req.ID, dest, res)
+		if err != nil {
+			s.log.Warn("files: extract failed", "id", req.ID, "archive", src, "dest", dest, "err", err)
+		}
+		return err
+	})
 	if err != nil {
 		res.release()
 		return filesapi.Job{}, err
 	}
 	handedOver = true
-	s.jobs.wg.Add(1)
-	go func() {
-		defer s.jobs.wg.Done()
-		defer root.Close()
-		defer f.Close()
-		defer res.release()
-		err := s.extract(s.jobs.ctx, root, zr, req.ID, dest, res)
-		if err != nil {
-			s.log.Warn("files: extract failed", "id", req.ID, "archive", src, "dest", dest, "err", err)
-		}
-		s.jobs.finish(req.ID, err, s.clock.Now())
-	}()
 	return job, nil
 }
 
@@ -145,7 +159,7 @@ func checkArchive(zr *zip.Reader, lim config.FilesLimits) (archivePlan, error) {
 		mode := zf.Mode()
 		dir := mode.IsDir()
 		switch {
-		case mode&fs.ModeSymlink != 0 || (!dir && !mode.IsRegular()):
+		case !unixTypeAllowed(zf.ExternalAttrs) || mode&fs.ModeSymlink != 0 || (!dir && !mode.IsRegular()):
 			return plan, fmt.Errorf("%w: entry %q is neither a file nor a folder", filesapi.ErrInvalid, zf.Name)
 		case zf.Flags&0x1 != 0:
 			return plan, fmt.Errorf("%w: entry %q is encrypted", filesapi.ErrInvalid, zf.Name)
@@ -174,6 +188,17 @@ func checkArchive(zr *zip.Reader, lim config.FilesLimits) (archivePlan, error) {
 	return plan, nil
 }
 
+// unixTypeAllowed checks the Unix file type in the high 16 bits of the external attributes,
+// whatever creator system the entry claims (archive/zip only reads them for Unix creators):
+// only "none", regular file and folder are allowed - never a symlink, FIFO, device or socket.
+func unixTypeAllowed(attrs uint32) bool {
+	switch (attrs >> 16) & 0o170000 {
+	case 0, 0o100000, 0o040000:
+		return true
+	}
+	return false
+}
+
 // extract unpacks into a temp folder next to dest, counting the bytes actually written, and
 // renames it to dest when everything succeeded. On any error the temp folder is removed.
 func (s *Service) extract(ctx context.Context, root *os.Root, zr *zip.Reader, id int64, dest string, res *reservation) error {
@@ -191,26 +216,32 @@ func (s *Service) extract(ctx context.Context, root *os.Root, zr *zip.Reader, id
 		}
 	}()
 	budget := s.cfg.Limits.MaxExtractBytes
+	type dirTime struct {
+		path string
+		t    time.Time
+	}
+	var dirTimes []dirTime
 	for _, zf := range zr.File {
 		name := strings.TrimSuffix(zf.Name, "/")
 		if h := s.jobs.hook; h != nil {
 			h(ctx, id, name)
 		}
 		if ctx.Err() != nil {
-			return errors.New("the files service is shutting down")
+			return errShuttingDown
 		}
 		target := tmp + "/" + name
 		if zf.Mode().IsDir() {
 			if err := root.MkdirAll(target, dirMode); err != nil { //nolint:gosec // G301: see above
 				return fsErr(err)
 			}
+			dirTimes = append(dirTimes, dirTime{target, zf.Modified})
 			s.jobs.progress(id, 0)
 			continue
 		}
 		if err := root.MkdirAll(parentOf(target), dirMode); err != nil { //nolint:gosec // G301: see above
 			return fsErr(err)
 		}
-		n, err := extractFile(root, zf, target, budget)
+		n, err := extractFile(ctx, root, zf, target, budget)
 		budget -= n
 		res.landed(n)
 		if err != nil {
@@ -219,23 +250,55 @@ func (s *Service) extract(ctx context.Context, root *os.Root, zr *zip.Reader, id
 		_ = root.Chtimes(target, zf.Modified, zf.Modified)
 		s.jobs.progress(id, n)
 	}
+	// Folder times last (writing into a folder changes its mtime), deepest first.
+	sort.SliceStable(dirTimes, func(a, b int) bool {
+		return strings.Count(dirTimes[a].path, "/") > strings.Count(dirTimes[b].path, "/")
+	})
+	for _, d := range dirTimes {
+		_ = root.Chtimes(d.path, d.t, d.t)
+	}
 	if err := destUsable(root, dest); err != nil { // something appeared meanwhile
 		return err
 	}
+	// os.Root.Rename never replaces an existing folder (EEXIST), so an empty dest is removed
+	// first - with rmdir, which fails for a folder that got content meanwhile; content that
+	// appears at the last moment is never lost, the job fails with exists instead.
+	exists := func(err error) bool {
+		return errors.Is(err, fs.ErrExist) || errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.ENOTDIR)
+	}
 	if fi, err := root.Lstat(dest); err == nil && fi.IsDir() {
 		if err := root.Remove(dest); err != nil {
+			if exists(err) {
+				return fmt.Errorf("%w: %s is not empty any more: %w", filesapi.ErrExists, dest, err)
+			}
 			return fsErr(err)
 		}
 	}
 	if err := root.Rename(tmp, dest); err != nil {
+		if exists(err) {
+			return fmt.Errorf("%w: %s exists now: %w", filesapi.ErrExists, dest, err)
+		}
 		return fsErr(err)
 	}
 	ok = true
 	return nil
 }
 
+// ctxReader ends a read as soon as ctx is done, so Close interrupts a large entry.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if c.ctx.Err() != nil {
+		return 0, errShuttingDown
+	}
+	return c.r.Read(p)
+}
+
 // extractFile writes one entry, refusing more bytes than declared or than the budget left.
-func extractFile(root *os.Root, zf *zip.File, target string, budget int64) (int64, error) {
+func extractFile(ctx context.Context, root *os.Root, zf *zip.File, target string, budget int64) (int64, error) {
 	rc, err := zf.Open()
 	if err != nil {
 		return 0, fmt.Errorf("%w: %s: %w", filesapi.ErrInvalid, zf.Name, err)
@@ -247,9 +310,11 @@ func extractFile(root *os.Root, zf *zip.File, target string, budget int64) (int6
 	}
 	declared := int64(zf.UncompressedSize64) // ≤ MaxExtractBytes, checked by checkArchive
 	limit := min(declared, budget)
-	n, err := io.Copy(out, io.LimitReader(rc, limit+1))
+	n, err := io.Copy(out, io.LimitReader(ctxReader{ctx: ctx, r: rc}, limit+1))
 	cerr := out.Close()
 	switch {
+	case errors.Is(err, errShuttingDown):
+		return n, err
 	case err != nil:
 		if fe := fsErr(err); errors.Is(fe, filesapi.ErrInsufficientStorage) {
 			return n, fe // the disk filled up while writing
