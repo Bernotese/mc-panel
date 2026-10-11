@@ -193,6 +193,9 @@ type fakeFiles struct {
 	// uploadHook, if set, consumes the upload body instead of io.ReadAll (stream tests).
 	uploadHook func(body io.Reader) (int64, error)
 	download   filesapi.Download
+	dlCtx      context.Context // ctx of the last Download call
+	dlClosed   chan struct{}   // closed when the last download body is closed
+	onExtract  func()          // runs at the start of Extract (outside the lock)
 	job        *filesapi.Job
 	extracts   []filesapi.ExtractRequest
 }
@@ -277,10 +280,17 @@ func (f *fakeFiles) Upload(ctx context.Context, id int64, path string, overwrite
 	f.mu.Unlock()
 	if hook != nil {
 		n, err := hook(body)
+		if err == nil && ctx.Err() != nil {
+			// like the real client: a cancelled request loses the service's answer
+			err = fmt.Errorf("%w: %w", filesapi.ErrUnavailable, ctx.Err())
+		}
 		return filesapi.UploadResponse{Size: n}, err
 	}
 	b, err := io.ReadAll(body)
 	if err != nil {
+		return filesapi.UploadResponse{}, fmt.Errorf("%w: %w", filesapi.ErrUnavailable, err)
+	}
+	if err := ctx.Err(); err != nil {
 		return filesapi.UploadResponse{}, fmt.Errorf("%w: %w", filesapi.ErrUnavailable, err)
 	}
 	if int64(len(b)) != size {
@@ -298,7 +308,40 @@ func (f *fakeFiles) Download(ctx context.Context, id int64, path string) (filesa
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.download, nil
+	d := f.download
+	if d.Body != nil {
+		// like the real client, the body fails once the request context is done
+		f.dlCtx, f.dlClosed = ctx, make(chan struct{})
+		d.Body = &ctxBody{ctx: ctx, rc: d.Body, closed: f.dlClosed}
+	}
+	return d, nil
+}
+
+// lastDownload returns the context and the close signal of the last download.
+func (f *fakeFiles) lastDownload() (context.Context, <-chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dlCtx, f.dlClosed
+}
+
+// ctxBody is a download body that fails once ctx is done and reports its Close.
+type ctxBody struct {
+	ctx    context.Context
+	rc     io.ReadCloser
+	once   sync.Once
+	closed chan struct{}
+}
+
+func (b *ctxBody) Read(p []byte) (int, error) {
+	if err := b.ctx.Err(); err != nil {
+		return 0, fmt.Errorf("%w: %w", filesapi.ErrUnavailable, err)
+	}
+	return b.rc.Read(p)
+}
+
+func (b *ctxBody) Close() error {
+	b.once.Do(func() { close(b.closed) })
+	return b.rc.Close()
 }
 
 func (f *fakeFiles) Mkdir(ctx context.Context, id int64, path string) error {
@@ -314,6 +357,12 @@ func (f *fakeFiles) Delete(ctx context.Context, id int64, path string) error {
 }
 
 func (f *fakeFiles) Extract(ctx context.Context, req filesapi.ExtractRequest) (filesapi.Job, error) {
+	f.mu.Lock()
+	hook := f.onExtract
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	if err := f.begin(ctx, fmt.Sprintf("extract %d %s %s", req.ID, req.Path, req.Dest)); err != nil {
 		return filesapi.Job{}, err
 	}
