@@ -55,13 +55,61 @@ func TestRecheck(t *testing.T) {
 		t.Fatalf("idle session: err = %v", err)
 	}
 
-	// deleted user
+	// absolute expiry (12 h) even though the session was active a moment ago
+	clk.Set(sessionStart)
+	_, busy := mustCreate(t, s, alice, principal.StageFull)
+	touch := func(at time.Time) {
+		t.Helper()
+		clk.Set(at)
+		if err := q.AuthTouchSession(ctx, store.AuthTouchSessionParams{LastSeenAt: at.UnixMilli(), ID: busy.ID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	touch(sessionStart.Add(12*time.Hour - time.Minute))
+	if _, err := s.Recheck(ctx, busy.ID, alice); err != nil {
+		t.Fatalf("active session before the absolute timeout: err = %v", err)
+	}
+	touch(sessionStart.Add(12 * time.Hour))
+	if _, err := s.Recheck(ctx, busy.ID, alice); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("absolute timeout: err = %v", err)
+	}
+
+	// deleted user: ON DELETE CASCADE removes the sessions too (session-missing path) ...
 	clk.Set(sessionStart)
 	_, bobSess := mustCreate(t, s, bob, principal.StageFull)
-	if _, err := db.Exec(`DELETE FROM users WHERE id = ?`, bob); err != nil {
+	if _, err := db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, bob); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Recheck(ctx, bobSess.ID, bob); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("deleted user: err = %v", err)
+	}
+	// ... so reach the user-missing branch with a session row whose user is gone (foreign keys
+	// off on one connection; PRAGMA foreign_keys is a no-op inside a transaction).
+	carol := storetest.CreateUser(t, db, "carol", "user")
+	_, carolSess := mustCreate(t, s, carol, principal.StageFull)
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range []struct {
+		sql  string
+		args []any
+	}{
+		{`PRAGMA foreign_keys = OFF`, nil},
+		{`DELETE FROM users WHERE id = ?`, []any{carol}},
+		{`PRAGMA foreign_keys = ON`, nil},
+	} {
+		if _, err := conn.ExecContext(ctx, st.sql, st.args...); err != nil {
+			t.Fatalf("%s: %v", st.sql, err)
+		}
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.AuthGetSessionByID(ctx, carolSess.ID); err != nil {
+		t.Fatalf("session row must survive for this case: %v", err)
+	}
+	if _, err := s.Recheck(ctx, carolSess.ID, carol); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("session of a missing user: err = %v", err)
 	}
 }
