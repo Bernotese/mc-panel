@@ -38,6 +38,7 @@ describe('ServerDetailPage', () => {
     expect(within(state).getByText('vor 5 Minuten')).toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'Steuerung für survival' })).toBeInTheDocument()
     expect(screen.queryByText('Neustart nötig')).not.toBeInTheDocument()
+    expect(await within(screen.getByRole('region', { name: 'Online-Spieler' })).findByText('2 / 20')).toBeInTheDocument()
   })
 
   it('shows admins the last error of a failed server', async () => {

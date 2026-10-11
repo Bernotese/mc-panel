@@ -422,6 +422,10 @@ export const en: Messages = {
       none: 'Nobody is online right now.',
       unavailable: 'Not available – the server is not running or still starting.',
     },
+    card: {
+      title: 'Online players',
+      count: '{{online}} / {{max}}',
+    },
     whitelist: {
       title: 'Whitelist',
       empty: 'Nobody is on the whitelist.',
