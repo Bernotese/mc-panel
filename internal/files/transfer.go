@@ -56,7 +56,7 @@ func (s *Service) Upload(ctx context.Context, id int64, p string, overwrite bool
 	}
 	defer res.release()
 
-	tmp, err := tempName(parentOf(clean))
+	tmp, err := s.tempName(parentOf(clean))
 	if err != nil {
 		return filesapi.UploadResponse{}, err
 	}
@@ -70,7 +70,13 @@ func (s *Service) Upload(ctx context.Context, id int64, p string, overwrite bool
 			_ = root.Remove(tmp)
 		}
 	}()
-	n, err := io.Copy(landingWriter{w: f, res: res}, io.LimitReader(body, size+1))
+	src := &bodyReader{r: body}
+	n, err := io.Copy(landingWriter{w: f, res: res}, io.LimitReader(src, size+1))
+	if src.err != nil {
+		// The caller's body broke off or stalled: its problem, not an internal error (the panel
+		// would otherwise report the service as unavailable).
+		err = src.problem()
+	}
 	if err == nil && n != size {
 		err = fmt.Errorf("%w: received %d bytes, Content-Length announced %d", filesapi.ErrInvalid, n, size)
 	}
@@ -93,6 +99,39 @@ func (s *Service) Upload(ctx context.Context, id int64, p string, overwrite bool
 	return filesapi.UploadResponse{Size: n}, nil
 }
 
+// bodyReader records the error of the upload body (as opposed to a write error on disk).
+type bodyReader struct {
+	r   io.Reader
+	err error
+}
+
+func (b *bodyReader) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) {
+		b.err = err
+	}
+	return n, err
+}
+
+// problem describes the body error for the caller (without the error text, which may name the
+// connection).
+func (b *bodyReader) problem() error {
+	if errors.Is(b.err, os.ErrDeadlineExceeded) {
+		return fmt.Errorf("%w: the upload stalled (no data for %s)", filesapi.ErrInvalid, ioTimeout)
+	}
+	return fmt.Errorf("%w: the upload was interrupted", filesapi.ErrInvalid)
+}
+
+// slot takes a place in sem without waiting; release gives it back.
+func slot(sem chan struct{}, what string) (release func(), err error) {
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
+	default:
+		return nil, fmt.Errorf("%w: too many %s at the same time", filesapi.ErrBusy, what)
+	}
+}
+
 // Download streams a file (exactly its size at open time) or a folder as zip. start is called
 // once before the first byte; an error before start can still be answered as JSON.
 func (s *Service) Download(ctx context.Context, id int64, p string, start func(isDir bool, size int64), w io.Writer) error {
@@ -111,11 +150,26 @@ func (s *Service) Download(ctx context.Context, id int64, p string, start func(i
 	}
 	switch {
 	case fi.IsDir():
+		release, err := slot(s.zipDownloads, "folder downloads")
+		if err != nil {
+			return err
+		}
+		defer release()
+		// Refused up front rather than cut off mid-stream (the browser would keep a broken zip).
+		if err := checkDirZip(ctx, root, clean, s.cfg.Limits); err != nil {
+			return err
+		}
 		start(true, -1)
 		return writeDirZip(ctx, root, clean, w, s.cfg.Limits)
 	case !fi.Mode().IsRegular():
 		return fmt.Errorf("%w: %s is not a regular file", filesapi.ErrNotRegular, clean)
-	case isServerProps(clean):
+	}
+	release, err := slot(s.fileDownloads, "downloads")
+	if err != nil {
+		return err
+	}
+	defer release()
+	if isServerProps(clean) {
 		data, _, err := readSmall(root, clean, s.cfg.Limits.MaxTextBytes)
 		if err != nil {
 			return err

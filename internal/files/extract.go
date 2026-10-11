@@ -94,6 +94,12 @@ func (s *Service) Extract(ctx context.Context, req filesapi.ExtractRequest) (fil
 	if err != nil {
 		return filesapi.Job{}, err
 	}
+	// The pre-check of a large archive takes a while: a caller that gave up meanwhile (the
+	// panel reported a failure) must not get a job it does not know about.
+	if err := ctx.Err(); err != nil {
+		res.release()
+		return filesapi.Job{}, err
+	}
 	ownSlot = false // start owns the slot from here on (it gives it back on error)
 	job, err := s.jobs.start(req.ID, src, dest, plan, s.clock.Now, func(jctx context.Context) error {
 		defer root.Close()
@@ -202,7 +208,7 @@ func unixTypeAllowed(attrs uint32) bool {
 // extract unpacks into a temp folder next to dest, counting the bytes actually written, and
 // renames it to dest when everything succeeded. On any error the temp folder is removed.
 func (s *Service) extract(ctx context.Context, root *os.Root, zr *zip.Reader, id int64, dest string, res *reservation) error {
-	tmp, err := tempName(parentOf(dest))
+	tmp, err := s.tempName(parentOf(dest))
 	if err != nil {
 		return err
 	}

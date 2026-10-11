@@ -200,7 +200,7 @@ func (s *Service) Write(ctx context.Context, req filesapi.WriteRequest) (filesap
 		return filesapi.WriteResponse{}, err
 	}
 	defer res.release()
-	if err := writeAtomic(root, clean, []byte(content), req.ExpectedMTime != nil); err != nil {
+	if err := s.writeAtomic(root, clean, []byte(content), req.ExpectedMTime != nil); err != nil {
 		return filesapi.WriteResponse{}, err
 	}
 	st, err := lstat(root, clean)
@@ -211,8 +211,8 @@ func (s *Service) Write(ctx context.Context, req filesapi.WriteRequest) (filesap
 }
 
 // writeAtomic writes data to a temp file next to clean, syncs it and commits it.
-func writeAtomic(root *os.Root, clean string, data []byte, overwrite bool) error {
-	tmp, err := tempName(parentOf(clean))
+func (s *Service) writeAtomic(root *os.Root, clean string, data []byte, overwrite bool) error {
+	tmp, err := s.tempName(parentOf(clean))
 	if err != nil {
 		return err
 	}

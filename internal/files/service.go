@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,13 +26,15 @@ import (
 )
 
 const (
-	tempPrefix      = ".mcpanel-tmp-"
-	maxUploads      = 4
-	maxJobsTotal    = 2
-	cleanupMaxDepth = 64
-	fileMode        = 0o644
-	dirMode         = 0o755
-	serverProps     = "server.properties"
+	tempPrefix       = ".mcpanel-tmp-"
+	maxUploads       = 4
+	maxZipDownloads  = 4  // folder zips: each holds its central directory in memory (spec §4.1)
+	maxFileDownloads = 16 // single files
+	maxJobsTotal     = 2
+	cleanupMaxDepth  = 64
+	fileMode         = 0o644
+	dirMode          = 0o755
+	serverProps      = "server.properties"
 )
 
 // Config configures a Service.
@@ -46,19 +49,33 @@ type Config struct {
 
 // Service performs the file operations of all instances.
 type Service struct {
-	cfg     Config
-	clock   clock.Clock
-	log     *slog.Logger
-	disk    DiskSpace
-	uploads chan struct{} // at most maxUploads concurrent uploads
-	jobs    *jobs
+	cfg           Config
+	clock         clock.Clock
+	log           *slog.Logger
+	disk          DiskSpace
+	uploads       chan struct{} // at most maxUploads concurrent uploads
+	zipDownloads  chan struct{} // at most maxZipDownloads concurrent folder zips
+	fileDownloads chan struct{} // at most maxFileDownloads concurrent file downloads
+	jobs          *jobs
+	// tempToken is part of every temp name this process creates, so CleanupTemp, which runs
+	// while the service already serves, removes only the leftovers of earlier runs.
+	tempToken string
+	dataDirRe *regexp.Regexp // host path of a data directory (publicMessage)
 
 	mu      sync.Mutex
 	pending int64 // bytes announced by running writes, uploads and extract jobs, not yet on disk
 }
 
 func New(cfg Config) *Service {
-	s := &Service{cfg: cfg, clock: cfg.Clock, log: cfg.Log, disk: cfg.Disk, uploads: make(chan struct{}, maxUploads), jobs: newJobs()}
+	s := &Service{
+		cfg: cfg, clock: cfg.Clock, log: cfg.Log, disk: cfg.Disk, jobs: newJobs(),
+		uploads:       make(chan struct{}, maxUploads),
+		zipDownloads:  make(chan struct{}, maxZipDownloads),
+		fileDownloads: make(chan struct{}, maxFileDownloads),
+		tempToken:     randomHex(4),
+		dataDirRe:     regexp.MustCompile(regexp.QuoteMeta(filepath.Join(cfg.InstancesDir, "instances")+string(filepath.Separator)) + `[0-9]+(/|\b)`),
+	}
+	s.jobs.scrub = s.publicMessage
 	if s.clock == nil {
 		s.clock = clock.Real{}
 	}
@@ -229,13 +246,39 @@ func openChecked(root *os.Root, clean string, fi fs.FileInfo, flag int) (*os.Fil
 	return f, st, nil
 }
 
-// tempName returns a fresh temp name inside folder dir.
-func tempName(dir string) (string, error) {
+// randomHex returns n random bytes as hex.
+func randomHex(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b) // never fails (crypto/rand panics instead)
+	return hex.EncodeToString(b)
+}
+
+// tempName returns a fresh temp name inside folder dir: .mcpanel-tmp-<process token>-<random>.
+func (s *Service) tempName(dir string) (string, error) {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
 	}
-	return filesapi.Join(dir, tempPrefix+hex.EncodeToString(b[:])), nil
+	return filesapi.Join(dir, tempPrefix+s.tempToken+"-"+hex.EncodeToString(b[:])), nil
+}
+
+// publicMessage removes host paths from a message that leaves the service (error answers and
+// job errors; spec §1.2: the panel and its users never learn the host layout). Files opened
+// through an os.Root carry the absolute path of the data directory in their errors: the part
+// up to the instance id is cut, so "write <instances_dir>/instances/1/world/x: …" becomes
+// "write world/x: …" and the data directory itself becomes ".". Any other mention of
+// instances_dir is replaced by "<instances_dir>". The log keeps the full message.
+func (s *Service) publicMessage(msg string) string {
+	msg = s.dataDirRe.ReplaceAllStringFunc(msg, func(m string) string {
+		if strings.HasSuffix(m, "/") {
+			return ""
+		}
+		return "."
+	})
+	if d := s.cfg.InstancesDir; len(d) > 1 {
+		msg = strings.ReplaceAll(msg, d, "<instances_dir>")
+	}
+	return msg
 }
 
 // commit moves the finished temp file tmp to clean. With overwrite it renames over clean;
