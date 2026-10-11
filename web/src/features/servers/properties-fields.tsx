@@ -20,10 +20,6 @@ const NUMBERS: readonly { key: NumberKey; field: PropertyField; min: number; max
   { key: 'simulation_distance', field: 'properties.simulation_distance', min: 3, max: 32 },
 ]
 
-// Same look as the shadcn Input; there is no shadcn textarea in this project.
-const TEXTAREA_CLASS =
-  'border-input focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:bg-input/30 min-h-20 w-full rounded-lg border bg-transparent px-2.5 py-1.5 text-base outline-none focus-visible:ring-3 aria-invalid:ring-3 md:text-sm'
-
 export interface PropertiesFieldsProps {
   idPrefix: string
   mode: 'create' | 'edit'
@@ -114,33 +110,7 @@ export function PropertiesFields({ idPrefix, mode, serverName, value, error, onC
         ))}
       </div>
       {value.online_mode ? null : <p className="text-destructive text-sm">{t('servers.props.online_mode_warning')}</p>}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <FieldRow id={`${idPrefix}-whitelist`} label={t('servers.props.whitelist')} hint={t('servers.props.whitelist_hint')} error={error('properties.whitelist')}>
-          {(c) => (
-            <textarea
-              {...c}
-              rows={3}
-              className={TEXTAREA_CLASS}
-              spellCheck={false}
-              value={value.whitelist}
-              onChange={(e) => onChange({ whitelist: e.target.value }, 'properties.whitelist')}
-            />
-          )}
-        </FieldRow>
-        <FieldRow id={`${idPrefix}-ops`} label={t('servers.props.ops')} hint={t('servers.props.ops_hint')} error={error('properties.ops')}>
-          {(c) => (
-            <textarea
-              {...c}
-              rows={3}
-              className={TEXTAREA_CLASS}
-              spellCheck={false}
-              value={value.ops}
-              onChange={(e) => onChange({ ops: e.target.value }, 'properties.ops')}
-            />
-          )}
-        </FieldRow>
-      </div>
-      <p className="text-muted-foreground text-sm">{t('servers.props.lists_sync_hint')}</p>
+      <p className="text-muted-foreground text-sm">{t('servers.props.lists_hint')}</p>
       <p className="text-muted-foreground text-sm">{t('servers.props.world_hint')}</p>
       <div className="grid gap-4 sm:grid-cols-2">
         <FieldRow id={`${idPrefix}-seed`} label={t('servers.props.seed')} error={error('properties.seed')}>

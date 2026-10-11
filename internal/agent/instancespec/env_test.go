@@ -3,6 +3,7 @@ package instancespec_test
 import (
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -10,19 +11,19 @@ import (
 )
 
 // allowedKeys is every environment variable Env may ever produce. Anything else
-// (JVM_OPTS, GENERIC_PACK, MODS, PLUGINS, ...) would let the panel smuggle in code.
+// (JVM_OPTS, GENERIC_PACK, MODS, PLUGINS, OPS, WHITELIST, ...) would let the panel smuggle in
+// code or override what the server itself manages (ops and whitelist, spec 3a §3.1).
 var allowedKeys = []string{
 	"EULA", "TYPE", "VERSION", "MEMORY", "ENABLE_AUTOPAUSE", "ENABLE_RCON", "OVERRIDE_SERVER_PROPERTIES",
-	"EXISTING_OPS_FILE", "EXISTING_WHITELIST_FILE",
 	"FABRIC_LOADER_VERSION", "NEOFORGE_VERSION", "MODRINTH_MODPACK", "CF_SLUG", "CF_PAGE_URL", "CF_API_KEY",
 	"MOTD", "DIFFICULTY", "MODE", "MAX_PLAYERS", "PVP", "HARDCORE", "ALLOW_FLIGHT", "ENABLE_COMMAND_BLOCK",
-	"ONLINE_MODE", "ENABLE_WHITELIST", "WHITELIST", "OPS", "VIEW_DISTANCE", "SIMULATION_DISTANCE",
+	"ONLINE_MODE", "ENABLE_WHITELIST", "VIEW_DISTANCE", "SIMULATION_DISTANCE",
 	"SPAWN_PROTECTION", "SEED", "LEVEL_TYPE",
 }
 
 func TestEnvPaper(t *testing.T) {
 	s := validSpec()
-	s.Properties = instancespec.Properties{MOTD: ptr("Hallo"), Whitelist: []string{"Notch", "jeb_"}, WhitelistEnabled: ptr(true)}
+	s.Properties = instancespec.Properties{MOTD: ptr("Hallo"), WhitelistEnabled: ptr(true)}
 	env, err := instancespec.Env("survival", s)
 	if err != nil {
 		t.Fatal(err)
@@ -30,10 +31,9 @@ func TestEnvPaper(t *testing.T) {
 	want := []string{
 		"EULA=TRUE", "TYPE=PAPER", "VERSION=1.21.4", "MEMORY=4096M", "ENABLE_AUTOPAUSE=false",
 		"ENABLE_RCON=true", "OVERRIDE_SERVER_PROPERTIES=true",
-		"EXISTING_OPS_FILE=SYNCHRONIZE", "EXISTING_WHITELIST_FILE=SYNCHRONIZE",
 		"MOTD=Hallo", "DIFFICULTY=normal", "MODE=survival", "MAX_PLAYERS=20", "PVP=true", "HARDCORE=false",
 		"ALLOW_FLIGHT=false", "ENABLE_COMMAND_BLOCK=false", "ONLINE_MODE=true", "ENABLE_WHITELIST=true",
-		"WHITELIST=Notch,jeb_", "VIEW_DISTANCE=10", "SIMULATION_DISTANCE=10", "SPAWN_PROTECTION=16",
+		"VIEW_DISTANCE=10", "SIMULATION_DISTANCE=10", "SPAWN_PROTECTION=16",
 		"LEVEL_TYPE=minecraft:normal",
 	}
 	if !slices.Equal(env, want) {
@@ -72,9 +72,9 @@ func TestEnvPerType(t *testing.T) {
 		},
 		{
 			spec: instancespec.Spec{Type: instancespec.TypeVanilla, Version: "LATEST", Java: instancespec.Java25, MemoryMiB: 1024,
-				Properties: instancespec.Properties{Seed: ptr("42"), LevelType: ptr("amplified"), Ops: []string{"Notch"}}},
-			has: []string{"TYPE=VANILLA", "VERSION=LATEST", "SEED=42", "LEVEL_TYPE=minecraft:amplified", "OPS=Notch"},
-			not: []string{"WHITELIST"},
+				Properties: instancespec.Properties{Seed: ptr("42"), LevelType: ptr("amplified")}},
+			has: []string{"TYPE=VANILLA", "VERSION=LATEST", "SEED=42", "LEVEL_TYPE=minecraft:amplified"},
+			not: []string{"WHITELIST", "OPS", "EXISTING_OPS_FILE", "EXISTING_WHITELIST_FILE"},
 		},
 	}
 	for _, c := range cases {
@@ -103,22 +103,25 @@ func TestEnvPerType(t *testing.T) {
 	}
 }
 
-// A whitelist that is switched off must not be sent: itzg enables whitelisting as soon as
-// WHITELIST is set.
-func TestEnvOmitsDisabledWhitelist(t *testing.T) {
-	s := validSpec()
-	s.Properties = instancespec.Properties{Whitelist: []string{"Notch"}, WhitelistEnabled: ptr(false)}
-	env, err := instancespec.Env("survival", s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, kv := range env {
-		if strings.HasPrefix(kv, "WHITELIST=") {
-			t.Fatalf("disabled whitelist must not be sent: %q", env)
+// The server owns ops.json and whitelist.json (spec 3a §3.1): Env never sends lists or sync
+// modes, whatever the whitelist switch says.
+func TestEnvNeverSendsPlayerLists(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		s := validSpec()
+		s.Properties = instancespec.Properties{WhitelistEnabled: ptr(enabled)}
+		env, err := instancespec.Env("survival", s)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if !slices.Contains(env, "ENABLE_WHITELIST=false") {
-		t.Fatalf("missing ENABLE_WHITELIST=false in %q", env)
+		for _, kv := range env {
+			k, _, _ := strings.Cut(kv, "=")
+			if slices.Contains([]string{"WHITELIST", "OPS", "EXISTING_OPS_FILE", "EXISTING_WHITELIST_FILE"}, k) {
+				t.Fatalf("whitelist_enabled=%v: env contains %q", enabled, kv)
+			}
+		}
+		if want := "ENABLE_WHITELIST=" + strconv.FormatBool(enabled); !slices.Contains(env, want) {
+			t.Fatalf("missing %s in %q", want, env)
+		}
 	}
 }
 

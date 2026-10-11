@@ -3,6 +3,7 @@ import type { HttpHandler } from 'msw'
 import { adminOperations } from './handlers/admin'
 import { auditOperations } from './handlers/audit'
 import { authOperations } from './handlers/auth'
+import { consoleOperations } from './handlers/console'
 import { meOperations } from './handlers/me'
 import { securityOperations } from './handlers/security'
 import { serverOperations } from './handlers/servers'
@@ -15,6 +16,7 @@ export const operations: MockOperation[] = [
   ...adminOperations,
   ...userOperations,
   ...serverOperations,
+  ...consoleOperations,
   ...auditOperations,
   ...securityOperations,
 ]

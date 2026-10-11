@@ -13,6 +13,7 @@ tags:
   - { name: admin, description: 'Admin-only session management' }
   - { name: users, description: 'User management' }
   - { name: servers, description: 'Servers and power control' }
+  - { name: console, description: 'Live console: log stream, RCON commands, players' }
   - { name: audit, description: 'Audit log' }
   - { name: security, description: 'Security center: attempts, jails, IP rules, settings, notifiers, agent' }
 paths:
@@ -524,6 +525,95 @@ paths:
         '409': { description: 'conflict (server not configured, or restart of a container that belongs to another server) or base_domain_missing (restart)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/console/stream:
+    get:
+      operationId: streamConsole
+      tags: [console]
+      summary: Live log of the server (Server-Sent Events)
+      description: |
+        `text/event-stream`, kept open across container restarts. Events:
+
+        - `line` with `id: <Docker timestamp in ns>` and `data: {"ts": <unix ms>, "stream": "out"|"err", "line": "…"}`
+        - `state` with `data: {"running": true|false}` – the container log stream (re)opened or ended
+        - comment `: ping` every 15 s
+
+        With `Last-Event-ID` the stream resumes after that line; otherwise it starts with the last `tail` lines.
+        The panel re-checks session and permission every 30 s and closes the stream when either is gone.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - { name: tail, in: query, required: false, schema: { type: integer, minimum: 0, maximum: 1000, default: 500 } }
+      responses:
+        '200': { description: Event stream, content: { text/event-stream: { schema: { type: string } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/console:
+    post:
+      operationId: sendConsoleCommand
+      tags: [console]
+      summary: Run a console command over RCON (audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ConsoleCommandRequest' } } }
+      responses:
+        '200': { description: RCON output, content: { application/json: { schema: { $ref: '#/components/schemas/ConsoleCommandResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: instance_not_running, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/players:
+    get:
+      operationId: getOnlinePlayers
+      tags: [console]
+      summary: Players currently online (cached for 10 s)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OnlinePlayers' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /servers/{id}/players/lists:
+    get:
+      operationId: getPlayerLists
+      tags: [console]
+      summary: Ops, whitelist and bans as kept by the server (readable while stopped)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PlayerLists' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/players/actions:
+    post:
+      operationId: playerAction
+      tags: [console]
+      summary: Kick, ban, pardon, op, deop or change the whitelist (audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PlayerActionRequest' } } }
+      responses:
+        '200': { description: RCON output, content: { application/json: { schema: { $ref: '#/components/schemas/ConsoleCommandResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: instance_not_running, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /audit:
     get:
       operationId: listAudit
@@ -739,13 +829,13 @@ components:
     NotFound: { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Conflict: { description: Conflict, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     TooManyRequests: { description: Rate limited (Retry-After header set), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-    ServiceUnavailable: { description: 'Agent or Docker not available (agent_unavailable, docker_unavailable)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    ServiceUnavailable: { description: 'Agent, Docker or RCON not available (agent_unavailable, docker_unavailable, rcon_unavailable)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   schemas:
     Error:
       type: object
       required: [error, message]
       properties:
-        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, internal] }
+        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, internal] }
         message: { type: string }
         request_id: { type: string }
     Role: { type: string, enum: [admin, user] }
@@ -860,6 +950,7 @@ components:
     ServerProperties:
       type: object
       additionalProperties: false
+      description: Allowlisted server.properties. Ops and the whitelist are managed live via /servers/{id}/players (sub-project 3a).
       properties:
         motd: { type: string, maxLength: 150 }
         difficulty: { type: string, enum: [peaceful, easy, normal, hard] }
@@ -871,8 +962,6 @@ components:
         enable_command_block: { type: boolean }
         online_mode: { type: boolean }
         whitelist_enabled: { type: boolean }
-        whitelist: { type: array, maxItems: 200, items: { type: string, pattern: '^[A-Za-z0-9_]{3,16}$' } }
-        ops: { type: array, maxItems: 50, items: { type: string, pattern: '^[A-Za-z0-9_]{3,16}$' } }
         view_distance: { type: integer, minimum: 3, maximum: 32 }
         simulation_distance: { type: integer, minimum: 3, maximum: 32 }
         spawn_protection: { type: integer, minimum: 0, maximum: 256 }
@@ -1005,6 +1094,65 @@ components:
       properties:
         base_domain: { type: [string, 'null'] }
         curseforge_api_key: { type: [string, 'null'] }
+    ConsoleCommandRequest:
+      type: object
+      additionalProperties: false
+      required: [command]
+      properties:
+        command: { type: string, minLength: 1, maxLength: 1001, description: 'Minecraft command; one leading "/" is stripped. 1..1000 bytes, no control characters.' }
+    ConsoleCommandResponse:
+      type: object
+      required: [output]
+      properties:
+        output: { type: string, description: 'RCON answer; may contain § formatting codes' }
+    OnlinePlayer:
+      type: object
+      required: [name, uuid]
+      properties:
+        name: { type: string }
+        uuid: { type: [string, 'null'] }
+    OnlinePlayers:
+      type: object
+      required: [available, online, max]
+      properties:
+        available: { type: boolean, description: false while the server is stopped or RCON does not answer }
+        online: { type: array, items: { $ref: '#/components/schemas/OnlinePlayer' } }
+        max: { type: [integer, 'null'] }
+    PlayerOp:
+      type: object
+      required: [uuid, name, level]
+      properties: { uuid: { type: string }, name: { type: string }, level: { type: integer } }
+    PlayerEntry:
+      type: object
+      required: [uuid, name]
+      properties: { uuid: { type: string }, name: { type: string } }
+    PlayerBan:
+      type: object
+      required: [uuid, name, reason, source, created, expires]
+      properties:
+        uuid: { type: string }
+        name: { type: string }
+        reason: { type: string }
+        source: { type: string }
+        created: { type: string, description: 'As stored by the server, e.g. "2026-10-11 09:32:51 +0000"' }
+        expires: { type: string, description: '"forever" or a date like created' }
+    PlayerLists:
+      type: object
+      required: [ops, whitelist, bans, errors]
+      properties:
+        ops: { type: array, items: { $ref: '#/components/schemas/PlayerOp' } }
+        whitelist: { type: array, items: { $ref: '#/components/schemas/PlayerEntry' } }
+        bans: { type: array, items: { $ref: '#/components/schemas/PlayerBan' } }
+        errors: { type: array, items: { type: string, enum: [ops.json, whitelist.json, banned-players.json] }, description: Files that exist but could not be read; their list is empty }
+    PlayerAction: { type: string, enum: [kick, ban, pardon, op, deop, whitelist_add, whitelist_remove] }
+    PlayerActionRequest:
+      type: object
+      additionalProperties: false
+      required: [action, name]
+      properties:
+        action: { $ref: '#/components/schemas/PlayerAction' }
+        name: { type: string, pattern: '^[A-Za-z0-9_]{3,16}$' }
+        reason: { type: string, maxLength: 200, description: kick and ban only }
     PermissionGrant:
       type: object
       required: [server_id, permissions]
