@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Instance acceptance for a Linux CI runner with Docker (sub-project 2, spec §12 criteria 2,
-# 6, 7, 8 on the agent path): starts the real agent as root, creates a Paper server through
-# its socket, waits until it answers a status ping routed by hostname through mc-router,
-# checks the container hardening, crashes it, waits for Docker's restart and removes it.
+# 6, 7, 8 on the agent path; sub-project 3a, spec §10 criteria 2 and 4 on the agent path):
+# starts the real agent as root, creates a Paper server through its socket, waits until it
+# answers a status ping routed by hostname through mc-router, checks the container hardening
+# and the console endpoints (rcon, log stream, player lists), crashes it, waits for Docker's
+# restart, checks the console on the stopped server and planted player files, and removes it.
 #
 # Usage (as root): scripts/ci-instances.sh AGENT_BINARY
 # Changes the host (users, Docker containers/network, port 25565): disposable CI runners only.
@@ -48,6 +50,47 @@ fail() {
 }
 
 agent() { curl -fsS --unix-socket "$sock" -H 'Content-Type: application/json' "$@"; }
+
+# post_status <path> <json> <outfile>: POST without -f; prints the HTTP status, body to outfile.
+post_status() {
+  curl -sS -o "$3" -w '%{http_code}' --unix-socket "$sock" -H 'Content-Type: application/json' \
+    -X POST "http://agent$1" -d "$2"
+}
+
+# rcon <command> <outfile>: one console command through the agent; the body is JSON-encoded
+# by Python, so the command text never ends up in the shell or in hand-written JSON.
+rcon() {
+  agent -X POST http://agent/v1/instances/rcon \
+    -d "$(python3 -I -c 'import json, sys; print(json.dumps({"id": 9001, "command": sys.argv[1]}))' "$1")" >"$2"
+}
+
+# rcon_output <file>: prints the "output" field of an rcon answer.
+rcon_output() { python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["output"])' "$1"; }
+
+# logs <json> <outfile> <seconds>: reads the NDJSON log stream (headers to <outfile>.headers).
+# For a running container the stream follows the log, so curl ends it after <seconds> with
+# exit 28; logs_rc keeps curl's exit code (0 = the agent ended the stream itself).
+logs_rc=0
+logs() {
+  logs_rc=0
+  curl -sS -N --max-time "$3" -D "$2.headers" --unix-socket "$sock" \
+    -H 'Content-Type: application/json' -X POST http://agent/v1/instances/logs -d "$1" >"$2" || logs_rc=$?
+  if [ "$logs_rc" -ne 0 ] && [ "$logs_rc" -ne 28 ]; then
+    fail "logs stream: curl exit $logs_rc"
+  fi
+}
+
+# players <outfile>: the player lists of instance 9001.
+players() { agent -X POST http://agent/v1/instances/players -d '{"id": 9001}' >"$1"; }
+
+# check_players <file> <python expression on d>: exit 1 with the lists if the expression is false.
+check_players() {
+  python3 -I -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+if not eval(sys.argv[2], {}, {"d": d}):
+    sys.exit("players check failed: %s\n%s" % (sys.argv[2], json.dumps(d)))' "$1" "$2"
+}
 
 # status_field <python expression on instance dict i>; prints "absent" without instance 9001.
 status_field() {
@@ -155,12 +198,127 @@ if setpriv --reuid=mcpanel --regid=mcpanel --init-groups test -w /var/run/docker
 fi
 echo "OK: panel user has no access to instance data or docker.sock"
 
+echo "== console: container env without ops/whitelist (sub-project 3a)"
+docker inspect mcpanel-mc-9001 | python3 -I -c '
+import json, sys
+env = json.load(sys.stdin)[0]["Config"]["Env"]
+gone = ("OPS=", "WHITELIST=", "EXISTING_OPS_FILE=", "EXISTING_WHITELIST_FILE=")
+bad = sorted(e.split("=", 1)[0] for e in env if e.startswith(gone))
+if bad or "ENABLE_RCON=true" not in env:
+    print("container env: unexpected", bad, "or ENABLE_RCON missing", file=sys.stderr)
+    sys.exit(1)
+print("OK: container env has no OPS/WHITELIST/EXISTING_*_FILE, RCON enabled")' || fail "container env"
+
+echo "== console: rcon"
+# The status ping can answer before the RCON listener is up; rcon-cli then exits non-zero and
+# the agent answers 503 rcon_unavailable (curl -f fails), so poll.
+rcon_ready() { rcon list "$work/rcon.json" 2>/dev/null; }
+wait_for 120 "rcon answers" rcon_ready
+rcon_output "$work/rcon.json" | grep -q 'players online' || fail "rcon list: $(cat "$work/rcon.json")"
+echo "OK: rcon list: $(rcon_output "$work/rcon.json")"
+
+code="$(post_status /v1/instances/rcon '{"id": 9001, "command": "list\nop Mallory"}' "$work/bad.json")"
+[ "$code" = 400 ] || fail "rcon with newline: HTTP $code $(cat "$work/bad.json")"
+code="$(post_status /v1/instances/rcon '{"id": 9001, "command": "list", "shell": true}' "$work/bad.json")"
+[ "$code" = 400 ] || fail "rcon with unknown field: HTTP $code $(cat "$work/bad.json")"
+code="$(post_status /v1/instances/logs '{"id": 9001, "tail": 1001, "since": 0}' "$work/bad.json")"
+[ "$code" = 400 ] || fail "logs with tail 1001: HTTP $code $(cat "$work/bad.json")"
+code="$(post_status /v1/instances/rcon '{"id": 9002, "command": "list"}' "$work/bad.json")"
+if [ "$code" != 404 ] || ! grep -q '"code":"not_found"' "$work/bad.json"; then
+  fail "rcon on unknown instance: HTTP $code $(cat "$work/bad.json")"
+fi
+echo "OK: rcon validation (newline, unknown field -> 400; unknown instance -> 404 not_found; tail 1001 -> 400)"
+
+echo "== console: log stream"
+logs '{"id": 9001, "tail": 1000, "since": 0}' "$work/logs.ndjson" 5
+grep -qi '^content-type: application/x-ndjson' "$work/logs.ndjson.headers" || fail "logs content type: $(cat "$work/logs.ndjson.headers")"
+last_ts="$(python3 -I -c '
+import json, sys
+lines = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+if not lines:
+    sys.exit("empty log stream")
+for l in lines:
+    if set(l) != {"ts", "stream", "line"} or l["stream"] not in ("out", "err") \
+            or not isinstance(l["ts"], int) or len(l["line"].encode()) > 8192 or l["line"].endswith(("\n", "\r")):
+        sys.exit("bad line: %r" % (l,))
+if not any("Done (" in l["line"] for l in lines):
+    sys.exit("no \"Done (\" line in %d lines" % len(lines))
+print(max(l["ts"] for l in lines))' "$work/logs.ndjson")" || fail "logs stream content"
+echo "OK: logs stream (NDJSON, $(wc -l <"$work/logs.ndjson") lines, contains \"Done (\")"
+
+# since = last timestamp + 1 ns must not repeat any line already seen (spec §6.2). New lines
+# (e.g. the RCON thread messages of the calls above) may appear; they are newer.
+logs "{\"id\": 9001, \"tail\": 0, \"since\": $((last_ts + 1))}" "$work/since.ndjson" 3
+python3 -I -c '
+import json, sys
+last = int(sys.argv[2])
+old = [l for l in (json.loads(x) for x in open(sys.argv[1]) if x.strip()) if l["ts"] <= last]
+if old:
+    sys.exit("since returned %d already seen lines, first: %r" % (len(old), old[0]))' "$work/since.ndjson" "$last_ts" || fail "logs since"
+echo "OK: logs since=<last ts>+1 repeats no line"
+
+echo "== console: player lists follow rcon changes (no restart)"
+for c in "whitelist add Notch" "op Notch" "ban Notch ci acceptance"; do
+  rcon "$c" "$work/rcon.json" || fail "rcon $c: $(cat "$work/rcon.json" 2>/dev/null)"
+  echo "rcon $c: $(rcon_output "$work/rcon.json")"
+done
+players "$work/players.json"
+check_players "$work/players.json" '
+  any(o["name"] == "Notch" and o["level"] >= 1 for o in d["ops"])
+  and "Notch" in [e["name"] for e in d["whitelist"]]
+  and any(b["name"] == "Notch" and b["reason"] == "ci acceptance" for b in d["bans"])
+  and d["errors"] == []' || fail "player lists after whitelist add/op/ban"
+rcon "pardon Notch" "$work/rcon.json" || fail "rcon pardon"
+players "$work/players.json"
+check_players "$work/players.json" '"Notch" not in [b["name"] for b in d["bans"]]' || fail "player lists after pardon"
+echo "OK: whitelist add, op, ban and pardon visible in the player lists without a restart"
+
 echo "== crash: stop the server from inside, Docker must restart it (unless-stopped)"
 before="$(status_field 'i["started_at"]')"
 docker exec mcpanel-mc-9001 rcon-cli stop >/dev/null
 restarted() { a="$(status_field 'i["started_at"]')"; [ "$a" != 0 ] && [ "$a" != "$before" ] && running; }
 wait_for 180 "automatic restart" restarted
 echo "OK: restarted (started_at $before -> $(status_field 'i["started_at"]'))"
+
+echo "== stopped server: rcon refused, log stream ends, player lists readable"
+agent -X POST http://agent/v1/instances/power -d '{"id": 9001, "action": "stop"}'
+stopped() { [ "$(status_field 'i["state"]')" = exited ] && [ -z "$(status_field 'i["operation"]')" ]; }
+wait_for 120 "container stopped" stopped
+code="$(post_status /v1/instances/rcon '{"id": 9001, "command": "list"}' "$work/nr.json")"
+if [ "$code" != 409 ] || ! grep -q '"code":"not_running"' "$work/nr.json"; then
+  fail "rcon on stopped server: HTTP $code $(cat "$work/nr.json")"
+fi
+echo "OK: rcon on stopped server -> 409 not_running"
+logs '{"id": 9001, "tail": 5, "since": 0}' "$work/stopped.ndjson" 20
+[ "$logs_rc" -eq 0 ] || fail "log stream of a stopped container did not end by itself (curl exit $logs_rc)"
+[ -s "$work/stopped.ndjson" ] || fail "log stream of a stopped container is empty"
+echo "OK: log stream of a stopped container ends by itself"
+players "$work/players.json"
+check_players "$work/players.json" 'any(o["name"] == "Notch" for o in d["ops"]) and d["errors"] == []' || fail "player lists of a stopped server"
+echo "OK: player lists readable while stopped (in-game op kept across the restart)"
+
+echo "== player files controlled by the server: symlinks and FIFOs are refused"
+data="$work/mc/instances/9001"
+for f in ops.json whitelist.json banned-players.json; do
+  mv "$data/$f" "$work/$f.orig"
+done
+ln -s /etc/shadow "$data/ops.json"                         # absolute symlink to a root-only file
+mkfifo "$data/whitelist.json"                              # would block a plain open()
+ln -s ../../router/routes.json "$data/banned-players.json" # relative symlink out of the data dir
+# --max-time turns a hang on the FIFO into a failure instead of a stuck job.
+curl -fsS --max-time 10 --unix-socket "$sock" -H 'Content-Type: application/json' \
+  -X POST http://agent/v1/instances/players -d '{"id": 9001}' >"$work/evil.json" || fail "players with planted files: curl exit $?"
+check_players "$work/evil.json" '
+  sorted(d["errors"]) == ["banned-players.json", "ops.json", "whitelist.json"]
+  and d["ops"] == [] and d["whitelist"] == [] and d["bans"] == []' || fail "planted player files not refused"
+if grep -q 'root:' "$work/evil.json" || grep -q 'mappings' "$work/evil.json"; then
+  fail "player lists leak a file outside the data directory: $(cat "$work/evil.json")"
+fi
+rm -f "$data/ops.json" "$data/whitelist.json" "$data/banned-players.json"
+for f in ops.json whitelist.json banned-players.json; do
+  mv "$work/$f.orig" "$data/$f"
+done
+echo "OK: symlink to /etc/shadow, FIFO and symlink out of the data dir reported in errors, nothing leaked"
 
 echo "== remove"
 agent -X POST http://agent/v1/instances/remove -d '{"id": 9001}'
