@@ -19,7 +19,12 @@ import { StatusBadge } from './status-badge'
 
 type DetailTab = 'overview' | 'console' | 'players' | 'settings' | 'delete'
 
+/** Keyed by id: the router reuses the component when only the :id parameter changes, but tab and console must reset. */
 export function ServerDetailPage({ serverId }: { serverId: number }) {
+  return <ServerDetail key={serverId} serverId={serverId} />
+}
+
+function ServerDetail({ serverId }: { serverId: number }) {
   const { t } = useTranslation()
   const me = useMe()
   const isAdmin = me?.role === 'admin'
