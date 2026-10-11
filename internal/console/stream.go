@@ -25,7 +25,7 @@ const (
 	heartbeatInterval = 15 * time.Second
 	recheckInterval   = 30 * time.Second
 	reconnectDelay    = 3 * time.Second  // first delay before the agent stream is re-opened
-	maxReconnectDelay = 30 * time.Second // the delay doubles up to this while nothing changes
+	maxReconnectDelay = 10 * time.Second // the delay doubles up to this while nothing changes
 	writeTimeout      = 30 * time.Second
 	maxStreamsPerUser = 4
 	lineBuffer        = 64
