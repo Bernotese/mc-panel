@@ -59,7 +59,7 @@ Zum Ausprobieren gegen das echte Backend mit Docker gibt es eine interne Test-VM
 | 1 | Fundament + Security | fertig |
 | 2 | Instanzen-Lifecycle | fertig |
 | 3a | Live-Betrieb: Konsole, Logs, Spieler | fertig |
-| 3b | Live-Betrieb: Dateibrowser | in Arbeit |
+| 3b | Live-Betrieb: Dateibrowser | fertig |
 | 3c | Live-Betrieb: Plugins/Mods (Modrinth, Hangar) | offen |
 | 4 | Backups | offen |
 | 5 | Monitoring + Alerts | offen |
