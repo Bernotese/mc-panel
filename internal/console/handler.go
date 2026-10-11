@@ -57,6 +57,7 @@ type Handler struct {
 	access Access
 	log    *slog.Logger
 	limit  *userLimiter
+	online *onlineCache
 }
 
 func NewHandler(d Deps) *Handler {
@@ -74,7 +75,7 @@ func NewHandler(d Deps) *Handler {
 	}
 	return &Handler{
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, agent: ag, access: acc, log: log,
-		limit: newUserLimiter(),
+		limit: newUserLimiter(), online: newOnlineCache(),
 	}
 }
 
