@@ -3,10 +3,12 @@
 package files
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 )
@@ -37,10 +39,16 @@ func TestCreatedModesHonourUmask(t *testing.T) {
 	}
 }
 
-// A FIFO swapped in after the Lstat check must not block a reader: openRegular opens with
-// O_NONBLOCK and then rejects the non-regular file.
-func TestOpenRegularDoesNotBlockOnFIFO(t *testing.T) {
+// A FIFO swapped in after the Lstat check must not block: files and folders are opened with
+// O_NONBLOCK (and O_DIRECTORY), and the opened object must be the one Lstat saw. openChecked
+// is the open step on its own, called with the Lstat result of a regular file or folder while
+// the path is a FIFO - exactly the state after a swap.
+func TestOpenDoesNotBlockOnSwappedFIFO(t *testing.T) {
 	s, data := newService(t)
+	put(t, data, "file", "x")
+	if err := os.Mkdir(filepath.Join(data, "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := syscall.Mkfifo(filepath.Join(data, "pipe"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -49,12 +57,34 @@ func TestOpenRegularDoesNotBlockOnFIFO(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	f, err := root.OpenFile("pipe", os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	fileInfo, err := root.Lstat("file")
 	if err != nil {
-		t.Fatalf("O_NONBLOCK open of a FIFO must return at once: %v", err)
+		t.Fatal(err)
 	}
-	_ = f.Close()
-	if _, _, err := openRegular(root, "pipe", os.O_RDONLY); err == nil {
-		t.Fatal("openRegular accepted a FIFO")
+	dirInfo, err := root.Lstat("dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, open := range map[string]func() error{
+		"openRegular":  func() error { _, _, err := openRegular(root, "pipe", os.O_RDONLY); return err },
+		"openDir":      func() error { _, _, err := openDir(root, "pipe"); return err },
+		"swapped file": func() error { _, _, err := openChecked(root, "pipe", fileInfo, os.O_RDONLY); return err },
+		"swapped folder": func() error {
+			_, _, err := openChecked(root, "pipe", dirInfo, os.O_RDONLY|syscall.O_DIRECTORY)
+			return err
+		},
+		"swapped folder, no dir": func() error { _, _, err := openChecked(root, "pipe", dirInfo, os.O_RDONLY); return err },
+		"list":                   func() error { _, err := s.List(ctx, 1, "pipe"); return err },
+	} {
+		done := make(chan error, 1)
+		go func() { done <- open() }()
+		select {
+		case err := <-done:
+			if !errors.Is(err, filesapi.ErrNotRegular) {
+				t.Errorf("%s: %v, want ErrNotRegular", name, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s blocks on a FIFO", name)
+		}
 	}
 }

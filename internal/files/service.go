@@ -177,10 +177,15 @@ func requireDir(root *os.Root, clean string) error {
 	return nil
 }
 
-// openRegular opens a regular file without following symlinks: Lstat first, then
-// O_NOFOLLOW|O_NONBLOCK (a FIFO swapped in meanwhile cannot block), then the opened file
-// must be the very file that Lstat saw.
+// openRegular opens a regular file for reading without following symlinks: Lstat first
+// (lstat refuses symlinked folder components), then openChecked. Only O_RDONLY is allowed:
+// os.Root.OpenFile resolves a symlink in the last component itself (inside the root) unless
+// O_CREATE|O_EXCL is given, so a writing open could act on a swapped-in link before the
+// SameFile check sees it.
 func openRegular(root *os.Root, clean string, flag int) (*os.File, fs.FileInfo, error) {
+	if flag != os.O_RDONLY {
+		return nil, nil, fmt.Errorf("openRegular: flag %#x is not O_RDONLY", flag)
+	}
 	fi, err := lstat(root, clean)
 	if err != nil {
 		return nil, nil, err
@@ -188,14 +193,36 @@ func openRegular(root *os.Root, clean string, flag int) (*os.File, fs.FileInfo, 
 	if !fi.Mode().IsRegular() {
 		return nil, nil, fmt.Errorf("%w: %s is not a regular file", filesapi.ErrNotRegular, rootName(clean))
 	}
-	f, err := root.OpenFile(clean, flag|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0) //nolint:gosec // G304: cleaned path inside the instance's os.Root
+	return openChecked(root, clean, fi, os.O_RDONLY)
+}
+
+// openDir opens a real folder for reading its entries, like openRegular (with O_DIRECTORY).
+func openDir(root *os.Root, clean string) (*os.File, fs.FileInfo, error) {
+	fi, err := lstat(root, clean)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !fi.IsDir() {
+		return nil, nil, fmt.Errorf("%w: %s is not a folder", filesapi.ErrNotRegular, rootName(clean))
+	}
+	return openChecked(root, clean, fi, os.O_RDONLY|syscall.O_DIRECTORY)
+}
+
+// openChecked opens clean with O_NOFOLLOW|O_NONBLOCK (a FIFO swapped in after the Lstat cannot
+// block) and accepts the result only if it is the very object fi describes (same type, same
+// inode): a symlink or anything else swapped in meanwhile ends as ErrNotRegular.
+func openChecked(root *os.Root, clean string, fi fs.FileInfo, flag int) (*os.File, fs.FileInfo, error) {
+	f, err := root.OpenFile(rootName(clean), flag|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0) //nolint:gosec // G304: cleaned path inside the instance's os.Root
+	if errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.ELOOP) {
+		return nil, nil, fmt.Errorf("%w: %s changed while it was opened", filesapi.ErrNotRegular, rootName(clean))
+	}
 	if err != nil {
 		return nil, nil, fsErr(err)
 	}
 	st, err := f.Stat()
-	if err != nil || !st.Mode().IsRegular() || !os.SameFile(fi, st) {
+	if err != nil || st.Mode().Type() != fi.Mode().Type() || !os.SameFile(fi, st) {
 		_ = f.Close()
-		return nil, nil, fmt.Errorf("%w: %s changed while it was opened", filesapi.ErrNotRegular, clean)
+		return nil, nil, fmt.Errorf("%w: %s changed while it was opened", filesapi.ErrNotRegular, rootName(clean))
 	}
 	return f, st, nil
 }

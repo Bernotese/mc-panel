@@ -108,9 +108,9 @@ func destUsable(root *os.Root, dest string) error {
 	if !fi.IsDir() {
 		return fmt.Errorf("%w: %s exists", filesapi.ErrExists, dest)
 	}
-	d, err := root.Open(dest)
+	d, _, err := openDir(root, dest)
 	if err != nil {
-		return fsErr(err)
+		return err
 	}
 	defer d.Close()
 	if names, err := d.Readdirnames(1); len(names) > 0 || (err != nil && !errors.Is(err, io.EOF)) {

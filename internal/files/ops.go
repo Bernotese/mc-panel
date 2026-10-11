@@ -43,21 +43,11 @@ func (s *Service) List(ctx context.Context, id int64, p string) (filesapi.ListRe
 		return filesapi.ListResponse{}, err
 	}
 	defer root.Close()
-	fi, err := lstat(root, clean)
+	d, _, err := openDir(root, clean)
 	if err != nil {
 		return filesapi.ListResponse{}, err
 	}
-	if !fi.IsDir() {
-		return filesapi.ListResponse{}, fmt.Errorf("%w: %s is not a folder", filesapi.ErrNotRegular, rootName(clean))
-	}
-	d, err := root.Open(rootName(clean))
-	if err != nil {
-		return filesapi.ListResponse{}, fsErr(err)
-	}
 	defer d.Close()
-	if st, err := d.Stat(); err != nil || !os.SameFile(fi, st) {
-		return filesapi.ListResponse{}, fmt.Errorf("%w: %s changed while it was opened", filesapi.ErrNotRegular, rootName(clean))
-	}
 
 	limit := s.cfg.Limits.MaxListEntries
 	res := filesapi.ListResponse{Entries: []filesapi.Entry{}}
@@ -71,7 +61,7 @@ func (s *Service) List(ctx context.Context, id int64, p string) (filesapi.ListRe
 				res.Truncated = true
 				break
 			}
-			info, ierr := e.Info()
+			info, ierr := root.Lstat(filesapi.Join(clean, e.Name())) // inside the root, never followed
 			if ierr != nil {
 				continue // vanished meanwhile
 			}
