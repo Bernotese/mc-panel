@@ -45,6 +45,7 @@ type env struct {
 	mux        http.Handler
 	rootID     int64
 	principals sync.Map // user id -> principal.Principal (stream tests, see stream_test.go)
+	timers     *fakeTimers
 }
 
 func newEnv(t *testing.T) *env { return newEnvWith(t, nil) }
@@ -55,7 +56,7 @@ func newEnvWith(t *testing.T, opt func(*console.Deps)) *env {
 	db := storetest.Open(t)
 	e := &env{
 		t: t, db: db, clk: clock.NewFake(t0), rec: &audit.MemoryRecorder{},
-		agent: newFakeAgent(), access: &fakeAccess{},
+		agent: newFakeAgent(), access: &fakeAccess{}, timers: newFakeTimers(),
 	}
 	d := console.Deps{
 		DB: db, Clock: e.clk, Audit: e.rec, Agent: e.agent, Access: e.access,
@@ -65,6 +66,7 @@ func newEnvWith(t *testing.T, opt func(*console.Deps)) *env {
 		opt(&d)
 	}
 	e.h = console.NewHandler(d)
+	console.SetTimers(e.h, e.timers)
 	mux := chi.NewRouter()
 	e.h.Routes(rbac.NewRouter(mux, rbac.NewDBChecker(db), e.clk))
 	e.mux = mux
