@@ -49,6 +49,8 @@ export const en: Messages = {
     docker_unavailable: 'Docker is not reachable on the host.',
     base_domain_missing: 'No base domain is set yet. Add it under Settings.',
     catalog_unavailable: 'The version list is currently unavailable.',
+    instance_not_running: 'The server is not running.',
+    rcon_unavailable: 'The server console is not responding right now – is the server still starting?',
     internal: 'Internal server error.',
     network: 'Server unreachable. Please check your connection.',
     unknown: 'Unexpected error (HTTP {{status}}).',

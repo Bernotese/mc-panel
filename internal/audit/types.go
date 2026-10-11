@@ -60,6 +60,8 @@ const (
 	ActionServerPower          = "server.power"
 	ActionServerUpdate         = "server.update"
 	ActionServerSettingsUpdate = "server.settings_update"
+	ActionServerConsoleCommand = "server.console_command"
+	ActionServerPlayerAction   = "server.player_action"
 	ActionJailAuto             = "security.jail_auto"
 	ActionJailCreate           = "security.jail_create"
 	ActionJailLift             = "security.jail_lift"

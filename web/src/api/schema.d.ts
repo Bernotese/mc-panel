@@ -564,6 +564,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/servers/{id}/console/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live log of the server (Server-Sent Events)
+         * @description `text/event-stream`, kept open across container restarts. Events:
+         *
+         *     - `line` with `id: <Docker timestamp in ns>` and `data: {"ts": <unix ms>, "stream": "out"|"err", "line": "…"}`
+         *     - `state` with `data: {"running": true|false}` – the container log stream (re)opened or ended
+         *     - comment `: ping` every 15 s
+         *
+         *     With `Last-Event-ID` the stream resumes after that line; otherwise it starts with the last `tail` lines.
+         *     The panel re-checks session and permission every 30 s and closes the stream when either is gone.
+         */
+        get: operations["streamConsole"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/console": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a console command over RCON (audited) */
+        post: operations["sendConsoleCommand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/players": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Players currently online (cached for 10 s) */
+        get: operations["getOnlinePlayers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/players/lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ops, whitelist and bans as kept by the server (readable while stopped) */
+        get: operations["getPlayerLists"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/players/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Kick, ban, pardon, op, deop or change the whitelist (audited) */
+        post: operations["playerAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/audit": {
         parameters: {
             query?: never;
@@ -778,7 +873,7 @@ export interface components {
     schemas: {
         Error: {
             /** @enum {string} */
-            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "internal";
+            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "internal";
             message: string;
             request_id?: string;
         };
@@ -1055,6 +1150,58 @@ export interface components {
             base_domain?: string | null;
             curseforge_api_key?: string | null;
         };
+        ConsoleCommandRequest: {
+            /** @description Minecraft command; one leading "/" is stripped. 1..1000 bytes, no control characters. */
+            command: string;
+        };
+        ConsoleCommandResponse: {
+            /** @description RCON answer; may contain § formatting codes */
+            output: string;
+        };
+        OnlinePlayer: {
+            name: string;
+            uuid: string | null;
+        };
+        OnlinePlayers: {
+            /** @description false while the server is stopped or RCON does not answer */
+            available: boolean;
+            online: components["schemas"]["OnlinePlayer"][];
+            max: number | null;
+        };
+        PlayerOp: {
+            uuid: string;
+            name: string;
+            level: number;
+        };
+        PlayerEntry: {
+            uuid: string;
+            name: string;
+        };
+        PlayerBan: {
+            uuid: string;
+            name: string;
+            reason: string;
+            source: string;
+            /** @description As stored by the server, e.g. "2026-10-11 09:32:51 +0000" */
+            created: string;
+            /** @description "forever" or a date like created */
+            expires: string;
+        };
+        PlayerLists: {
+            ops: components["schemas"]["PlayerOp"][];
+            whitelist: components["schemas"]["PlayerEntry"][];
+            bans: components["schemas"]["PlayerBan"][];
+            /** @description Files that exist but could not be read; their list is empty */
+            errors: ("ops.json" | "whitelist.json" | "banned-players.json")[];
+        };
+        /** @enum {string} */
+        PlayerAction: "kick" | "ban" | "pardon" | "op" | "deop" | "whitelist_add" | "whitelist_remove";
+        PlayerActionRequest: {
+            action: components["schemas"]["PlayerAction"];
+            name: string;
+            /** @description kick and ban only */
+            reason?: string;
+        };
         PermissionGrant: {
             /** Format: int64 */
             server_id: number;
@@ -1292,7 +1439,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description Agent or Docker not available (agent_unavailable, docker_unavailable) */
+        /** @description Agent, Docker or RCON not available (agent_unavailable, docker_unavailable, rcon_unavailable) */
         ServiceUnavailable: {
             headers: {
                 [name: string]: unknown;
@@ -2457,6 +2604,172 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description conflict (server not configured, or restart of a container that belongs to another server) or base_domain_missing (restart) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    streamConsole: {
+        parameters: {
+            query?: {
+                tail?: number;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Event stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    sendConsoleCommand: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description RCON output */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCommandResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description instance_not_running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getOnlinePlayers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnlinePlayers"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getPlayerLists: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerLists"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    playerAction: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlayerActionRequest"];
+            };
+        };
+        responses: {
+            /** @description RCON output */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCommandResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description instance_not_running */
             409: {
                 headers: {
                     [name: string]: unknown;

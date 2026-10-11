@@ -27,6 +27,8 @@ const (
 	CodeDockerUnavailable  = "docker_unavailable"
 	CodeBaseDomainMissing  = "base_domain_missing"
 	CodeCatalogUnavailable = "catalog_unavailable"
+	CodeInstanceNotRunning = "instance_not_running"
+	CodeRconUnavailable    = "rcon_unavailable"
 	CodeInternal           = "internal"
 )
 

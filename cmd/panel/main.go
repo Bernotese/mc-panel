@@ -232,7 +232,7 @@ func serve(args []string) error {
 	password.Warmup()
 
 	ac := agent.NewClient(cfg.AgentSocket) // firewall and instance API share one client
-	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clock.Real{}, Agent: ac, Instances: ac, Version: version})
+	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clock.Real{}, Agent: ac, Instances: ac, Console: ac, Version: version})
 	if err != nil {
 		return err
 	}
