@@ -2,6 +2,7 @@ package console_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -87,6 +88,8 @@ func TestCommandValidation(t *testing.T) {
 	for _, cmd := range []string{
 		"", "/", "   ", "/   ", "say\nhi", "say\rhi", "say\thi", "a\x00b", "a\x7fb",
 		strings.Repeat("a", 1001), "/" + strings.Repeat("a", 1001),
+		// rcon-cli would parse these as its own options (--host sends the RCON password elsewhere).
+		"--host=attacker.example", "-h", "/--host=attacker.example", "/-h", " --config=/etc/shadow",
 	} {
 		rec := e.do(http.MethodPost, srvPath(id, "/console"), map[string]string{"command": cmd}, &admin)
 		if rec.Code != http.StatusBadRequest || errCode(t, rec) != httpx.CodeValidation {
@@ -205,30 +208,67 @@ func TestCommandRateLimit(t *testing.T) {
 	}
 }
 
-// cancellingAgent simulates a client that disconnects while the RCON call runs.
+// cancellingAgent simulates a client that disconnects while the RCON call runs: it cancels the
+// request, then fails like a cut agent call if its context ended, otherwise answers with err
+// or like fakeAgent.
 type cancellingAgent struct {
 	*fakeAgent
 	cancel context.CancelFunc
+	err    error
 }
 
-func (a cancellingAgent) Rcon(ctx context.Context, _ int64, _ string) (string, error) {
+func (a *cancellingAgent) Rcon(ctx context.Context, id int64, command string) (string, error) {
 	a.cancel()
-	<-ctx.Done()
-	return "", ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if a.err != nil {
+		return "", a.err
+	}
+	return a.fakeAgent.Rcon(ctx, id, command)
+}
+
+// gone sends body to path with a request that the client abandons during the agent call.
+func gone(t *testing.T, e *env, ag *cancellingAgent, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	base := httpx.WithClientIP(principal.With(context.Background(), e.admin()), netip.MustParseAddr("203.0.113.7"))
+	ctx, cancel := context.WithCancel(base)
+	t.Cleanup(cancel)
+	ag.cancel = cancel
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, path, strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	e.mux.ServeHTTP(rec, req)
+	return rec
+}
+
+// Review K3: a command the agent ran is audited as success even if the browser left meanwhile
+// (the agent call does not end with the request).
+func TestCommandClientGoneAfterAgentRan(t *testing.T) {
+	for _, tc := range []struct{ name, path, body, sent string }{
+		{"console command", "/console", `{"command":"say hi"}`, "say hi"},
+		{"player action", "/players/actions", `{"action":"op","name":"Steve"}`, "op Steve"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ag := &cancellingAgent{fakeAgent: newFakeAgent()}
+			e := newEnvWith(t, func(d *console.Deps) { d.Agent = ag })
+			id := createInstance(t, e.db, "survival")
+			gone(t, e, ag, srvPath(id, tc.path), tc.body)
+			if got := ag.takeRcons(); !slices.Equal(got, []string{fmt.Sprintf("%d %s", id, tc.sent)}) {
+				t.Fatalf("agent calls = %v", got)
+			}
+			if len(e.rec.Entries) != 1 || e.rec.Entries[0].Result != audit.ResultSuccess {
+				t.Fatalf("audit = %+v, want one success", e.rec.Entries)
+			}
+		})
+	}
 }
 
 // A client that went away is no server error: no 500, no answer at all (nobody reads it).
 func TestCommandClientGone(t *testing.T) {
-	ag := cancellingAgent{fakeAgent: newFakeAgent()}
-	e := newEnvWith(t, func(d *console.Deps) { d.Agent = &ag })
+	ag := &cancellingAgent{fakeAgent: newFakeAgent(), err: errors.New("agent connection reset")}
+	e := newEnvWith(t, func(d *console.Deps) { d.Agent = ag })
 	id := createInstance(t, e.db, "survival")
-	base := httpx.WithClientIP(principal.With(context.Background(), e.admin()), netip.MustParseAddr("203.0.113.7"))
-	ctx, cancel := context.WithCancel(base)
-	defer cancel()
-	ag.cancel = cancel
-	req := httptest.NewRequestWithContext(ctx, http.MethodPost, srvPath(id, "/console"), strings.NewReader(`{"command":"list"}`))
-	rec := httptest.NewRecorder()
-	e.mux.ServeHTTP(rec, req)
+	rec := gone(t, e, ag, srvPath(id, "/console"), `{"command":"list"}`)
 	if rec.Body.Len() != 0 {
 		t.Fatalf("answer for a gone client: %d %s", rec.Code, rec.Body)
 	}
