@@ -120,4 +120,32 @@ describe('FilesTab', () => {
     expect(names().slice(0, 4)).toEqual(['world', 'plugins', 'logs', 'world-backup.zip'])
     expect(screen.getByRole('button', { name: 'Absteigend sortiert – umkehren' })).toBeInTheDocument()
   })
+
+  it('uploads files into the open folder', async () => {
+    const { user, region } = await openFiles()
+    await user.click(await within(region).findByRole('button', { name: 'plugins' }))
+    await within(region).findByRole('button', { name: 'Essentials' })
+    await user.upload(screen.getByLabelText('Dateien hochladen'), new File(['jar'], 'WorldEdit.jar'))
+    const uploads = await screen.findByRole('region', { name: 'Uploads' })
+    expect(await within(uploads).findByText('Hochgeladen')).toBeInTheDocument()
+    expect(await within(region).findByText('WorldEdit.jar')).toBeInTheDocument()
+  })
+
+  it('asks before overwriting an existing file and can skip it', async () => {
+    const { user, region } = await openFiles()
+    await within(region).findByRole('button', { name: 'plugins' })
+    await user.upload(screen.getByLabelText('Dateien hochladen'), new File(['x'], 'server.properties'))
+    const dialog = await screen.findByRole('dialog', { name: '„server.properties“ existiert bereits' })
+    await user.click(within(dialog).getByRole('button', { name: 'Überspringen' }))
+    const uploads = screen.getByRole('region', { name: 'Uploads' })
+    expect(await within(uploads).findByText('Übersprungen')).toBeInTheDocument()
+  })
+
+  it('rejects reserved names without uploading', async () => {
+    const { user, region } = await openFiles()
+    await within(region).findByRole('button', { name: 'plugins' })
+    await user.upload(screen.getByLabelText('Dateien hochladen'), new File(['x'], '.rcon-cli.env'))
+    const uploads = await screen.findByRole('region', { name: 'Uploads' })
+    expect(within(uploads).getByText('Dieser Name ist für das panel reserviert.')).toBeInTheDocument()
+  })
 })
