@@ -50,14 +50,17 @@ type Access interface {
 var ErrAccessRevoked = errors.New("console: access revoked")
 
 type Handler struct {
-	q      *store.Queries
-	clock  clock.Clock
-	rec    audit.Recorder
-	agent  agentapi.ConsoleClient
-	access Access
-	log    *slog.Logger
-	limit  *userLimiter
-	online *onlineCache
+	q       *store.Queries
+	clock   clock.Clock
+	ioClock clock.Clock // wall clock for I/O deadlines (always clock.Real)
+	rec     audit.Recorder
+	agent   agentapi.ConsoleClient
+	access  Access
+	log     *slog.Logger
+	limit   *userLimiter
+	online  *onlineCache
+	streams *streamSet
+	timers  timers
 }
 
 func NewHandler(d Deps) *Handler {
@@ -74,8 +77,8 @@ func NewHandler(d Deps) *Handler {
 		log = slog.Default()
 	}
 	return &Handler{
-		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, agent: ag, access: acc, log: log,
-		limit: newUserLimiter(), online: newOnlineCache(),
+		q: store.New(d.DB), clock: d.Clock, ioClock: clock.Real{}, rec: d.Audit, agent: ag, access: acc, log: log,
+		limit: newUserLimiter(), online: newOnlineCache(), streams: newStreamSet(), timers: realTimers{},
 	}
 }
 
@@ -88,8 +91,9 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Post("/servers/{id}/players/actions", rbac.Server(rbac.PermServerConsole, "id"), h.handlePlayerAction)
 }
 
-// Shutdown closes all open streams (there are none before the stream handler exists).
-func (h *Handler) Shutdown() {}
+// Shutdown closes all open streams; new streams are refused with 503 afterwards. cmd/panel
+// registers it with http.Server.RegisterOnShutdown, so Shutdown does not wait for streams.
+func (h *Handler) Shutdown() { h.streams.closeAll() }
 
 func serverTarget(id int64) string { return "server:" + strconv.FormatInt(id, 10) }
 
