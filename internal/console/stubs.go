@@ -12,6 +12,4 @@ func notYet(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeAgentUnavailable, "console not implemented yet")
 }
 
-func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request)       { notYet(w, r) }
-func (h *Handler) handlePlayerLists(w http.ResponseWriter, r *http.Request)  { notYet(w, r) }
-func (h *Handler) handlePlayerAction(w http.ResponseWriter, r *http.Request) { notYet(w, r) }
+func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) { notYet(w, r) }
