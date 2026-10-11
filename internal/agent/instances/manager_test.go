@@ -153,8 +153,8 @@ func TestEnsureCreatesInstance(t *testing.T) {
 	if fi, err := os.Stat(data); err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o750 {
 		t.Fatalf("data dir = %v, %v; want 0750 directory", fi, err)
 	}
-	if fi, err := os.Stat(filepath.Join(e.dir, "instances")); err != nil || fi.Mode().Perm() != 0o700 {
-		t.Fatalf("instances dir = %v, %v; want 0700", fi, err)
+	if fi, err := os.Stat(filepath.Join(e.dir, "instances")); err != nil || fi.Mode().Perm() != 0o750 {
+		t.Fatalf("instances dir = %v, %v; want 0750", fi, err)
 	}
 	if !strings.Contains(e.routes(t), `"survival.mc.example.com": "mcpanel-mc-1:25565"`) {
 		t.Fatalf("routes = %s", e.routes(t))

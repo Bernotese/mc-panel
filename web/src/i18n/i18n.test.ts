@@ -29,6 +29,13 @@ const ERROR_CODES = [
   'catalog_unavailable',
   'instance_not_running',
   'rcon_unavailable',
+  'files_unavailable',
+  'file_exists',
+  'file_modified',
+  'not_text',
+  'not_regular',
+  'instance_running',
+  'insufficient_storage',
   'internal',
 ]
 

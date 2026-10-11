@@ -42,6 +42,7 @@ type Panel struct {
 	PublicURL      string   `toml:"public_url"`
 	DataDir        string   `toml:"data_dir"`
 	AgentSocket    string   `toml:"agent_socket"`
+	FilesSocket    string   `toml:"files_socket"`
 	GeoIPPath      string   `toml:"geoip_path"`
 	TrustedProxies []string `toml:"trusted_proxies"`
 	Session        Session  `toml:"session"`
@@ -68,6 +69,7 @@ func DefaultPanel() Panel {
 		Listen:         UnixListenPrefix + "/run/mc-panel/panel.sock",
 		DataDir:        "/var/lib/mc-panel",
 		AgentSocket:    "/run/mc-panel/agent.sock",
+		FilesSocket:    "/run/mc-panel-files/files.sock",
 		GeoIPPath:      "/var/lib/mc-panel/dbip-country-lite.mmdb",
 		TrustedProxies: []string{"127.0.0.1/32", "::1/128"},
 		Session:        defaultSession(),
@@ -81,6 +83,7 @@ func DevPanel(root string) Panel {
 	p.PublicURL = "http://localhost:5173"
 	p.DataDir = filepath.Join(root, ".dev", "data")
 	p.AgentSocket = filepath.Join(root, ".dev", "agent.sock")
+	p.FilesSocket = filepath.Join(root, ".dev", "files.sock")
 	p.GeoIPPath = filepath.Join(root, ".dev", "dbip-country-lite.mmdb")
 	return p
 }
@@ -124,8 +127,8 @@ func (p *Panel) Validate() error {
 	case u.Scheme != "https" && !(p.Dev && u.Scheme == "http"):
 		errs = append(errs, errors.New("public_url must use https (http only allowed in dev mode)"))
 	}
-	if p.DataDir == "" || p.AgentSocket == "" {
-		errs = append(errs, errors.New("data_dir and agent_socket must be set"))
+	if p.DataDir == "" || p.AgentSocket == "" || p.FilesSocket == "" {
+		errs = append(errs, errors.New("data_dir, agent_socket and files_socket must be set"))
 	}
 	p.trusted = make([]netip.Prefix, 0, len(p.TrustedProxies))
 	for _, s := range p.TrustedProxies {

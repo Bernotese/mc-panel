@@ -659,6 +659,163 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/servers/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a directory of the server's data */
+        get: operations["listFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/files/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a text file for the editor (rcon.password redacted) */
+        get: operations["readFile"];
+        /** Save a text file (atomic, with conflict check; audited) */
+        put: operations["writeFile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/files/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload one file as a raw stream (up to 4 GiB; audited) */
+        post: operations["uploadFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/files/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download a file, or a directory as a zip stream (audited) */
+        get: operations["downloadFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/files/mkdir": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create a directory (audited) */
+        post: operations["makeDirectory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/files/rename": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rename or move a file or directory (audited) */
+        post: operations["renameFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/files/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Delete a file or a directory with its content (audited) */
+        post: operations["deleteFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/files/extract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start extracting a zip into a new or empty directory (server must be stopped; audited)
+         * @description The archive is checked before the job starts (entry names, symlinks, encryption, compression, total size and entries, destination, free space); a failed check answers 400/409/413/507 and starts no job.
+         */
+        post: operations["extractArchive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/files/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The running or last extract job of the server */
+        get: operations["getFileJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/audit": {
         parameters: {
             query?: never;
@@ -873,7 +1030,7 @@ export interface components {
     schemas: {
         Error: {
             /** @enum {string} */
-            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "internal";
+            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "files_unavailable" | "file_exists" | "file_modified" | "not_text" | "not_regular" | "instance_running" | "insufficient_storage" | "internal";
             message: string;
             request_id?: string;
         };
@@ -1202,6 +1359,93 @@ export interface components {
             /** @description kick and ban only */
             reason?: string;
         };
+        /** @enum {string} */
+        FileEntryType: "file" | "dir" | "symlink" | "other";
+        FileEntry: {
+            name: string;
+            type: components["schemas"]["FileEntryType"];
+            /** Format: int64 */
+            size: number;
+            /**
+             * Format: int64
+             * @description Unix ms
+             */
+            mtime: number;
+        };
+        FileList: {
+            /** @description Cleaned path of the listed directory ('' = root) */
+            path: string;
+            entries: components["schemas"]["FileEntry"][];
+            /** @description More than 10 000 entries; only the first are listed */
+            truncated: boolean;
+        };
+        FileContent: {
+            path: string;
+            content: string;
+            /** Format: int64 */
+            mtime: number;
+            /** Format: int64 */
+            size: number;
+        };
+        WriteFileRequest: {
+            path: string;
+            content: string;
+            /**
+             * Format: int64
+             * @description mtime from readFile; null = create a new file
+             */
+            expected_mtime: number | null;
+        };
+        FileWriteResult: {
+            /** Format: int64 */
+            mtime: number;
+            /** Format: int64 */
+            size: number;
+        };
+        UploadResult: {
+            /** Format: int64 */
+            size: number;
+        };
+        FilePathRequest: {
+            path: string;
+        };
+        RenameFileRequest: {
+            from: string;
+            to: string;
+        };
+        ExtractRequest: {
+            /** @description A .zip file */
+            path: string;
+            /** @description New or empty directory */
+            dest: string;
+        };
+        /** @enum {string} */
+        FileJobState: "running" | "done" | "failed";
+        FileJob: {
+            id: string;
+            state: components["schemas"]["FileJobState"];
+            path: string;
+            dest: string;
+            /** Format: int64 */
+            bytes: number;
+            /** Format: int64 */
+            entries: number;
+            /** Format: int64 */
+            total_bytes: number;
+            /** Format: int64 */
+            total_entries: number;
+            error: string;
+            /** Format: int64 */
+            started_at: number;
+            /**
+             * Format: int64
+             * @description 0 while running
+             */
+            finished_at: number;
+        };
+        FileJobResponse: {
+            job: components["schemas"]["FileJob"] | null;
+        };
         PermissionGrant: {
             /** Format: int64 */
             server_id: number;
@@ -1439,8 +1683,17 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description Agent, Docker or RCON not available (agent_unavailable, docker_unavailable, rcon_unavailable) */
+        /** @description Agent, Docker, RCON or the files service not available (agent_unavailable, docker_unavailable, rcon_unavailable, files_unavailable) */
         ServiceUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description insufficient_storage (less than the reserve would be left) */
+        InsufficientStorage: {
             headers: {
                 [name: string]: unknown;
             };
@@ -1454,6 +1707,10 @@ export interface components {
         IdPath: number;
         Cursor: string;
         Limit: number;
+        /** @description Relative path in the data directory; empty = root */
+        FilePathQuery: string;
+        /** @description Relative path in the data directory */
+        FilePathQueryRequired: string;
     };
     requestBodies: never;
     headers: never;
@@ -2603,7 +2860,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description conflict (server not configured, or restart of a container that belongs to another server) or base_domain_missing (restart) */
+            /** @description conflict (server not configured, restart of a container that belongs to another server, or an archive is being extracted) or base_domain_missing (restart) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2780,6 +3037,453 @@ export interface operations {
                 };
             };
             429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listFiles: {
+        parameters: {
+            query?: {
+                /** @description Relative path in the data directory; empty = root */
+                path?: components["parameters"]["FilePathQuery"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileList"];
+                };
+            };
+            /** @description validation_failed or not_regular (not a directory) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    readFile: {
+        parameters: {
+            query: {
+                /** @description Relative path in the data directory */
+                path: components["parameters"]["FilePathQueryRequired"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileContent"];
+                };
+            };
+            /** @description validation_failed or not_regular */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description not_text (too large for the editor or not text) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    writeFile: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WriteFileRequest"];
+            };
+        };
+        responses: {
+            /** @description Saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileWriteResult"];
+                };
+            };
+            /** @description validation_failed or not_regular */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description file_exists (new file) or file_modified (changed since it was opened) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+            507: components["responses"]["InsufficientStorage"];
+        };
+    };
+    uploadFile: {
+        parameters: {
+            query: {
+                /** @description Relative path in the data directory */
+                path: components["parameters"]["FilePathQueryRequired"];
+                overwrite?: boolean;
+            };
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Uploaded */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadResult"];
+                };
+            };
+            /** @description validation_failed (also without Content-Length) or not_regular */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description file_exists (without overwrite) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+            507: components["responses"]["InsufficientStorage"];
+        };
+    };
+    downloadFile: {
+        parameters: {
+            query?: {
+                /** @description Relative path in the data directory; empty = root */
+                path?: components["parameters"]["FilePathQuery"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description File or zip stream with Content-Disposition attachment */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                    "application/zip": string;
+                };
+            };
+            /** @description validation_failed or not_regular (symlink or special file) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    makeDirectory: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FilePathRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description file_exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    renameFile: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameFileRequest"];
+            };
+        };
+        responses: {
+            /** @description Renamed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description file_exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteFile: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FilePathRequest"];
+            };
+        };
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    extractArchive: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExtractRequest"];
+            };
+        };
+        responses: {
+            /** @description Job started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileJob"];
+                };
+            };
+            /** @description validation_failed or not_regular */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description instance_running (server must be stopped) or file_exists (destination not empty) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large (archive exceeds the size or entry limit) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+            507: components["responses"]["InsufficientStorage"];
+        };
+    };
+    getFileJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileJobResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
