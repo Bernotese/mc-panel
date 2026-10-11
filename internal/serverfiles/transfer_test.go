@@ -504,8 +504,10 @@ func TestUploadSurvivesSlowServiceAfterBody(t *testing.T) {
 			if err != nil {
 				return n, fmt.Errorf("%w: %w", filesapi.ErrUnavailable, err)
 			}
-			if extra, err := io.Copy(io.Discard, body); err != nil || extra != 0 {
-				return n, fmt.Errorf("%w: extra read: %d bytes, %v", filesapi.ErrInvalid, extra, err)
+			if extra, err := io.Copy(io.Discard, body); err != nil {
+				return n, fmt.Errorf("%w: extra read: %w", filesapi.ErrUnavailable, err)
+			} else if extra != 0 {
+				return n, fmt.Errorf("%w: %d bytes after the announced length", filesapi.ErrInvalid, extra)
 			}
 			time.Sleep(700 * time.Millisecond) // fsync and rename
 			return n, nil
