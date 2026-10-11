@@ -36,6 +36,11 @@ const (
 	OpInspect = "inspect"
 	OpList    = "list"
 	OpStats   = "stats"
+
+	OpLogs        = "logs"         // GET /containers/{id}/logs
+	OpExecCreate  = "exec_create"  // POST /containers/{id}/exec
+	OpExecStart   = "exec_start"   // POST /exec/{id}/start
+	OpExecInspect = "exec_inspect" // GET /exec/{id}/json
 )
 
 // Container is a snapshot of a fake container.
@@ -72,6 +77,14 @@ type Daemon struct {
 	pullError  string
 	holds      map[string]*hold
 	stats      map[string]docker.Stats
+
+	logs        map[string][]logEntry // by container name
+	logWake     chan struct{}         // closed and replaced on every log or state change
+	logSeq      int
+	logQueries  []string
+	execs       map[string]*execState
+	execRecords []ExecRecord
+	execHandler func(container string, cfg docker.ExecConfig) ExecResult
 }
 
 type network struct {
@@ -100,6 +113,9 @@ func New(t testing.TB) *Daemon {
 		fail:       map[string]failure{},
 		holds:      map[string]*hold{},
 		stats:      map[string]docker.Stats{},
+		logs:       map[string][]logEntry{},
+		logWake:    make(chan struct{}),
+		execs:      map[string]*execState{},
 	}
 	l, err := net.Listen("unix", d.Socket)
 	if err != nil {
@@ -160,6 +176,7 @@ func (d *Daemon) SetState(name, status string, exitCode int) {
 	if c, ok := d.containers[name]; ok {
 		c.Status, c.ExitCode = status, exitCode
 	}
+	d.wakeLogs()
 }
 
 // SetStats sets the answer of the stats endpoint for the container called name.
@@ -302,6 +319,14 @@ func route(method, path string) (op, target string) {
 		return OpCreate, ""
 	case method == http.MethodGet && path == "/containers/json":
 		return OpList, ""
+	case strings.HasPrefix(path, "/exec/"):
+		id, action, _ := strings.Cut(strings.TrimPrefix(path, "/exec/"), "/")
+		switch {
+		case method == http.MethodPost && action == "start":
+			return OpExecStart, id
+		case method == http.MethodGet && action == "json":
+			return OpExecInspect, id
+		}
 	case strings.HasPrefix(path, "/containers/"):
 		rest := strings.TrimPrefix(path, "/containers/")
 		id, action, _ := strings.Cut(rest, "/")
@@ -312,6 +337,10 @@ func route(method, path string) (op, target string) {
 			return OpInspect, id
 		case method == http.MethodGet && action == "stats":
 			return OpStats, id
+		case method == http.MethodGet && action == "logs":
+			return OpLogs, id
+		case method == http.MethodPost && action == "exec":
+			return OpExecCreate, id
 		case method == http.MethodPost && slices.Contains([]string{OpStart, OpStop, OpRestart, OpKill}, action):
 			return action, id
 		}
@@ -355,6 +384,10 @@ func (d *Daemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, f.status, f.msg)
 		return
 	}
+	if op == OpLogs {
+		d.serveLogs(w, r, target)
+		return
+	}
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -376,8 +409,13 @@ func (d *Daemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		d.create(w, r, target)
 	case OpList:
 		d.list(w, r)
+	case OpExecStart:
+		d.execStart(w, r, target)
+	case OpExecInspect:
+		d.execInspect(w, target)
 	default:
 		d.container(w, r, op, target)
+		d.wakeLogs() // start/stop/kill/remove end or continue followed logs
 	}
 }
 
@@ -559,5 +597,7 @@ func (d *Daemon) container(w http.ResponseWriter, r *http.Request, op, ref strin
 		})
 	case OpStats:
 		writeJSON(w, http.StatusOK, d.stats[c.Name])
+	case OpExecCreate:
+		d.execCreate(w, r, c)
 	}
 }

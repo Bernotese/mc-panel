@@ -323,6 +323,21 @@ func (c *Client) call(ctx context.Context, timeout time.Duration, method, path s
 	return nil
 }
 
+// stream sends one request and hands the body of a 2xx answer to the caller, who reads
+// and closes it. Only ctx bounds the call: streams (followed logs, exec output) last as
+// long as the caller wants.
+func (c *Client) stream(ctx context.Context, method, path string, q url.Values, in any) (io.ReadCloser, error) {
+	resp, err := c.send(ctx, method, path, q, in) //nolint:bodyclose // the body is returned to the caller, who closes it
+	if err != nil {
+		return nil, err
+	}
+	if err := checkStatus(resp, method, path); err != nil {
+		_ = resp.Body.Close()
+		return nil, err
+	}
+	return resp.Body, nil
+}
+
 func (c *Client) send(ctx context.Context, method, path string, q url.Values, in any) (*http.Response, error) {
 	var body io.Reader
 	if in != nil {
