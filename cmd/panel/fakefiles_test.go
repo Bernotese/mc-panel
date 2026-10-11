@@ -51,8 +51,7 @@ func (f *fakeFiles) List(_ context.Context, id int64, dir string) (filesapi.List
 		if !ok {
 			continue
 		}
-		name, sub, isDir := strings.Cut(rest, "/")
-		_ = sub
+		name, _, isDir := strings.Cut(rest, "/")
 		if isDir {
 			seen[name] = filesapi.Entry{Name: name, Type: filesapi.TypeDir, MTime: f.mtime}
 		} else {

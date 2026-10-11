@@ -89,7 +89,7 @@ func TestFilesEndToEnd(t *testing.T) {
 	admin.must(202, "POST", fmt.Sprintf("/servers/%d/power", id), map[string]string{"action": "stop"})
 	waitServer(t, admin, id, "stopped", stateIs("stopped"))
 	admin.must(202, "POST", fmt.Sprintf("/servers/%d/files/extract", id), map[string]any{"path": "w.zip", "dest": "w"})
-	if code, out := admin.do("POST", fmt.Sprintf("/servers/%d/power", id), map[string]string{"action": "start"}); code != 409 {
+	if code, out := admin.do("POST", fmt.Sprintf("/servers/%d/power", id), map[string]string{"action": "start"}); code != 409 || out["error"] != "conflict" {
 		t.Fatalf("start while extracting = %d %v", code, out)
 	}
 	job := admin.must(200, "GET", fmt.Sprintf("/servers/%d/files/jobs", id), nil)
