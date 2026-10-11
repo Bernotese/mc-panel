@@ -122,9 +122,9 @@ test('admin edits a config, uploads, renames and deletes files', async ({ page }
   await page.getByRole('tab', { name: 'Dateien' }).click()
   const files = page.getByRole('region', { name: 'Dateien' })
 
-  await files.getByRole('button', { name: 'plugins' }).click()
-  await files.getByRole('button', { name: 'Essentials' }).click()
-  await files.getByRole('button', { name: 'config.yml' }).click()
+  await files.getByRole('button', { name: 'plugins', exact: true }).click()
+  await files.getByRole('button', { name: 'Essentials', exact: true }).click()
+  await files.getByRole('button', { name: 'config.yml', exact: true }).click()
   const editor = page.getByRole('textbox', { name: 'Inhalt von config.yml' })
   await expect(editor).toBeVisible()
   await editor.click()
@@ -138,19 +138,19 @@ test('admin edits a config, uploads, renames and deletes files', async ({ page }
   await page.getByLabel('Dateien hochladen').setInputFiles({ name: 'hallo.txt', mimeType: 'text/plain', buffer: Buffer.from('hallo welt') })
   const uploads = page.getByRole('region', { name: 'Uploads' })
   await expect(uploads.getByText('Hochgeladen')).toBeVisible()
-  await expect(files.getByRole('button', { name: 'hallo.txt' })).toBeVisible()
+  await expect(files.getByRole('button', { name: 'hallo.txt', exact: true })).toBeVisible()
 
-  await files.getByRole('button', { name: 'Aktionen für hallo.txt' }).click()
+  await files.getByRole('button', { name: 'Aktionen für hallo.txt', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Umbenennen oder verschieben' }).click()
   const rename = page.getByRole('dialog', { name: '„hallo.txt“ umbenennen oder verschieben' })
   await rename.getByLabel('Neuer Pfad').fill('plugins/Essentials/servus.txt')
   await rename.getByRole('button', { name: 'Umbenennen' }).click()
-  await expect(files.getByRole('button', { name: 'servus.txt' })).toBeVisible()
+  await expect(files.getByRole('button', { name: 'servus.txt', exact: true })).toBeVisible()
 
-  await files.getByRole('button', { name: 'Aktionen für servus.txt' }).click()
+  await files.getByRole('button', { name: 'Aktionen für servus.txt', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Löschen' }).click()
   await page.getByRole('dialog', { name: '„servus.txt“ löschen?' }).getByRole('button', { name: 'Endgültig löschen' }).click()
-  await expect(files.getByRole('button', { name: 'servus.txt' })).toHaveCount(0)
+  await expect(files.getByRole('button', { name: 'servus.txt', exact: true })).toHaveCount(0)
 })
 
 test('admin uploads a world zip to a stopped server and extracts it', async ({ page }) => {
@@ -167,14 +167,14 @@ test('admin uploads a world zip to a stopped server and extracts it', async ({ p
   })
   await expect(page.getByRole('region', { name: 'Uploads' }).getByText('Hochgeladen')).toBeVisible()
 
-  await files.getByRole('button', { name: 'Aktionen für neue-welt.zip' }).click()
+  await files.getByRole('button', { name: 'Aktionen für neue-welt.zip', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Entpacken …' }).click()
   const dialog = page.getByRole('dialog', { name: '„neue-welt.zip“ entpacken' })
   await expect(dialog.getByLabel('Zielordner')).toHaveValue('neue-welt')
   await dialog.getByRole('button', { name: 'Entpacken' }).click()
   await expect(page.getByRole('progressbar', { name: 'Fortschritt beim Entpacken' })).toBeVisible()
   await expect(page.getByText('„neue-welt.zip“ wurde nach neue-welt entpackt.')).toBeVisible({ timeout: 15_000 })
-  await expect(files.getByRole('button', { name: 'neue-welt' })).toBeVisible()
+  await expect(files.getByRole('button', { name: 'neue-welt', exact: true })).toBeVisible()
 })
 
 test('a user without file permission sees no files tab', async ({ page }) => {
