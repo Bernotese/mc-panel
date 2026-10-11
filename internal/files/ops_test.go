@@ -319,8 +319,8 @@ func TestMkdirRenameDelete(t *testing.T) {
 		{ID: 1, From: "plugins", To: "plugins/inner"}:                    filesapi.ErrInvalid,
 		{ID: 1, From: "plugins", To: "plugins"}:                          filesapi.ErrInvalid,
 		{ID: 1, From: "missing", To: "x"}:                                filesapi.ErrNotFound,
-		{ID: 1, From: "server.properties", To: "nope/x"}:                 filesapi.ErrNotFound,
-		{ID: 1, From: "server.properties", To: "current/x"}:              filesapi.ErrNotRegular,
+		{ID: 1, From: "plugins/EssentialsX.jar", To: "nope/x"}:           filesapi.ErrNotFound,
+		{ID: 1, From: "plugins/EssentialsX.jar", To: "current/x"}:        filesapi.ErrNotRegular,
 		{ID: 1, From: "", To: "x"}:                                       filesapi.ErrInvalid,
 	} {
 		if err := s.Rename(ctx, req); !errors.Is(err, want) {
@@ -368,5 +368,74 @@ func TestWriteNewServerPropertiesDropsPlaceholder(t *testing.T) {
 	}
 	if v, _ := get(t, data, "server.properties"); v != "motd=x\n" {
 		t.Fatalf("the placeholder became a password: %q", v)
+	}
+}
+
+// server.properties may not be renamed: under another name or in a subfolder its RCON password
+// would no longer be redacted (spec §3.4).
+func TestRenameKeepsServerPropertiesRedacted(t *testing.T) {
+	s, data := newService(t)
+	layout(t, data)
+	for _, from := range []string{"server.properties", "SERVER.PROPERTIES", "Server.Properties"} {
+		for _, to := range []string{"x.txt", "plugins/server.properties", "copy.properties"} {
+			err := s.Rename(ctx, filesapi.RenameRequest{ID: 1, From: from, To: to})
+			if !errors.Is(err, filesapi.ErrInvalid) {
+				t.Errorf("rename %s -> %s: %v, want ErrInvalid", from, to, err)
+			}
+		}
+	}
+	// Renaming another file *to* server.properties stays possible.
+	put(t, data, "other.properties", "motd=x\n")
+	if err := s.Delete(ctx, 1, "server.properties"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Rename(ctx, filesapi.RenameRequest{ID: 1, From: "other.properties", To: "server.properties"}); err != nil {
+		t.Fatalf("rename onto the free name: %v", err)
+	}
+}
+
+// No read path (editor, download, folder zip) returns the RCON password, under any name the
+// API accepts.
+func TestNoReadPathReturnsTheRconPassword(t *testing.T) {
+	s, data := newService(t)
+	layout(t, data)
+	_ = s.Rename(ctx, filesapi.RenameRequest{ID: 1, From: "server.properties", To: "leak.txt"})
+	_ = s.Rename(ctx, filesapi.RenameRequest{ID: 1, From: "server.properties", To: "plugins/server.properties"})
+
+	var paths []string
+	var walk func(dir string)
+	walk = func(dir string) {
+		res, err := s.List(ctx, 1, dir)
+		if err != nil {
+			t.Fatalf("list %q: %v", dir, err)
+		}
+		for _, e := range res.Entries {
+			p := filesapi.Join(dir, e.Name)
+			paths = append(paths, p)
+			if e.Type == filesapi.TypeDir {
+				walk(p)
+			}
+		}
+	}
+	walk("")
+	// Case variants reach the real file on a case-insensitive file system (macOS dev).
+	paths = append(paths, "SERVER.PROPERTIES", "Server.properties", ".RCON-CLI.ENV", ".Rcon-Cli.Yaml")
+	for _, p := range paths {
+		if r, err := s.Read(ctx, 1, p); err == nil && strings.Contains(r.Content, "s3cret") {
+			t.Errorf("read %s returns the password", p)
+		}
+		var d download
+		if err := s.Download(ctx, 1, p, d.start, &d.body); err == nil && strings.Contains(d.body.String(), "s3cret") {
+			t.Errorf("download %s returns the password", p)
+		}
+	}
+	var d download
+	if err := s.Download(ctx, 1, "", d.start, &d.body); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range zipNames(t, d.body.Bytes()) {
+		if strings.Contains(content, "s3cret") {
+			t.Errorf("folder zip entry %s contains the password", name)
+		}
 	}
 }

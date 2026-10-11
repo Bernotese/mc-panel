@@ -113,7 +113,7 @@ func (s *Service) Download(ctx context.Context, id int64, p string, start func(i
 		return writeDirZip(ctx, root, clean, w, s.cfg.Limits.MaxTextBytes)
 	case !fi.Mode().IsRegular():
 		return fmt.Errorf("%w: %s is not a regular file", filesapi.ErrNotRegular, clean)
-	case clean == serverProps:
+	case isServerProps(clean):
 		data, _, err := readSmall(root, clean, s.cfg.Limits.MaxTextBytes)
 		if err != nil {
 			return err
