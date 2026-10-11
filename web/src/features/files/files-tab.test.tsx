@@ -1,5 +1,5 @@
 import { createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { server } from '@/mocks/node'
 import { openFiles } from './test-utils'
@@ -92,6 +92,10 @@ describe('FilesTab', () => {
     server.use(http.get('*/api/servers/:id/files', () => HttpResponse.json({ error: 'not_found', message: 'not found' }, { status: 404 })))
     const { region } = await openFiles()
     expect(await within(region).findByText('Der Server wurde noch nie gestartet – es gibt noch keine Daten.')).toBeInTheDocument()
+    // Review F10: there is no folder to create files in yet.
+    for (const name of ['Neuer Ordner', 'Neue Datei', 'Hochladen']) {
+      expect(within(region).queryByRole('button', { name })).not.toBeInTheDocument()
+    }
   })
 
   it('sorts by size with folders first', async () => {
@@ -128,6 +132,63 @@ describe('FilesTab', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Überspringen' }))
     const uploads = screen.getByRole('region', { name: 'Uploads' })
     expect(await within(uploads).findByText('Übersprungen')).toBeInTheDocument()
+  })
+
+  // Review F2: an early 409 can arrive as a reset connection; a name the listing shows is asked about up front.
+  it('asks about an existing file before sending it', async () => {
+    const seen: string[] = []
+    server.use(
+      http.post('*/api/servers/:id/files/upload', ({ request }) => {
+        seen.push(new URL(request.url).searchParams.get('overwrite') ?? '')
+        return HttpResponse.json({ size: 1 }, { status: 201 })
+      }),
+    )
+    const { user, region } = await openFiles()
+    await within(region).findByRole('button', { name: 'plugins' })
+    await user.upload(screen.getByLabelText('Dateien hochladen'), new File(['x'], 'server.properties'))
+    const dialog = await screen.findByRole('dialog', { name: '„server.properties“ existiert bereits' })
+    expect(seen).toEqual([])
+    await user.click(within(dialog).getByRole('button', { name: 'Überschreiben' }))
+    const uploads = screen.getByRole('region', { name: 'Uploads' })
+    expect(await within(uploads).findByText('Hochgeladen')).toBeInTheDocument()
+    expect(seen).toEqual(['true'])
+  })
+
+  // Review F6: after the last byte the panel and the service still store the file.
+  it('says an upload is being processed once every byte is sent', async () => {
+    server.use(
+      http.post('*/api/servers/:id/files/upload', async () => {
+        await delay('infinite')
+        return HttpResponse.json({ size: 1 }, { status: 201 })
+      }),
+    )
+    const { user, region } = await openFiles()
+    await within(region).findByRole('button', { name: 'plugins' })
+    await user.upload(screen.getByLabelText('Dateien hochladen'), new File([], 'empty.txt'))
+    const uploads = await screen.findByRole('region', { name: 'Uploads' })
+    expect(await within(uploads).findByText('Wird verarbeitet …')).toBeInTheDocument()
+  })
+
+  // Review F1: leaving the tab cancels running uploads, so it asks first.
+  it('asks before leaving the tab while uploads run', async () => {
+    server.use(
+      http.post('*/api/servers/:id/files/upload', async () => {
+        await delay('infinite')
+        return HttpResponse.json({ size: 1 }, { status: 201 })
+      }),
+    )
+    const { user, region } = await openFiles()
+    await within(region).findByRole('button', { name: 'plugins' })
+    await user.upload(screen.getByLabelText('Dateien hochladen'), new File(['x'], 'big.jar'))
+    await screen.findByRole('region', { name: 'Uploads' })
+    await user.click(screen.getByRole('tab', { name: 'Übersicht' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Laufende Uploads abbrechen?' })
+    expect(within(dialog).getByText('Laufende Uploads werden abgebrochen.')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Abbrechen' }))
+    expect(screen.getByRole('tab', { name: 'Dateien' })).toHaveAttribute('aria-selected', 'true')
+    await user.click(screen.getByRole('tab', { name: 'Übersicht' }))
+    await user.click(within(await screen.findByRole('dialog', { name: 'Laufende Uploads abbrechen?' })).getByRole('button', { name: 'Verlassen' }))
+    expect(await screen.findByRole('region', { name: 'Zustand' })).toBeInTheDocument()
   })
 
   it('rejects reserved names without uploading', async () => {

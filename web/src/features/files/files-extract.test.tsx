@@ -61,6 +61,9 @@ describe('extracting', () => {
     expect(within(dialog).getByLabelText('Zielordner')).toHaveValue('neue-welt')
     await user.click(within(dialog).getByRole('button', { name: 'Entpacken' }))
     expect(await screen.findByRole('progressbar', { name: 'Fortschritt beim Entpacken' })).toBeInTheDocument()
+    // Review F9: only the title is announced, not the counts on every poll.
+    expect(screen.getByText('Entpacken von „neue-welt.zip“ läuft …')).toHaveAttribute('role', 'status')
+    expect(screen.getByText(/von 100 Einträgen/).closest('[role="status"], [aria-live]')).toBeNull()
     await act(() => vi.advanceTimersByTimeAsync(JOB_POLL_MS + 100))
     await act(() => vi.advanceTimersByTimeAsync(JOB_POLL_MS + 100))
     expect(await screen.findByText('„neue-welt.zip“ wurde nach neue-welt entpackt.')).toBeInTheDocument()
@@ -77,13 +80,15 @@ describe('extracting', () => {
       http.post('*/api/servers/:id/files/extract', () => HttpResponse.json(job('running', 10), { status: 202 })),
       http.get('*/api/servers/:id/files/jobs', () => {
         polls += 1
-        return HttpResponse.json({ job: job('failed', 20, 'Archiv beschädigt') })
+        return HttpResponse.json({ job: job('failed', 20, 'insufficient_storage: 10 bytes free') })
       }),
     )
     const { user, dialog } = await openExtractDialog()
     await user.click(within(dialog).getByRole('button', { name: 'Entpacken' }))
     await act(() => vi.advanceTimersByTimeAsync(JOB_POLL_MS + 100))
-    expect(await screen.findByText('Entpacken von „neue-welt.zip“ fehlgeschlagen: Archiv beschädigt')).toBeInTheDocument()
+    // Review F4: a localized reason, the service's detail after it.
+    expect(await screen.findByText('Entpacken von „neue-welt.zip“ fehlgeschlagen: Nicht genug freier Speicherplatz.')).toBeInTheDocument()
+    expect(screen.getByText('insufficient_storage: 10 bytes free')).toBeInTheDocument()
     expect(polls).toBeGreaterThan(0)
   })
 
@@ -115,15 +120,31 @@ describe('extracting', () => {
   })
 
   it.each([
-    [409, 'instance_running', 'Der Server muss dafür gestoppt sein.'],
-    [503, 'agent_unavailable', 'Der Agent ist nicht erreichbar.'],
-  ])('shows %i %s inside the dialog', async (status, code, message) => {
+    [409, 'instance_running', 'x', 'Der Server muss dafür gestoppt sein.'],
+    [503, 'agent_unavailable', 'x', 'Der Agent ist nicht erreichbar.'],
+    // Review F5
+    [409, 'file_exists', 'x', 'Der Zielordner ist nicht leer.'],
+    [429, 'rate_limited', 'x', 'Es läuft bereits ein Entpack-Vorgang.'],
+    [413, 'payload_too_large', 'the archive has more than 100000 entries', 'Das Archiv ist zu groß oder hat zu viele Einträge (the archive has more than 100000 entries).'],
+  ])('shows %i %s inside the dialog', async (status, code, detail, message) => {
     server.use(
       listWithZip(),
-      http.post('*/api/servers/:id/files/extract', () => HttpResponse.json({ error: code, message: 'x' }, { status })),
+      http.post('*/api/servers/:id/files/extract', () => HttpResponse.json({ error: code, message: detail }, { status })),
     )
     const { user, dialog } = await openExtractDialog()
     await user.click(within(dialog).getByRole('button', { name: 'Entpacken' }))
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(message)
+  })
+
+  // Review F5: a crashed server (container exited) may be extracted into; the panel checks the actual state.
+  it('allows extracting while the server is in the error state', async () => {
+    const creative = db.servers.find((s) => s.id === 2)
+    if (!creative) throw new Error('mock server 2 missing')
+    creative.status = { ...creative.status, state: 'error' }
+    server.use(listWithZip(), http.post('*/api/servers/:id/files/extract', () => HttpResponse.json(job('running', 10), { status: 202 })))
+    const { user, dialog } = await openExtractDialog()
+    expect(within(dialog).queryByText('Entpacken geht nur bei gestopptem Server.')).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Entpacken' }))
+    expect(await screen.findByRole('progressbar', { name: 'Fortschritt beim Entpacken' })).toBeInTheDocument()
   })
 })

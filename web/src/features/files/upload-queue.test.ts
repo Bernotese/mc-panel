@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/errors'
-import type { UploadTransport } from './upload'
+import { UploadInterruptedError, type UploadTransport } from './upload'
 import { nextToStart, uploadReducer, useUploadQueue, type UploadItem } from './upload-queue'
 
 const item = (id: number, status: UploadItem['status'] = 'queued'): UploadItem => ({
@@ -109,6 +109,36 @@ describe('useUploadQueue', () => {
     expect(result.current.items[0].status).toBe('conflict')
     act(() => result.current.overwrite(result.current.items[0].id))
     expect(calls[1]).toMatchObject({ path: 'a.txt', overwrite: true })
+  })
+
+  // Review F2: an existing file is asked about before a byte is sent.
+  it('asks about a file the listing already shows before sending it', async () => {
+    const { calls, transport } = fakeTransport()
+    const exists = (path: string) => path === 'plugins/a.txt'
+    const { result } = renderHook(() => useUploadQueue(1, { onUploaded: vi.fn(), transport, exists }))
+    act(() => result.current.add([new File(['a'], 'a.txt'), new File(['b'], 'b.txt')], 'plugins'))
+    expect(calls).toHaveLength(0)
+    expect(result.current.items.map((i) => i.status)).toEqual(['conflict', 'queued'])
+    act(() => result.current.overwrite(result.current.items[0].id))
+    expect(calls[0]).toMatchObject({ path: 'plugins/a.txt', overwrite: true })
+  })
+
+  it('explains an upload that broke off', async () => {
+    const { calls, transport } = fakeTransport()
+    const { result } = renderHook(() => useUploadQueue(1, { onUploaded: vi.fn(), transport }))
+    act(() => result.current.add([new File(['a'], 'a.txt')], ''))
+    await act(async () => calls[0].reject(new UploadInterruptedError()))
+    expect(result.current.items[0]).toMatchObject({ status: 'failed', error: 'files.uploads.interrupted' })
+  })
+
+  it('reports whether uploads are still pending', async () => {
+    const { calls, transport } = fakeTransport()
+    const { result } = renderHook(() => useUploadQueue(1, { onUploaded: vi.fn(), transport }))
+    expect(result.current.active).toBe(false)
+    act(() => result.current.add([new File(['a'], 'a.txt')], ''))
+    expect(result.current.active).toBe(true)
+    await act(async () => calls[0].resolve())
+    expect(result.current.active).toBe(false)
   })
 
   it('aborts running uploads when the tab unmounts', () => {
