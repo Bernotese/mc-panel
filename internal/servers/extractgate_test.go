@@ -27,11 +27,11 @@ func TestPowerBlockedWhileExtracting(t *testing.T) {
 	if got := instanceRow(t, e.db, id).DesiredState; got != "stopped" {
 		t.Fatalf("desired = %s", got)
 	}
-	asked := e.gate.asked
+	asked := e.gate.askedCount()
 	if code, _ := e.power(id, "stop", &admin); code != http.StatusAccepted {
 		t.Fatalf("stop while extracting: %d", code)
 	}
-	if e.gate.asked != asked {
+	if e.gate.askedCount() != asked {
 		t.Fatal("a stop must not wait for the file service")
 	}
 	if got := e.rec.Actions(); !slices.Equal(got, []string{audit.ActionServerPower}) {

@@ -1,8 +1,10 @@
 package serverfiles_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/serverfiles"
 )
 
 func status(id int64, s agentapi.ContainerState, op agentapi.Operation) agentapi.InstanceStatus {
@@ -201,5 +204,38 @@ func TestExtractPendingHoldsStarts(t *testing.T) {
 	}
 	if e.h.ExtractRunning(context.Background(), id) {
 		t.Fatal("a refused extract keeps holding starts")
+	}
+
+	// during the service call the service knows no job yet, the mark still holds; a refusal
+	// of the service (job limit) clears it
+	e.agent.set(status(id, agentapi.StateExited, ""))
+	e.agent.onCall = nil
+	var inCall bool
+	e.files.onExtract = func() { inCall = e.h.ExtractRunning(context.Background(), id) }
+	e.files.setErr(fmt.Errorf("service: %w", filesapi.ErrBusy))
+	rec = e.do(http.MethodPost, srvPath(id, "/files/extract"), map[string]string{"path": "w.zip", "dest": "w"}, &admin)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("extract with busy service: %d %s", rec.Code, rec.Body)
+	}
+	if !inCall {
+		t.Fatal("the gate was open during the service call")
+	}
+	e.files.setErr(nil) // the service answers again and knows no job
+	if e.h.ExtractRunning(context.Background(), id) {
+		t.Fatal("a failed extract keeps holding starts")
+	}
+}
+
+// An open gate because the service is unreachable is logged.
+func TestExtractRunningLogsUnreachableService(t *testing.T) {
+	var logs bytes.Buffer
+	e := newEnvWith(t, func(d *serverfiles.Deps) { d.Log = slog.New(slog.NewTextHandler(&logs, nil)) })
+	id := createInstance(t, e.db, "survival")
+	e.files.setErr(filesapi.ErrUnavailable)
+	if e.h.ExtractRunning(context.Background(), id) {
+		t.Fatal("service down must count as no job")
+	}
+	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), fmt.Sprintf("server_id=%d", id)) {
+		t.Fatalf("log = %q", logs.String())
 	}
 }

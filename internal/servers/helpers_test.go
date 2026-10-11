@@ -301,6 +301,8 @@ type fakeGate struct {
 
 func (g *fakeGate) set(id int64, on bool) { g.mu.Lock(); g.running[id] = on; g.mu.Unlock() }
 
+func (g *fakeGate) askedCount() int { g.mu.Lock(); defer g.mu.Unlock(); return g.asked }
+
 func (g *fakeGate) ExtractRunning(_ context.Context, id int64) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
