@@ -43,10 +43,10 @@ describe('cleanPath (mirrors filesapi.CleanPath)', () => {
 })
 
 describe('hidden names', () => {
-  it.each(['.rcon-cli.env', '.rcon-cli.yaml', '.mcpanel-tmp-1', 'world/.mcpanel-tmp-x/a'])('hides %j', (p) => {
+  it.each(['.rcon-cli.env', '.rcon-cli.yaml', '.mcpanel-tmp-1', 'world/.mcpanel-tmp-x/a', '.RCON-CLI.ENV', '.Rcon-Cli.Yaml', 'a/.MCPanel-tmp'])('hides %j', (p) => {
     expect(isHiddenPath(p)).toBe(true)
   })
-  it.each(['plugins/.rcon-cli.env', 'rcon-cli.env', '.mcpanelx', 'server.properties'])('shows %j', (p) => {
+  it.each(['plugins/.rcon-cli.env', 'plugins/.RCON-CLI.ENV', 'rcon-cli.env', '.mcpanelx', 'server.properties'])('shows %j', (p) => {
     expect(isHiddenPath(p)).toBe(false)
   })
 })

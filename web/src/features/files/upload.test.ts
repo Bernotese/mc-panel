@@ -1,6 +1,7 @@
-import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it } from 'vitest'
-import { setCsrfToken } from '@/api/csrf'
+import { delay, http, HttpResponse } from 'msw'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { getCsrfToken, setCsrfToken } from '@/api/csrf'
+import { configureApiHandlers } from '@/api/handlers'
 import { ApiError } from '@/api/errors'
 import { server } from '@/mocks/node'
 import { uploadFile } from './upload'
@@ -65,5 +66,51 @@ describe('uploadFile', () => {
     )
     await expect(uploadFile(1, 'a', new File(['x'], 'a'), { overwrite: false })).resolves.toEqual({ size: 1 })
     expect(calls).toBe(2)
+  })
+
+  it('rejects with AbortError when cancelled while the request is in flight', async () => {
+    let started = false
+    server.use(
+      http.post('*/api/servers/:id/files/upload', async () => {
+        started = true
+        await delay('infinite')
+        return HttpResponse.json({ size: 1 }, { status: 201 })
+      }),
+    )
+    const controller = new AbortController()
+    const pending = uploadFile(1, 'a', new File(['x'], 'a'), { overwrite: false, signal: controller.signal }).catch((e: unknown) => e)
+    await vi.waitFor(() => expect(started).toBe(true))
+    controller.abort()
+    expect(((await pending) as DOMException).name).toBe('AbortError')
+  })
+
+  it('signs the user out on 401 and drops the token', async () => {
+    const onUnauthorized = vi.fn()
+    configureApiHandlers({ onUnauthorized })
+    setCsrfToken('tok')
+    server.use(
+      http.post('*/api/servers/:id/files/upload', () => HttpResponse.json({ error: 'unauthorized', message: 'no' }, { status: 401 })),
+    )
+    const err = await uploadFile(1, 'a', new File(['x'], 'a'), { overwrite: false }).catch((e: unknown) => e)
+    expect((err as ApiError).code).toBe('unauthorized')
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+    expect(getCsrfToken()).toBe('')
+  })
+
+  it('passes Retry-After on', async () => {
+    server.use(
+      http.post('*/api/servers/:id/files/upload', () =>
+        HttpResponse.json({ error: 'rate_limited', message: 'slow down' }, { status: 429, headers: { 'Retry-After': '7' } }),
+      ),
+    )
+    const err = await uploadFile(1, 'a', new File(['x'], 'a'), { overwrite: false }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).retryAfterSeconds).toBe(7)
+  })
+
+  it('rejects with a TypeError on network errors', async () => {
+    server.use(http.post('*/api/servers/:id/files/upload', () => HttpResponse.error()))
+    const err = await uploadFile(1, 'a', new File(['x'], 'a'), { overwrite: false }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(TypeError)
   })
 })

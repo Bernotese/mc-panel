@@ -100,4 +100,62 @@ describe('FileEditor', () => {
     expect(screen.getByText(/wird beim Start aus den panel-Einstellungen überschrieben/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Zu den Einstellungen' })).toBeInTheDocument()
   })
+
+  it('asks before "Zu den Einstellungen" drops unsaved changes', async () => {
+    const { user, region } = await openFiles()
+    await user.click(await within(region).findByRole('button', { name: 'server.properties' }))
+    const editor = await screen.findByRole('textbox', { name: 'Inhalt von server.properties' })
+    await user.type(editor, 'x')
+    await user.click(screen.getByRole('button', { name: 'Zu den Einstellungen' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Ungespeicherte Änderungen verwerfen?' })
+    expect(screen.getByRole('tab', { name: 'Dateien' })).toHaveAttribute('aria-selected', 'true')
+    await user.click(within(dialog).getByRole('button', { name: 'Verwerfen' }))
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Einstellungen' })).toHaveAttribute('aria-selected', 'true'))
+  })
+
+  describe('after a conflicting save', () => {
+    function mockConflict(secondRead: 'ok' | 'fail') {
+      let reads = 0
+      const writes: { expected_mtime: number | null; content: string }[] = []
+      server.use(
+        http.get('*/api/servers/:id/files/content', ({ request }) => {
+          reads += 1
+          if (reads > 1 && secondRead === 'fail') return HttpResponse.json({ error: 'agent_unavailable', message: 'down' }, { status: 503 })
+          return HttpResponse.json({ path: new URL(request.url).searchParams.get('path'), content: 'a: 1\n', mtime: reads === 1 ? 100 : 200, size: 5 })
+        }),
+        http.put('*/api/servers/:id/files/content', async ({ request }) => {
+          writes.push((await request.json()) as { expected_mtime: number | null; content: string })
+          return writes.length === 1
+            ? HttpResponse.json({ error: 'file_modified', message: 'modified' }, { status: 409 })
+            : HttpResponse.json({ mtime: 300, size: 6 })
+        }),
+      )
+      return writes
+    }
+
+    it('overwrites with the fresh mtime and clears the unsaved marker', async () => {
+      const writes = mockConflict('ok')
+      const { user, editor } = await openConfig()
+      await user.type(editor, 'x')
+      await user.click(screen.getByRole('button', { name: 'Speichern' }))
+      const dialog = await screen.findByRole('dialog', { name: 'Datei wurde geändert' })
+      await user.click(within(dialog).getByRole('button', { name: 'Überschreiben' }))
+      await waitFor(() => expect(writes).toHaveLength(2))
+      expect(writes[0].expected_mtime).toBe(100)
+      expect(writes[1].expected_mtime).toBe(200)
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      await waitFor(() => expect(screen.queryByText('Ungespeicherte Änderungen')).not.toBeInTheDocument())
+    })
+
+    it('keeps the draft when reloading fails', async () => {
+      mockConflict('fail')
+      const { user, editor } = await openConfig()
+      await user.type(editor, 'x')
+      await user.click(screen.getByRole('button', { name: 'Speichern' }))
+      const dialog = await screen.findByRole('dialog', { name: 'Datei wurde geändert' })
+      await user.click(within(dialog).getByRole('button', { name: 'Neu laden' }))
+      expect(await screen.findByText('Der Agent ist nicht erreichbar.')).toBeInTheDocument()
+      expect(screen.getByText('Ungespeicherte Änderungen')).toBeInTheDocument()
+    })
+  })
 })

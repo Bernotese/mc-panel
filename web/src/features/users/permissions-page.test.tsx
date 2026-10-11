@@ -40,4 +40,21 @@ describe('UserPermissionsPage', () => {
     await user.click(screen.getByRole('checkbox', { name: 'survival: Dateien' }))
     expect(screen.getByText(/„Dateien“ erlaubt Code-Ausführung im Minecraft-Server/)).toBeInTheDocument()
   })
+
+  it('does not warn for access that is already saved', async () => {
+    db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.files'] }])
+    const user = userEvent.setup()
+    await renderWithProviders(<UserPermissionsPage userId={2} />, { me: loginAs('admin', { sudo: true }) })
+    await screen.findByRole('heading', { name: 'Rechte von alice' })
+    expect(screen.getByRole('checkbox', { name: 'survival: Dateien' })).toBeChecked()
+    expect(screen.queryByText(/erlaubt Code-Ausführung/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: 'survival: Starten/Stoppen' }))
+    expect(screen.queryByText(/erlaubt Code-Ausführung/)).not.toBeInTheDocument()
+  })
+
+  it('does not warn for administrator targets', async () => {
+    await renderWithProviders(<UserPermissionsPage userId={3} />, { me: loginAs('admin') })
+    expect(await screen.findByText('Administratoren haben automatisch alle Rechte auf allen Servern.')).toBeInTheDocument()
+    expect(screen.queryByText(/erlaubt Code-Ausführung/)).not.toBeInTheDocument()
+  })
 })

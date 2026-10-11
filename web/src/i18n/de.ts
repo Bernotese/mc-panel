@@ -522,6 +522,7 @@ export const de = {
       new_file: 'Neue Datei',
       upload: 'Hochladen',
       upload_input: 'Dateien hochladen',
+      folders_unsupported: 'Ordner werden nicht unterstützt – bitte als Zip hochladen.',
       drop: 'Dateien hier ablegen, um sie nach {{dir}} hochzuladen',
     },
     dialog: {
@@ -601,6 +602,8 @@ export const de = {
       dest: 'Zielordner',
       dest_hint: 'Der Ordner muss neu oder leer sein.',
       submit: 'Entpacken',
+      agent_unavailable: 'Der Agent ist nicht erreichbar – Entpacken ist gerade nicht möglich.',
+      already_running: 'Es läuft bereits ein Entpacken.',
       stopped_only: 'Entpacken geht nur bei gestopptem Server.',
       running: 'Entpacken von „{{name}}“ läuft …',
       progress: 'Fortschritt beim Entpacken',

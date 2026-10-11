@@ -21,7 +21,7 @@ import { NameDialog } from './name-dialog'
 import { useFileJob } from './use-file-job'
 import { UploadList } from './upload-list'
 import { useUploadQueue } from './upload-queue'
-import { baseName, breadcrumbs, componentProblem, joinPath, targetProblem } from './path'
+import { baseName, breadcrumbs, cleanPath, componentProblem, joinPath, targetProblem } from './path'
 
 type DialogState = { kind: 'mkdir' } | { kind: 'newfile' } | { kind: 'rename'; entry: FileEntry } | { kind: 'delete'; entry: FileEntry } | { kind: 'extract'; path: string }
 
@@ -65,10 +65,42 @@ export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProp
   const [dragging, setDragging] = useState(false)
   const conflict = uploads.items.find((i) => i.status === 'conflict')
 
+  const [notice, setNotice] = useState<string | null>(null)
+
+  // A drop beside the drop zone would make the browser navigate to the file and leave the panel.
+  useEffect(() => {
+    const stop = (event: globalThis.DragEvent) => {
+      if (event.dataTransfer?.types.includes('Files')) event.preventDefault()
+    }
+    window.addEventListener('dragover', stop)
+    window.addEventListener('drop', stop)
+    return () => {
+      window.removeEventListener('dragover', stop)
+      window.removeEventListener('drop', stop)
+    }
+  }, [])
+
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault()
     setDragging(false)
-    const dropped = Array.from(event.dataTransfer.files)
+    // Folders cannot be uploaded (one file per request); name them instead of silently dropping them.
+    const dropped: File[] = []
+    let folders = 0
+    const items = Array.from(event.dataTransfer.items ?? [])
+    if (items.length > 0) {
+      for (const item of items) {
+        if (item.kind !== 'file') continue
+        if (item.webkitGetAsEntry?.()?.isDirectory) {
+          folders += 1
+          continue
+        }
+        const file = item.getAsFile()
+        if (file) dropped.push(file)
+      }
+    } else {
+      dropped.push(...Array.from(event.dataTransfer.files))
+    }
+    setNotice(folders > 0 ? t('files.toolbar.folders_unsupported') : null)
     if (dropped.length > 0) uploads.add(dropped, dir)
   }
 
@@ -97,8 +129,15 @@ export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProp
     setEditing(joinPath(dir, name))
   }
 
-  async function rename(entry: FileEntry, to: string) {
+  async function rename(entry: FileEntry, input: string) {
     const from = joinPath(dir, entry.name)
+    // Send the normalised path (one trailing slash dropped), exactly what the service validates.
+    const cleaned = cleanPath(input)
+    const to = 'path' in cleaned ? cleaned.path : input
+    if (to === from) {
+      setDialog(null)
+      return
+    }
     await renameFile(server.id, from, to)
     toast.success(t('files.done.rename', { from, to }))
     setDialog(null)
@@ -200,11 +239,15 @@ export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProp
             event.preventDefault()
             setDragging(true)
           }}
-          onDragLeave={() => setDragging(false)}
+          onDragLeave={(event) => {
+            // Moving over a child fires dragleave on the zone too: only a real exit clears the highlight.
+            if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+            setDragging(false)
+          }}
           onDrop={onDrop}
         >
           {dragging ? (
-            <p className="bg-background/90 absolute inset-0 z-10 flex items-center justify-center rounded-md text-sm font-medium">
+            <p className="bg-background/90 pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md text-sm font-medium">
               {t('files.toolbar.drop', { dir: dirLabel })}
             </p>
           ) : null}
@@ -262,6 +305,11 @@ export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProp
               </Button>
             </div>
           </div>
+          {notice ? (
+            <p role="alert" className="text-destructive text-sm">
+              {notice}
+            </p>
+          ) : null}
           {body()}
         </div>
         )}
