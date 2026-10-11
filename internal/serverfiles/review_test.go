@@ -138,7 +138,8 @@ func TestDownloadLimitPerUser(t *testing.T) {
 	id := createInstance(t, e.db, "survival")
 	admin := e.admin()
 	release := make(chan struct{})
-	e.files.download = filesapi.Download{Body: blockingBody{release}, Size: -1, IsDir: true, Name: "world"}
+	// Files: folder zips have their own, lower limit (TestOneFolderZipPerUser).
+	e.files.download = filesapi.Download{Body: blockingBody{release}, Size: -1, Name: "world.bin"}
 	var started atomic.Int32
 	e.files.onCall = func() { started.Add(1) }
 	var wg sync.WaitGroup
@@ -146,7 +147,7 @@ func TestDownloadLimitPerUser(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			e.do(http.MethodGet, srvPath(id, "/files/download?path=world"), nil, &admin)
+			e.do(http.MethodGet, srvPath(id, "/files/download?path=world.bin"), nil, &admin)
 		}()
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -157,7 +158,7 @@ func TestDownloadLimitPerUser(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	rec := e.do(http.MethodGet, srvPath(id, "/files/download?path=world"), nil, &admin)
+	rec := e.do(http.MethodGet, srvPath(id, "/files/download?path=world.bin"), nil, &admin)
 	close(release)
 	wg.Wait()
 	if rec.Code != http.StatusTooManyRequests || errCode(t, rec) != httpx.CodeRateLimited || rec.Header().Get("Retry-After") == "" {
@@ -166,7 +167,7 @@ func TestDownloadLimitPerUser(t *testing.T) {
 	if started.Load() != 4 {
 		t.Fatalf("the refused download reached the service (%d calls)", started.Load())
 	}
-	if rec := e.do(http.MethodGet, srvPath(id, "/files/download?path=world"), nil, &admin); rec.Code != http.StatusOK {
+	if rec := e.do(http.MethodGet, srvPath(id, "/files/download?path=world.bin"), nil, &admin); rec.Code != http.StatusOK {
 		t.Fatalf("after release: %d %s", rec.Code, rec.Body)
 	}
 }

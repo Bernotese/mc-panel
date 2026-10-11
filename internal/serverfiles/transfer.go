@@ -234,8 +234,9 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// The answer may come long after the WriteTimeout that started with the request.
 	h.extendWrite(w, r)
 	h.recordResult(ctx, audit.ActionFileUpload, s.ID, err, map[string]any{"path": p, "size": r.ContentLength})
-	if err != nil && body.stalled() && ctx.Err() == nil {
-		// The browser stopped sending: its problem, not an unreachable file service.
+	if err != nil && body.stalled() {
+		// The browser stopped sending: its problem, not an unreachable file service. net/http
+		// cancels ctx on the failed read, but the browser may still be waiting for the answer.
 		writeValidation(w, r, fmt.Sprintf("the upload stalled (no data for %s)", h.ioTimeout))
 		return
 	}
