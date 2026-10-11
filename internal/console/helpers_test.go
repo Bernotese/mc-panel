@@ -183,7 +183,6 @@ func (f *fakeAccess) Recheck(_ context.Context, _ principal.Principal, _ int64, 
 // fakeAgent is an in-memory agentapi.ConsoleClient.
 type fakeAgent struct {
 	mu         sync.Mutex
-	err        error             // returned by every call while set
 	outputs    map[string]string // Rcon output per command ("" if missing)
 	rconErrs   map[string]error  // Rcon error per command
 	rcons      []string          // "<id> <command>" of every Rcon call
@@ -206,7 +205,6 @@ func newFakeAgent() *fakeAgent {
 	}
 }
 
-func (f *fakeAgent) setErr(err error)     { f.mu.Lock(); f.err = err; f.mu.Unlock() }
 func (f *fakeAgent) setLogsErr(err error) { f.mu.Lock(); f.logsErr = err; f.mu.Unlock() }
 
 func (f *fakeAgent) setOutput(cmd, out string) { f.mu.Lock(); f.outputs[cmd] = out; f.mu.Unlock() }
@@ -239,9 +237,6 @@ func (f *fakeAgent) Rcon(ctx context.Context, id int64, command string) (string,
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if f.err != nil {
-		return "", f.err
-	}
 	if err := f.rconErrs[command]; err != nil {
 		return "", err
 	}
@@ -251,9 +246,6 @@ func (f *fakeAgent) Rcon(ctx context.Context, id int64, command string) (string,
 func (f *fakeAgent) Players(context.Context, int64) (agentapi.PlayersResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.err != nil {
-		return agentapi.PlayersResponse{}, f.err
-	}
 	return f.players, f.playersErr
 }
 
@@ -261,9 +253,6 @@ func (f *fakeAgent) Logs(_ context.Context, req agentapi.LogsRequest) (agentapi.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.logReqs = append(f.logReqs, req)
-	if f.err != nil {
-		return nil, f.err
-	}
 	if f.logsErr != nil {
 		return nil, f.logsErr
 	}

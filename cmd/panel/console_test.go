@@ -43,7 +43,7 @@ func TestConsoleEndToEnd(t *testing.T) {
 		t.Fatalf("command output = %v", out)
 	}
 	players := admin.must(200, "GET", fmt.Sprintf("/servers/%d/players", id), nil)
-	if players["available"] != true {
+	if available, _ := players["available"].(bool); !available {
 		t.Fatalf("players = %v", players)
 	}
 	lists := admin.must(200, "GET", fmt.Sprintf("/servers/%d/players/lists", id), nil)
