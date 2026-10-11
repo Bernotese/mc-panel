@@ -50,6 +50,15 @@ describe('FileEditor', () => {
     await waitFor(() => expect(screen.queryByText('Ungespeicherte Änderungen')).not.toBeInTheDocument())
   })
 
+  // Review F8: Ctrl+S also saves while the focus is on a button of the editor.
+  it('saves with Ctrl+S while the save button has the focus', async () => {
+    const { user, editor } = await openConfig()
+    await user.type(editor, 'x')
+    screen.getByRole('button', { name: 'Speichern' }).focus()
+    await user.keyboard('{Control>}s{/Control}')
+    expect(await screen.findByText('Gespeichert.')).toBeInTheDocument()
+  })
+
   it('offers reload or overwrite after a conflicting save', async () => {
     server.use(
       http.put('*/api/servers/:id/files/content', () => HttpResponse.json({ error: 'file_modified', message: 'modified' }, { status: 409 })),
