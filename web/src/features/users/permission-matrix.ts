@@ -37,3 +37,11 @@ export function toggle(matrix: Matrix, serverId: number, permission: Permission,
 export function sameMatrix(a: Matrix, b: Matrix): boolean {
   return JSON.stringify(fromMatrix(a)) === JSON.stringify(fromMatrix(b))
 }
+
+/** Server ids where permission is in draft but was not saved yet (for the files warning, spec §6.4). */
+export function newlyGranted(draft: Matrix, saved: Matrix, permission: Permission): number[] {
+  return Object.entries(draft)
+    .filter(([id, perms]) => perms.includes(permission) && !(saved[Number(id)] ?? []).includes(permission))
+    .map(([id]) => Number(id))
+    .sort((a, b) => a - b)
+}

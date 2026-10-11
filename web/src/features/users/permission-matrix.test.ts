@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fromMatrix, sameMatrix, toggle, toMatrix } from './permission-matrix'
+import { fromMatrix, newlyGranted, sameMatrix, toggle, toMatrix } from './permission-matrix'
 
 describe('permission matrix', () => {
   it('round-trips grants and drops empty servers', () => {
@@ -29,5 +29,14 @@ describe('permission matrix', () => {
   it('compares matrices independent of order and empty entries', () => {
     expect(sameMatrix({ 1: ['server.power', 'server.view'], 2: [] }, { 1: ['server.view', 'server.power'] })).toBe(true)
     expect(sameMatrix({ 1: ['server.view'] }, {})).toBe(false)
+  })
+})
+
+describe('newlyGranted', () => {
+  it('lists servers where a permission was added', () => {
+    const saved = { 1: ['server.view' as const], 2: ['server.view' as const, 'server.files' as const] }
+    const draft = { 1: ['server.view' as const, 'server.files' as const], 2: ['server.view' as const, 'server.files' as const], 3: ['server.view' as const] }
+    expect(newlyGranted(draft, saved, 'server.files')).toEqual([1])
+    expect(newlyGranted(saved, saved, 'server.files')).toEqual([])
   })
 })
