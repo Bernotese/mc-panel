@@ -115,6 +115,14 @@ describe('useConsoleStream', () => {
     expect(result.current.connection).toBe('unavailable')
   })
 
+  it('names the limit of open consoles and keeps trying', async () => {
+    server.use(http.get(STREAM, () => HttpResponse.json({ error: 'rate_limited', message: 'too many open consoles' }, { status: 429 })))
+    const { result } = renderHook(() => useConsoleStream(1, FAST))
+    act(() => FakeEventSource.latest().fail(true))
+    await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThanOrEqual(2))
+    expect(result.current.connection).toBe('too_many')
+  })
+
   it('closes the stream when the console is left', () => {
     const { unmount } = renderHook(() => useConsoleStream(1, FAST))
     const es = FakeEventSource.latest()
@@ -197,8 +205,8 @@ describe('classifyProbe', () => {
     expect(classifyProbe(err(401, 'unauthorized'), DEFAULT_TIMING)).toEqual({ state: 'unauthorized', retryMs: null })
     expect(classifyProbe(err(403, 'forbidden'), DEFAULT_TIMING)).toEqual({ state: 'forbidden', retryMs: null })
     expect(classifyProbe(err(404, 'not_found'), DEFAULT_TIMING)).toEqual({ state: 'not_found', retryMs: null })
-    expect(classifyProbe(err(429, 'rate_limited', 30), DEFAULT_TIMING)).toEqual({ state: 'reconnecting', retryMs: 30_000 })
-    expect(classifyProbe(err(429, 'rate_limited'), DEFAULT_TIMING)).toEqual({ state: 'reconnecting', retryMs: 10_000 })
+    expect(classifyProbe(err(429, 'rate_limited', 30), DEFAULT_TIMING)).toEqual({ state: 'too_many', retryMs: 30_000 })
+    expect(classifyProbe(err(429, 'rate_limited'), DEFAULT_TIMING)).toEqual({ state: 'too_many', retryMs: 10_000 })
     expect(classifyProbe(err(503, 'agent_unavailable'), DEFAULT_TIMING)).toEqual({ state: 'unavailable', retryMs: 10_000 })
     expect(classifyProbe(new TypeError('Failed to fetch'), DEFAULT_TIMING)).toEqual({ state: 'unavailable', retryMs: 10_000 })
   })
