@@ -54,8 +54,10 @@ func (h *Handler) handleExtract(w http.ResponseWriter, r *http.Request) {
 		h.writeStateError(w, r, err)
 		return
 	}
+	// The pre-check of a large archive can take minutes (filesapi.ExtractTimeout).
 	job, err := h.files.Extract(context.WithoutCancel(ctx), filesapi.ExtractRequest{ID: s.ID, Path: p, Dest: dest})
-	h.record(ctx, audit.ActionFileExtract, s.ID, result(err), map[string]any{"path": p, "dest": dest})
+	h.extendWrite(w, r)
+	h.recordResult(ctx, audit.ActionFileExtract, s.ID, err, map[string]any{"path": p, "dest": dest})
 	if err != nil {
 		h.writeFilesError(w, r, err)
 		return

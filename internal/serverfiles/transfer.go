@@ -13,26 +13,33 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
-// maxUploadsPerUser bounds parallel uploads of one account (spec §5.1).
-const maxUploadsPerUser = 2
+const (
+	// maxUploadsPerUser bounds parallel uploads of one account (spec §5.1).
+	maxUploadsPerUser = 2
+	// maxDownloadsPerUser bounds parallel downloads of one account; the service limits folder
+	// zips and file downloads in total as well.
+	maxDownloadsPerUser = 4
+)
 
-// uploadSlots counts running uploads per user.
-type uploadSlots struct {
-	mu sync.Mutex
-	n  map[int64]int
+// userSlots counts running transfers per user.
+type userSlots struct {
+	mu  sync.Mutex
+	max int
+	n   map[int64]int
 }
 
-func newUploadSlots() *uploadSlots { return &uploadSlots{n: map[int64]int{}} }
+func newUserSlots(maxPerUser int) *userSlots { return &userSlots{max: maxPerUser, n: map[int64]int{}} }
 
 // acquire takes a slot of userID; release must be called exactly once.
-func (u *uploadSlots) acquire(userID int64) (release func(), ok bool) {
+func (u *userSlots) acquire(userID int64) (release func(), ok bool) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if u.n[userID] >= maxUploadsPerUser {
+	if u.n[userID] >= u.max {
 		return nil, false
 	}
 	u.n[userID]++
@@ -205,10 +212,8 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	res, err := h.files.Upload(ctx, s.ID, p, overwrite, r.ContentLength, body)
 	body.finish()
 	// The answer may come long after the WriteTimeout that started with the request.
-	if dlErr := ignoreUnsupported(rc.SetWriteDeadline(h.ioClock.Now().Add(h.ioTimeout))); dlErr != nil {
-		h.log.DebugContext(ctx, "set write deadline", "err", dlErr)
-	}
-	h.record(ctx, audit.ActionFileUpload, s.ID, result(err), map[string]any{"path": p, "size": r.ContentLength})
+	h.extendWrite(w, r)
+	h.recordResult(ctx, audit.ActionFileUpload, s.ID, err, map[string]any{"path": p, "size": r.ContentLength})
 	if err != nil {
 		h.writeFilesError(w, r, err)
 		return
@@ -234,12 +239,24 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	pr, _ := principal.From(ctx) // guaranteed by the rbac rule
+	release, ok := h.downloads.acquire(pr.UserID)
+	if !ok {
+		w.Header().Set("Retry-After", "5")
+		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "at most 4 downloads at a time, try again when one is done")
+		return
+	}
+	defer release()
 	// dctx ends the service's download when the browser leaves (ctx) or the service stalls.
 	dctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	d, err := h.files.Download(dctx, s.ID, p)
 	if err != nil {
-		h.record(ctx, audit.ActionFileDownload, s.ID, audit.ResultFailure, map[string]any{"path": p})
+		// Refused downloads (a missing or invalid path, a symlink, a busy service) are
+		// rejections, not audited (spec §5.3); a download that could not be served is.
+		if !rejected(err) && !errors.Is(err, filesapi.ErrNotFound) && !errors.Is(err, filesapi.ErrNotRegular) && !errors.Is(err, filesapi.ErrInvalid) {
+			h.record(ctx, audit.ActionFileDownload, s.ID, audit.ResultFailure, map[string]any{"path": p})
+		}
 		h.writeFilesError(w, r, err)
 		return
 	}
