@@ -28,6 +28,10 @@ import (
 // ioTimeout aborts an upload or download after this long without progress (spec §5.1).
 const ioTimeout = 60 * time.Second
 
+// maxEditorCalls bounds the editor reads and saves running at the same time panel-wide: each
+// holds up to max_text_bytes of text (a save up to filesapi.MaxJSONBytes of JSON) in memory.
+const maxEditorCalls = 8
+
 // Deps are the dependencies of the file handlers.
 type Deps struct {
 	DB    *sql.DB // from store.Open
@@ -51,7 +55,9 @@ type Handler struct {
 	files     filesapi.Client
 	inst      agentapi.InstancesClient
 	log       *slog.Logger
-	uploads   *uploadSlots
+	uploads   *userSlots
+	downloads *userSlots
+	editor    chan struct{} // at most maxEditorCalls reads and saves
 	pending   *pendingExtracts
 }
 
@@ -70,8 +76,9 @@ func NewHandler(d Deps) *Handler {
 	}
 	return &Handler{
 		q: store.New(d.DB), clock: d.Clock, ioClock: clock.Real{}, ioTimeout: ioTimeout,
-		rec: d.Audit, files: fc, inst: inst, log: log, uploads: newUploadSlots(),
-		pending: newPendingExtracts(),
+		rec: d.Audit, files: fc, inst: inst, log: log,
+		uploads: newUserSlots(maxUploadsPerUser), downloads: newUserSlots(maxDownloadsPerUser),
+		editor: make(chan struct{}, maxEditorCalls), pending: newPendingExtracts(),
 	}
 }
 
@@ -177,35 +184,106 @@ func cleanItemPath(w http.ResponseWriter, r *http.Request, p string) (string, bo
 	return c, ok
 }
 
-// writeFilesError maps a failed service call to the API error (table in the plan's constraints).
-func (h *Handler) writeFilesError(w http.ResponseWriter, r *http.Request, err error) {
+// apiError is the answer to a failed service call.
+type apiError struct {
+	status int
+	code   string
+	msg    string
+}
+
+// mapFilesError maps a failed service call to the API error (spec §5.1); ok is false for an
+// internal error (500).
+func mapFilesError(err error) (e apiError, ok bool) {
 	switch {
-	case r.Context().Err() != nil:
+	case errors.Is(err, filesapi.ErrNotFound):
+		return apiError{http.StatusNotFound, httpx.CodeNotFound, "file not found"}, true
+	case errors.Is(err, filesapi.ErrExists):
+		return apiError{http.StatusConflict, httpx.CodeFileExists, "the target already exists"}, true
+	case errors.Is(err, filesapi.ErrModified):
+		return apiError{http.StatusConflict, httpx.CodeFileModified, "the file was changed since it was opened"}, true
+	case errors.Is(err, filesapi.ErrNotText):
+		return apiError{http.StatusUnsupportedMediaType, httpx.CodeNotText, "the editor cannot open this file (too large or not text)"}, true
+	case errors.Is(err, filesapi.ErrNotRegular):
+		return apiError{http.StatusBadRequest, httpx.CodeNotRegular, "not a regular file"}, true
+	case errors.Is(err, filesapi.ErrTooLarge):
+		return apiError{http.StatusRequestEntityTooLarge, httpx.CodePayloadTooLarge, serviceMessage(err, "the file is too large")}, true
+	case errors.Is(err, filesapi.ErrInsufficientStorage):
+		return apiError{http.StatusInsufficientStorage, httpx.CodeInsufficientStorage, "not enough free disk space"}, true
+	case errors.Is(err, filesapi.ErrBusy):
+		return apiError{http.StatusTooManyRequests, httpx.CodeRateLimited, "the file service is busy, try again shortly"}, true
+	case errors.Is(err, filesapi.ErrInvalid):
+		return apiError{http.StatusBadRequest, httpx.CodeValidation, serviceMessage(err, err.Error())}, true
+	case errors.Is(err, filesapi.ErrUnavailable), errors.Is(err, context.DeadlineExceeded):
+		return apiError{http.StatusServiceUnavailable, httpx.CodeFilesUnavailable, "the file service is not reachable"}, true
+	}
+	return apiError{http.StatusInternalServerError, httpx.CodeInternal, "internal error"}, false
+}
+
+// ErrorStatus returns the HTTP status and error code a failed service call is answered with
+// (the contract test checks them against api/openapi.yaml).
+func ErrorStatus(err error) (status int, code string) {
+	e, _ := mapFilesError(err)
+	return e.status, e.code
+}
+
+// serviceMessage returns the message the service wrote (without the client's transport
+// prefix; the service keeps host paths out of it), or fallback for other errors.
+func serviceMessage(err error, fallback string) string {
+	var se *filesapi.StatusError
+	if errors.As(err, &se) && se.Message != "" {
+		return se.Message
+	}
+	return fallback
+}
+
+// writeFilesError answers a failed service call (mapFilesError).
+func (h *Handler) writeFilesError(w http.ResponseWriter, r *http.Request, err error) {
+	if r.Context().Err() != nil {
 		// The client went away: nobody reads an answer, and it is not a server error.
 		h.log.DebugContext(r.Context(), "file operation ended with the request", "err", err)
-	case errors.Is(err, filesapi.ErrNotFound):
-		writeFileNotFound(w, r)
-	case errors.Is(err, filesapi.ErrExists):
-		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeFileExists, "the target already exists")
-	case errors.Is(err, filesapi.ErrModified):
-		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeFileModified, "the file was changed since it was opened")
-	case errors.Is(err, filesapi.ErrNotText):
-		httpx.WriteError(w, r, http.StatusUnsupportedMediaType, httpx.CodeNotText, "the editor cannot open this file (too large or not text)")
-	case errors.Is(err, filesapi.ErrNotRegular):
-		httpx.WriteError(w, r, http.StatusBadRequest, httpx.CodeNotRegular, "not a regular file")
-	case errors.Is(err, filesapi.ErrTooLarge):
-		httpx.WriteError(w, r, http.StatusRequestEntityTooLarge, httpx.CodePayloadTooLarge, "the file is too large")
-	case errors.Is(err, filesapi.ErrInsufficientStorage):
-		httpx.WriteError(w, r, http.StatusInsufficientStorage, httpx.CodeInsufficientStorage, "not enough free disk space")
-	case errors.Is(err, filesapi.ErrBusy):
-		w.Header().Set("Retry-After", "5")
-		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "the file service is busy, try again shortly")
-	case errors.Is(err, filesapi.ErrInvalid):
-		writeValidation(w, r, err.Error())
-	case errors.Is(err, filesapi.ErrUnavailable), errors.Is(err, context.DeadlineExceeded):
-		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeFilesUnavailable, "the file service is not reachable")
-	default:
+		return
+	}
+	e, ok := mapFilesError(err)
+	if !ok {
 		httpx.Internal(w, r, err)
+		return
+	}
+	if e.status == http.StatusTooManyRequests {
+		w.Header().Set("Retry-After", "5")
+	}
+	httpx.WriteError(w, r, e.status, e.code, e.msg)
+}
+
+// rejected reports a service answer that refused the request rather than failing it: a busy
+// service is a rate limit, and rate limits are not audited (spec §5.3).
+func rejected(err error) bool { return errors.Is(err, filesapi.ErrBusy) }
+
+// recordResult audits the outcome of a service call unless the service rejected it.
+func (h *Handler) recordResult(ctx context.Context, action string, serverID int64, err error, details map[string]any) {
+	if err != nil && rejected(err) {
+		return
+	}
+	h.record(ctx, action, serverID, result(err), details)
+}
+
+// extendWrite gives the answer a fresh write deadline after a call that may have outlasted the
+// server's WriteTimeout (a large delete, the extract pre-check, a slow upload or save).
+func (h *Handler) extendWrite(w http.ResponseWriter, r *http.Request) {
+	rc := http.NewResponseController(w)
+	if err := ignoreUnsupported(rc.SetWriteDeadline(h.ioClock.Now().Add(h.ioTimeout))); err != nil {
+		h.log.DebugContext(r.Context(), "set write deadline", "err", err)
+	}
+}
+
+// editorSlot takes one of the panel-wide editor slots; on false it has answered 429.
+func (h *Handler) editorSlot(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
+	select {
+	case h.editor <- struct{}{}:
+		return func() { <-h.editor }, true
+	default:
+		w.Header().Set("Retry-After", "5")
+		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "too many files are being opened or saved, try again shortly")
+		return nil, false
 	}
 }
 
