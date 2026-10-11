@@ -457,8 +457,9 @@ func TestUploadSlotsArePerUser(t *testing.T) {
 	wg.Wait()
 }
 
-// Review finding C1: a GET has no body, so net/http's background read watches the connection
-// with the request's read deadline and would cancel the download after ReadTimeout.
+// Smoke test (review finding C1): a download longer than the server's ReadTimeout and
+// WriteTimeout succeeds. net/http (Go 1.27) already clears the read deadline before a handler
+// for a request without body, so this test also passes without handleDownload's safeguard.
 func TestDownloadSurvivesServerTimeouts(t *testing.T) {
 	e := newEnv(t)
 	id := createInstance(t, e.db, "survival")
@@ -489,8 +490,9 @@ func TestDownloadSurvivesServerTimeouts(t *testing.T) {
 	waitAudit(t, e, audit.ActionFileDownload, audit.ResultSuccess)
 }
 
-// Review finding I1: after the last byte the background read keeps the last read deadline; a
-// service that needs longer to store the file must not lose its answer.
+// Review finding I1: like net/http's Transport, the service client reads once more after the
+// announced length; a deadline armed for that read would cancel the request while the service
+// is still storing the file.
 func TestUploadSurvivesSlowServiceAfterBody(t *testing.T) {
 	for _, size := range []int{3, 0} {
 		e := newEnv(t)
@@ -498,9 +500,12 @@ func TestUploadSurvivesSlowServiceAfterBody(t *testing.T) {
 		serverfiles.SetIOTimeout(e.h, 150*time.Millisecond)
 		srv := e.server(e.admin(), func(s *http.Server) { s.ReadTimeout = 300 * time.Millisecond })
 		e.files.setUploadHook(func(body io.Reader) (int64, error) {
-			n, err := io.Copy(io.Discard, body)
+			n, err := io.Copy(io.Discard, io.LimitReader(body, int64(size)))
 			if err != nil {
 				return n, fmt.Errorf("%w: %w", filesapi.ErrUnavailable, err)
+			}
+			if extra, err := io.Copy(io.Discard, body); err != nil || extra != 0 {
+				return n, fmt.Errorf("%w: extra read: %d bytes, %v", filesapi.ErrInvalid, extra, err)
 			}
 			time.Sleep(700 * time.Millisecond) // fsync and rename
 			return n, nil
@@ -586,4 +591,36 @@ func TestDownloadClientAbortEndsService(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	waitAudit(t, e, audit.ActionFileDownload, audit.ResultFailure)
+}
+
+// Review round 2: a service that stops sending while the browser stays connected must not hold
+// the download forever; the browser sees a failed (not a truncated but complete) download.
+func TestDownloadAbortsWhenServiceStalls(t *testing.T) {
+	e := newEnv(t)
+	id := createInstance(t, e.db, "survival")
+	serverfiles.SetIOTimeout(e.h, 150*time.Millisecond)
+	srv := e.server(e.admin(), nil)
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	e.files.download = filesapi.Download{Body: pr, Size: -1, IsDir: true, Name: "world"}
+	go func() { _, _ = pw.Write([]byte("first")) }() // then the service stalls
+	resp, err := srv.Client().Get(srv.URL + srvPath(id, "/files/download?path=world"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	done := make(chan error, 1)
+	go func() { _, err := io.ReadAll(resp.Body); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a stalled download ended like a complete one")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a stalled download was never aborted")
+	}
+	waitAudit(t, e, audit.ActionFileDownload, audit.ResultFailure)
+	if ctx, _ := e.files.lastDownload(); ctx.Err() == nil {
+		t.Fatal("the service request was not cancelled")
+	}
 }
