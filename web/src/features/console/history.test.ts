@@ -16,7 +16,7 @@ describe('command history', () => {
     ;[h, value] = historyDown(h, value)
     expect(value).toBe('dra')
     expect(h.index).toBeNull()
-    ;[h, value] = historyDown(h, 'dra')
+    ;[, value] = historyDown(h, 'dra')
     expect(value).toBe('dra')
   })
 
