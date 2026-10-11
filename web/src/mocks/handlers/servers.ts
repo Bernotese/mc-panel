@@ -12,7 +12,7 @@ import type {
 } from '@/api/types'
 import { ALL_PERMISSIONS } from '@/api/types'
 import { javaFor } from '@/features/servers/java'
-import { db, nextId, recordAudit, resolveProperties, runningStatus, stoppedStatus, type MockServer } from '../db'
+import { db, emptyPlayers, nextId, recordAudit, resolveProperties, runningStatus, stoppedStatus, type MockServer } from '../db'
 import { API, apiError, guard, idParam, noContent, op, readJson, serverPermissions, type MockOperation } from './util'
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/
@@ -109,6 +109,7 @@ export const serverOperations: MockOperation[] = [
         status: { ...runningStatus(body.memory_mib, 0), state: 'creating', operation: 'pulling', memory_bytes: 0, memory_limit_bytes: 0, cpu_percent: 0 },
         revision: 1,
         runningRevision: 1,
+        players: emptyPlayers(),
       }
       db.servers.push(server)
       recordAudit(g.user, 'server.create', `server:${server.id}`, 'success', { name, type: body.type, version })

@@ -47,6 +47,8 @@ export const de = {
     docker_unavailable: 'Docker ist auf dem Host nicht erreichbar.',
     base_domain_missing: 'Es ist noch keine Basisdomain festgelegt. Trag sie unter Einstellungen ein.',
     catalog_unavailable: 'Die Versionsliste ist gerade nicht abrufbar.',
+    instance_not_running: 'Der Server läuft nicht.',
+    rcon_unavailable: 'Die Server-Konsole antwortet gerade nicht – startet der Server noch?',
     internal: 'Interner Serverfehler.',
     network: 'Server nicht erreichbar. Bitte Verbindung prüfen.',
     unknown: 'Unerwarteter Fehler (HTTP {{status}}).',
