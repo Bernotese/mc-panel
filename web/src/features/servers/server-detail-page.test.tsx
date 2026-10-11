@@ -6,8 +6,7 @@ import { renderWithProviders } from '@/test/render'
 import { ServerDetailPage } from './server-detail-page'
 
 const GIB = 1024 ** 3
-const LISTS_HINT =
-  'Whitelist und Operatoren werden bei jedem Neustart auf diese Listen gesetzt. Änderungen im Spiel (/op, /whitelist add …) werden dabei überschrieben.'
+const LISTS_HINT = 'Whitelist, Operatoren und Bans verwaltest du im Tab „Spieler“ der Serverseite; Änderungen dort wirken sofort.'
 
 function mockServer(id: number) {
   const server = db.servers.find((s) => s.id === id)

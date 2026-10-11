@@ -165,15 +165,9 @@ describe('CreateServerPage', () => {
     expect(
       screen.getByText('Ohne Online-Modus kann sich jeder mit beliebigem Namen anmelden – auch mit dem Namen eines Operators.'),
     ).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        'Whitelist und Operatoren werden bei jedem Neustart auf diese Listen gesetzt. Änderungen im Spiel (/op, /whitelist add …) werden dabei überschrieben.',
-      ),
-    ).toBeInTheDocument()
-    await user.type(screen.getByLabelText('Whitelist'), 'Notch, jeb_')
+    expect(screen.getByText('Whitelist, Operatoren und Bans verwaltest du im Tab „Spieler“ der Serverseite; Änderungen dort wirken sofort.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Whitelist')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Server anlegen' }))
-    await waitFor(() =>
-      expect(createdInstance('props')?.properties).toMatchObject({ motd: 'Hallo', pvp: false, online_mode: false, whitelist: ['Notch', 'jeb_'] }),
-    )
+    await waitFor(() => expect(createdInstance('props')?.properties).toMatchObject({ motd: 'Hallo', pvp: false, online_mode: false }))
   })
 })

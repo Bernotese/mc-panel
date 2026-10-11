@@ -19,8 +19,6 @@ export const MEMORY_STEP_MIB = 256
 export const DEFAULT_MEMORY_MIB = 4096
 export const MAX_MOTD_LENGTH = 150
 export const MAX_SEED_LENGTH = 64
-export const MAX_WHITELIST = 200
-export const MAX_OPS = 50
 export const MAX_BASE_DOMAIN_LENGTH = 200
 
 const SERVER_NAME_RE = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/
@@ -28,7 +26,6 @@ const VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.\-+_]{0,63}$/
 const SLUG_RE = /^[a-z0-9-]{1,64}$/
 const CURSEFORGE_URL_RE = /^https:\/\/www\.curseforge\.com\/minecraft\/modpacks\/[a-z0-9-]{1,64}$/
 const CURSEFORGE_KEY_RE = /^[A-Za-z0-9$./_-]{1,128}$/
-const PLAYER_RE = /^[A-Za-z0-9_]{3,16}$/
 const DNS_LABEL_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 // Go's unicode.IsPrint rejects control/format/unassigned characters and every space except U+0020.
 const NON_PRINTABLE_RE = /\p{C}|[^\S ]/u
@@ -95,18 +92,6 @@ export function validateIntInRange(text: string, min: number, max: number): Fiel
   const trimmed = text.trim()
   const n = Number(trimmed)
   return /^\d+$/.test(trimmed) && n >= min && n <= max ? null : fieldError('servers.validation.integer_range', { min, max })
-}
-
-/** Splits a whitelist/ops text area on commas, semicolons and whitespace. */
-export function parsePlayerNames(text: string): { names: string[]; invalid: string[] } {
-  const names = text.split(/[\s,;]+/).filter((n) => n !== '')
-  return { names, invalid: names.filter((n) => !PLAYER_RE.test(n)) }
-}
-
-export function validatePlayerNames(text: string, max: number): FieldError | null {
-  const { names, invalid } = parsePlayerNames(text)
-  if (invalid.length > 0) return fieldError('servers.validation.players_invalid', { names: invalid.join(', ') })
-  return names.length > max ? fieldError('servers.validation.players_too_many', { max }) : null
 }
 
 /** The panel stores base domains in lower case; the form sends them that way. */

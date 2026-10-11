@@ -909,6 +909,7 @@ export interface components {
         JavaVersion: "java8" | "java17" | "java21" | "java25";
         /** @enum {string} */
         ServerState: "not_configured" | "unknown" | "creating" | "starting" | "running" | "stopping" | "stopped" | "restarting" | "error";
+        /** @description Allowlisted server.properties. Ops and the whitelist are managed live via /servers/{id}/players (sub-project 3a). */
         ServerProperties: {
             motd?: string;
             /** @enum {string} */
@@ -922,8 +923,6 @@ export interface components {
             enable_command_block?: boolean;
             online_mode?: boolean;
             whitelist_enabled?: boolean;
-            whitelist?: string[];
-            ops?: string[];
             view_distance?: number;
             simulation_distance?: number;
             spawn_protection?: number;

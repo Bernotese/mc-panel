@@ -108,8 +108,6 @@ export function resolveProperties(name: string, p: ServerProperties = {}): Requi
     enable_command_block: false,
     online_mode: true,
     whitelist_enabled: false,
-    whitelist: [],
-    ops: [],
     view_distance: 10,
     simulation_distance: 10,
     spawn_protection: 16,

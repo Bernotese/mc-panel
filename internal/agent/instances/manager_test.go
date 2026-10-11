@@ -597,81 +597,31 @@ func TestCloseRejectsNewWork(t *testing.T) {
 	}
 }
 
-// TestEnsureClearsStaleListFiles: instancespec.Env omits OPS/WHITELIST for empty
-// lists, and itzg then leaves ops.json/whitelist.json alone. A (re)created container
-// must not keep an op or whitelist entry the panel has removed.
-func TestEnsureClearsStaleListFiles(t *testing.T) {
+// TestEnsureLeavesListFiles: since sub-project 3a the server owns ops.json and whitelist.json;
+// creating and recreating a container must leave them exactly as they are.
+func TestEnsureLeavesListFiles(t *testing.T) {
 	e := newEnv(t)
 	data := instances.DataDir(e.dir, 1)
 	if err := os.MkdirAll(data, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	stale := []byte(`[{"uuid":"069a79f4-44e9-4726-a5be-fca90e38aaf5","name":"Notch","level":4}]` + "\n")
-	write := func(name string) {
-		t.Helper()
-		if err := os.WriteFile(filepath.Join(data, name), stale, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	read := func(name string) string {
-		t.Helper()
-		b, err := os.ReadFile(filepath.Join(data, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(b)
-	}
-	write("ops.json")
-	write("whitelist.json")
-
-	// Spec with ops and an enabled whitelist: both files stay as they are.
-	req := ensureReq(1, "survival", 1)
-	req.Spec.Properties.Ops = []string{"Notch"}
-	req.Spec.Properties.WhitelistEnabled = ptr(true)
-	req.Spec.Properties.Whitelist = []string{"Notch"}
-	e.ensure(t, req)
-	if read("ops.json") != string(stale) || read("whitelist.json") != string(stale) {
-		t.Fatalf("lists in the spec must leave the files alone: ops=%q whitelist=%q", read("ops.json"), read("whitelist.json"))
-	}
-
-	// Recreate without ops and with the whitelist off: both files are emptied.
-	req = ensureReq(1, "survival", 2)
-	req.Recreate = true
-	e.ensure(t, req)
+	ops := []byte(`[{"uuid":"069a79f4-44e9-4726-a5be-fca90e38aaf5","name":"Notch","level":4}]` + "\n")
 	for _, name := range []string{"ops.json", "whitelist.json"} {
-		if got := read(name); got != "[]\n" {
-			t.Fatalf("%s = %q, want []", name, got)
-		}
-		fi, err := os.Stat(filepath.Join(data, name))
-		if err != nil || fi.Mode().Perm() != 0o644 {
-			t.Fatalf("%s mode = %v, %v; want 0644", name, fi.Mode(), err)
+		if err := os.WriteFile(filepath.Join(data, name), ops, 0o600); err != nil {
+			t.Fatal(err)
 		}
 	}
-	entries, err := os.ReadDir(data)
-	if err != nil || len(entries) != 2 {
-		t.Fatalf("temp files left behind: %v (%v)", entries, err)
-	}
-
-	// Whitelist on but empty: whitelist.json is emptied as well; missing files stay missing.
-	if err := os.Remove(filepath.Join(data, "ops.json")); err != nil {
-		t.Fatal(err)
-	}
-	write("whitelist.json")
-	req = ensureReq(1, "survival", 3)
+	e.ensure(t, ensureReq(1, "survival", 1))
+	req := ensureReq(1, "survival", 2)
 	req.Recreate = true
-	req.Spec.Properties.WhitelistEnabled = ptr(true)
 	e.ensure(t, req)
-	if got := read("whitelist.json"); got != "[]\n" {
-		t.Fatalf("empty whitelist: whitelist.json = %q", got)
+	if s := e.status(t, 1); s.LastError != "" || s.Revision != 2 {
+		t.Fatalf("status = %+v", s)
 	}
-	if _, err := os.Stat(filepath.Join(data, "ops.json")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("a missing ops.json must not be created: %v", err)
-	}
-
-	// No (re)creation (same revision): nothing is rewritten.
-	write("ops.json")
-	e.ensure(t, req)
-	if read("ops.json") != string(stale) {
-		t.Fatal("ensure without creating a container must not touch ops.json")
+	for _, name := range []string{"ops.json", "whitelist.json"} {
+		b, err := os.ReadFile(filepath.Join(data, name))
+		if err != nil || string(b) != string(ops) {
+			t.Fatalf("%s = %q, %v; want it unchanged", name, b, err)
+		}
 	}
 }

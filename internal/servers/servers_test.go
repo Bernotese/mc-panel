@@ -159,8 +159,10 @@ func TestCreateServerStoresInstance(t *testing.T) {
 		p["view_distance"] != float64(10) || p["level_type"] != "normal" {
 		t.Fatalf("properties = %v", p)
 	}
-	if wl, ok := p["whitelist"].([]any); !ok || len(wl) != 0 {
-		t.Fatalf("whitelist = %#v, want []", p["whitelist"])
+	for _, k := range []string{"whitelist", "ops"} {
+		if _, ok := p[k]; ok {
+			t.Fatalf("properties must not contain %s since sub-project 3a: %v", k, p)
+		}
 	}
 	if s.Status.State != "creating" || s.Status.DesiredState == nil || *s.Status.DesiredState != "running" || s.Status.RestartRequired {
 		t.Fatalf("status = %+v", s.Status)
@@ -379,14 +381,16 @@ func TestUpdateServerRejects(t *testing.T) {
 		status int
 		code   string
 	}{
-		"version null":     {map[string]any{"version": nil}, 400, "validation_failed"},
-		"memory null":      {map[string]any{"memory_mib": nil}, 400, "validation_failed"},
-		"properties null":  {map[string]any{"properties": nil}, 400, "validation_failed"},
-		"memory invalid":   {map[string]any{"memory_mib": 512}, 400, "validation_failed"},
-		"loader on paper":  {map[string]any{"loader_version": "1"}, 400, "validation_failed"},
-		"unknown property": {map[string]any{"properties": map[string]any{"jvm_opts": "x"}}, 400, "validation_failed"},
-		"type not allowed": {map[string]any{"type": "vanilla"}, 400, "bad_request"},
-		"name not allowed": {map[string]any{"name": "other"}, 400, "bad_request"},
+		"version null":       {map[string]any{"version": nil}, 400, "validation_failed"},
+		"memory null":        {map[string]any{"memory_mib": nil}, 400, "validation_failed"},
+		"properties null":    {map[string]any{"properties": nil}, 400, "validation_failed"},
+		"memory invalid":     {map[string]any{"memory_mib": 512}, 400, "validation_failed"},
+		"loader on paper":    {map[string]any{"loader_version": "1"}, 400, "validation_failed"},
+		"unknown property":   {map[string]any{"properties": map[string]any{"jvm_opts": "x"}}, 400, "validation_failed"},
+		"ops property":       {map[string]any{"properties": map[string]any{"ops": []string{"Notch"}}}, 400, "validation_failed"},
+		"whitelist property": {map[string]any{"properties": map[string]any{"whitelist": []string{"Notch"}}}, 400, "validation_failed"},
+		"type not allowed":   {map[string]any{"type": "vanilla"}, 400, "bad_request"},
+		"name not allowed":   {map[string]any{"name": "other"}, 400, "bad_request"},
 	} {
 		rec := e.do(http.MethodPatch, path, tc.body, &admin)
 		if rec.Code != tc.status || errCode(t, rec) != tc.code {
