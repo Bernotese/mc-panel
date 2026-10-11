@@ -296,8 +296,9 @@ jobs:
       - name: Build agent
         run: go build -o bin/agent ./cmd/agent
 
-      # Real agent + Docker + itzg Paper server: routing by hostname, hardening,
-      # automatic restart after a crash, removal.
+      # Real agent + Docker + itzg Paper server: routing by hostname, hardening, console
+      # (rcon, log stream, player lists, planted player files), automatic restart after a
+      # crash, removal.
       - name: Instance acceptance
         run: sudo scripts/ci-instances.sh bin/agent
 
