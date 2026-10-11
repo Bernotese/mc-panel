@@ -25,6 +25,7 @@ import (
 const (
 	tempPrefix      = ".mcpanel-tmp-"
 	maxUploads      = 4
+	maxJobsTotal    = 2
 	cleanupMaxDepth = 64
 	fileMode        = 0o644
 	dirMode         = 0o755
@@ -48,10 +49,11 @@ type Service struct {
 	log     *slog.Logger
 	disk    DiskSpace
 	uploads chan struct{} // at most maxUploads concurrent uploads
+	jobs    *jobs
 }
 
 func New(cfg Config) *Service {
-	s := &Service{cfg: cfg, clock: cfg.Clock, log: cfg.Log, disk: cfg.Disk, uploads: make(chan struct{}, maxUploads)}
+	s := &Service{cfg: cfg, clock: cfg.Clock, log: cfg.Log, disk: cfg.Disk, uploads: make(chan struct{}, maxUploads), jobs: newJobs()}
 	if s.clock == nil {
 		s.clock = clock.Real{}
 	}
@@ -64,8 +66,12 @@ func New(cfg Config) *Service {
 	return s
 }
 
-// Close releases background work (extract jobs, Task 7).
-func (s *Service) Close() {}
+// Close cancels running extract jobs (they end as failed and remove their temp folders) and
+// waits for them. It may be called more than once.
+func (s *Service) Close() {
+	s.jobs.cancel()
+	s.jobs.wg.Wait()
+}
 
 func (s *Service) instanceDir(id int64) string {
 	return filepath.Join(s.cfg.InstancesDir, "instances", strconv.FormatInt(id, 10))
