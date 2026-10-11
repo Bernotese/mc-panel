@@ -445,7 +445,8 @@ func TestIntegrationConsole(t *testing.T) {
 	}
 
 	// Console command: exec as the container user in /data, output back.
-	if out, err := m.Rcon(ctx, 1, "say hallo"); err != nil || out != "say hallo" {
+	// RconCommand is echo here: it prints the "--" that ends rcon-cli's options as well.
+	if out, err := m.Rcon(ctx, 1, "say hallo"); err != nil || out != "-- say hallo" {
 		t.Fatalf("Rcon = %q, %v", out, err)
 	}
 	// A failing rcon-cli (exit code != 0) is rcon_unavailable.

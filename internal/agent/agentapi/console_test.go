@@ -18,6 +18,7 @@ func TestValidateCommand(t *testing.T) {
 		strings.Repeat("a", agentapi.MaxCommandBytes),
 		strings.Repeat("ä", agentapi.MaxCommandBytes/2), // 1000 bytes
 		" list ",
+		"say -- not an option", // a dash later in the command is plain text
 	}
 	for _, c := range valid {
 		if err := agentapi.ValidateCommand(c); err != nil {
@@ -36,6 +37,12 @@ func TestValidateCommand(t *testing.T) {
 		"del":           "say a\x7f",
 		"invalid utf8":  "say \xff\xfe",
 		"only spaces":   "   ",
+		// rcon-cli (cobra) would parse these as its own options, e.g. connect elsewhere with the password.
+		"long option":          "--host=attacker.example",
+		"short option":         "-h",
+		"option after slash":   "/--host=attacker.example",
+		"option after spaces":  "  --config=/etc/shadow",
+		"option slash, spaces": " / -p 1",
 	}
 	for name, c := range invalid {
 		if err := agentapi.ValidateCommand(c); !errors.Is(err, instancespec.ErrInvalid) {
