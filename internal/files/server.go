@@ -39,6 +39,9 @@ type Server struct {
 	io      clock.Clock // stream deadlines: always real time
 	routes  map[string]route
 	srv     *http.Server
+	// testHook runs in the delete and extract handlers right before the operation (tests:
+	// simulate a slow operation).
+	testHook func(op string)
 }
 
 func NewServer(svc *Service, version string, log *slog.Logger) *Server {
@@ -152,7 +155,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, op string, err err
 		return
 	}
 	s.log.Info("file request rejected", "op", op, "status", status, "code", code, "err", err.Error(), "peer_uid", peerUID(r))
-	writeJSON(w, status, filesapi.ErrorResponse{Error: err.Error(), Code: code})
+	writeJSON(w, status, filesapi.ErrorResponse{Error: s.svc.publicMessage(err.Error()), Code: code})
 }
 
 // statusFor maps an error to the HTTP status and wire code (filesapi.CodeOf; other errors
@@ -260,12 +263,26 @@ func (s *Server) rename(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// longOp lifts the server's WriteTimeout for an operation that may take minutes (deleting a
+// world, the pre-check of a large archive; the client waits up to filesapi.DeleteTimeout or
+// ExtractTimeout) and gives the answer a fresh deadline once it is done.
+func (s *Server) longOp(w http.ResponseWriter, op string, run func() error) error {
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
+	if s.testHook != nil {
+		s.testHook(op)
+	}
+	err := run()
+	_ = rc.SetWriteDeadline(s.io.Now().Add(ioTimeout))
+	return err
+}
+
 func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 	var req filesapi.PathRequest
 	if !s.decode(w, r, &req, filesapi.MaxSmallJSONBytes) {
 		return
 	}
-	if err := s.svc.Delete(r.Context(), req.ID, req.Path); err != nil {
+	if err := s.longOp(w, "delete", func() error { return s.svc.Delete(r.Context(), req.ID, req.Path) }); err != nil {
 		s.fail(w, r, "delete", err)
 		return
 	}
@@ -350,6 +367,9 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = rc.SetWriteDeadline(s.io.Now().Add(ioTimeout))
 		w.WriteHeader(http.StatusOK)
+		// The panel waits for the headers only filesapi.DownloadHeaderTimeout; a folder zip
+		// produces its first bytes only after some entries.
+		_ = rc.Flush()
 	}
 	err = s.svc.Download(r.Context(), id, q.Get("path"), start, &deadlineWriter{w: w, rc: rc, now: s.io.Now})
 	if err == nil {
@@ -402,7 +422,12 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &req, filesapi.MaxSmallJSONBytes) {
 		return
 	}
-	job, err := s.svc.Extract(r.Context(), req)
+	var job filesapi.Job
+	err := s.longOp(w, "extract", func() error {
+		var err error
+		job, err = s.svc.Extract(r.Context(), req)
+		return err
+	})
 	if err != nil {
 		s.fail(w, r, "extract", err)
 		return

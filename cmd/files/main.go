@@ -85,8 +85,23 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, geteuid f
 	}
 
 	svc := files.New(files.Config{InstancesDir: cfg.InstancesDir, Limits: cfg.Limits, Dev: cfg.Dev, Clock: clock.Real{}, Log: log})
-	if n := svc.CleanupTemp(); n > 0 {
-		log.Info("files: removed leftover temp entries", "count", n)
+	// The temp cleanup walks every data directory; it runs while the service already answers,
+	// so a large instances_dir never delays the panel's calls (it leaves the temp entries of
+	// this process alone).
+	cleanupCtx, stopCleanup := context.WithCancel(context.Background())
+	cleanupDone := make(chan struct{})
+	go func() {
+		defer close(cleanupDone)
+		if n := svc.CleanupTemp(cleanupCtx); n > 0 {
+			log.Info("files: removed leftover temp entries", "count", n)
+		}
+	}()
+	// stop ends the background work: running extract jobs are cancelled first (they remove
+	// their temp folders), so a slow HTTP shutdown never keeps them writing.
+	stop := func() {
+		stopCleanup()
+		svc.Close()
+		<-cleanupDone
 	}
 	srv := files.NewServer(svc, version, log)
 	errc := make(chan error, 1)
@@ -96,7 +111,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, geteuid f
 
 	select {
 	case err := <-errc:
-		svc.Close()
+		stop()
 		if err == nil {
 			err = errors.New("server stopped unexpectedly")
 		}
@@ -104,11 +119,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, geteuid f
 	case <-ctx.Done():
 	}
 	log.Info("files shutting down")
+	stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	err = srv.Shutdown(shutdownCtx)
-	svc.Close()
-	if err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return <-errc
