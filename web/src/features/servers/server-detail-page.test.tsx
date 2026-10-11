@@ -27,7 +27,7 @@ describe('ServerDetailPage', () => {
     await renderWithProviders(<ServerDetailPage serverId={1} />, { path: '/servers/1', me: loginAs('admin') })
 
     expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Übersicht', 'Einstellungen', 'Löschen'])
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Übersicht', 'Konsole', 'Spieler', 'Einstellungen', 'Löschen'])
     const state = screen.getByRole('region', { name: 'Zustand' })
     expect(within(state).getByText('Läuft')).toBeInTheDocument()
     expect(within(state).getByText('survival.mc.example.com')).toBeInTheDocument()
@@ -38,6 +38,7 @@ describe('ServerDetailPage', () => {
     expect(within(state).getByText('vor 5 Minuten')).toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'Steuerung für survival' })).toBeInTheDocument()
     expect(screen.queryByText('Neustart nötig')).not.toBeInTheDocument()
+    expect(await within(screen.getByRole('region', { name: 'Online-Spieler' })).findByText('2 / 20')).toBeInTheDocument()
   })
 
   it('shows admins the last error of a failed server', async () => {
@@ -88,6 +89,14 @@ describe('ServerDetailPage', () => {
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Übersicht'])
     expect(screen.queryByRole('group', { name: 'Steuerung für creative' })).not.toBeInTheDocument()
     expect(screen.getByText('Keine Berechtigung für Start/Stopp.')).toBeInTheDocument()
+  })
+
+  it('shows the console to a user with the console permission', async () => {
+    db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.console'] }])
+    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+    expect(await screen.findByRole('tab', { name: 'Konsole' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Spieler' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Einstellungen' })).not.toBeInTheDocument()
   })
 
   it('explains a server the user may not see', async () => {

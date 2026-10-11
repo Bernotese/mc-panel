@@ -1,0 +1,73 @@
+import { SendHorizontal } from 'lucide-react'
+import { useId, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { commandProblem, type CommandProblem } from './command'
+import { emptyHistory, historyDown, historyUp, pushHistory, type HistoryState } from './history'
+
+export function CommandInput({ disabled, onSubmit }: { disabled: boolean; onSubmit(command: string): void }) {
+  const { t } = useTranslation()
+  const id = useId()
+  const [value, setValue] = useState('')
+  const [history, setHistory] = useState<HistoryState>(emptyHistory)
+  const [problem, setProblem] = useState<CommandProblem | null>(null)
+  const hintId = `${id}-hint`
+  const errorId = `${id}-error`
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const command = value.trim()
+    const found = commandProblem(command)
+    setProblem(found)
+    if (found) return
+    setHistory((h) => pushHistory(h, command))
+    setValue('')
+    onSubmit(command)
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+    event.preventDefault()
+    const [next, text] = event.key === 'ArrowUp' ? historyUp(history, value) : historyDown(history, value)
+    setHistory(next)
+    setValue(text)
+  }
+
+  return (
+    <form onSubmit={submit} className="bg-background sticky bottom-0 space-y-1 pt-2">
+      <div className="flex gap-2">
+        <Label htmlFor={id} className="sr-only">
+          {t('console.command')}
+        </Label>
+        <Input
+          id={id}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={onKeyDown}
+          disabled={disabled}
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          placeholder={disabled ? t('console.stopped_placeholder') : t('console.command_placeholder')}
+          aria-invalid={problem ? true : undefined}
+          aria-describedby={problem ? `${errorId} ${hintId}` : hintId}
+          className="font-mono"
+        />
+        <Button type="submit" disabled={disabled}>
+          <SendHorizontal aria-hidden="true" />
+          {t('console.send')}
+        </Button>
+      </div>
+      {problem ? (
+        <p id={errorId} role="alert" className="text-destructive text-sm">
+          {t(`console.validation.${problem}`)}
+        </p>
+      ) : null}
+      <p id={hintId} className="text-muted-foreground text-xs">
+        {disabled ? t('console.stopped_hint') : t('console.stop_hint')}
+      </p>
+    </form>
+  )
+}
