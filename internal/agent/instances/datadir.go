@@ -30,9 +30,18 @@ func (m *Manager) ensureLayout() error {
 	return ensureDir(DeletedDir(m.host.InstancesDir), os.Getegid(), 0o700)
 }
 
+// Init enforces the layout of instances_dir once at agent start (spec 3b §3.3), independent of
+// Docker and of any instance operation: on an upgraded host instances/ may still be 0700 (or
+// loosened) while every container is up to date, so no Ensure would ever fix it and the files
+// service could not enter it.
+func (m *Manager) Init() error {
+	return m.ensureLayout()
+}
+
 // ensureDir creates dir if needed and enforces owner = agent process (root in production),
 // group gid and mode perm through a descriptor opened with O_NOFOLLOW: a symlink in its place
-// is refused, never followed.
+// is refused, never followed. The mode is set before the group, so a directory that was too
+// open never carries the new group with its old, looser mode.
 func ensureDir(dir string, gid int, perm os.FileMode) error {
 	if err := os.Mkdir(dir, perm); err != nil && !errors.Is(err, fs.ErrExist) {
 		return err
@@ -42,10 +51,13 @@ func ensureDir(dir string, gid int, perm os.FileMode) error {
 		return err
 	}
 	defer func() { _ = f.Close() }()
+	if err := f.Chmod(perm); err != nil {
+		return fmt.Errorf("chmod %s: %w", dir, err)
+	}
 	if err := f.Chown(os.Geteuid(), gid); err != nil {
 		return fmt.Errorf("chown %s: %w", dir, err)
 	}
-	return f.Chmod(perm)
+	return nil
 }
 
 // openDirNoFollow opens dir itself, refusing a symlink or anything but a directory.

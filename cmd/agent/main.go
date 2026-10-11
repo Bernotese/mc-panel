@@ -135,6 +135,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			Clock:        clock.Real{},
 			Log:          log,
 		})
+		// The layout of instances_dir (instances/ root:<mc gid> 0750 for the files service)
+		// is enforced before serving, also when Docker is down and no Ensure follows.
+		if err := mgr.Init(); err != nil {
+			mgr.Close()
+			_ = l.Close()
+			return fmt.Errorf("instances_dir layout: %w", err)
+		}
 		// One bounded check before serving, so /v1/health is right from the first
 		// request instead of "unavailable" until the background loop has run.
 		mgr.CheckDocker(ctx)
