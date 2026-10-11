@@ -15,6 +15,7 @@ package docker_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -361,5 +362,129 @@ func TestIntegrationManagerCycle(t *testing.T) {
 	}
 	if slices.ContainsFunc(m.Status(ctx).Instances, func(s agentapi.InstanceStatus) bool { return s.ID == 1 }) {
 		t.Fatal("removed instance still listed")
+	}
+}
+
+// consoleCmd prints to stdout and stderr like a server, then ticks once a second and
+// exits on SIGTERM.
+var consoleCmd = []string{"sh", "-c", "echo hello; echo oops >&2; trap 'exit 0' TERM; i=0; while true; do i=$((i+1)); echo tick $i; sleep 1; done"}
+
+func TestIntegrationConsole(t *testing.T) {
+	c := requireDocker(t)
+	ctx := context.Background()
+	requireCleanHost(t, c)
+	t.Cleanup(func() {
+		forceRemove(t, c, instances.ContainerName(1), instances.RouterName)
+		_ = rawRequest(t, http.MethodDelete, "/networks/"+instances.NetworkName)
+	})
+
+	dir := t.TempDir()
+	images := config.Images{Java8: testImage, Java17: testImage, Java21: testImage, Java25: testImage, Router: testImage}
+	newManager := func(rcon string) *instances.Manager {
+		m := instances.New(instances.Config{
+			Docker: c, InstancesDir: dir, UID: nobody, GID: nobody, Images: images, Clock: clock.Real{},
+			Log:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})),
+			RconCommand: rcon,
+			Customize: func(name string, cfg *docker.ContainerConfig) {
+				if name == instances.RouterName {
+					cfg.Cmd = testCmd
+					cfg.HostConfig.PortBindings = nil // keep the host port free on developer machines
+					cfg.ExposedPorts = nil
+					return
+				}
+				cfg.Cmd = consoleCmd
+			},
+		})
+		t.Cleanup(m.Close)
+		return m
+	}
+	m := newManager("echo")
+	run := func(op func() error) {
+		t.Helper()
+		if err := op(); err != nil {
+			t.Fatal(err)
+		}
+		m.Wait()
+	}
+	req := agentapi.EnsureRequest{
+		ID: 1, Name: "it", FQDN: "it.mc.localhost", Revision: 1,
+		Spec: instancespec.Spec{Type: instancespec.TypePaper, Version: "1.21.4", Java: instancespec.Java21, MemoryMiB: 1024},
+	}
+	run(func() error { return m.Ensure(ctx, req) })
+	run(func() error { return m.Power(ctx, 1, agentapi.PowerStart) })
+
+	// Live log: history plus new lines, stdout and stderr apart.
+	lctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	lines, done := make(chan agentapi.LogLine, 256), make(chan error, 1)
+	go func() {
+		done <- m.Logs(lctx, agentapi.LogsRequest{ID: 1, Tail: 100}, func(running bool) {
+			if !running {
+				t.Error("start(false) for the running container")
+			}
+		}, func(l agentapi.LogLine) error {
+			select {
+			case lines <- l:
+			default: // never block the stream
+			}
+			return nil
+		})
+	}()
+	seen := map[string]agentapi.LogLine{}
+	timeout := time.After(30 * time.Second)
+	for seen["hello"].TS == 0 || seen["oops"].TS == 0 || seen["tick 3"].TS == 0 {
+		select {
+		case l := <-lines:
+			seen[l.Line] = l
+		case <-timeout:
+			t.Fatalf("log lines missing after 30 s: %v", seen)
+		}
+	}
+	if seen["hello"].Stream != agentapi.StreamOut || seen["oops"].Stream != agentapi.StreamErr {
+		t.Fatalf("streams: hello=%+v oops=%+v", seen["hello"], seen["oops"])
+	}
+
+	// Console command: exec as the container user in /data, output back.
+	if out, err := m.Rcon(ctx, 1, "say hallo"); err != nil || out != "say hallo" {
+		t.Fatalf("Rcon = %q, %v", out, err)
+	}
+	// A failing rcon-cli (exit code != 0) is rcon_unavailable.
+	if _, err := newManager("false").Rcon(ctx, 1, "list"); !errors.Is(err, agentapi.ErrRconUnavailable) {
+		t.Fatalf("failing rcon command = %v, want ErrRconUnavailable", err)
+	}
+
+	// Player lists from the real data directory.
+	if err := os.WriteFile(filepath.Join(instances.DataDir(dir, 1), "ops.json"), []byte(`[{"uuid":"u1","name":"Notch","level":4}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	players, err := m.Players(ctx, 1)
+	if err != nil || len(players.Ops) != 1 || players.Ops[0].Name != "Notch" || len(players.Errors) != 0 {
+		t.Fatalf("Players = %+v, %v", players, err)
+	}
+
+	// Stopping the container ends the stream; commands then report not running.
+	run(func() error { return m.Power(ctx, 1, agentapi.PowerStop) })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Logs after stop = %v, want nil", err)
+		}
+	case <-time.After(90 * time.Second):
+		t.Fatal("log stream did not end after the container stopped")
+	}
+	if _, err := m.Rcon(ctx, 1, "list"); !errors.Is(err, agentapi.ErrNotRunning) {
+		t.Fatalf("Rcon on a stopped container = %v, want ErrNotRunning", err)
+	}
+
+	// Resume after "hello": since wins over tail, no repeated line, and the stream of a
+	// stopped container ends after the history.
+	var resumed []string
+	var resumedRunning bool
+	err = m.Logs(ctx, agentapi.LogsRequest{ID: 1, Tail: 1, Since: seen["hello"].TS + 1}, func(running bool) { resumedRunning = running }, func(l agentapi.LogLine) error {
+		resumed = append(resumed, l.Line)
+		return nil
+	})
+	if err != nil || resumedRunning || slices.Contains(resumed, "hello") || !slices.Contains(resumed, "tick 1") {
+		t.Fatalf("resumed lines = %q (running %v), %v", resumed, resumedRunning, err)
 	}
 }
