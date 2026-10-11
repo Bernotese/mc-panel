@@ -150,7 +150,7 @@ func (s *Service) Read(ctx context.Context, id int64, p string) (filesapi.ReadRe
 		return filesapi.ReadResponse{}, fmt.Errorf("%w: %s is not a text file", filesapi.ErrNotText, clean)
 	}
 	content := string(data)
-	if clean == serverProps {
+	if isServerProps(clean) {
 		content = redactProperties(content)
 	}
 	return filesapi.ReadResponse{Content: content, MTime: st.ModTime().UnixMilli(), Size: st.Size()}, nil
@@ -187,7 +187,7 @@ func (s *Service) Write(ctx context.Context, req filesapi.WriteRequest) (filesap
 		if req.ExpectedMTime != nil {
 			return filesapi.WriteResponse{}, fmt.Errorf("%w: %s was deleted meanwhile", filesapi.ErrModified, clean)
 		}
-		if clean == serverProps { // a new file never gets the placeholder as its password
+		if isServerProps(clean) { // a new file never gets the placeholder as its password
 			content = restorePassword(content, "")
 		}
 	case err != nil:
@@ -198,7 +198,7 @@ func (s *Service) Write(ctx context.Context, req filesapi.WriteRequest) (filesap
 		return filesapi.WriteResponse{}, fmt.Errorf("%w: %s", filesapi.ErrExists, clean)
 	case *req.ExpectedMTime != fi.ModTime().UnixMilli():
 		return filesapi.WriteResponse{}, fmt.Errorf("%w: %s was changed meanwhile", filesapi.ErrModified, clean)
-	case clean == serverProps:
+	case isServerProps(clean):
 		cur, _, rerr := readSmall(root, clean, s.cfg.Limits.MaxTextBytes)
 		if rerr != nil && !errors.Is(rerr, filesapi.ErrTooLarge) {
 			return filesapi.WriteResponse{}, rerr
@@ -283,6 +283,10 @@ func (s *Service) Rename(ctx context.Context, req filesapi.RenameRequest) error 
 	}
 	if from == "" || to == "" {
 		return fmt.Errorf("%w: the root cannot be renamed", filesapi.ErrInvalid)
+	}
+	if isServerProps(from) {
+		// Under another name or in a subfolder its RCON password would no longer be redacted.
+		return fmt.Errorf("%w: %s cannot be renamed or moved", filesapi.ErrInvalid, from)
 	}
 	if to == from || strings.HasPrefix(to, from+"/") {
 		return fmt.Errorf("%w: %s cannot be moved into itself", filesapi.ErrInvalid, from)

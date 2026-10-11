@@ -29,3 +29,45 @@ func TestRestorePassword(t *testing.T) {
 		t.Fatalf("last definition: %q", got)
 	}
 }
+
+// java.util.Properties continues a logical line when a natural line ends in an odd number of
+// backslashes; lines end with \n, \r\n or \r; comment lines never continue.
+func TestRestorePasswordRespectsLineContinuation(t *testing.T) {
+	current := "rcon.password=s3cret\n"
+	for _, c := range []struct{ name, next, want string }{
+		// The placeholder is part of the motd value: it must never become the password.
+		{"odd backslashes", "motd=hi \\\nrcon.password=********\n", "motd=hi \\\nrcon.password=********\n"},
+		{"three backslashes", "motd=hi \\\\\\\nrcon.password=********\n", "motd=hi \\\\\\\nrcon.password=********\n"},
+		{"continued twice", "motd=a\\\n b\\\nrcon.password=********\n", "motd=a\\\n b\\\nrcon.password=********\n"},
+		{"cr terminator", "motd=hi \\\rrcon.password=********\r", "motd=hi \\\rrcon.password=********\r"},
+		// An escaped backslash does not continue the line: the placeholder is a real key.
+		{"even backslashes", "motd=hi \\\\\nrcon.password=********\n", "motd=hi \\\\\nrcon.password=s3cret\n"},
+		// A comment line never continues, whatever it ends with.
+		{"comment", "# note \\\nrcon.password=********\n", "# note \\\nrcon.password=s3cret\n"},
+		{"bang comment", "  ! note \\\nrcon.password=********\n", "  ! note \\\nrcon.password=s3cret\n"},
+	} {
+		if got := restorePassword(c.next, current); got != c.want {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestRedactMultiLineAndCRPasswords(t *testing.T) {
+	for _, c := range []struct{ name, in, want string }{
+		// The whole logical value is hidden, also its continuation lines.
+		{"continued value", "rcon.password=ab\\\n   cd\r\nmotd=x\n", "rcon.password=********\r\nmotd=x\n"},
+		{"cr terminators", "motd=x\rrcon.password=s3cret\rlevel=w\r", "motd=x\rrcon.password=********\rlevel=w\r"},
+		// A password-like continuation line is hidden too (it keeps its own continuation).
+		{"inside another value", "motd=a \\\nrcon.password=s3cret\n", "motd=a \\\nrcon.password=********\n"},
+		{"inside, continued", "motd=a \\\nrcon.password=s3\\\n cret\n", "motd=a \\\nrcon.password=********\\\n cret\n"},
+	} {
+		if got := redactProperties(c.in); got != c.want {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+		}
+	}
+	// Saving the redacted view of a continued password restores the original text.
+	orig := "rcon.password=ab\\\n   cd\r\nmotd=x\n"
+	if got := restorePassword(redactProperties(orig), orig); got != orig {
+		t.Fatalf("round trip of a continued password:\n got %q\nwant %q", got, orig)
+	}
+}

@@ -63,7 +63,7 @@ func writeDirZip(ctx context.Context, root *os.Root, dir string, w io.Writer, ma
 
 func addZipFile(zw *zip.Writer, root *os.Root, p, name string, info fs.FileInfo, maxSmall int64) error {
 	var src io.Reader
-	if p == serverProps {
+	if isServerProps(p) {
 		data, _, err := readSmall(root, p, maxSmall)
 		if err != nil {
 			return err
