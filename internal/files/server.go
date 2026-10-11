@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"mime"
 	"net"
@@ -39,6 +40,12 @@ func NewServer(svc *Service, version string, log *slog.Logger) *Server {
 	s := &Server{svc: svc, version: version, log: log}
 	s.routes = map[string]route{
 		filesapi.PathHealth: {method: http.MethodGet, handler: s.health},
+		filesapi.PathList:   {method: http.MethodPost, handler: s.list},
+		filesapi.PathRead:   {method: http.MethodPost, handler: s.read},
+		filesapi.PathWrite:  {method: http.MethodPost, handler: s.write},
+		filesapi.PathMkdir:  {method: http.MethodPost, handler: s.mkdir},
+		filesapi.PathRename: {method: http.MethodPost, handler: s.rename},
+		filesapi.PathDelete: {method: http.MethodPost, handler: s.delete},
 	}
 	s.srv = &http.Server{
 		Handler:           s,
@@ -98,6 +105,30 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, filesapi.HealthResponse{Status: "ok", Version: s.version})
 }
 
+// decode strictly decodes exactly one JSON object of at most limit bytes; on failure it has
+// answered already.
+func (s *Server) decode(w http.ResponseWriter, r *http.Request, dst any, limit int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	err := dec.Decode(dst)
+	if err == nil {
+		if _, terr := dec.Token(); !errors.Is(terr, io.EOF) {
+			err = errors.New("unexpected data after the JSON body")
+		}
+	}
+	if err == nil {
+		return true
+	}
+	var mbe *http.MaxBytesError
+	if errors.As(err, &mbe) {
+		s.fail(w, r, "decode", fmt.Errorf("%w: request body exceeds %d bytes", filesapi.ErrTooLarge, limit))
+	} else {
+		s.fail(w, r, "decode", fmt.Errorf("%w: invalid JSON body: %w", filesapi.ErrInvalid, err))
+	}
+	return false
+}
+
 // fail answers err: sentinel errors with their code, everything else as a generic 500 whose
 // details only go to the log. A caller that has already gone gets no answer.
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, op string, err error) {
@@ -143,4 +174,79 @@ func peerUID(r *http.Request) int64 {
 		return int64(uid)
 	}
 	return -1
+}
+
+func (s *Server) list(w http.ResponseWriter, r *http.Request) {
+	var req filesapi.PathRequest
+	if !s.decode(w, r, &req, filesapi.MaxSmallJSONBytes) {
+		return
+	}
+	res, err := s.svc.List(r.Context(), req.ID, req.Path)
+	if err != nil {
+		s.fail(w, r, "list", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) read(w http.ResponseWriter, r *http.Request) {
+	var req filesapi.PathRequest
+	if !s.decode(w, r, &req, filesapi.MaxSmallJSONBytes) {
+		return
+	}
+	res, err := s.svc.Read(r.Context(), req.ID, req.Path)
+	if err != nil {
+		s.fail(w, r, "read", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) write(w http.ResponseWriter, r *http.Request) {
+	var req filesapi.WriteRequest
+	if !s.decode(w, r, &req, filesapi.MaxJSONBytes) {
+		return
+	}
+	res, err := s.svc.Write(r.Context(), req)
+	if err != nil {
+		s.fail(w, r, "write", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) mkdir(w http.ResponseWriter, r *http.Request) {
+	var req filesapi.PathRequest
+	if !s.decode(w, r, &req, filesapi.MaxSmallJSONBytes) {
+		return
+	}
+	if err := s.svc.Mkdir(r.Context(), req.ID, req.Path); err != nil {
+		s.fail(w, r, "mkdir", err)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (s *Server) rename(w http.ResponseWriter, r *http.Request) {
+	var req filesapi.RenameRequest
+	if !s.decode(w, r, &req, filesapi.MaxSmallJSONBytes) {
+		return
+	}
+	if err := s.svc.Rename(r.Context(), req); err != nil {
+		s.fail(w, r, "rename", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
+	var req filesapi.PathRequest
+	if !s.decode(w, r, &req, filesapi.MaxSmallJSONBytes) {
+		return
+	}
+	if err := s.svc.Delete(r.Context(), req.ID, req.Path); err != nil {
+		s.fail(w, r, "delete", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
