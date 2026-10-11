@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Starts agent (if present), panel and the Vite dev server for local development.
+# Starts agent (if present), the files service (if present), panel and the Vite dev server for
+# local development.
 # If any of them exits, the others are stopped and the script exits non-zero.
 # Compatible with macOS' bash 3.2 (no `wait -n`).
 set -euo pipefail
@@ -26,6 +27,11 @@ start() {
 
 if [ -x .dev/bin/agent ]; then
   start agent .dev/bin/agent -dev
+fi
+# The files service runs as the developer in dev mode (instances below .dev/, the same tree the
+# dev agent uses); in production it is the unprivileged user mcpanel-mc.
+if [ -x .dev/bin/files ]; then
+  start files .dev/bin/files -dev
 fi
 start panel .dev/bin/panel serve -dev
 start vite bash -c 'cd web && exec npm run dev'

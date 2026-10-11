@@ -24,10 +24,10 @@ brew install go node sqlc goose golangci-lint goreleaser jq shellcheck
 
 ```bash
 (cd web && npm ci)
-make dev        # agent + panel (-dev) + Vite; UI unter http://localhost:5173
+make dev        # agent + files + panel (-dev) + Vite; UI unter http://localhost:5173
 ```
 
-`make dev` baut `.dev/bin/panel` und `.dev/bin/agent` und startet agent, `panel serve -dev` und Vite. Endet einer der drei Prozesse, beendet `scripts/dev.sh` die anderen und bricht mit Exit-Code ≠ 0 ab (die Ausgabe nennt den Prozess). Strg+C stoppt alles.
+`make dev` baut `.dev/bin/panel`, `.dev/bin/agent` und `.dev/bin/files` und startet agent, den Dateidienst (`files -dev`), `panel serve -dev` und Vite. Endet einer der Prozesse, beendet `scripts/dev.sh` die anderen und bricht mit Exit-Code ≠ 0 ab (die Ausgabe nennt den Prozess). Strg+C stoppt alles.
 
 ## Erster Start
 
@@ -86,8 +86,9 @@ MCPANEL_DEV_DOCKER=1 make dev
 - Nach dem Update von TP2 jeden Server mit „Neustart nötig“ über das panel neu starten, bevor Ops/Whitelist im Spieler-Tab geändert werden: Laufende Container tragen sonst noch `OPS`/`WHITELIST`/`EXISTING_*_FILE=SYNCHRONIZE`, und nach einem Absturz oder `stop` überschreibt itzg `ops.json`/`whitelist.json` aus der alten Umgebung.
 - Konsolenbefehle, die mit `-` beginnen (nach optionalen Leerzeichen und einem `/`), lehnen panel und agent ab (`400 validation_failed`): sonst würde `rcon-cli` sie als Option lesen; der agent ruft `rcon-cli -- <befehl>` auf.
 - Konsole und Spieler-Tab brauchen einen laufenden Container. Ohne Docker antworten Befehle und Spielerlisten mit `503 docker_unavailable`, die Karte „Online-Spieler“ zeigt „nicht verfügbar“; der Log-Stream antwortet trotzdem mit 200, und die Konsole zeigt „Konsole nicht erreichbar“ bzw. „Verbinde neu …“. Die UI-Vorschau (`make preview`) und `npm run dev:mock` liefern dagegen simulierte Log-Zeilen (alle 2 s eine neue, mit ANSI-/`§`-Farben und RCON-Rauschen), Befehlsantworten und Spielerlisten.
+- Der Dateidienst läuft im Dev-Modus als eigener Prozess des Entwicklers und arbeitet auf demselben Instanz-Verzeichnis wie der dev-agent (`.dev/mc/instances/<id>`); fehlt das Verzeichnis eines Servers, legt er es an. Der Dateibrowser funktioniert dadurch auch ohne Docker. Die Rechte-Trennung (eigener Benutzer `mcpanel-mc`, keine Capabilities) gibt es nur auf Linux (Test-VM, CI).
 
-Funktionstests gegen echte Server (Clients, Modpacks, Neustarts, Konsole) laufen getrennt auf der Test-VM (nächster Abschnitt); die Checklisten stehen in `docs/dev/acceptance-tp2.md` (Server-Lebenszyklus) und `docs/dev/acceptance-tp3a.md` (Konsole, Logs, Spieler).
+Funktionstests gegen echte Server (Clients, Modpacks, Neustarts, Konsole) laufen getrennt auf der Test-VM (nächster Abschnitt); die Checklisten stehen in `docs/dev/acceptance-tp2.md` (Server-Lebenszyklus), `docs/dev/acceptance-tp3a.md` (Konsole, Logs, Spieler) und `docs/dev/acceptance-tp3b.md` (Dateibrowser).
 
 ## Test-VM
 
@@ -99,11 +100,11 @@ make deploy-testvm REF=feat/mein-branch    # beliebiger Branch, Tag oder Commit 
 make deploy-testvm TESTVM=user@andere-vm   # andere VM
 ```
 
-- `scripts/testvm-deploy.sh` läuft per `ssh … bash -s` auf der VM. Beim ersten Lauf installiert es Docker, Caddy, nftables, Go (Version aus `go.mod`, nach `/usr/local/go`) und Node.js 24 (nach `/usr/local/lib/nodejs`). Danach holt es das Repo mit dem Deploy-Key der VM nach `~/mc-panel`, baut panel und agent (Version `0.0.0-testvm+<commit>`), installiert sie nach `/usr/local/bin`, schreibt Konfiguration, systemd-Units (`mcpanel-agent`, `mcpanel-panel`, starten auch nach einem Neustart) und Caddyfile neu und startet die Dienste neu. Daten bleiben erhalten (`/var/lib/mc-panel`, `/srv/mc-panel`).
+- `scripts/testvm-deploy.sh` läuft per `ssh … bash -s` auf der VM. Beim ersten Lauf installiert es Docker, Caddy, nftables, Go (Version aus `go.mod`, nach `/usr/local/go`) und Node.js 24 (nach `/usr/local/lib/nodejs`). Danach holt es das Repo mit dem Deploy-Key der VM nach `~/mc-panel`, baut panel, agent und files (Version `0.0.0-testvm+<commit>`), installiert sie nach `/usr/local/bin`, schreibt Konfiguration, systemd-Units (`mcpanel-agent`, `mcpanel-files.socket` + `mcpanel-files.service`, `mcpanel-panel`, starten auch nach einem Neustart) und Caddyfile neu und startet die Dienste neu. Daten bleiben erhalten (`/var/lib/mc-panel`, `/srv/mc-panel`). Danach prüft es Socket (`mcpanel-mc:mcpanel 0660`) und Prozess (`mcpanel-mc`, ohne Zusatzgruppe `mcpanel`, ohne Capabilities, `no_new_privs`) von `mcpanel-files`.
 - Adressen über [sslip.io](https://sslip.io) (öffentliches Wildcard-DNS, das auf die IP im Namen auflöst): Panel <https://panel.192-168-1-117.sslip.io/>, Basisdomain für Minecraft `mc.192-168-1-117.sslip.io`, im Client also `<server>.mc.192-168-1-117.sslip.io`. `https://192.168.1.117` leitet auf den Panel-Namen um.
 - TLS: Let's Encrypt erreicht die VM nicht, deshalb signiert Caddy mit seiner internen CA (`tls internal`). Bis die CA vertraut ist, warnt der Browser; die Warnung lässt sich wegklicken (TOTP-Login geht), Passkeys aber nicht (WebAuthn verweigert Seiten mit Zertifikatsfehlern). Die CA vertrauen: `scp claude@192.168.1.117:caddy-root.crt /tmp/ && sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /tmp/caddy-root.crt` (systemweit, also nur durch den Nutzer). Das Root-Zertifikat bleibt über Deploys gleich.
 - Erster Admin: `ssh claude@192.168.1.117 "printf '%s\n' '<passwort>' | sudo -u mcpanel panel admin create -config /etc/mc-panel/panel.toml -username admin"`.
-- Logs: `ssh claude@192.168.1.117 journalctl -u mcpanel-agent -u mcpanel-panel -f`. Konfiguration: `/etc/mc-panel/{panel,agent}.toml`; Änderungen dort überschreibt der nächste Deploy, also im Skript ändern.
+- Logs: `ssh claude@192.168.1.117 journalctl -u mcpanel-agent -u mcpanel-files -u mcpanel-panel -f`. Konfiguration: `/etc/mc-panel/{panel,agent}.toml` und `/etc/mc-panel-files/files.toml`; Änderungen dort überschreibt der nächste Deploy, also im Skript ändern.
 - Das panel lauscht auf der VM auf `127.0.0.1:8080` (wie in `docs/dev/acceptance-tp2.md`), nicht auf dem Unix-Socket aus dem Produktionsprofil; die endgültigen Units liefert der Installer (Teilprojekt 6).
 
 ## End-to-End-Tests (Playwright)
@@ -125,12 +126,14 @@ cd web && E2E_BASE_URL=http://localhost:5173 E2E_ADMIN_USER=e2e-admin E2E_ADMIN_
 
 Ein zweiter Lauf braucht einen neuen Admin (anderer Benutzername) oder ein frisches `.dev/` (`make clean`).
 
-In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er baut die Binaries, startet agent, `panel serve -dev` und Vite, legt `e2e-admin` an, führt `npm run e2e:real` (ohne Retries) und danach `npm run e2e` aus und lädt bei einem Fehlschlag die Logs sowie `test-results`/`playwright-report` als Artefakt hoch.
+In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er baut die Binaries, startet agent, `files -dev`, `panel serve -dev` und Vite, legt `e2e-admin` an, führt `npm run e2e:real` (ohne Retries) und danach `npm run e2e` aus und lädt bei einem Fehlschlag die Logs sowie `test-results`/`playwright-report` als Artefakt hoch.
 
 ## Produktion: Listen-Adresse und Reverse Proxy
 
 - Der agent braucht Docker (Engine ≥ 25, API ≥ 1.44) und den Systembenutzer `mcpanel-mc` (eigene UID/GID, nicht die des panels); beides richtet später der Installer (Teilprojekt 6) ein. `instances_dir` (Standard `/srv/mc-panel`) darf kein Symlink sein und nur unter root-eigenen, nicht gruppen-/weltbeschreibbaren Verzeichnissen liegen.
 
+- Der Dateidienst `files` (Spec 3b §3.1) läuft als `mcpanel-mc` ohne Zusatzgruppen und ohne Capabilities, mit `NoNewPrivileges`, `ProtectSystem=strict`, `ReadWritePaths=<instances_dir>/instances`, `MemoryMax=512M` und `TasksMax=256` (Begrenzung gegen präparierte Archive). Er nimmt nur Verbindungen der panel-UID und von root an (`panel_uid`; die Peer-UID-Prüfung ist die eigentliche Zugangskontrolle, wie beim agent). Den Socket legt systemd an (Socket-Aktivierung, `mcpanel-files.socket`: `ListenStream=/run/mc-panel-files/files.sock`, `SocketUser=mcpanel-mc`, `SocketGroup=mcpanel`, `SocketMode=0660`, `DirectoryMode=0755`), der Dienst übernimmt ihn über `LISTEN_FDS`. Ohne Aktivierung (Dev, CI) legt er `socket` selbst mit `socket_mode` an (Gruppe = seine primäre Gruppe). Mit `UMask=0027` entstehen in Produktion Dateien mit 0640 und Ordner mit 0750 (der Dienst fordert 0644/0755 an). Verbindliche Vorgaben für die Units des Installers (Teilprojekt 6): eigenes Socket-Verzeichnis `/run/mc-panel-files` (nie `/run/mc-panel` des agents), keine `SupplementaryGroups`, Konfiguration in `/etc/mc-panel-files/files.toml` (`root:mcpanel-mc`, Verzeichnis 0750, Datei 0640 – `/etc/mc-panel` ist für `mcpanel-mc` unlesbar), `instances/` als `root:mcpanel-mc 0750` (setzt der agent beim Start), `deleted/` bleibt `root:root 0700`. Das panel findet den Dienst über `files_socket` in `panel.toml`; `scripts/testvm-deploy.sh` ist die Referenz.
+- Datei-Uploads und -Downloads (bis 4 GiB) laufen als ein Stream durch Caddy und das panel; Caddy begrenzt die Body-Größe standardmäßig nicht. Ein anderer Proxy braucht ein Body-Limit ≥ 4 GiB und darf Uploads nicht puffern.
 - Standard ohne `-dev` ist `listen = "unix:/run/mc-panel/panel.sock"`: das panel lauscht nur auf einem Unix-Socket (Modus 0660, Gruppe = primäre Gruppe des panel-Benutzers `mcpanel`). Ein verwaister Socket wird beim Start nur entfernt, wenn niemand mehr darauf lauscht. Das Socket-Verzeichnis liefern die systemd-Units des Installers (Teilprojekt 6). Verbindliche Vorgabe dafür: Das panel bekommt ein **eigenes** Runtime-Verzeichnis (z. B. `RuntimeDirectory=mc-panel-web`, Besitzer `mcpanel`), nicht `/run/mc-panel` des agents — systemd löscht das Runtime-Verzeichnis einer Unit bei deren Stopp, und `mcpanel` darf den agent-Socket nicht ersetzen können. Der Pfad im Beispiel unten ändert sich entsprechend.
 - Caddy terminiert TLS und spricht den Socket an:
 
@@ -154,12 +157,12 @@ In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er 
 | Target | Wirkung |
 |---|---|
 | `make check` | einziger lokaler Check auf dem Mac (~10 s): gofmt, `go vet` + `go build` für macOS und Linux (inkl. Integrationstest-Dateien), `tsc`. Tests, Race, Lint und E2E laufen in der CI |
-| `make dev` | baut agent und panel, startet agent + `panel serve -dev` + Vite-Dev-Server, alles unter `./.dev/`; endet ein Prozess, stoppt das Skript alle |
+| `make dev` | baut agent, files und panel, startet agent + `files -dev` + `panel serve -dev` + Vite-Dev-Server, alles unter `./.dev/`; endet ein Prozess, stoppt das Skript alle |
 | `make test` | Go-Tests (`test-go`) und Frontend-Tests (`test-web`) |
 | `make test-race` | Go-Tests mit Race-Detector (`CGO_ENABLED=1`) |
 | `make lint` | `golangci-lint run ./...` plus ESLint und TypeScript-Check im Frontend |
 | `make generate` | `sqlc generate` und `npm run gen:api` |
-| `make build` | Frontend bauen, dann `bin/panel` (und `bin/agent`) für das Host-System |
+| `make build` | Frontend bauen, dann `bin/panel`, `bin/agent` und `bin/files` für das Host-System |
 | `make release` | GoReleaser-Snapshot nach `dist/`: Archive für linux/amd64 und linux/arm64 plus `checksums.txt` |
 | `make deploy-testvm` | baut `REF` (Standard `main`) auf der Test-VM aus GitHub und deployt ihn dort (siehe „Test-VM“) |
 | `make clean` | entfernt `bin/`, `dist/`, `.dev/` und das gebaute Frontend |
@@ -173,8 +176,8 @@ In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er 
 | `openapi` | `npx --yes @redocly/cli@2.54.2 lint api/openapi.yaml --extends=minimal` |
 | `nftables` | nur in der CI (Linux, root): `go test -tags nftintegration -exec sudo ./internal/agent/...` und der Abnahmetest `sudo scripts/ci-acceptance.sh bin/panel bin/agent` (5 Fehlversuche → IP im nftables-Jail). Das Skript verändert den Host (Benutzer, Netz-Namespace, nftables) und ist nur für Wegwerf-Runner gedacht. |
 | `nftables` (Docker-Integration) | nur in der CI: `go test -tags dockerintegration -exec "sudo env MCPANEL_IT_STRICT=1" ./internal/agent/...` |
-| `instances` | nur in der CI: `sudo scripts/ci-instances.sh bin/agent` (echter agent + Docker + Paper-Server: Routing, Härtung, Konsole mit RCON, Log-Stream und Spielerlisten, präparierte Spielerdateien, Absturz-Neustart, Löschen; verändert den Host) |
-| `build` | `make build`, `make release`, dann `file dist/*/panel dist/*/agent` |
+| `instances` | nur in der CI: `sudo scripts/ci-instances.sh bin/agent bin/files` (echter agent + Docker + Paper-Server: Routing, Härtung, Konsole mit RCON, Log-Stream und Spielerlisten, präparierte Spielerdateien, Absturz-Neustart, Löschen; Dateidienst als `mcpanel-mc`: Peer-UID (panel-Benutzer und root erlaubt, `nobody` abgewiesen), Upload, Schwärzen, Editor-Sperre, Symlinks, Ordner-Zip, Welt entpacken, bösartige Archive; verändert den Host) |
+| `build` | `make build`, `make release`, dann `file dist/*/panel dist/*/agent dist/*/files` |
 
 Linux-spezifische Dateien lokal linten: `GOOS=linux .dev/tools/golangci-lint run ./...`.
 
@@ -185,7 +188,7 @@ Linux-spezifische Dateien lokal linten: `GOOS=linux .dev/tools/golangci-lint run
 - Aktive Exclusion-Presets: nur `std-error-handling` (ignoriert ungeprüfte Fehler von `Close`, `Flush`, `os.Remove`, `fmt.Fprint*` u. Ä.). `common-false-positives` ist bewusst **nicht** aktiv: gosec G103 (`unsafe`), G204 (Subprozess mit Variable) und G304 (Datei-Pfad aus Variable) bleiben sichtbar und brauchen im Einzelfall eine gezielte Regel oder `//nolint:gosec // Begründung`.
 - Global abgeschaltete gosec-Regeln (`linters.settings.gosec.excludes`): G104 (ungeprüfte Fehler, macht errcheck), G115 (Integer-Konvertierung, feuert bei jeder `uint32(len(x))`/`int(uid)`-Konvertierung; Grenzen werden dort geprüft, wo Eingaben nicht vertrauenswürdig sind) und G117 (Feldnamen wie `password`/`secret` in API-DTOs sind Teil des OpenAPI-Vertrags).
 - Requests und DB-Zugriffe immer mit Kontext: `http.NewRequestWithContext`, `QueryContext`/`ExecContext`/`PingContext`. Ausnahme ist `net.Listen` im agent (`cmd/agent/`, `internal/agent/`).
-- Dateimodus `0660` (agent-Socket, Spec §3) ist nur in `cmd/agent/` und `internal/agent/` für gosec G302 freigegeben, sofern er als Literal (`0o660`) in der Zeile steht; überall sonst und für andere Modi über `0600` ist eine Begründung nötig (z. B. `internal/unixsock`, das den Modus der Sockets von agent und panel setzt).
+- Dateimodus `0660` (agent-Socket, Spec §3) ist nur in `cmd/agent/` und `internal/agent/` für gosec G302 freigegeben, sofern er als Literal (`0o660`) in der Zeile steht; überall sonst und für andere Modi über `0600` ist eine Begründung nötig (z. B. `internal/unixsock`, das den Modus der Sockets von agent, panel und Dateidienst setzt). Der Dateidienst (`internal/files`) legt Dateien mit 0644 und Ordner mit 0755 an (wie der Minecraft-Server selbst; die `UMask=0027` der Unit greift); die Stellen tragen `//nolint:gosec // G302/G304 …` bzw. `G301` mit Begründung, eine Pfadregel gibt es nicht.
 - In Tests sind feste Test-Passwörter, `math/rand` und lockere Dateimodi erlaubt.
 - Formatierung: `gofmt` + `goimports` mit lokalem Präfix `github.com/Bernotese/mc-panel` (`golangci-lint fmt ./...`).
 
@@ -200,7 +203,7 @@ git push origin v0.1.0
 
 Der Workflow `.github/workflows/release.yml` prüft zuerst, dass der getaggte Commit in `main` enthalten ist (sonst Abbruch), führt `make lint`, `make test` und `make test-race` aus, baut das Frontend und veröffentlicht mit GoReleaser (nur dieser letzte Schritt sieht `GITHUB_TOKEN`):
 
-- `mc-panel_<version>_linux_amd64.tar.gz`, `mc-panel_<version>_linux_arm64.tar.gz` (je `panel` und `agent`, ohne Unterordner)
+- `mc-panel_<version>_linux_amd64.tar.gz`, `mc-panel_<version>_linux_arm64.tar.gz` (je `panel`, `agent` und `files`, ohne Unterordner)
 - `checksums.txt` (SHA-256, Format `<hash>  <datei>`)
 
 `<version>` ist der Tag ohne führendes `v`. Tags mit Suffix (z. B. `v0.2.0-rc.1`) werden als Pre-Release markiert.
