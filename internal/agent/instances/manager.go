@@ -50,6 +50,11 @@ type Config struct {
 	Customize func(name string, cfg *docker.ContainerConfig)
 	// StatusTimeout bounds Status (GET /v1/instances); 0 means DefaultStatusTimeout.
 	StatusTimeout time.Duration
+	// RconCommand is the program run for console commands; "" means DefaultRconCommand.
+	// Only the dockerintegration test changes it (busybox has no rcon-cli).
+	RconCommand string
+	// RconTimeout bounds one console command; 0 means RconTimeout.
+	RconTimeout time.Duration
 }
 
 type sample struct {
@@ -72,6 +77,9 @@ type Manager struct {
 	cancel context.CancelFunc
 
 	statusTimeout time.Duration
+	rconCmd       string
+	rconTimeout   time.Duration
+	console       consoleState
 
 	routerMu sync.Mutex // serialises routes file + router container changes
 	// lastApplied is the routes file content the running router has loaded (nil:
@@ -99,6 +107,8 @@ func New(cfg Config) *Manager {
 		customize:     cfg.Customize,
 		ctx:           ctx,
 		statusTimeout: cmp.Or(cfg.StatusTimeout, DefaultStatusTimeout),
+		rconCmd:       cmp.Or(cfg.RconCommand, DefaultRconCommand),
+		rconTimeout:   cmp.Or(cfg.RconTimeout, RconTimeout),
 		cancel:        cancel,
 		inst:          map[int64]*instanceState{},
 		stats:         map[int64]sample{},
