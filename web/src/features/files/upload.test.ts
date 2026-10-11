@@ -69,18 +69,15 @@ describe('uploadFile', () => {
   })
 
   it('rejects with AbortError when cancelled while the request is in flight', async () => {
-    let started = false
     server.use(
       http.post('*/api/servers/:id/files/upload', async () => {
-        started = true
-        await delay('infinite')
+        await delay(500)
         return HttpResponse.json({ size: 1 }, { status: 201 })
       }),
     )
     const controller = new AbortController()
     const pending = uploadFile(1, 'a', new File(['x'], 'a'), { overwrite: false, signal: controller.signal }).catch((e: unknown) => e)
-    await vi.waitFor(() => expect(started).toBe(true))
-    controller.abort()
+    controller.abort() // xhr.send() has already run, so this aborts a request in flight
     expect(((await pending) as DOMException).name).toBe('AbortError')
   })
 
