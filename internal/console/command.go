@@ -1,6 +1,7 @@
 package console
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -46,7 +47,9 @@ func (h *Handler) run(w http.ResponseWriter, r *http.Request, serverID int64, cm
 	if !h.allow(w, r, p.UserID) {
 		return false
 	}
-	out, err := h.agent.Rcon(ctx, serverID, cmd)
+	// Not cancelled with the request: once sent, the command runs on the server whether the
+	// browser waits or not, and the audit entry must say how it ended (RconTimeout bounds it).
+	out, err := h.agent.Rcon(context.WithoutCancel(ctx), serverID, cmd)
 	result := audit.ResultSuccess
 	if err != nil {
 		result = audit.ResultFailure
