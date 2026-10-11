@@ -170,10 +170,18 @@ func parseID(v string) (int64, error) {
 	return id, nil
 }
 
+// writeJSON answers with a Content-Length, so a flushed answer is complete for the client even
+// while the handler still runs (failEarly keeps reading the upload body afterwards).
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		status, b = http.StatusInternalServerError, []byte(`{"error":"cannot encode the answer","code":""}`)
+	}
+	b = append(b, '\n')
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(b)
 }
 
 // peerUID returns the UID stored by peercred.ConnContext, or -1 if unknown.

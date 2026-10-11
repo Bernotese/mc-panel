@@ -168,13 +168,19 @@ func TestUploadEarlyErrorReachesClient(t *testing.T) {
 	for _, tc := range cases {
 		disk.set(tc.disk)
 		// A client that stalls after 1 MiB: the answer must not wait for the rest of the body.
+		// The whole answer (with Content-Length) must arrive while the service still drains the
+		// body, not only when it gives up after uploadDrainTime.
 		release := make(chan struct{})
+		began := time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		_, err := c.Upload(ctx, 1, tc.path, false, tc.size, &stallingReader{n: 1 << 20, release: release})
 		cancel()
 		close(release)
 		if !errors.Is(err, tc.want) {
 			t.Errorf("%s, stalled client: %v, want %v", tc.name, err, tc.want)
+		}
+		if took := time.Since(began); took >= uploadDrainTime/2 {
+			t.Errorf("%s, stalled client: the answer took %s", tc.name, took)
 		}
 		// A client that keeps writing at full speed: the answer must win against the end of the
 		// connection, every time.
