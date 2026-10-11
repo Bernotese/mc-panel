@@ -24,7 +24,7 @@ Dienst-spezifische, verbindliche Werte dieses Teilplans:
 | Fremde Dateien | `internal/files/filesapi/**`, `internal/config/**`, `internal/agent/**`, `internal/unixsock/**` gehören anderen Phasen: nur lesen/benutzen; Bedarf → Lead |
 | Benutzer | Prozess verweigert den Start als root (`geteuid() == 0` → Fehler), auch im Dev-Modus |
 | Konfiguration | Flag `-config` (Default `/etc/mc-panel-files/files.toml`), `-dev` (ohne `-config`: `config.DevFiles(cwd)`, d. h. Socket `.dev/files.sock`, `instances_dir` `.dev/mc`), `-version`; `var version = "dev"` (per `-ldflags -X main.version=…`, der Release-Snapshot prüft das) |
-| Peer-UID | immer `peercred.AllowUIDs(panel_uid)` – nur der panel-Benutzer, **nicht** root (Lead-Entscheidung: der Dienst bedient nur das panel; `scripts/ci-instances.sh` testet als panel-UID und prüft, dass root abgewiesen wird); `panel_uid = -1` nur mit `dev` (dann eigene UID; `DevFiles` setzt sie ohnehin) |
+| Peer-UID | immer `peercred.AllowUIDs(panel_uid, 0)` – panel-Benutzer und root (wie beim agent; Betreiber und Skripte dürfen als root zugreifen, root kann ohnehin alles); `panel_uid = -1` nur mit `dev` (dann eigene UID; `DevFiles` setzt sie ohnehin) |
 | Socket | bevorzugt systemd-Socket-Aktivierung: `LISTEN_PID == getpid()` und `LISTEN_FDS == 1` → fd 3 als Listener (muss ein Unix-Socket sein), danach `LISTEN_PID`, `LISTEN_FDS`, `LISTEN_FDNAMES` aus der Umgebung entfernen; sonst `unixsock.Listen(cfg.Socket, cfg.SocketFileMode(), -1)` (Gruppe = primäre Gruppe des Prozesses, kein `chown`); Dev: Socket-Ordner wird angelegt |
 | Instanz-Verzeichnis | `<instances_dir>/instances/<id>`; `os.Lstat` muss ein echter Ordner sein (Symlink → Fehler 500), danach `os.OpenRoot` und `os.SameFile(lstat, root.Stat("."))`; fehlt → `ErrNotFound` („server <id> has no data directory yet“); Dev: vorher `os.MkdirAll(..., 0o750)` |
 | Pfade | jede Anfrage: `filesapi.CleanPath`, danach `filesapi.IsHidden` → `ErrNotFound`; Wurzel `""` nur bei `list`/`download` erlaubt, sonst `ErrInvalid` bzw. `ErrNotRegular` (`read`) |
@@ -1323,7 +1323,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, geteuid f
 	}
 	srv := files.NewServer(svc, version, log)
 	errc := make(chan error, 1)
-	go func() { errc <- srv.Serve(peercred.Wrap(l, peercred.AllowUIDs(uid), log)) }() // only the panel, never root
+	go func() { errc <- srv.Serve(peercred.Wrap(l, peercred.AllowUIDs(uid, 0), log)) }() // the panel and root, like the agent
 	log.Info("files started", "version", version, "socket", cfg.Socket, "socket_activation", activated,
 		"panel_uid", uid, "instances_dir", cfg.InstancesDir, "dev", cfg.Dev, "uid", os.Getuid())
 
@@ -4302,7 +4302,7 @@ Expected: CI grün; `TestEndToEndWithClient`, `TestPeerUIDIsChecked`, `TestCreat
 
 ## Vertragsprobleme / offene Punkte für den Lead
 
-1. **Peer-UID:** Entschieden (Lead): nur `panel_uid`, root wird abgewiesen (`AllowUIDs(panel_uid)`); passt zu Spec §3.1 und zum CI-Skript in Plan 05.
+1. **Peer-UID:** Entschieden (Nutzer): `panel_uid` und root (`AllowUIDs(panel_uid, 0)`), wie beim agent; Spec §3.1 und das CI-Skript in Plan 05 sind angeglichen.
 2. **`peercred`-Logtext:** `peercred.Wrap` loggt „agent: rejecting connection …“ – im Dienst irreführend; Anpassung wäre eine Änderung in `internal/agent/peercred` (nicht B1). Kosmetisch.
 3. **Hardlinks:** „ohne Überschreiben“ (neue Datei im Editor, Upload ohne `overwrite`) nutzt `root.Link` (atomar). Dateisysteme ohne Hardlinks würden das scheitern lassen; für ext4/xfs/APFS kein Thema – Vorgabe für den Installer (lokales Dateisystem).
 4. **Socket-Aktivierung im Test:** Der fd-3-Pfad (`activatedListener` mit echtem Socket) ist nur auf der Test-VM bzw. in Phase C (`mcpanel-files.socket`) wirklich prüfbar; die Unit-Tests decken nur die Umgebungs-Logik ab.

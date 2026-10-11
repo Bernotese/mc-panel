@@ -20,7 +20,7 @@
 | Wo getestet wird | lokal nur `make check`, `bash -n`, `shellcheck` (falls installiert) und `actionlint` per `go run`; alles mit root, Docker oder Minecraft nur in der CI bzw. auf der Test-VM |
 | Socket des Dienstes | Test-VM/Produktion: systemd-Socket-Aktivierung `mcpanel-files.socket` (`ListenStream=/run/mc-panel-files/files.sock`, `SocketUser=mcpanel-mc`, `SocketGroup=mcpanel`, `SocketMode=0660`, `DirectoryMode=0755`); der Dienst übernimmt ihn per `LISTEN_FDS`/`LISTEN_PID`. Eigenes Verzeichnis `/run/mc-panel-files`, nie `/run/mc-panel` des agents. CI (ohne Aktivierung): der Dienst legt den Socket selbst an (`socket`, `socket_mode`) |
 | Prozess des Dienstes | `User=mcpanel-mc`, `Group=mcpanel-mc`, **keine** Zusatzgruppen (kein Zugriff auf `/etc/mc-panel`), kein `RuntimeDirectory`, Härtung exakt nach Spec §3.1; Konfiguration in `/etc/mc-panel-files/files.toml` (`root:mcpanel-mc`, Verzeichnis 0750, Datei 0640), weil `/etc/mc-panel` (`root:mcpanel 0750`) für `mcpanel-mc` unlesbar ist |
-| CI-Socket | `socket = "$work/frun/files.sock"`, `socket_mode = "0666"` in `$work/frun` (`mcpanel-mc:mcpanel-mc 0755`): ohne Socket-Aktivierung bekommt der Socket die primäre Gruppe des Dienstes (`mcpanel-mc`), der panel-Testbenutzer `mcpanel` ist nicht Mitglied; 0666 ist hier vertretbar, weil die Peer-UID-Prüfung die Zugangskontrolle ist – das Skript beweist das, indem root und `nobody` trotz 0666 abgewiesen werden |
+| CI-Socket | `socket = "$work/frun/files.sock"`, `socket_mode = "0666"` in `$work/frun` (`mcpanel-mc:mcpanel-mc 0755`): ohne Socket-Aktivierung bekommt der Socket die primäre Gruppe des Dienstes (`mcpanel-mc`), der panel-Testbenutzer `mcpanel` ist nicht Mitglied; 0666 ist hier vertretbar, weil die Peer-UID-Prüfung die Zugangskontrolle ist – das Skript beweist das, indem `nobody` trotz 0666 abgewiesen wird (root ist wie beim agent zugelassen) |
 | CI-Grenzen (`files.toml` im Skript) | `max_upload_bytes = 10485760` (10 MiB), `max_extract_bytes = 104857600`, `max_extract_entries = 1000`, `reserve_bytes = 1048576`, `max_text_bytes = 5242880`, `max_list_entries = 10000` |
 | Test-Server | wie TP2/3a: ID `9001`, Name `citest`, Paper `1.21.11`, java21, 2048 MiB |
 | Dienst-Aufrufe im Skript | immer als panel-Benutzer: `setpriv --reuid=mcpanel --regid=mcpanel --init-groups curl … --unix-socket <sock> http://files/…`; Ausgaben nach `$work/fout` (Besitzer `mcpanel`); JSON mit Nutzerinhalt immer per `json.dumps` |
@@ -444,8 +444,8 @@ echo "== setup: files service as mcpanel-mc"
 install -m 0755 "$2" "$work/bin/files"
 # No socket activation here: the service creates its socket itself in a directory it owns. The
 # socket then gets the service's primary group (mcpanel-mc), which the panel test user is not in,
-# so socket_mode is 0666: the peer-UID check is the access control (root and nobody are refused
-# below). Production uses mcpanel-files.socket with group mcpanel and 0660 instead.
+# so socket_mode is 0666: the peer-UID check is the access control (nobody is refused below;
+# root is allowed, like at the agent). Production uses mcpanel-files.socket with group mcpanel and 0660 instead.
 install -d -m 0755 -o mcpanel-mc -g mcpanel-mc "$work/frun"
 install -d -m 0750 -o mcpanel -g mcpanel "$fo"
 cat >"$work/files.toml" <<EOF
@@ -479,16 +479,15 @@ echo "OK: files service up"
 (8) Vor `echo "== crash: stop the server from inside, Docker must restart it (unless-stopped)"` einfügen:
 
 ```bash
-echo "== files: service runs as mcpanel-mc without privileges, only the panel user may connect"
+echo "== files: service runs as mcpanel-mc without privileges, only the panel user and root may connect"
 data="$work/mc/instances/9001"
 uid_mc="$(id -u mcpanel-mc)"
 grep -qxP "Uid:\t$uid_mc\t$uid_mc\t$uid_mc\t$uid_mc" "/proc/$files_pid/status" ||
   fail "files service uid: $(grep '^Uid:' "/proc/$files_pid/status")"
 grep -qxP 'CapEff:\t0000000000000000' "/proc/$files_pid/status" || fail "files service has capabilities"
 grep -qxP 'NoNewPrivs:\t1' "/proc/$files_pid/status" || fail "files service without no_new_privs"
-if curl -fsS --max-time 5 --unix-socket "$fsock" http://files/v1/health >/dev/null 2>&1; then
-  fail "root (not the panel uid) reached the files service"
-fi
+# root may connect (like at the agent): operators can call the service from a root shell.
+curl -fsS --max-time 5 --unix-socket "$fsock" http://files/v1/health >/dev/null || fail "root was refused by the files service"
 # The CI socket is 0666 (see setup): any local user can connect, so this proves that the
 # peer-UID check, not the file mode, keeps other users out.
 if setpriv --reuid=nobody --regid=nogroup --clear-groups \
@@ -501,7 +500,7 @@ fi
 if setpriv --reuid=mcpanel-mc --regid=mcpanel-mc --clear-groups ls "$work/mc/deleted" >/dev/null 2>&1; then
   fail "mcpanel-mc can read deleted/"
 fi
-echo "OK: uid mcpanel-mc, no capabilities, no_new_privs; root and nobody refused; router/ and deleted/ out of reach"
+echo "OK: uid mcpanel-mc, no capabilities, no_new_privs; root allowed, nobody refused; router/ and deleted/ out of reach"
 
 echo "== files: upload a plugin jar"
 head -c 65536 /dev/urandom >"$work/ci-plugin.jar"
@@ -971,10 +970,10 @@ Expected: CI grün. Danach dem Lead melden (Commit-Bereiche beider Aufgaben, CI-
 ```bash
 git -C /Users/jannes/Workspace/mc-panel switch main && git -C /Users/jannes/Workspace/mc-panel pull --ff-only
 make deploy-testvm
-ssh claude@192.168.1.117 'systemctl is-active mcpanel-agent mcpanel-files.socket mcpanel-files.service mcpanel-panel caddy; sudo stat -c "%U:%G %a" /run/mc-panel-files/files.sock; pid=$(systemctl show -p MainPID --value mcpanel-files); sudo grep -E "^(Uid|Gid|Groups|CapEff|NoNewPrivs):" /proc/$pid/status; id -u mcpanel-mc; sudo -u mcpanel curl -s --unix-socket /run/mc-panel/agent.sock http://agent/v1/health; sudo -u mcpanel curl -s --unix-socket /run/mc-panel-files/files.sock http://files/v1/health; sudo curl -s --max-time 3 --unix-socket /run/mc-panel-files/files.sock http://files/v1/health || echo "root refused (ok)"'
+ssh claude@192.168.1.117 'systemctl is-active mcpanel-agent mcpanel-files.socket mcpanel-files.service mcpanel-panel caddy; sudo stat -c "%U:%G %a" /run/mc-panel-files/files.sock; pid=$(systemctl show -p MainPID --value mcpanel-files); sudo grep -E "^(Uid|Gid|Groups|CapEff|NoNewPrivs):" /proc/$pid/status; id -u mcpanel-mc; sudo -u mcpanel curl -s --unix-socket /run/mc-panel/agent.sock http://agent/v1/health; sudo -u mcpanel curl -s --unix-socket /run/mc-panel-files/files.sock http://files/v1/health; sudo curl -s --max-time 3 --unix-socket /run/mc-panel-files/files.sock http://files/v1/health'
 ```
 
-(SSH nur mit abgeschalteter Sandbox.) Expected: fünfmal `active`; Socket `mcpanel-mc:mcpanel 660`; `Uid` viermal die UID von `mcpanel-mc`, `Groups` ohne die GID von `mcpanel`, `CapEff: 0000000000000000`, `NoNewPrivs: 1`; beide Health-Antworten `ok`; der root-Aufruf wird abgewiesen. Dann dem Nutzer `docs/dev/acceptance-tp3b.md` übergeben. Befunde: Issue, Fix auf eigenem `fix/…`-Branch mit PR (Teammate), erneut deployen.
+(SSH nur mit abgeschalteter Sandbox.) Expected: fünfmal `active`; Socket `mcpanel-mc:mcpanel 660`; `Uid` viermal die UID von `mcpanel-mc`, `Groups` ohne die GID von `mcpanel`, `CapEff: 0000000000000000`, `NoNewPrivs: 1`; alle drei Health-Antworten `ok` (auch der Aufruf als root). Dann dem Nutzer `docs/dev/acceptance-tp3b.md` übergeben. Befunde: Issue, Fix auf eigenem `fix/…`-Branch mit PR (Teammate), erneut deployen.
 
 - [ ] **Step 6: Abschluss nach erfolgreicher Abnahme** – auf neuem Branch `docs/tp3b-done` von `origin/main`:
 
@@ -1018,11 +1017,11 @@ gh pr checks <pr> --watch --interval 30
 
 ## Self-Review (dieser Datei)
 
-- Spec §3.1 (Prozess, Unit-Härtung, Socket-Aktivierung mit `mcpanel-files.socket`, `socket`/`socket_mode` ohne Aktivierung, `files.toml`, `files_socket`, Dev-Modus) → Aufgabe 18 Steps 2–3 (Test-VM mit Aktivierung), 6 (CI ohne Aktivierung, `socket_mode = "0666"`, Peer-UID-Beweis mit root und `nobody`), Doku Aufgabe 19 Step 2(e).
+- Spec §3.1 (Prozess, Unit-Härtung, Socket-Aktivierung mit `mcpanel-files.socket`, `socket`/`socket_mode` ohne Aktivierung, `files.toml`, `files_socket`, Dev-Modus) → Aufgabe 18 Steps 2–3 (Test-VM mit Aktivierung), 6 (CI ohne Aktivierung, `socket_mode = "0666"`, Peer-UID-Beweis mit `nobody` (root zugelassen)), Doku Aufgabe 19 Step 2(e).
 - Spec §4.2 (synchrone Vorprüfung): Aufgabe 18 Step 6 (9) erwartet für jedes bösartige Archiv exakt `400 invalid` bzw. `413 too_large` ohne neuen Job und ohne Ziel; `409 exists` beim nicht leeren Ziel.
 - Spec §3.3 (`instances/` `root:mcpanel-mc 0750`, `deleted/` 0700, Temp-Dateien) → Aufgabe 18 Step 6 (7), (8) und `no_tmp_left`.
 - Spec §7 (Mac, `make dev`, Test-VM, Release, Installer-Vorgaben, CI) → Aufgabe 18 Steps 2–5, Aufgabe 19 Step 2(e).
-- Spec §8 Zeile „CI-Abnahme“: Dienst als `mcpanel-mc` → (7)/(8) Prozessprüfung; Plugin-Jar hochladen → (8); `server.properties` geschwärzt → (8); Config ändern → (8); Server stoppen, Welt-Zip hochladen und entpacken → (9); Zip-Slip abgelehnt → (9); Symlink auf `/etc/shadow` liefert keinen Inhalt → (8); Schreibversuch nach `<instances_dir>/router` scheitert → (8) (Prozessrechte und Symlink-Ordner); zusätzlich Peer-UID (root abgewiesen), Socket-Modus, 409/413/415, Ordner-Zip ohne Geheimnisse, bösartige Archive (absolut, Symlink-Eintrag, zu viele Einträge).
+- Spec §8 Zeile „CI-Abnahme“: Dienst als `mcpanel-mc` → (7)/(8) Prozessprüfung; Plugin-Jar hochladen → (8); `server.properties` geschwärzt → (8); Config ändern → (8); Server stoppen, Welt-Zip hochladen und entpacken → (9); Zip-Slip abgelehnt → (9); Symlink auf `/etc/shadow` liefert keinen Inhalt → (8); Schreibversuch nach `<instances_dir>/router` scheitert → (8) (Prozessrechte und Symlink-Ordner); zusätzlich Peer-UID (`nobody` abgewiesen, root zugelassen), Socket-Modus, 409/413/415, Ordner-Zip ohne Geheimnisse, bösartige Archive (absolut, Symlink-Eintrag, zu viele Einträge).
 - Spec §9: Kriterium 1 → CI-Läufe in Aufgaben 18–20; Dienst-Seite von 2–4 → Aufgabe 18 Step 6; 2–7 manuell → `docs/dev/acceptance-tp3b.md`.
 - Nichts startet Container oder braucht root auf dem Mac; Host-verändernde Prüfungen nur in der CI und auf der Test-VM.
 - Mergen, Tags und Löschen von Remote-Branches nur durch bzw. nach Freigabe des Nutzers.
