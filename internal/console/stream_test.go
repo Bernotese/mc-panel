@@ -265,6 +265,41 @@ func TestStreamRunningStateAndReconnect(t *testing.T) {
 	}
 }
 
+// Review Focus #4: lines with the same timestamp within one agent stream are all forwarded;
+// only lines the agent repeats after a reconnect are dropped.
+func TestStreamKeepsLinesWithEqualTimestamps(t *testing.T) {
+	e := newEnv(t)
+	id := createInstance(t, e.db, "survival")
+	srv := e.streamServer(nil)
+	s1 := e.agent.prepare()
+	c := e.openStream(srv, e.admin(), id, "", "")
+	expectState(t, c.next(), true)
+	s1.send(t, agentapi.LogLine{TS: 50, Stream: agentapi.StreamOut, Line: "a"})
+	s1.send(t, agentapi.LogLine{TS: 50, Stream: agentapi.StreamOut, Line: "b"})
+	s1.send(t, agentapi.LogLine{TS: 49, Stream: agentapi.StreamErr, Line: "c"}) // stderr copied a bit late
+	for _, want := range []string{`"line":"a"`, `"line":"b"`, `"line":"c"`} {
+		if ev := c.next(); ev.Event != "line" || !strings.Contains(ev.Data, want) {
+			t.Fatalf("event = %+v, want %s", ev, want)
+		}
+	}
+	s1.finish()
+	expectState(t, c.next(), false)
+	s2 := e.agent.prepare()
+	e.timers.fire(t, 3*time.Second)
+	expectState(t, c.next(), true)
+	s2.send(t, agentapi.LogLine{TS: 50, Stream: agentapi.StreamOut, Line: "b"}) // repeated: dropped
+	s2.send(t, agentapi.LogLine{TS: 51, Stream: agentapi.StreamOut, Line: "d"})
+	s2.send(t, agentapi.LogLine{TS: 51, Stream: agentapi.StreamOut, Line: "e"})
+	for _, want := range []string{`"line":"d"`, `"line":"e"`} {
+		if ev := c.next(); ev.Event != "line" || !strings.Contains(ev.Data, want) {
+			t.Fatalf("after reconnect: event = %+v, want %s", ev, want)
+		}
+	}
+	if reqs := e.agent.requests(); len(reqs) != 2 || reqs[1].Since != 51 {
+		t.Fatalf("requests = %+v, want the reconnect with since = newest timestamp + 1", reqs)
+	}
+}
+
 // A stopped container: the agent delivers the history and ends at once. No "running" flapping.
 func TestStreamStoppedServerDoesNotFlap(t *testing.T) {
 	e := newEnv(t)
