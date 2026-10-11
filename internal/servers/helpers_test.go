@@ -45,6 +45,7 @@ type env struct {
 	box     *secretbox.Box
 	agent   *fakeAgent
 	catalog *fakeCatalog
+	gate    *fakeGate
 	logs    *bytes.Buffer // reconcile log output
 	h       *servers.Handler
 	mux     http.Handler
@@ -61,10 +62,11 @@ func newEnv(t *testing.T) *env {
 	e := &env{
 		t: t, db: db, clk: clock.NewFake(t0), rec: &audit.MemoryRecorder{}, box: box,
 		agent: newFakeAgent(), catalog: &fakeCatalog{}, logs: &bytes.Buffer{},
+		gate: &fakeGate{running: map[int64]bool{}},
 	}
 	e.h = servers.NewHandler(servers.Deps{
 		DB: db, Clock: e.clk, Audit: e.rec, Box: box, Instances: e.agent,
-		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog,
+		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog, Extract: e.gate,
 	})
 	mux := chi.NewRouter()
 	e.h.Routes(rbac.NewRouter(mux, rbac.NewDBChecker(db), e.clk))
@@ -288,4 +290,22 @@ func (f *fakeCatalog) Get(_ context.Context, t instancespec.Type) (catalog.Catal
 	defer f.mu.Unlock()
 	f.asked = append(f.asked, t)
 	return f.cat, f.err
+}
+
+// fakeGate is a servers.ExtractGate with a switch per server.
+type fakeGate struct {
+	mu      sync.Mutex
+	running map[int64]bool
+	asked   int
+}
+
+func (g *fakeGate) set(id int64, on bool) { g.mu.Lock(); g.running[id] = on; g.mu.Unlock() }
+
+func (g *fakeGate) askedCount() int { g.mu.Lock(); defer g.mu.Unlock(); return g.asked }
+
+func (g *fakeGate) ExtractRunning(_ context.Context, id int64) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.asked++
+	return g.running[id]
 }

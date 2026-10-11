@@ -115,17 +115,20 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		return nil, fmt.Errorf("auth: %w", err)
 	}
 	usersH := users.NewHandler(db, d.Clock, auditRec, disp)
+	// The files handler is the servers handler's extract gate: no start while an archive is
+	// extracted into a server (files spec §5.1).
+	filesH := serverfiles.NewHandler(serverfiles.Deps{
+		DB: db, Clock: d.Clock, Audit: auditRec, Files: d.Files, Instances: d.Instances,
+	})
 	serversH := servers.NewHandler(servers.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Box: box, Instances: d.Instances,
 		Catalog: catalog.New(catalog.Options{Clock: d.Clock, Version: d.Version}),
+		Extract: filesH,
 	})
 	checker := rbac.NewDBChecker(db)
 	consoleH := console.NewHandler(console.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Agent: d.Console,
 		Access: console.NewAccess(authH.Sessions(), checker),
-	})
-	filesH := serverfiles.NewHandler(serverfiles.Deps{
-		DB: db, Clock: d.Clock, Audit: auditRec, Files: d.Files, Instances: d.Instances,
 	})
 	auditH := auditapi.NewHandler(db, d.Clock, disp)
 	defenseH := defense.NewHandler(svc)
