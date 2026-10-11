@@ -2,12 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-mc-panel is a self-hosted Minecraft server panel: a Go backend with an embedded React SPA, released as static `linux/amd64` and `linux/arm64` binaries. Development happens locally on macOS (Apple Silicon); production is an Ubuntu 26.04 LTS VPS (panel and agent as systemd services behind Caddy). Project docs are written in German:
+mc-panel is a self-hosted Minecraft server panel: a Go backend with an embedded React SPA, released as static `linux/amd64` and `linux/arm64` binaries. Development happens locally on macOS (Apple Silicon); production is an Ubuntu 26.04 LTS VPS (panel, agent and the files service as systemd services behind Caddy). Project docs are written in German:
 
 - `docs/dev/README.md`: toolchain versions, CLI commands, CI jobs and how to reproduce them locally, lint conventions, release process, production setup.
 - `docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`: architecture, security requirements and the roadmap of sub-projects (1 foundation, 2 instances and 3a console are done).
 - `docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md`: Minecraft instances (sub-project 2); manual acceptance checklist in `docs/dev/acceptance-tp2.md`.
 - `docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md`: console, live log and player management (sub-project 3a); manual acceptance checklist in `docs/dev/acceptance-tp3a.md`.
+- `docs/superpowers/specs/2026-10-11-mc-panel-files-design.md`: file browser through the unprivileged files service (sub-project 3b); manual acceptance checklist in `docs/dev/acceptance-tp3b.md`.
 
 ## Working rules
 
@@ -21,7 +22,7 @@ mc-panel is a self-hosted Minecraft server panel: a Go backend with an embedded 
 
 ```bash
 (cd web && npm ci)          # once
-make dev                    # agent + `panel serve -dev` + Vite; UI at http://localhost:5173, all state in ./.dev/
+make dev                    # agent + files -dev + `panel serve -dev` + Vite; UI at http://localhost:5173, all state in ./.dev/
 printf '%s\n' '<pw>' | .dev/bin/panel admin create -dev -username admin   # first admin (while make dev runs)
 
 make check                  # the local check (format, vet, build for macOS + Linux, tsc)
@@ -32,7 +33,7 @@ make generate               # sqlc generate + regenerate web/src/api/schema.d.ts
 make test                   # go test ./... + vitest
 make test-race              # needs CGO_ENABLED=1 (Makefile sets it)
 make lint                   # golangci-lint + eslint + tsc
-make build                  # web build, then bin/panel and bin/agent
+make build                  # web build, then bin/panel, bin/agent and bin/files
 make clean                  # also wipes .dev/ (resets the dev DB)
 
 go test ./internal/rbac -run TestName                 # single Go test
@@ -48,16 +49,17 @@ CI fails if generated code is out of date. Commit regenerated files after you ch
 
 ## Architecture
 
-There are two binaries, built from `cmd/panel` and `cmd/agent`, and they are separated by privilege:
+There are three binaries, built from `cmd/panel`, `cmd/agent` and `cmd/files`, and they are separated by privilege:
 
 - **panel** runs unprivileged as user `mcpanel`. It serves the web app and `/api`, and in production it listens on a Unix socket behind Caddy. It owns the SQLite DB (`modernc.org/sqlite`, no CGO). It also provides the CLI subcommands `serve`, `version`, `admin create`, `admin unlock` and `audit verify`.
 - **agent** runs as root and exposes a narrow JSON API over a Unix socket (`internal/agent`). It accepts connections only from the configured panel UID, checked via peer credentials. It validates every request strictly, rejecting unknown fields, and checks ban prefixes in `agentapi`. It manages the nftables sets `mcpanel_jail4`/`mcpanel_jail6` in table `inet mcpanel` and is the only Docker client: Minecraft servers are containers built from a fixed, hardened template (`internal/agent/instances`), validated with `internal/agent/instancespec` (shared with the panel), and routed by hostname through the `mcpanel-router` container (mc-router, reloaded via SIGHUP). For the console it streams container logs (Docker `logs?follow`, sent to the panel as NDJSON), runs `rcon-cli` in the container via Docker exec (argv, no shell) and reads an instance's player list files through `os.Root` with `O_NOFOLLOW|O_NONBLOCK` (regular files ≤ 1 MiB only): the data directory is controlled by the container, so the root agent never follows a path out of it. In dev mode Docker is off unless `MCPANEL_DEV_DOCKER=1`. The design goal is that a compromised panel does not give root on the host. If the agent fails, the panel reports `503 agent_unavailable`; in-app jails still apply.
+- **files** runs as `mcpanel-mc` (the Minecraft containers' user) with no capabilities and `no_new_privs`, never as root (it refuses to start as root). It serves the file browser over its own Unix socket (`internal/files`; contract and path rules in `internal/files/filesapi`, shared with the panel) and accepts only the panel UID and root (like the agent); in production systemd creates the socket (`mcpanel-files.socket`, group `mcpanel`, 0660) and hands it over via `LISTEN_FDS`, so the service needs no supplementary groups. Every request opens `<instances_dir>/instances/<id>` with `os.Root`; symlinks are never followed (`Lstat` before, `Stat` + `os.SameFile` after opening), `.rcon-cli.*` and `.mcpanel-*` are hidden (case-insensitive), `rcon.password` in `server.properties` is redacted on read, download and folder zip (and kept on write). Uploads and downloads are streams, zip extraction is a job (pre-checked central directory, temp dir, re-counted sizes; one job per instance). The root agent never touches user-supplied file paths or archives.
 
 Linux-specific code sits behind interfaces and is chosen with build tags (`_linux.go` / `_other.go` / `_darwin.go`). On macOS the firewall is a no-op that only logs, and peer credentials use `LOCAL_PEERCRED`.
 
 ### Request path and routing
 
-`cmd/panel/app.go` (`buildApp`) is the only place that wires the packages together. Each feature package (`auth`, `defense`, `notify`, `users`, `servers`, `console`, `audit/auditapi`) has a `Handler` with a `Routes(api *rbac.Router)` method.
+`cmd/panel/app.go` (`buildApp`) is the only place that wires the packages together. Each feature package (`auth`, `defense`, `notify`, `users`, `servers`, `console`, `serverfiles`, `audit/auditapi`) has a `Handler` with a `Routes(api *rbac.Router)` method.
 
 - Register routes only through `*rbac.Router`, with paths relative to `/api`, and give every route a `Rule`: `rbac.Public()`, `Authenticated()`, `Admin()` or `Server(perm, "param")`, optionally with `.WithSudo()`. Registering a route without a rule panics, and `TestEveryRouteDeclaresARule` catches any route added to chi directly. Feature code never calls `Route()`; it is used once, for `/api`.
 - `cmd/panel/openapi_test.go` requires the registered routes to match the operations in `api/openapi.yaml` exactly. It also requires the `httpx` `Code*` error constants to match the contract's error enum. A new endpoint therefore needs a handler, an OpenAPI entry, regenerated TS types and an MSW mock handler (`web/src/mocks/handlers.test.ts` checks that every operation has a mock).
@@ -80,7 +82,8 @@ Linux-specific code sits behind interfaces and is chosen with build tags (`_linu
 - Version catalogs (`internal/servers/catalog`) fetch fixed upstream URLs with a contact User-Agent and a 1 h cache.
 - Ops, whitelist and bans belong to the server itself (`ops.json`, `whitelist.json`, `banned-players.json` in its data directory): the panel never sets `OPS`/`WHITELIST`; the Players tab reads the files through the agent and changes them through RCON. `whitelist_enabled` stays an instance property.
 - `internal/console` serves the live log as Server-Sent Events (`/servers/{id}/console/stream`: per-write deadlines via `http.ResponseController` instead of the server's `WriteTimeout`, reconnects to the agent across container restarts, re-checks session and permission every 30 s) and console commands and player actions as normal POST requests (CSRF, 30/min per user, audited as `server.console_command`/`server.player_action`). Player actions map an enum to fixed RCON commands; user text never becomes a command. `server.view` sees online players, `server.console` everything else.
-- Docker integration and the instance acceptance (`scripts/ci-instances.sh`, including the console endpoints) run only in CI.
+- `internal/serverfiles` exposes `/servers/{id}/files/*` (`server.files`, which means full trust: uploading a plugin runs code in the container). Upload and download bypass the 1 MiB body limit and the server timeouts (per-operation deadlines, no buffering, 2 uploads per user; only `PUT …/files/content` is exempt from the body limit as well); writes, uploads, renames, deletes, extracts and downloads are audited as `file.*`. Extracting needs a stopped server (agent state); while an extract job runs, power start/restart answer `409` and the reconcile loop does not start the server.
+- Docker integration and the instance acceptance (`scripts/ci-instances.sh`, including the console endpoints and the files service) run only in CI.
 
 ### Frontend (`web/`)
 
