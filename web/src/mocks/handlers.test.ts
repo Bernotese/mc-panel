@@ -184,7 +184,13 @@ describe('mock behaviour', () => {
   it('streams console lines as server-sent events', async () => {
     loginAs('admin')
     const read = async (id: number, until: string) => {
-      const res = await fetch(`${window.location.origin}/api/servers/${id}/console/stream`, { headers: { Accept: 'text/event-stream' } })
+      // Closing goes through the abort signal: the response body is tee'd on its way through MSW, so
+      // reader.cancel() would wait for the other branch and never settle.
+      const abort = new AbortController()
+      const res = await fetch(`${window.location.origin}/api/servers/${id}/console/stream`, {
+        headers: { Accept: 'text/event-stream' },
+        signal: abort.signal,
+      })
       expect(res.headers.get('Content-Type')).toBe('text/event-stream')
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
@@ -194,10 +200,11 @@ describe('mock behaviour', () => {
         if (done) break
         text += decoder.decode(value, { stream: true })
       }
-      await reader.cancel()
+      abort.abort()
+      void reader.cancel().catch(() => undefined)
       return text
     }
-    const running = await read(1, 'Done (')
+    const running = await read(1, 'RCON Client /127.0.0.1 started')
     expect(running).toContain('event: state\ndata: {"running":true}')
     expect(running).toMatch(/id: \d{16,}\nevent: line\ndata: \{"ts":\d+,"stream":"out","line":"\[\d\d:\d\d:\d\d INFO\]: Starting minecraft server/)
     expect(running).toContain('Thread RCON Client /127.0.0.1 started')
