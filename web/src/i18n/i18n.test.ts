@@ -61,6 +61,12 @@ const DYNAMIC_KEYS = [
   ),
   ...['empty', 'too_long', 'control'].map((p) => `console.validation.${p}`),
   ...['name_invalid', 'reason_too_long', 'reason_control'].map((p) => `players.validation.${p}`),
+  ...['file', 'dir', 'symlink', 'other'].map((k) => `files.type.${k}`),
+  ...['name', 'size', 'mtime'].map((k) => `files.sort.${k}`),
+  ...['empty', 'slash', 'invalid', 'dot_dot', 'control', 'too_long', 'component_too_long', 'hidden', 'too_large'].map(
+    (p) => `files.validation.${p}`,
+  ),
+  ...['queued', 'uploading', 'conflict', 'done', 'failed', 'cancelled', 'skipped'].map((s) => `files.uploads.status.${s}`),
   ...['not_configured', 'unknown', 'creating', 'starting', 'running', 'stopping', 'stopped', 'restarting', 'error'].map(
     (s) => `servers.state.${s}`,
   ),
