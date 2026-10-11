@@ -88,7 +88,7 @@ check_players() {
   python3 -I -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
-if not eval(sys.argv[2], {}, {"d": d}):
+if not eval("(" + sys.argv[2] + "\n)", {}, {"d": d}):
     sys.exit("players check failed: %s\n%s" % (sys.argv[2], json.dumps(d)))' "$1" "$2"
 }
 
