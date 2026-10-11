@@ -123,11 +123,19 @@ func (h *Handler) handleWrite(w http.ResponseWriter, r *http.Request) {
 	defer release()
 	// The editor may save up to filesapi.MaxJSONBytes (decision 1); UnlimitedBody exempts this
 	// route from the global 1 MiB limit. Over a slow connection that takes longer than the
-	// server's ReadTimeout: every read gets its own deadline, like an upload (review B6).
+	// server's ReadTimeout: every read gets its own deadline, like an upload (review B6), but
+	// the whole body must arrive within saveTimeout (it holds an editor slot meanwhile).
 	rc := http.NewResponseController(w)
+	until := h.ioClock.Now().Add(h.saveTimeout)
 	body := &deadlineReader{
-		r:   r.Body,
-		dl:  func() error { return ignoreUnsupported(rc.SetReadDeadline(h.ioClock.Now().Add(h.ioTimeout))) },
+		r: r.Body,
+		dl: func() error {
+			next := h.ioClock.Now().Add(h.ioTimeout)
+			if until.Before(next) {
+				next = until
+			}
+			return ignoreUnsupported(rc.SetReadDeadline(next))
+		},
 		eof: r.ContentLength == 0,
 	}
 	r.Body = http.MaxBytesReader(w, io.NopCloser(body), filesapi.MaxJSONBytes)

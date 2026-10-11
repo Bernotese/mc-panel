@@ -60,7 +60,9 @@ type Service struct {
 	// tempToken is part of every temp name this process creates, so CleanupTemp, which runs
 	// while the service already serves, removes only the leftovers of earlier runs.
 	tempToken string
-	dataDirRe *regexp.Regexp // host path of a data directory (publicMessage)
+	// Host paths at the start of a path in a message (publicMessage): inside a data directory,
+	// a data directory itself, and instances_dir.
+	dataPathRe, dataDirRe, baseDirRe *regexp.Regexp
 
 	mu      sync.Mutex
 	pending int64 // bytes announced by running writes, uploads and extract jobs, not yet on disk
@@ -73,7 +75,12 @@ func New(cfg Config) *Service {
 		zipDownloads:  make(chan struct{}, maxZipDownloads),
 		fileDownloads: make(chan struct{}, maxFileDownloads),
 		tempToken:     randomHex(4),
-		dataDirRe:     regexp.MustCompile(regexp.QuoteMeta(filepath.Join(cfg.InstancesDir, "instances")+string(filepath.Separator)) + `[0-9]+(/|\b)`),
+	}
+	instances := regexp.QuoteMeta(filepath.Join(cfg.InstancesDir, "instances") + string(filepath.Separator))
+	s.dataPathRe = regexp.MustCompile(pathStart + instances + `[0-9]+/`)
+	s.dataDirRe = regexp.MustCompile(pathStart + instances + `[0-9]+\b`)
+	if len(cfg.InstancesDir) > 1 {
+		s.baseDirRe = regexp.MustCompile(pathStart + regexp.QuoteMeta(cfg.InstancesDir))
 	}
 	s.jobs.scrub = s.publicMessage
 	if s.clock == nil {
@@ -262,21 +269,22 @@ func (s *Service) tempName(dir string) (string, error) {
 	return filesapi.Join(dir, tempPrefix+s.tempToken+"-"+hex.EncodeToString(b[:])), nil
 }
 
+// pathStart matches where a path can start in a message: its beginning, after white space,
+// a quote, a parenthesis or '='. A user's name that merely contains the host path is left alone.
+const pathStart = `(^|[\s"'(=])`
+
 // publicMessage removes host paths from a message that leaves the service (error answers and
 // job errors; spec §1.2: the panel and its users never learn the host layout). Files opened
 // through an os.Root carry the absolute path of the data directory in their errors: the part
 // up to the instance id is cut, so "write <instances_dir>/instances/1/world/x: …" becomes
-// "write world/x: …" and the data directory itself becomes ".". Any other mention of
-// instances_dir is replaced by "<instances_dir>". The log keeps the full message.
+// "write world/x: …" and the data directory itself becomes ".". Any other path starting with
+// instances_dir gets "<instances_dir>" instead. Only paths at a path start (pathStart) are
+// replaced. The log keeps the full message.
 func (s *Service) publicMessage(msg string) string {
-	msg = s.dataDirRe.ReplaceAllStringFunc(msg, func(m string) string {
-		if strings.HasSuffix(m, "/") {
-			return ""
-		}
-		return "."
-	})
-	if d := s.cfg.InstancesDir; len(d) > 1 {
-		msg = strings.ReplaceAll(msg, d, "<instances_dir>")
+	msg = s.dataPathRe.ReplaceAllString(msg, "$1")
+	msg = s.dataDirRe.ReplaceAllString(msg, "$1.")
+	if s.baseDirRe != nil {
+		msg = s.baseDirRe.ReplaceAllString(msg, "$1<instances_dir>")
 	}
 	return msg
 }

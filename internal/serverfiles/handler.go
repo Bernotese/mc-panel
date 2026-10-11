@@ -21,6 +21,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
@@ -28,9 +29,17 @@ import (
 // ioTimeout aborts an upload or download after this long without progress (spec §5.1).
 const ioTimeout = 60 * time.Second
 
-// maxEditorCalls bounds the editor reads and saves running at the same time panel-wide: each
-// holds up to max_text_bytes of text (a save up to filesapi.MaxJSONBytes of JSON) in memory.
-const maxEditorCalls = 8
+const (
+	// maxEditorCalls bounds the editor reads and saves running at the same time panel-wide:
+	// each holds up to max_text_bytes of text (a save up to filesapi.MaxJSONBytes of JSON) in
+	// memory.
+	maxEditorCalls = 8
+	// maxEditorCallsPerUser keeps one account from taking every editor slot.
+	maxEditorCallsPerUser = 2
+	// saveTimeout bounds reading the body of an editor save as a whole (on top of ioTimeout per
+	// read): a save that trickles in must not hold an editor slot for long.
+	saveTimeout = 2 * time.Minute
+)
 
 // Deps are the dependencies of the file handlers.
 type Deps struct {
@@ -51,14 +60,18 @@ type Handler struct {
 	clock     clock.Clock
 	ioClock   clock.Clock // wall clock for I/O deadlines (always clock.Real)
 	ioTimeout time.Duration
-	rec       audit.Recorder
-	files     filesapi.Client
-	inst      agentapi.InstancesClient
-	log       *slog.Logger
-	uploads   *userSlots
-	downloads *userSlots
-	editor    chan struct{} // at most maxEditorCalls reads and saves
-	pending   *pendingExtracts
+	// saveTimeout bounds reading an editor save (tests shorten it).
+	saveTimeout time.Duration
+	rec         audit.Recorder
+	files       filesapi.Client
+	inst        agentapi.InstancesClient
+	log         *slog.Logger
+	uploads     *userSlots
+	downloads   *userSlots
+	editor      chan struct{} // at most maxEditorCalls reads and saves
+	editors     *userSlots    // at most maxEditorCallsPerUser of them per user
+	zips        *userSlots    // at most maxZipsPerUser folder zips per user
+	pending     *pendingExtracts
 }
 
 func NewHandler(d Deps) *Handler {
@@ -78,7 +91,8 @@ func NewHandler(d Deps) *Handler {
 		q: store.New(d.DB), clock: d.Clock, ioClock: clock.Real{}, ioTimeout: ioTimeout,
 		rec: d.Audit, files: fc, inst: inst, log: log,
 		uploads: newUserSlots(maxUploadsPerUser), downloads: newUserSlots(maxDownloadsPerUser),
-		editor: make(chan struct{}, maxEditorCalls), pending: newPendingExtracts(),
+		editor: make(chan struct{}, maxEditorCalls), editors: newUserSlots(maxEditorCallsPerUser),
+		zips: newUserSlots(maxZipsPerUser), saveTimeout: saveTimeout, pending: newPendingExtracts(),
 	}
 }
 
@@ -275,16 +289,22 @@ func (h *Handler) extendWrite(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// editorSlot takes one of the panel-wide editor slots; on false it has answered 429.
+// editorSlot takes one of the user's editor slots and one of the panel-wide ones; on false it
+// has answered 429.
 func (h *Handler) editorSlot(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
-	select {
-	case h.editor <- struct{}{}:
-		return func() { <-h.editor }, true
-	default:
-		w.Header().Set("Retry-After", "5")
-		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "too many files are being opened or saved, try again shortly")
-		return nil, false
+	pr, _ := principal.From(r.Context()) // guaranteed by the rbac rule
+	releaseUser, ok := h.editors.acquire(pr.UserID)
+	if ok {
+		select {
+		case h.editor <- struct{}{}:
+			return func() { <-h.editor; releaseUser() }, true
+		default:
+			releaseUser()
+		}
 	}
+	w.Header().Set("Retry-After", "5")
+	httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "too many files are being opened or saved, try again shortly")
+	return nil, false
 }
 
 var errNoFiles = fmt.Errorf("%w: no file service configured", filesapi.ErrUnavailable)
