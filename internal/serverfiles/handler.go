@@ -52,6 +52,7 @@ type Handler struct {
 	inst      agentapi.InstancesClient
 	log       *slog.Logger
 	uploads   *uploadSlots
+	pending   *pendingExtracts
 }
 
 func NewHandler(d Deps) *Handler {
@@ -70,6 +71,7 @@ func NewHandler(d Deps) *Handler {
 	return &Handler{
 		q: store.New(d.DB), clock: d.Clock, ioClock: clock.Real{}, ioTimeout: ioTimeout,
 		rec: d.Audit, files: fc, inst: inst, log: log, uploads: newUploadSlots(),
+		pending: newPendingExtracts(),
 	}
 }
 
