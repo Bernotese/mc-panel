@@ -179,7 +179,7 @@ func activatedListener(getenv func(string) string, unsetenv func(string) error, 
 	if lpid == "" && lfds == "" {
 		return nil, nil
 	}
-	if p, err := strconv.Atoi(lpid); err != nil || p != pid {
+	if lpid != strconv.Itoa(pid) {
 		return nil, nil // meant for another process
 	}
 	if n, err := strconv.Atoi(lfds); err != nil || n != 1 {
