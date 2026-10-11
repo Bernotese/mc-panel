@@ -195,9 +195,11 @@ func (s *Service) Write(ctx context.Context, req filesapi.WriteRequest) (filesap
 		}
 		content = restorePassword(content, string(cur))
 	}
-	if err := s.reserve(req.ID, int64(len(content))); err != nil {
+	res, err := s.reserve(req.ID, int64(len(content)))
+	if err != nil {
 		return filesapi.WriteResponse{}, err
 	}
+	defer res.release()
 	if err := writeAtomic(root, clean, []byte(content), req.ExpectedMTime != nil); err != nil {
 		return filesapi.WriteResponse{}, err
 	}

@@ -21,6 +21,7 @@ import (
 const (
 	ioTimeout         = 60 * time.Second // stream deadline per read or write (spec §4.1)
 	uploadDrainTime   = 5 * time.Second  // see failEarly
+	uploadDrainBytes  = 64 << 20         // see failEarly
 	readHeaderTimeout = 5 * time.Second
 	requestTimeout    = 30 * time.Second
 )
@@ -303,11 +304,12 @@ func (s *Server) receive(r *http.Request, rc *http.ResponseController, body io.R
 }
 
 // failEarly answers an upload error while the client may still be sending the body. The
-// answer goes out at once with "Connection: close"; then the rest of the body is read and
-// discarded until the client closes the connection - a Go client (the panel) does so as soon
-// as it has read the answer - or uploadDrainTime has passed. Closing the connection right away
-// instead could reset it while the client is still writing, and the client would see a broken
-// connection instead of the answer.
+// answer goes out at once (complete, with Content-Length) and with "Connection: close"; then
+// the rest of the body is read and discarded until the client closes the connection - a Go
+// client (the panel) does so as soon as it has read the answer - or uploadDrainTime has
+// passed or uploadDrainBytes were read. Closing the connection right away instead could reset
+// it while the client is still writing, and the client would see a broken connection instead
+// of the answer.
 func (s *Server) failEarly(w http.ResponseWriter, r *http.Request, rc *http.ResponseController, err error) {
 	w.Header().Set("Connection", "close")
 	s.fail(w, r, "upload", err)
@@ -316,7 +318,7 @@ func (s *Server) failEarly(w http.ResponseWriter, r *http.Request, rc *http.Resp
 	}
 	_ = rc.Flush()
 	_ = rc.SetReadDeadline(s.io.Now().Add(uploadDrainTime))
-	_, _ = io.Copy(io.Discard, r.Body)
+	_, _ = io.CopyN(io.Discard, r.Body, uploadDrainBytes)
 }
 
 // download: GET ?id=&path=. Errors after the first byte abort the response (the client must

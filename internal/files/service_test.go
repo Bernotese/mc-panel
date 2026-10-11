@@ -124,15 +124,44 @@ func TestCleanupTempRemovesLeftovers(t *testing.T) {
 func TestReserve(t *testing.T) {
 	disk := &fakeDisk{avail: 10 << 10}
 	s, _ := newService(t, func(c *Config) { c.Disk = disk })
-	if err := s.reserve(1, 9<<10); err != nil { // 9 KiB + 1 KiB reserve = 10 KiB
+	r, err := s.reserve(1, 9<<10) // 9 KiB + 1 KiB reserve = 10 KiB
+	if err != nil {
 		t.Fatalf("exactly enough: %v", err)
 	}
-	if err := s.reserve(1, 9<<10+1); !errors.Is(err, filesapi.ErrInsufficientStorage) {
+	r.release()
+	if _, err := s.reserve(1, 9<<10+1); !errors.Is(err, filesapi.ErrInsufficientStorage) {
 		t.Fatalf("one byte too much: %v", err)
 	}
 	disk.err = errors.New("statfs broke")
-	if err := s.reserve(1, 1); err == nil || errors.Is(err, filesapi.ErrInsufficientStorage) {
+	if _, err := s.reserve(1, 1); err == nil || errors.Is(err, filesapi.ErrInsufficientStorage) {
 		t.Fatalf("statfs error must surface as an internal error: %v", err)
+	}
+}
+
+// Space announced by running uploads, writes and extract jobs counts until it has landed on
+// disk (then statfs shows it) or the operation ended.
+func TestReserveCountsInFlightOperations(t *testing.T) {
+	disk := &fakeDisk{avail: 10 << 10}
+	s, _ := newService(t, func(c *Config) { c.Disk = disk })
+	r1, err := s.reserve(1, 5<<10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.reserve(2, 5<<10); !errors.Is(err, filesapi.ErrInsufficientStorage) {
+		t.Fatalf("second reservation ignores the first: %v", err)
+	}
+	r1.landed(2 << 10) // 2 KiB written: statfs now reports them as used
+	disk.set(8 << 10)
+	r2, err := s.reserve(2, 4<<10) // 3 KiB still announced + 4 KiB + 1 KiB reserve = 8 KiB
+	if err != nil {
+		t.Fatalf("landed bytes still counted: %v", err)
+	}
+	r1.landed(10 << 10) // more than announced: never below zero
+	r1.release()
+	r2.release()
+	r2.release() // idempotent
+	if s.pending != 0 {
+		t.Fatalf("pending after release: %d", s.pending)
 	}
 }
 

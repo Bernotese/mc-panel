@@ -9,12 +9,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/Bernotese/mc-panel/internal/clock"
@@ -50,6 +52,9 @@ type Service struct {
 	disk    DiskSpace
 	uploads chan struct{} // at most maxUploads concurrent uploads
 	jobs    *jobs
+
+	mu      sync.Mutex
+	pending int64 // bytes announced by running writes, uploads and extract jobs, not yet on disk
 }
 
 func New(cfg Config) *Service {
@@ -270,15 +275,58 @@ func fsErr(err error) error {
 	return err
 }
 
-// reserve checks that need more bytes still leave the configured reserve free.
-func (s *Service) reserve(id, need int64) error {
+// reserve checks that need more bytes still leave the configured reserve free, counting the
+// bytes that running operations announced but have not written yet (all data directories
+// share one file system). The caller reports written bytes with landed and must release the
+// reservation when it ends.
+func (s *Service) reserve(id, need int64) (*reservation, error) {
+	need = max(need, 0)
 	avail, err := s.disk.Available(s.instanceDir(id))
 	if err != nil {
-		return fmt.Errorf("check free space: %w", err)
+		return nil, fmt.Errorf("check free space: %w", err)
 	}
-	want := uint64(max(need, 0)) + uint64(max(s.cfg.Limits.ReserveBytes, 0))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	want := uint64(need) + uint64(max(s.cfg.Limits.ReserveBytes, 0)) + uint64(s.pending)
 	if avail < want {
-		return fmt.Errorf("%w: %d bytes free, %d bytes needed including the reserve", filesapi.ErrInsufficientStorage, avail, want)
+		return nil, fmt.Errorf("%w: %d bytes free, %d bytes needed including the reserve and running operations",
+			filesapi.ErrInsufficientStorage, avail, want)
 	}
-	return nil
+	s.pending += need
+	return &reservation{s: s, left: need}, nil
+}
+
+// reservation is disk space announced by one running operation.
+type reservation struct {
+	s    *Service
+	left int64 // guarded by s.mu
+}
+
+// landed reports n bytes written to disk: statfs shows them now, so they leave the reservation.
+func (r *reservation) landed(n int64) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	d := min(max(n, 0), r.left)
+	r.left -= d
+	r.s.pending -= d
+}
+
+// release returns what is left of the reservation; it may be called more than once.
+func (r *reservation) release() {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	r.s.pending -= r.left
+	r.left = 0
+}
+
+// landingWriter reports every write to a reservation.
+type landingWriter struct {
+	w   io.Writer
+	res *reservation
+}
+
+func (l landingWriter) Write(p []byte) (int, error) {
+	n, err := l.w.Write(p)
+	l.res.landed(int64(n))
+	return n, err
 }
