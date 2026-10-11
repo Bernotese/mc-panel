@@ -50,9 +50,11 @@ func (s *Service) Upload(ctx context.Context, id int64, p string, overwrite bool
 	case !overwrite:
 		return filesapi.UploadResponse{}, fmt.Errorf("%w: %s", filesapi.ErrExists, clean)
 	}
-	if err := s.reserve(id, size); err != nil {
+	res, err := s.reserve(id, size)
+	if err != nil {
 		return filesapi.UploadResponse{}, err
 	}
+	defer res.release()
 
 	tmp, err := tempName(parentOf(clean))
 	if err != nil {
@@ -68,7 +70,7 @@ func (s *Service) Upload(ctx context.Context, id int64, p string, overwrite bool
 			_ = root.Remove(tmp)
 		}
 	}()
-	n, err := io.Copy(f, io.LimitReader(body, size+1))
+	n, err := io.Copy(landingWriter{w: f, res: res}, io.LimitReader(body, size+1))
 	if err == nil && n != size {
 		err = fmt.Errorf("%w: received %d bytes, Content-Length announced %d", filesapi.ErrInvalid, n, size)
 	}
@@ -110,7 +112,7 @@ func (s *Service) Download(ctx context.Context, id int64, p string, start func(i
 	switch {
 	case fi.IsDir():
 		start(true, -1)
-		return writeDirZip(ctx, root, clean, w, s.cfg.Limits.MaxTextBytes)
+		return writeDirZip(ctx, root, clean, w, s.cfg.Limits)
 	case !fi.Mode().IsRegular():
 		return fmt.Errorf("%w: %s is not a regular file", filesapi.ErrNotRegular, clean)
 	case isServerProps(clean):

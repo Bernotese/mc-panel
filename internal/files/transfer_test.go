@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -263,5 +264,92 @@ func TestDownloadDirZip(t *testing.T) {
 	}
 	if !strings.Contains(got["server.properties"], "rcon.password=********") || got["plugins/.rcon-cli.env"] != "nested, visible" {
 		t.Fatalf("root zip: %v", got)
+	}
+}
+
+func TestUploadsReserveSpaceWhileRunning(t *testing.T) {
+	disk := &fakeDisk{avail: 10 << 10}
+	s, _ := newService(t, func(c *Config) { c.Disk = disk })
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Upload(ctx, 1, "slow.bin", false, 5<<10, blockingReader{release})
+		done <- err
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.Lock()
+		p := s.pending
+		s.mu.Unlock()
+		if p == 5<<10 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("first upload did not reserve its size")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, err := upload(s, "second.bin", false, strings.Repeat("x", 5<<10)); !errors.Is(err, filesapi.ErrInsufficientStorage) {
+		t.Fatalf("second upload ignores the running one: %v", err)
+	}
+	close(release)
+	<-done // the first one fails (short body) and frees its reservation
+	if _, err := upload(s, "second.bin", false, strings.Repeat("x", 5<<10)); err != nil {
+		t.Fatalf("reservation not released: %v", err)
+	}
+}
+
+func TestDirZipSkipsUnsafeNames(t *testing.T) {
+	s, data := newService(t)
+	put(t, data, "world/level.dat", "lvl")
+	for _, bad := range []string{`..\..\evil.bat`, "ctl\x01name", "bad\xffutf8", `sub\dir`} {
+		if err := os.WriteFile(filepath.Join(data, "world", bad), []byte("evil"), 0o644); err != nil {
+			t.Logf("file system refuses %q: %v", bad, err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(data, "world", `dir\..`), 0o755); err == nil {
+		put(t, data, "world/dir\\../inner.txt", "evil")
+	}
+	var d download
+	if err := s.Download(ctx, 1, "world", d.start, &d.body); err != nil {
+		t.Fatal(err)
+	}
+	got := zipNames(t, d.body.Bytes())
+	for name, content := range got {
+		if clean, err := filesapi.CleanPath(strings.TrimSuffix(name, "/")); err != nil || clean != strings.TrimSuffix(name, "/") {
+			t.Errorf("zip entry %q is not a clean path", name)
+		}
+		if content == "evil" {
+			t.Errorf("zip entry %q has content of an unsafe name", name)
+		}
+	}
+	if got["world/level.dat"] != "lvl" {
+		t.Fatalf("safe entry missing: %v", got)
+	}
+}
+
+func TestDirZipLimits(t *testing.T) {
+	s, data := newService(t, func(c *Config) {
+		c.Limits.MaxExtractEntries = 5
+		c.Limits.MaxTextBytes = 16
+	})
+	put(t, data, "server.properties", "rcon.password=s3cret\nmotd=far too long for the limit\n")
+	put(t, data, "a.txt", "a")
+	// An oversized server.properties is left out, the rest is zipped.
+	var d download
+	if err := s.Download(ctx, 1, "", d.start, &d.body); err != nil {
+		t.Fatalf("oversized server.properties aborts the zip: %v", err)
+	}
+	got := zipNames(t, d.body.Bytes())
+	if _, ok := got["server.properties"]; ok || got["a.txt"] != "a" {
+		t.Fatalf("zip: %v", got)
+	}
+	// More entries than max_extract_entries: the zip is refused (its directory is held in memory).
+	for i := range 6 {
+		put(t, data, "many/f"+strconv.Itoa(i), "x")
+	}
+	d = download{}
+	if err := s.Download(ctx, 1, "many", d.start, &d.body); !errors.Is(err, filesapi.ErrTooLarge) {
+		t.Fatalf("too many entries: %v, want ErrTooLarge", err)
 	}
 }

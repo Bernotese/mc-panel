@@ -74,11 +74,13 @@ func (s *Service) Extract(ctx context.Context, req filesapi.ExtractRequest) (fil
 	if err != nil {
 		return filesapi.Job{}, err
 	}
-	if err := s.reserve(req.ID, plan.bytes); err != nil {
+	res, err := s.reserve(req.ID, plan.bytes)
+	if err != nil {
 		return filesapi.Job{}, err
 	}
 	job, err := s.jobs.start(req.ID, src, dest, plan, s.clock.Now())
 	if err != nil {
+		res.release()
 		return filesapi.Job{}, err
 	}
 	handedOver = true
@@ -87,7 +89,8 @@ func (s *Service) Extract(ctx context.Context, req filesapi.ExtractRequest) (fil
 		defer s.jobs.wg.Done()
 		defer root.Close()
 		defer f.Close()
-		err := s.extract(s.jobs.ctx, root, zr, req.ID, dest)
+		defer res.release()
+		err := s.extract(s.jobs.ctx, root, zr, req.ID, dest, res)
 		if err != nil {
 			s.log.Warn("files: extract failed", "id", req.ID, "archive", src, "dest", dest, "err", err)
 		}
@@ -173,7 +176,7 @@ func checkArchive(zr *zip.Reader, lim config.FilesLimits) (archivePlan, error) {
 
 // extract unpacks into a temp folder next to dest, counting the bytes actually written, and
 // renames it to dest when everything succeeded. On any error the temp folder is removed.
-func (s *Service) extract(ctx context.Context, root *os.Root, zr *zip.Reader, id int64, dest string) error {
+func (s *Service) extract(ctx context.Context, root *os.Root, zr *zip.Reader, id int64, dest string, res *reservation) error {
 	tmp, err := tempName(parentOf(dest))
 	if err != nil {
 		return err
@@ -209,6 +212,7 @@ func (s *Service) extract(ctx context.Context, root *os.Root, zr *zip.Reader, id
 		}
 		n, err := extractFile(root, zf, target, budget)
 		budget -= n
+		res.landed(n)
 		if err != nil {
 			return err
 		}
