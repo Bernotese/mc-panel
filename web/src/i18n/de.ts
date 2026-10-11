@@ -598,6 +598,7 @@ export const de = {
       overwrite: 'Überschreiben',
       discard_title: 'Ungespeicherte Änderungen verwerfen?',
       discard_description: 'Deine Änderungen an {{name}} gehen verloren.',
+      busy: 'Gerade werden zu viele Dateien gleichzeitig bearbeitet – bitte gleich noch einmal versuchen.',
       discard_tab: 'Deine ungespeicherten Änderungen im Editor gehen verloren.',
       discard: 'Verwerfen',
     },

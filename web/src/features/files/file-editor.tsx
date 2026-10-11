@@ -3,13 +3,13 @@ import { ArrowLeft } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { isApiError } from '@/api/errors'
+import { isApiError, isSudoCancelled } from '@/api/errors'
 import type { FileContent, Server } from '@/api/types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { errorMessage, useErrorToast } from '@/lib/error-message'
+import { errorMessage } from '@/lib/error-message'
 import { downloadUrl, fileContentKey, fileListsKey, readFile, writeFile } from './api'
 import { editorLanguage } from './format'
 import { baseName } from './path'
@@ -27,7 +27,11 @@ export interface FileEditorProps {
 export function FileEditor({ server, path, onClose, onDirtyChange, onOpenSettings }: FileEditorProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const notifyError = useErrorToast()
+  // The panel limits editor reads and saves (per account and in total): say so instead of "too many attempts".
+  const message = (err: unknown) => (isApiError(err, 'rate_limited') ? t('files.editor.busy') : errorMessage(err, t))
+  const notifyError = (err: unknown) => {
+    if (!isSudoCancelled(err)) toast.error(message(err))
+  }
   const contentKey = fileContentKey(server.id, path)
   const name = baseName(path)
   const file = useQuery({
@@ -116,7 +120,7 @@ export function FileEditor({ server, path, onClose, onDirtyChange, onOpenSetting
       }
       return (
         <p role="alert" className="text-destructive text-sm">
-          {errorMessage(file.error, t)}
+          {message(file.error)}
         </p>
       )
     }
