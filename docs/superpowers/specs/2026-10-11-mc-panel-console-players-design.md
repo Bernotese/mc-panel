@@ -98,12 +98,12 @@ Fehler wie bisher als `agentapi.ErrorResponse` (`{error, code}`); neue Werte fü
 
 ### 5.3 RCON
 
-- `id` > 0; `command`: 1–1000 Bytes, gültiges UTF-8, kein Zeichen < `0x20` und kein `0x7f` (also auch kein Zeilenumbruch oder Tab), nicht nur Leerzeichen.
-- Ablauf: Container inspizieren (fehlt er → `404 not_found`, läuft er nicht → `409 not_running`), `POST /containers/{id}/exec` mit `{"Cmd": ["rcon-cli", command], "User": "<uid>:<gid>", "WorkingDir": "/data", "Env": ["HOME=/data"], "AttachStdout": true, "AttachStderr": true, "AttachStdin": false, "Tty": false}`, dann `POST /exec/{id}/start` mit `{"Detach": false, "Tty": false}` (Antwort-Body ist der Multiplex-Stream, kein Hijack), danach `GET /exec/{id}/json` für den Exit-Code.
+- `id` > 0; `command`: 1–1000 Bytes, gültiges UTF-8, kein Zeichen < `0x20` und kein `0x7f` (also auch kein Zeilenumbruch oder Tab), nicht nur Leerzeichen, und kein führendes `-` (nach optionalen Leerzeichen und höchstens einem `/`), damit der Befehl nie als Option von `rcon-cli` gelesen wird.
+- Ablauf: Container inspizieren (fehlt er → `404 not_found`, läuft er nicht → `409 not_running`), `POST /containers/{id}/exec` mit `{"Cmd": ["rcon-cli", "--", command], "User": "<uid>:<gid>", "WorkingDir": "/data", "Env": ["HOME=/data"], "AttachStdout": true, "AttachStderr": true, "AttachStdin": false, "Tty": false}`, dann `POST /exec/{id}/start` mit `{"Detach": false, "Tty": false}` (Antwort-Body ist der Multiplex-Stream, kein Hijack), danach `GET /exec/{id}/json` für den Exit-Code.
 - `uid:gid` ist `mcpanel-mc` (wie der Container selbst). `rcon-cli` steht fest im Code; nur die Integrationstests tauschen es über die Manager-Konfiguration (`RconCommand`, Default `rcon-cli`) gegen ein busybox-Programm.
 - Timeout 10 s für den gesamten Ablauf; Ausgabe (stdout und stderr zusammen) höchstens 64 KiB, danach abgeschnitten mit Hinweis `[… gekürzt]`.
 - Exit-Code ≠ 0 (z. B. RCON während des Starts noch nicht bereit) → `503` mit Code `rcon_unavailable` und den ersten 500 Zeichen der Ausgabe in `error`. Exit-Code 0 → `200 {output}` mit der Ausgabe als Text (Minecraft-`§`-Formatcodes bleiben erhalten).
-- RCON-Aufrufe laufen nicht über die serielle Warteschlange der Instanz (TP2 §5.1), weil sie den Container-Zustand nicht ändern. Höchstens 4 gleichzeitige Aufrufe pro Instanz, sonst `429`.
+- RCON-Aufrufe laufen nicht über die serielle Warteschlange der Instanz (TP2 §5.1), weil sie den Container-Zustand nicht ändern. Höchstens 4 gleichzeitige Aufrufe pro Instanz, sonst `429`. Beim Herunterfahren bricht der agent laufende Konsolen-Aufrufe und Spielerlisten-Lesungen ab (das panel sieht eine abgebrochene Verbindung und meldet `503 agent_unavailable`).
 
 ### 5.4 Spielerlisten
 
@@ -111,7 +111,8 @@ Fehler wie bisher als `agentapi.ErrorResponse` (`{error, code}`); neue Werte fü
 - Das Verzeichnis gehört dem Container-Benutzer; der root-agent liest also Dateien, die ein kompromittierter Server kontrolliert. Deshalb:
   - Öffnen über `os.Root` auf dem Datenverzeichnis (keine Auflösung von Symlinks aus dem Verzeichnis heraus, kein `..`), mit `O_RDONLY|O_NOFOLLOW|O_NONBLOCK` (kein Hängen an einer FIFO, kein Folgen eines Symlinks als letztem Element).
   - Nach dem Öffnen `fstat`: nur reguläre Dateien, höchstens 1 MiB; gelesen werden höchstens 1 MiB + 1 Byte.
-  - Inhalte werden geparst und nur die Felder unten weitergegeben; Strings auf 256 Zeichen gekürzt, Listen auf 1000 Einträge.
+  - Inhalte werden geparst und nur die Felder unten weitergegeben; Strings auf 256 Zeichen gekürzt, Listen auf 1000 Einträge (das Dekodieren endet nach 1000 Einträgen).
+  - Höchstens 2 Lesungen gleichzeitig im agent, sonst `429 busy`.
 - Antwort:
   - `ops`: `[{uuid, name, level}]`
   - `whitelist`: `[{uuid, name}]`
@@ -155,9 +156,9 @@ Alle Routen über `*rbac.Router`, beschrieben in `api/openapi.yaml`, mit MSW-Moc
   - `event: state`, `data: {"running": true|false}` – beim ersten erfolgreichen Öffnen des agent-Streams `true`, bei dessen Ende `false`.
   - Alle 15 s ein Kommentar (`: ping`) als Heartbeat.
 - Start: Mit Header `Last-Event-ID` (gültige Zahl) öffnet das panel den agent-Stream mit `since` = diesem Wert + 1 ns, sonst mit `tail` = 500. Der Query-Parameter `tail` (0–1000) überschreibt den Default.
-- Endet der agent-Stream oder schlägt das Öffnen fehl (`404`, `docker_unavailable`, agent weg), sendet das panel einmalig `state {running: false}` und versucht es alle 3 s erneut mit `since` = letzter gesehener Zeitstempel. So läuft das Log über Neustarts und Neuanlagen des Containers weiter, ohne doppelte Zeilen.
+- Endet der agent-Stream oder schlägt das Öffnen fehl (`404`, `docker_unavailable`, agent weg), sendet das panel einmalig `state {running: false}` und versucht es erneut mit `since` = letzter gesehener Zeitstempel. So läuft das Log über Neustarts und Neuanlagen des Containers weiter, ohne doppelte Zeilen. Die Wartezeit beginnt bei 3 s und verdoppelt sich bis 30 s, solange weder eine Zeile noch ein Zustandswechsel ankommt (gestoppter Server, agent weg oder ausgelastet); jede Zeile bzw. jeder Zustandswechsel setzt sie zurück. Ein `429 busy` des agent wird auf Info-Ebene geloggt.
 - Prüfung während des Streams (über `clock.Clock`, alle 30 s): Session gültig (nicht abgelaufen, nicht widerrufen, Stufe voll angemeldet), Benutzer existiert, Recht `server.console` (bzw. Admin) besteht noch, Server existiert noch. Fällt eine Prüfung durch, schließt das panel den Stream. Der Stream verlängert die Session nicht (`Touch` nur beim Öffnen wie bei jedem Request).
-- Höchstens 4 gleichzeitige Streams pro Benutzer im panel, sonst `429 rate_limited`. Beim Herunterfahren schließt das panel alle Streams.
+- Höchstens 4 gleichzeitige Streams pro Benutzer im panel, sonst `429 rate_limited`. Beim Herunterfahren schließt das panel alle Streams; das Herunterfahren wartet höchstens 20 s (länger als der RCON-Aufruf mit 15 s).
 
 ### 6.3 Online-Spieler
 
@@ -174,6 +175,7 @@ Alle Routen über `*rbac.Router`, beschrieben in `api/openapi.yaml`, mit MSW-Moc
 - Das panel entfernt ein führendes `/` und prüft wie der agent (§5.3); Verstoß → `400 validation_failed`.
 - Rate-Limit: 30 Befehle pro Minute pro Benutzer (Token-Bucket, Burst 10, Muster wie `internal/servers/powerlimit.go`), gemeinsam für Befehle und Spieler-Aktionen; Überschreitung → `429 rate_limited` mit `Retry-After`.
 - Fehler: `409 instance_not_running` (agent `not_running`), `503 rcon_unavailable`.
+- Der RCON-Aufruf wird nicht abgebrochen, wenn der Browser die Verbindung verlässt; der Audit-Eintrag (`server.console_command`, §6.7) folgt der Antwort des agent, nicht dem Verbleib des Clients. Das gilt ebenso für Spieler-Aktionen (§6.5).
 - Kein Sudo (würde bei jedem Befehl stören).
 
 ### 6.5 Spieler-Aktionen
@@ -225,8 +227,8 @@ Tabs (nur mit passendem Recht sichtbar): Übersicht · **Konsole** · **Spieler*
 
 - **Log-Ansicht:** virtualisierte Liste (`@tanstack/react-virtual`, einzige neue Abhängigkeit), Ringpuffer von 5000 Zeilen.
 - **Darstellung:** eigener Parser für ANSI-SGR-Farben (16 Farben, fett) und Minecraft-`§`-Codes zu Spans; kein `dangerouslySetInnerHTML`. Zeilen mit `WARN` bzw. `ERROR` sind farblich hervorgehoben; stderr-Zeilen ebenso.
-- **Werkzeuge:** Textfilter; Schalter „RCON-Meldungen ausblenden“ (Standard an, filtert die Zeilen aus §3.3); Auto-Scroll, der beim Hochscrollen pausiert, mit Knopf „Neue Zeilen ↓“; Verbindungsanzeige (verbunden, Server gestoppt, verbinde neu); „Kopieren“ der sichtbaren Zeilen.
-- **Befehlszeile:** am unteren Rand (auch mobil), Verlauf mit ↑/↓ (nur im Speicher, 100 Einträge). Ein gesendeter Befehl erscheint als eigener, abgesetzter Block `› befehl` mit der RCON-Antwort darunter, eingereiht in die Log-Ansicht. Bei gestopptem Server gesperrt mit Hinweis. Unter der Zeile: „`stop` beendet den Server, Docker startet ihn sofort neu – zum Stoppen den Power-Button verwenden.“
+- **Werkzeuge:** Textfilter; Schalter „RCON-Meldungen ausblenden“ (Standard an, filtert die Zeilen aus §3.3); Auto-Scroll, der beim Hochscrollen pausiert, mit Knopf „Neue Zeilen ↓“; Verbindungsanzeige (verbunden, Server gestoppt, verbinde neu, „Zu viele offene Konsolen – schließe eine andere.“ bei `429` des Streams); „Kopieren“ der sichtbaren Zeilen.
+- **Befehlszeile:** am unteren Rand (auch mobil), Verlauf mit ↑/↓ (nur im Speicher, 100 Einträge). Ein gesendeter Befehl erscheint als eigener, abgesetzter Block `› befehl` mit der RCON-Antwort darunter, eingereiht in die Log-Ansicht. Bei gestopptem Server sowie bei `forbidden`/`not_found` des Streams gesperrt, mit Hinweis. Unter der Zeile: „`stop` beendet den Server, Docker startet ihn sofort neu – zum Stoppen den Power-Button verwenden.“
 - **Verbindung:** `EventSource` (Same-Origin, Cookie). Bei Abbruch verbindet der Browser selbst neu (mit `Last-Event-ID`); bei `401`/`403` schließt die Ansicht die Verbindung und zeigt den passenden Hinweis.
 
 ### 7.3 Spieler (`server.console`)
@@ -235,6 +237,7 @@ Tabs (nur mit passendem Recht sichtbar): Übersicht · **Konsole** · **Spieler*
 - **Whitelist:** Name hinzufügen, entfernen; Hinweis, ob die Whitelist aktiv ist, mit Link zur Einstellung (Admin).
 - **Ops:** hinzufügen, entfernen; Level anzeigen.
 - **Bans:** Name, Grund, von, seit, bis; Entbannen.
+- Ops und Whitelist zeigen eine Warnung „Neustart nötig“, solange der Server noch mit der alten Umgebung (TP2) läuft; die Karte „Online“ zeigt bei gestopptem Server keine Liste. Die Beschriftung der Op-Aktionen lautet „Op“ bzw. „Deop“. Die Tab-Leiste scrollt auf dem Handy horizontal.
 - Listen sind auch bei gestopptem Server lesbar; Ändern nur bei laufendem Server (Knöpfe sonst gesperrt, Hinweis). Unlesbare Dateien (`errors`) zeigen einen Hinweis an der betroffenen Liste.
 - Nach jeder Aktion: Toast mit der RCON-Antwort, danach Neuladen von Listen und Online-Spielern.
 
