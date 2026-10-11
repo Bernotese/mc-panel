@@ -29,8 +29,8 @@ func (e *env) startInstance(t *testing.T, id int64, name string) {
 
 // collectLogs runs Logs in the background: lines arrive on lines, the result on done,
 // started receives the running flag of every start call (the tests check it was exactly one).
-func collectLogs(ctx context.Context, m *instances.Manager, req agentapi.LogsRequest) (lines chan agentapi.LogLine, started chan bool, done chan error) {
-	lines, started, done = make(chan agentapi.LogLine, 64), make(chan bool, 2), make(chan error, 1)
+func collectLogs(ctx context.Context, m *instances.Manager, req agentapi.LogsRequest) (chan agentapi.LogLine, chan bool, chan error) {
+	lines, started, done := make(chan agentapi.LogLine, 64), make(chan bool, 2), make(chan error, 1)
 	go func() {
 		done <- m.Logs(ctx, req, func(running bool) { started <- running }, func(l agentapi.LogLine) error {
 			lines <- l
