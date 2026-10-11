@@ -17,6 +17,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/auth"
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/console"
 	"github.com/Bernotese/mc-panel/internal/defense"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/notify"
@@ -61,7 +62,10 @@ type appDeps struct {
 	// Instances is the agent's instance API (in production the same *agent.Client as Agent);
 	// nil means no agent: the panel works, instance states are "unknown".
 	Instances agentapi.InstancesClient
-	Version   string // panel version, sent in the User-Agent of catalog requests
+	// Console is the agent's console API (logs, RCON, player lists; the same *agent.Client);
+	// nil means no agent: console routes answer agent_unavailable.
+	Console agentapi.ConsoleClient
+	Version string // panel version, sent in the User-Agent of catalog requests
 }
 
 type app struct {
@@ -108,6 +112,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		DB: db, Clock: d.Clock, Audit: auditRec, Box: box, Instances: d.Instances,
 		Catalog: catalog.New(catalog.Options{Clock: d.Clock, Version: d.Version}),
 	})
+	consoleH := console.NewHandler(console.Deps{DB: db, Clock: d.Clock, Audit: auditRec, Agent: d.Console})
 	auditH := auditapi.NewHandler(db, d.Clock, disp)
 	defenseH := defense.NewHandler(svc)
 	notifyH := notify.NewHandler(notify.HandlerDeps{
@@ -144,6 +149,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		notifyH.Routes(api)
 		usersH.Routes(api)
 		serversH.Routes(api)
+		consoleH.Routes(api)
 		auditH.Routes(api)
 	})
 	mux.Handle("/*", webui.Handler())
@@ -162,6 +168,6 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		Mux:     mux,
 		Routes:  rt.Routes(),
 		Run:     run,
-		Close:   func() { _ = closeGeo() },
+		Close:   func() { consoleH.Shutdown(); _ = closeGeo() },
 	}, nil
 }

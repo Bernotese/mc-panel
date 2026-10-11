@@ -60,6 +60,29 @@ export type UnknownContainer = Schemas['UnknownContainer']
 export type CreateServerRequest = Schemas['CreateServerRequest']
 export type UpdateServerRequest = Schemas['UpdateServerRequest']
 export type UpdateServerSettingsRequest = Schemas['UpdateServerSettingsRequest']
+export type ConsoleCommandRequest = Schemas['ConsoleCommandRequest']
+export type ConsoleCommandResponse = Schemas['ConsoleCommandResponse']
+export type OnlinePlayer = Schemas['OnlinePlayer']
+export type OnlinePlayers = Schemas['OnlinePlayers']
+export type PlayerOp = Schemas['PlayerOp']
+export type PlayerEntry = Schemas['PlayerEntry']
+export type PlayerBan = Schemas['PlayerBan']
+export type PlayerLists = Schemas['PlayerLists']
+export type PlayerListFile = PlayerLists['errors'][number]
+export type PlayerAction = Schemas['PlayerAction']
+export type PlayerActionRequest = Schemas['PlayerActionRequest']
+
+/** SSE `line` event of GET /servers/{id}/console/stream; the event id is the Docker timestamp in ns. */
+export interface ConsoleLineEvent {
+  ts: number // unix ms
+  stream: 'out' | 'err'
+  line: string
+}
+
+/** SSE `state` event: the container log stream (re)opened (true) or ended (false). */
+export interface ConsoleStateEvent {
+  running: boolean
+}
 
 export const ALL_PERMISSIONS: readonly Permission[] = [
   'server.view',

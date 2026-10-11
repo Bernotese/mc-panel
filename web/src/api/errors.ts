@@ -62,6 +62,8 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   'docker_unavailable',
   'base_domain_missing',
   'catalog_unavailable',
+  'instance_not_running',
+  'rcon_unavailable',
   'internal',
 ])
 

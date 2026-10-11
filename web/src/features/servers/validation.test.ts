@@ -3,14 +3,12 @@ import i18n from '@/i18n'
 import {
   memoryMiBFromGiB,
   normalizeBaseDomain,
-  parsePlayerNames,
   validateBaseDomain,
   validateCurseForgeKey,
   validateIntInRange,
   validateLoaderVersion,
   validateMemoryMiB,
   validateModpack,
-  validatePlayerNames,
   validateServerName,
   validateText,
   validateVersion,
@@ -107,15 +105,6 @@ describe('properties', () => {
     expect(validateIntInRange('20', 1, 500)).toBeNull()
     expect(validateIntInRange('0', 0, 256)).toBeNull()
     for (const v of ['0', '501', '', '2.5', '-1', 'abc']) expectError(validateIntInRange(v, 1, 500), 'servers.validation.integer_range')
-  })
-
-  it('parses and checks player lists', () => {
-    expect(parsePlayerNames('Notch, jeb_\nDinnerbone;  ')).toEqual({ names: ['Notch', 'jeb_', 'Dinnerbone'], invalid: [] })
-    expect(validatePlayerNames('Notch jeb_', 200)).toBeNull()
-    const invalid = validatePlayerNames('ab, Notch, a-b', 200)
-    expectError(invalid, 'servers.validation.players_invalid')
-    expect(invalid?.params).toEqual({ names: 'ab, a-b' })
-    expectError(validatePlayerNames(Array.from({ length: 51 }, (_, i) => `player${i}`).join(','), 50), 'servers.validation.players_too_many')
   })
 
   it('checks CurseForge keys', () => {

@@ -10,7 +10,7 @@ const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../
 describe('mock coverage', () => {
   it('mocks every operationId of api/openapi.yaml exactly once', () => {
     const ids = [...openapiYaml.matchAll(/operationId:\s*(\w+)/g)].map((m) => m[1]).sort()
-    expect(ids).toHaveLength(61)
+    expect(ids).toHaveLength(66)
     expect(operations.map((o) => o.operationId).sort()).toEqual(ids)
   })
 })
@@ -150,5 +150,64 @@ describe('mock behaviour', () => {
     expect(field((await callApi('GET', '/security/overview?range=24h')).body, 'series')).toHaveLength(24)
     expect(field((await callApi('GET', '/security/overview?range=7d')).body, 'series')).toHaveLength(7)
     expect(field((await callApi('GET', '/security/overview?range=30d')).body, 'series')).toHaveLength(30)
+  })
+
+  it('runs console commands and player actions on running servers only', async () => {
+    const me = loginAs('admin')
+    const cmd = (id: number, command: string) => callApi('POST', `/servers/${id}/console`, { body: { command }, csrf: me.csrf_token })
+    expect(field((await cmd(1, '/list')).body, 'output')).toMatch(/^There are 2 of a max of 20 players online: Alex, Steve$/)
+    expect(field((await cmd(1, 'say a\nstop')).body, 'error')).toBe('validation_failed')
+    expect(field((await cmd(2, 'list')).body, 'error')).toBe('instance_not_running')
+    expect(db.audit.at(-1)).toMatchObject({ action: 'server.console_command', details: { command: 'list' } })
+
+    const act = (body: object) => callApi('POST', '/servers/1/players/actions', { body, csrf: me.csrf_token })
+    expect(field((await act({ action: 'op', name: 'Steve' })).body, 'output')).toBe('Made Steve a server operator')
+    expect(field((await act({ action: 'ban', name: 'Steve', reason: 'griefing' })).body, 'output')).toBe('Banned Steve: griefing')
+    expect(field((await act({ action: 'op', name: 'Steve', reason: 'x' })).body, 'error')).toBe('validation_failed')
+    expect(field((await act({ action: 'kick', name: 'a b' })).body, 'error')).toBe('validation_failed')
+    expect(field((await act({ action: 'kick', name: 'Alex', reason: 'a\nb' })).body, 'error')).toBe('validation_failed')
+    const lists = (await callApi('GET', '/servers/1/players/lists')).body as { ops: Array<{ name: string }>; bans: Array<{ name: string; reason: string }> }
+    expect(lists.ops.map((o) => o.name)).toContain('Steve')
+    expect(lists.bans).toContainEqual(expect.objectContaining({ name: 'Steve', reason: 'griefing' }))
+    expect((await callApi('GET', '/servers/1/players')).body).toMatchObject({ available: true, online: [{ name: 'Alex' }], max: 20 })
+    expect((await callApi('GET', '/servers/2/players')).body).toEqual({ available: false, online: [], max: null })
+    expect((await callApi('GET', '/servers/3/players')).status).toBe(404)
+  })
+
+  it('gives server.view only the online players', async () => {
+    loginAs('alice')
+    expect((await callApi('GET', '/servers/1/players')).status).toBe(200)
+    expect((await callApi('GET', '/servers/1/players/lists')).status).toBe(403)
+    expect((await callApi('GET', '/servers/1/console/stream')).status).toBe(403)
+  })
+
+  it('streams console lines as server-sent events', async () => {
+    loginAs('admin')
+    const read = async (id: number, until: string) => {
+      // Closing goes through the abort signal: the response body is tee'd on its way through MSW, so
+      // reader.cancel() would wait for the other branch and never settle.
+      const abort = new AbortController()
+      const res = await fetch(`${window.location.origin}/api/servers/${id}/console/stream`, {
+        headers: { Accept: 'text/event-stream' },
+        signal: abort.signal,
+      })
+      expect(res.headers.get('Content-Type')).toBe('text/event-stream')
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let text = ''
+      while (!text.includes(until)) {
+        const { value, done } = await reader.read()
+        if (done) break
+        text += decoder.decode(value, { stream: true })
+      }
+      abort.abort()
+      void reader.cancel().catch(() => undefined)
+      return text
+    }
+    const running = await read(1, 'RCON Client /127.0.0.1 started')
+    expect(running).toContain('event: state\ndata: {"running":true}')
+    expect(running).toMatch(/id: \d{16,}\nevent: line\ndata: \{"ts":\d+,"stream":"out","line":"\[\d\d:\d\d:\d\d INFO\]: Starting minecraft server/)
+    expect(running).toContain('Thread RCON Client /127.0.0.1 started')
+    expect(await read(2, 'running')).toContain('event: state\ndata: {"running":false}')
   })
 })

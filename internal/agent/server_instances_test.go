@@ -139,6 +139,8 @@ func TestServerRejectsInvalidInstanceRequests(t *testing.T) {
 		{"unknown top-level field", "POST", agentapi.PathInstanceEnsure, jsonCT, strings.Replace(ensureBody, `"id":1`, `"id":1,"image":"evil"`, 1), 400},
 		{"unknown spec field", "POST", agentapi.PathInstanceEnsure, jsonCT, withSpec(`"java":"java21"`, `"java":"java21","jvm_opts":"-X"`), 400},
 		{"unknown property", "POST", agentapi.PathInstanceEnsure, jsonCT, withSpec(`"motd":"Hallo"`, `"motd":"Hallo","plugins":"x"`), 400},
+		{"ops property (sub-project 3a)", "POST", agentapi.PathInstanceEnsure, jsonCT, withSpec(`"motd":"Hallo"`, `"motd":"Hallo","ops":["Notch"]`), 400},
+		{"whitelist property (sub-project 3a)", "POST", agentapi.PathInstanceEnsure, jsonCT, withSpec(`"motd":"Hallo"`, `"motd":"Hallo","whitelist":["Notch"]`), 400},
 		{"motd newline", "POST", agentapi.PathInstanceEnsure, jsonCT, withSpec(`"motd":"Hallo"`, `"motd":"a\nENABLE_RCON=false"`), 400},
 		{"motd nul", "POST", agentapi.PathInstanceEnsure, jsonCT, withSpec(`"motd":"Hallo"`, `"motd":"a\u0000b"`), 400},
 		{"memory", "POST", agentapi.PathInstanceEnsure, jsonCT, withSpec(`"memory_mib":4096`, `"memory_mib":4000`), 400},
@@ -177,13 +179,8 @@ func TestServerRejectsInvalidInstanceRequests(t *testing.T) {
 }
 
 func TestServerInstanceBodyLimitIs16KiB(t *testing.T) {
-	names := make([]string, 200)
-	for i := range names {
-		names[i] = fmt.Sprintf(`"player_%09d"`, i) // 16 characters each
-	}
-	list := strings.Join(names, ",")
-	body := strings.Replace(ensureBody, `"max_players":10`,
-		`"max_players":10,"whitelist":[`+list+`],"ops":[`+strings.Join(names[:50], ",")+`]`, 1)
+	// JSON whitespace pads a valid ensure request to more than the 4 KiB firewall limit.
+	body := strings.Replace(ensureBody, `"max_players":10`, `"max_players":10`+strings.Repeat(" ", 6000), 1)
 	if len(body) <= 4<<10 || len(body) > 16<<10 {
 		t.Fatalf("body has %d bytes; the test needs 4 KiB < body <= 16 KiB", len(body))
 	}
@@ -191,8 +188,8 @@ func TestServerInstanceBodyLimitIs16KiB(t *testing.T) {
 	if rec := serve(newInstanceServer(st), http.MethodPost, agentapi.PathInstanceEnsure, jsonCT, body); rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body)
 	}
-	if len(st.ensured) != 1 || len(st.ensured[0].Spec.Properties.Whitelist) != 200 || len(st.ensured[0].Spec.Properties.Ops) != 50 {
-		t.Fatalf("ensured = %d requests", len(st.ensured))
+	if len(st.ensured) != 1 || *st.ensured[0].Spec.Properties.MaxPlayers != 10 {
+		t.Fatalf("ensured = %+v", st.ensured)
 	}
 }
 

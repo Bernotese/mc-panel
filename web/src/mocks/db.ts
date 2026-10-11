@@ -13,8 +13,12 @@ import type {
   Me,
   NewDeviceLogin,
   Notifier,
+  OnlinePlayer,
   Passkey,
   PermissionGrant,
+  PlayerBan,
+  PlayerEntry,
+  PlayerOp,
   Role,
   SecondFactor,
   SecuritySettings,
@@ -83,6 +87,21 @@ export interface MockSession {
   lastSeenAt: number
 }
 
+/** What the mock "Minecraft server" keeps itself: online players, ops.json, whitelist.json, banned-players.json. */
+export interface MockPlayers {
+  online: OnlinePlayer[]
+  ops: PlayerOp[]
+  whitelist: PlayerEntry[]
+  bans: PlayerBan[]
+}
+
+export function emptyPlayers(): MockPlayers {
+  return { online: [], ops: [], whitelist: [], bans: [] }
+}
+
+const ALEX_UUID = 'ec561538-f3fd-461d-aff5-086b22154bce'
+const STEVE_UUID = '8667ba71-b85a-4004-af54-457a9734eed7'
+
 export interface MockServer {
   id: number
   name: string
@@ -90,6 +109,7 @@ export interface MockServer {
   status: ServerStatus
   revision: number // desired revision
   runningRevision: number // revision of the "running container"
+  players: MockPlayers
 }
 
 const MIB = 1024 * 1024
@@ -108,8 +128,6 @@ export function resolveProperties(name: string, p: ServerProperties = {}): Requi
     enable_command_block: false,
     online_mode: true,
     whitelist_enabled: false,
-    whitelist: [],
-    ops: [],
     view_distance: 10,
     simulation_distance: 10,
     spawn_protection: 16,
@@ -316,6 +334,20 @@ function seed(now: number): MockDb {
         status: runningStatus(4096, now - 2 * HOUR, Math.round(2.1 * GIB), 12.5),
         revision: 1,
         runningRevision: 1,
+        players: {
+          online: [
+            { name: 'Alex', uuid: ALEX_UUID },
+            { name: 'Steve', uuid: STEVE_UUID },
+          ],
+          ops: [{ uuid: ALEX_UUID, name: 'Alex', level: 4 }],
+          whitelist: [
+            { uuid: ALEX_UUID, name: 'Alex' },
+            { uuid: STEVE_UUID, name: 'Steve' },
+          ],
+          bans: [
+            { uuid: '1f0b3c55-6a7d-4e8f-9a0b-1c2d3e4f5a6b', name: 'Griefer123', reason: 'Griefing', source: 'Alex', created: '2026-10-01 18:04:12 +0000', expires: 'forever' },
+          ],
+        },
       },
       {
         id: 2,
@@ -324,8 +356,9 @@ function seed(now: number): MockDb {
         status: stoppedStatus(),
         revision: 1,
         runningRevision: 1,
+        players: emptyPlayers(),
       },
-      { id: 3, name: 'lobby', instance: null, status: notConfiguredStatus(), revision: 0, runningRevision: 0 },
+      { id: 3, name: 'lobby', instance: null, status: notConfiguredStatus(), revision: 0, runningRevision: 0, players: emptyPlayers() },
     ],
     serverSettings: { base_domain: 'mc.example.com', curseforge_api_key_set: false, docker: 'ok' },
     catalogs: {

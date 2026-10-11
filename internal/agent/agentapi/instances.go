@@ -14,8 +14,8 @@ const (
 	PathInstancePower  = "/v1/instances/power"
 	PathInstanceRemove = "/v1/instances/remove"
 
-	// MaxInstanceRequestBytes is the body limit of the /v1/instances/* endpoints
-	// (MOTD, whitelist and ops need more than the 4 KiB of the firewall endpoints).
+	// MaxInstanceRequestBytes is the body limit of the /v1/instances/* endpoints (a full
+	// spec needs more than the 4 KiB of the firewall endpoints).
 	MaxInstanceRequestBytes = 16 << 10
 
 	ErrorCodeBusy              = "busy"

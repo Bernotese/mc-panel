@@ -25,7 +25,7 @@ func paperRequest() agentapi.EnsureRequest {
 		ID: 7, Name: "survival", FQDN: "survival.mc.example.com", Revision: 3,
 		Spec: instancespec.Spec{
 			Type: instancespec.TypePaper, Version: "1.21.4", Java: instancespec.Java21, MemoryMiB: 4096,
-			Properties: instancespec.Properties{MOTD: ptr("Hallo"), Ops: []string{"Notch"}},
+			Properties: instancespec.Properties{MOTD: ptr("Hallo")},
 		},
 	}
 }
@@ -41,10 +41,9 @@ func TestInstanceContainerGolden(t *testing.T) {
 		Env: []string{
 			"EULA=TRUE", "TYPE=PAPER", "VERSION=1.21.4", "MEMORY=4096M", "ENABLE_AUTOPAUSE=false",
 			"ENABLE_RCON=true", "OVERRIDE_SERVER_PROPERTIES=true",
-			"EXISTING_OPS_FILE=SYNCHRONIZE", "EXISTING_WHITELIST_FILE=SYNCHRONIZE",
 			"MOTD=Hallo", "DIFFICULTY=normal", "MODE=survival", "MAX_PLAYERS=20", "PVP=true", "HARDCORE=false",
 			"ALLOW_FLIGHT=false", "ENABLE_COMMAND_BLOCK=false", "ONLINE_MODE=true", "ENABLE_WHITELIST=false",
-			"OPS=Notch", "VIEW_DISTANCE=10", "SIMULATION_DISTANCE=10", "SPAWN_PROTECTION=16",
+			"VIEW_DISTANCE=10", "SIMULATION_DISTANCE=10", "SPAWN_PROTECTION=16",
 			"LEVEL_TYPE=minecraft:normal",
 		},
 		Hostname: "survival",
@@ -109,22 +108,17 @@ func TestRouterContainerGolden(t *testing.T) {
 // allowedEnvKeys mirrors the allowlist of instancespec.Env: the template must never add anything.
 var allowedEnvKeys = []string{
 	"EULA", "TYPE", "VERSION", "MEMORY", "ENABLE_AUTOPAUSE", "ENABLE_RCON", "OVERRIDE_SERVER_PROPERTIES",
-	"EXISTING_OPS_FILE", "EXISTING_WHITELIST_FILE",
 	"FABRIC_LOADER_VERSION", "NEOFORGE_VERSION", "MODRINTH_MODPACK", "CF_SLUG", "CF_PAGE_URL", "CF_API_KEY",
 	"MOTD", "DIFFICULTY", "MODE", "MAX_PLAYERS", "PVP", "HARDCORE", "ALLOW_FLIGHT", "ENABLE_COMMAND_BLOCK",
-	"ONLINE_MODE", "ENABLE_WHITELIST", "WHITELIST", "OPS", "VIEW_DISTANCE", "SIMULATION_DISTANCE",
+	"ONLINE_MODE", "ENABLE_WHITELIST", "VIEW_DISTANCE", "SIMULATION_DISTANCE",
 	"SPAWN_PROTECTION", "SEED", "LEVEL_TYPE",
 }
 
 func variedRequests() []agentapi.EnsureRequest {
-	names := make([]string, 200)
-	for i := range names {
-		names[i] = "player_" + strings.Repeat("x", i%9)
-	}
 	full := instancespec.Properties{
 		MOTD: ptr("§aMOTD with = and : and ,"), Difficulty: ptr("hard"), Gamemode: ptr("creative"), MaxPlayers: ptr(500),
 		PVP: ptr(false), Hardcore: ptr(true), AllowFlight: ptr(true), EnableCommandBlock: ptr(true), OnlineMode: ptr(false),
-		WhitelistEnabled: ptr(true), Whitelist: names, Ops: names[:50], ViewDistance: ptr(32), SimulationDistance: ptr(3),
+		WhitelistEnabled: ptr(true), ViewDistance: ptr(32), SimulationDistance: ptr(3),
 		SpawnProtection: ptr(0), Seed: ptr("-42=JVM_OPTS"), LevelType: ptr("amplified"),
 	}
 	specs := []instancespec.Spec{

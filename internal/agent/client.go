@@ -43,8 +43,19 @@ func (e *StatusError) Error() string {
 
 // Is maps status codes to the sentinel errors: 409 -> ErrConflict, 429 -> agentapi.ErrBusy,
 // other 4xx -> ErrInvalid, everything else non-2xx -> agentapi.ErrUnavailable; a 503 with
-// code docker_unavailable additionally matches agentapi.ErrDockerUnavailable.
+// code docker_unavailable additionally matches agentapi.ErrDockerUnavailable. The console
+// codes not_found (404), not_running (409) and rcon_unavailable (503) additionally match
+// agentapi.ErrNotFound, ErrNotRunning and ErrRconUnavailable.
 func (e *StatusError) Is(target error) bool {
+	// Console codes first: they are more specific than the status-based rules below.
+	switch target {
+	case agentapi.ErrNotFound:
+		return e.StatusCode == http.StatusNotFound && e.Code == agentapi.ErrorCodeNotFound
+	case agentapi.ErrNotRunning:
+		return e.StatusCode == http.StatusConflict && e.Code == agentapi.ErrorCodeNotRunning
+	case agentapi.ErrRconUnavailable:
+		return e.StatusCode == http.StatusServiceUnavailable && e.Code == agentapi.ErrorCodeRconUnavailable
+	}
 	switch {
 	case target == agentapi.ErrDockerUnavailable:
 		return e.StatusCode == http.StatusServiceUnavailable && e.Code == agentapi.ErrorCodeDockerUnavailable
@@ -65,8 +76,9 @@ func (e *StatusError) Is(target error) bool {
 // Client talks to the agent over its Unix socket. It implements
 // agentapi.Client and is safe for concurrent use.
 type Client struct {
-	hc      *http.Client
-	timeout time.Duration
+	hc                *http.Client
+	timeout           time.Duration
+	logsHeaderTimeout time.Duration
 }
 
 var _ agentapi.Client = (*Client)(nil)
@@ -90,7 +102,8 @@ func NewClientWithTimeout(socketPath string, timeout time.Duration) *Client {
 			Transport:     tr,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
-		timeout: timeout,
+		timeout:           timeout,
+		logsHeaderTimeout: LogsHeaderTimeout,
 	}
 }
 
@@ -163,26 +176,17 @@ func (c *Client) Remove(ctx context.Context, id int64) error {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	return c.doTimeout(ctx, c.timeout, method, path, in, out)
+}
+
+func (c *Client) doTimeout(ctx context.Context, timeout time.Duration, method, path string, in, out any) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	var body io.Reader
-	if in != nil {
-		b, err := json.Marshal(in)
-		if err != nil {
-			return fmt.Errorf("agent: encode request: %w", err)
-		}
-		body = bytes.NewReader(b)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, body)
+	req, err := newRequest(ctx, method, path, in)
 	if err != nil {
-		return fmt.Errorf("agent: build request: %w", err)
+		return err
 	}
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("Accept", "application/json")
-
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: %w", agentapi.ErrUnavailable, err)
@@ -197,12 +201,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		return fmt.Errorf("%w: response exceeds %d bytes", agentapi.ErrUnavailable, maxResponseBytes)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		msg := http.StatusText(resp.StatusCode)
-		var er agentapi.ErrorResponse
-		if json.Unmarshal(data, &er) == nil && er.Error != "" {
-			msg = er.Error
-		}
-		return &StatusError{StatusCode: resp.StatusCode, Message: msg, Code: er.Code}
+		return statusError(resp.StatusCode, data)
 	}
 	if out == nil {
 		return nil
@@ -211,4 +210,35 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		return fmt.Errorf("%w: decode response: %w", agentapi.ErrUnavailable, err)
 	}
 	return nil
+}
+
+// newRequest builds a JSON request to the agent (body only if in != nil).
+func newRequest(ctx context.Context, method, path string, in any) (*http.Request, error) {
+	var body io.Reader
+	if in != nil {
+		b, err := json.Marshal(in)
+		if err != nil {
+			return nil, fmt.Errorf("agent: encode request: %w", err)
+		}
+		body = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, body)
+	if err != nil {
+		return nil, fmt.Errorf("agent: build request: %w", err)
+	}
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Accept", "application/json")
+	return req, nil
+}
+
+// statusError turns a non-2xx answer into a *StatusError (message and code from the body).
+func statusError(status int, data []byte) *StatusError {
+	msg := http.StatusText(status)
+	var er agentapi.ErrorResponse
+	if json.Unmarshal(data, &er) == nil && er.Error != "" {
+		msg = er.Error
+	}
+	return &StatusError{StatusCode: status, Message: msg, Code: er.Code}
 }

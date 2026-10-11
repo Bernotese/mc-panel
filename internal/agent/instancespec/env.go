@@ -28,10 +28,6 @@ func Env(name string, s Spec) ([]string, error) {
 		"ENABLE_AUTOPAUSE=false",
 		"ENABLE_RCON=true",
 		"OVERRIDE_SERVER_PROPERTIES=true",
-		// itzg's default only merges names into ops.json/whitelist.json; synchronizing
-		// makes a name removed in the panel lose its op or whitelist entry.
-		"EXISTING_OPS_FILE=SYNCHRONIZE",
-		"EXISTING_WHITELIST_FILE=SYNCHRONIZE",
 	)
 	switch s.Type {
 	case TypeFabric:
@@ -66,15 +62,8 @@ func Env(name string, s Spec) ([]string, error) {
 		"ONLINE_MODE="+b(*p.OnlineMode),
 		"ENABLE_WHITELIST="+b(*p.WhitelistEnabled),
 	)
-	// Empty lists are omitted: itzg clears a property for an empty value but leaves it
-	// alone when the variable is unset. WHITELIST is only sent while the whitelist is on,
-	// because itzg turns whitelisting on as soon as the variable is set.
-	if *p.WhitelistEnabled && len(p.Whitelist) > 0 {
-		env = append(env, "WHITELIST="+strings.Join(p.Whitelist, ","))
-	}
-	if len(p.Ops) > 0 {
-		env = append(env, "OPS="+strings.Join(p.Ops, ","))
-	}
+	// No OPS/WHITELIST: without them itzg leaves ops.json and whitelist.json alone, so the
+	// lists the server keeps (and the panel changes over RCON) survive every recreate.
 	env = append(env,
 		"VIEW_DISTANCE="+strconv.Itoa(*p.ViewDistance),
 		"SIMULATION_DISTANCE="+strconv.Itoa(*p.SimulationDistance),

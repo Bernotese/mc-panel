@@ -47,8 +47,6 @@ const survival: InstanceConfig = {
     enable_command_block: false,
     online_mode: true,
     whitelist_enabled: true,
-    whitelist: ['Notch', 'jeb_'],
-    ops: [],
     view_distance: 12,
     simulation_distance: 8,
     spawn_protection: 0,
@@ -94,8 +92,6 @@ describe('server form model', () => {
         enable_command_block: false,
         online_mode: true,
         whitelist_enabled: false,
-        whitelist: [],
-        ops: [],
         view_distance: 10,
         simulation_distance: 10,
         spawn_protection: 16,
@@ -155,15 +151,14 @@ describe('server form model', () => {
     }
   })
 
-  it('validates properties and parses player lists', () => {
-    const value = form({ properties: { ...emptyServerForm().properties, whitelist: 'Notch, jeb_\nDinnerbone', max_players: '0', motd: 'a\nb' } })
+  it('validates properties', () => {
+    const value = form({ properties: { ...emptyServerForm().properties, max_players: '0', motd: 'a\nb' } })
     expect(Object.keys(validateServerForm(value, ctx('create', paperCatalog))).sort()).toEqual(['properties.max_players', 'properties.motd'])
     const fixed = { ...value, properties: { ...value.properties, max_players: '8', motd: 'Hallo' } }
-    expect(resolveServerForm(fixed, ctx('create', paperCatalog))?.properties).toMatchObject({
-      motd: 'Hallo',
-      max_players: 8,
-      whitelist: ['Notch', 'jeb_', 'Dinnerbone'],
-    })
+    const properties = resolveServerForm(fixed, ctx('create', paperCatalog))?.properties
+    expect(properties).toMatchObject({ motd: 'Hallo', max_players: 8 })
+    expect(properties).not.toHaveProperty('whitelist')
+    expect(properties).not.toHaveProperty('ops')
   })
 
   it('round-trips an existing instance in edit mode', () => {

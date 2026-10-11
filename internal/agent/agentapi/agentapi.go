@@ -45,7 +45,7 @@ type BansResponse struct {
 
 type ErrorResponse struct {
 	Error string `json:"error"`
-	Code  string `json:"code,omitempty"` // ErrorCodeBusy | ErrorCodeDockerUnavailable
+	Code  string `json:"code,omitempty"` // ErrorCodeBusy | ErrorCodeDockerUnavailable | ErrorCodeNotFound | ErrorCodeNotRunning | ErrorCodeRconUnavailable
 }
 
 var ErrUnavailable = errors.New("agent unavailable")
