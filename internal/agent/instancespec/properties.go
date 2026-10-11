@@ -1,34 +1,31 @@
 package instancespec
 
 import (
-	"regexp"
 	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 )
 
-var playerRe = regexp.MustCompile(`^[A-Za-z0-9_]{3,16}$`)
-
 // Properties are the allowlisted server.properties (spec §7). nil/empty = default.
+// Ops and the whitelist are not here: the server keeps them in ops.json/whitelist.json and
+// the panel changes them over RCON (spec 3a §3.1).
 type Properties struct {
-	MOTD               *string  `json:"motd,omitempty"`
-	Difficulty         *string  `json:"difficulty,omitempty"`
-	Gamemode           *string  `json:"gamemode,omitempty"`
-	MaxPlayers         *int     `json:"max_players,omitempty"`
-	PVP                *bool    `json:"pvp,omitempty"`
-	Hardcore           *bool    `json:"hardcore,omitempty"`
-	AllowFlight        *bool    `json:"allow_flight,omitempty"`
-	EnableCommandBlock *bool    `json:"enable_command_block,omitempty"`
-	OnlineMode         *bool    `json:"online_mode,omitempty"`
-	WhitelistEnabled   *bool    `json:"whitelist_enabled,omitempty"`
-	Whitelist          []string `json:"whitelist,omitempty"`
-	Ops                []string `json:"ops,omitempty"`
-	ViewDistance       *int     `json:"view_distance,omitempty"`
-	SimulationDistance *int     `json:"simulation_distance,omitempty"`
-	SpawnProtection    *int     `json:"spawn_protection,omitempty"`
-	Seed               *string  `json:"seed,omitempty"`
-	LevelType          *string  `json:"level_type,omitempty"`
+	MOTD               *string `json:"motd,omitempty"`
+	Difficulty         *string `json:"difficulty,omitempty"`
+	Gamemode           *string `json:"gamemode,omitempty"`
+	MaxPlayers         *int    `json:"max_players,omitempty"`
+	PVP                *bool   `json:"pvp,omitempty"`
+	Hardcore           *bool   `json:"hardcore,omitempty"`
+	AllowFlight        *bool   `json:"allow_flight,omitempty"`
+	EnableCommandBlock *bool   `json:"enable_command_block,omitempty"`
+	OnlineMode         *bool   `json:"online_mode,omitempty"`
+	WhitelistEnabled   *bool   `json:"whitelist_enabled,omitempty"`
+	ViewDistance       *int    `json:"view_distance,omitempty"`
+	SimulationDistance *int    `json:"simulation_distance,omitempty"`
+	SpawnProtection    *int    `json:"spawn_protection,omitempty"`
+	Seed               *string `json:"seed,omitempty"`
+	LevelType          *string `json:"level_type,omitempty"`
 }
 
 var (
@@ -38,10 +35,8 @@ var (
 )
 
 const (
-	maxMOTDRunes   = 150
-	maxSeedRunes   = 64
-	maxWhitelisted = 200
-	maxOps         = 50
+	maxMOTDRunes = 150
+	maxSeedRunes = 64
 )
 
 func (p Properties) Validate() error {
@@ -72,12 +67,6 @@ func (p Properties) Validate() error {
 		if r.v != nil && (*r.v < r.min || *r.v > r.max) {
 			return invalid(r.field, "must be %d..%d", r.min, r.max)
 		}
-	}
-	if err := players("whitelist", p.Whitelist, maxWhitelisted); err != nil {
-		return err
-	}
-	if err := players("ops", p.Ops, maxOps); err != nil {
-		return err
 	}
 	if p.Seed != nil {
 		if err := printable("seed", *p.Seed, maxSeedRunes); err != nil {
@@ -113,18 +102,6 @@ func oneOf(field string, v *string, allowed []string) error {
 	return nil
 }
 
-func players(field string, names []string, maxN int) error {
-	if len(names) > maxN {
-		return invalid(field, "at most %d names", maxN)
-	}
-	for _, n := range names {
-		if !playerRe.MatchString(n) {
-			return invalid(field, "name %q must match %s", n, playerRe)
-		}
-	}
-	return nil
-}
-
 // Resolve returns p with every unset field replaced by its default (spec §7).
 func Resolve(name string, p Properties) Properties {
 	str := func(v *string, d string) *string {
@@ -145,12 +122,6 @@ func Resolve(name string, p Properties) Properties {
 		}
 		return &d
 	}
-	list := func(v []string) []string {
-		if v == nil {
-			return []string{}
-		}
-		return v
-	}
 	return Properties{
 		MOTD:               str(p.MOTD, name),
 		Difficulty:         str(p.Difficulty, "normal"),
@@ -162,8 +133,6 @@ func Resolve(name string, p Properties) Properties {
 		EnableCommandBlock: flag(p.EnableCommandBlock, false),
 		OnlineMode:         flag(p.OnlineMode, true),
 		WhitelistEnabled:   flag(p.WhitelistEnabled, false),
-		Whitelist:          list(p.Whitelist),
-		Ops:                list(p.Ops),
 		ViewDistance:       num(p.ViewDistance, 10),
 		SimulationDistance: num(p.SimulationDistance, 10),
 		SpawnProtection:    num(p.SpawnProtection, 16),

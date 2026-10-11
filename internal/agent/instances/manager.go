@@ -230,10 +230,6 @@ func (m *Manager) ensure(ctx context.Context, req agentapi.EnsureRequest) error 
 		}
 	}
 	m.setOp(req.ID, agentapi.OpCreating)
-	// After the old container is gone, so a still running server cannot write the files back.
-	if err := m.clearStaleLists(req.ID, req.Name, req.Spec.Properties); err != nil {
-		return err
-	}
 	if _, err := m.dc.CreateContainer(ctx, name, cfg); err != nil {
 		return err
 	}

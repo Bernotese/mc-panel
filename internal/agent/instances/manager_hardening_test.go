@@ -2,7 +2,6 @@ package instances_test
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -118,65 +117,33 @@ func TestSymlinkedDataDirIsRefused(t *testing.T) {
 	}
 }
 
-// TestListFileSymlinkIsReplaced: ops.json pointing outside the data directory is
-// replaced by a regular file; the link target stays as it was.
-func TestListFileSymlinkIsReplaced(t *testing.T) {
+// TestListFilesAreNeverTouched: the agent no longer writes ops.json/whitelist.json, so a
+// planted symlink or directory stays as it is and never blocks a recreate.
+func TestListFilesAreNeverTouched(t *testing.T) {
 	e := newEnv(t)
 	data := instances.DataDir(e.dir, 1)
-	if err := os.MkdirAll(data, 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Join(data, "whitelist.json"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	outside := filepath.Join(t.TempDir(), "secret.json")
 	if err := os.WriteFile(outside, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"ops.json", "whitelist.json"} {
-		if err := os.Symlink(outside, filepath.Join(data, name)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	e.ensure(t, ensureReq(1, "survival", 1))
-	if s := e.status(t, 1); s.LastError != "" {
-		t.Fatalf("last_error = %q", s.LastError)
-	}
-	if b, err := os.ReadFile(outside); err != nil || string(b) != "keep" {
-		t.Fatalf("link target = %q, %v", b, err)
-	}
-	for _, name := range []string{"ops.json", "whitelist.json"} {
-		p := filepath.Join(data, name)
-		fi, err := os.Lstat(p)
-		if err != nil || !fi.Mode().IsRegular() {
-			t.Fatalf("%s = %v, %v; want a regular file", name, fi, err)
-		}
-		if b, _ := os.ReadFile(p); string(b) != "[]\n" {
-			t.Fatalf("%s = %q", name, b)
-		}
-	}
-}
-
-// TestListFileDirectoryIsMovedAside: a container must not be able to block its own
-// recreate by turning ops.json into a directory.
-func TestListFileDirectoryIsMovedAside(t *testing.T) {
-	e := newEnv(t)
-	data := instances.DataDir(e.dir, 1)
-	if err := os.MkdirAll(filepath.Join(data, "ops.json"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(data, "ops.json", "x"), []byte("x"), 0o600); err != nil {
+	if err := os.Symlink(outside, filepath.Join(data, "ops.json")); err != nil {
 		t.Fatal(err)
 	}
 	e.ensure(t, ensureReq(1, "survival", 1))
 	if s := e.status(t, 1); s.LastError != "" || s.State != agentapi.StateCreated {
 		t.Fatalf("status = %+v, want the container created", s)
 	}
-	if _, err := os.Stat(filepath.Join(data, "ops.json.blocked-20261010T120000Z", "x")); err != nil {
-		t.Fatalf("directory not moved aside: %v", err)
+	if fi, err := os.Lstat(filepath.Join(data, "ops.json")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("ops.json = %v, %v; want the symlink untouched", fi, err)
 	}
-	if _, err := os.Lstat(filepath.Join(data, "ops.json")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("ops.json still there: %v", err)
+	if b, err := os.ReadFile(outside); err != nil || string(b) != "keep" {
+		t.Fatalf("link target = %q, %v", b, err)
 	}
-	if !strings.Contains(e.logs.String(), "ops.json") {
-		t.Fatal("moving a blocked list file aside must be logged")
+	if fi, err := os.Stat(filepath.Join(data, "whitelist.json")); err != nil || !fi.IsDir() {
+		t.Fatalf("whitelist.json = %v, %v; want the directory untouched", fi, err)
 	}
 }
 

@@ -6,16 +6,12 @@ import {
   hasLoader,
   isModpack,
   MAX_MOTD_LENGTH,
-  MAX_OPS,
   MAX_SEED_LENGTH,
-  MAX_WHITELIST,
   memoryMiBFromGiB,
-  parsePlayerNames,
   validateIntInRange,
   validateLoaderVersion,
   validateMemoryMiB,
   validateModpack,
-  validatePlayerNames,
   validateServerName,
   validateText,
   validateVersion,
@@ -36,8 +32,6 @@ export interface PropertiesDraft {
   enable_command_block: boolean
   online_mode: boolean
   whitelist_enabled: boolean
-  whitelist: string
-  ops: string
   view_distance: string
   simulation_distance: string
   spawn_protection: string
@@ -76,8 +70,6 @@ export interface ServerFormResult {
 export const PROPERTY_FIELDS = [
   'properties.motd',
   'properties.max_players',
-  'properties.whitelist',
-  'properties.ops',
   'properties.view_distance',
   'properties.simulation_distance',
   'properties.spawn_protection',
@@ -107,8 +99,6 @@ export function defaultPropertiesDraft(): PropertiesDraft {
     enable_command_block: false,
     online_mode: true,
     whitelist_enabled: false,
-    whitelist: '',
-    ops: '',
     view_distance: '10',
     simulation_distance: '10',
     spawn_protection: '16',
@@ -160,8 +150,6 @@ export function formFromInstance(name: string, instance: InstanceConfig): Server
       enable_command_block: p.enable_command_block ?? d.enable_command_block,
       online_mode: p.online_mode ?? d.online_mode,
       whitelist_enabled: p.whitelist_enabled ?? d.whitelist_enabled,
-      whitelist: (p.whitelist ?? []).join('\n'),
-      ops: (p.ops ?? []).join('\n'),
       view_distance: numberText(p.view_distance, d.view_distance),
       simulation_distance: numberText(p.simulation_distance, d.simulation_distance),
       spawn_protection: numberText(p.spawn_protection, d.spawn_protection),
@@ -205,8 +193,6 @@ export function validateServerForm(value: ServerFormValue, ctx: FormContext): Fo
   check('properties.view_distance', validateIntInRange(p.view_distance, 3, 32))
   check('properties.simulation_distance', validateIntInRange(p.simulation_distance, 3, 32))
   check('properties.spawn_protection', validateIntInRange(p.spawn_protection, 0, 256))
-  check('properties.whitelist', validatePlayerNames(p.whitelist, MAX_WHITELIST))
-  check('properties.ops', validatePlayerNames(p.ops, MAX_OPS))
   check('properties.seed', validateText(p.seed, MAX_SEED_LENGTH))
   return errors
 }
@@ -225,8 +211,6 @@ export function resolveServerForm(value: ServerFormValue, ctx: FormContext): Ser
     enable_command_block: p.enable_command_block,
     online_mode: p.online_mode,
     whitelist_enabled: p.whitelist_enabled,
-    whitelist: parsePlayerNames(p.whitelist).names,
-    ops: parsePlayerNames(p.ops).names,
     view_distance: Number(p.view_distance.trim()),
     simulation_distance: Number(p.simulation_distance.trim()),
     spawn_protection: Number(p.spawn_protection.trim()),

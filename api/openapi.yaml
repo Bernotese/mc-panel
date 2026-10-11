@@ -860,6 +860,7 @@ components:
     ServerProperties:
       type: object
       additionalProperties: false
+      description: Allowlisted server.properties. Ops and the whitelist are managed live via /servers/{id}/players (sub-project 3a).
       properties:
         motd: { type: string, maxLength: 150 }
         difficulty: { type: string, enum: [peaceful, easy, normal, hard] }
@@ -871,8 +872,6 @@ components:
         enable_command_block: { type: boolean }
         online_mode: { type: boolean }
         whitelist_enabled: { type: boolean }
-        whitelist: { type: array, maxItems: 200, items: { type: string, pattern: '^[A-Za-z0-9_]{3,16}$' } }
-        ops: { type: array, maxItems: 50, items: { type: string, pattern: '^[A-Za-z0-9_]{3,16}$' } }
         view_distance: { type: integer, minimum: 3, maximum: 32 }
         simulation_distance: { type: integer, minimum: 3, maximum: 32 }
         spawn_protection: { type: integer, minimum: 0, maximum: 256 }
