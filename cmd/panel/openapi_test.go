@@ -110,3 +110,24 @@ func TestErrorCodesMatchOpenAPI(t *testing.T) {
 		t.Fatalf("httpx codes %v\n!= OpenAPI enum %v", codes, enum)
 	}
 }
+
+// Review K7: streamConsole answers an invalid ?tail with 400 validation_failed; the contract
+// must declare it.
+func TestStreamConsoleDeclaresBadRequest(t *testing.T) {
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := string(raw)
+	start := strings.Index(spec, "operationId: streamConsole")
+	if start < 0 {
+		t.Fatal("streamConsole not found in openapi.yaml")
+	}
+	op := spec[start:]
+	if end := strings.Index(op, "\n  /"); end >= 0 { // the next path
+		op = op[:end]
+	}
+	if !strings.Contains(op, "'400': { $ref: '#/components/responses/BadRequest' }") {
+		t.Fatalf("streamConsole declares no 400 response:\n%s", op)
+	}
+}
