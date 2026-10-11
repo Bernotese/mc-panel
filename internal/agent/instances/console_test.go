@@ -413,3 +413,56 @@ func TestRconTimeout(t *testing.T) {
 		t.Fatalf("slot not released after a timeout: %v", err)
 	}
 }
+
+// TestRconTruncatedOutputStillChecksExitCode: a failing rcon-cli with more than 64 KiB of
+// output is still rcon_unavailable.
+func TestRconTruncatedOutputStillChecksExitCode(t *testing.T) {
+	e := newEnv(t)
+	e.startInstance(t, 1, "survival")
+	e.d.SetExecHandler(func(string, docker.ExecConfig) dockertest.ExecResult {
+		return dockertest.ExecResult{Stdout: strings.Repeat("a", agentapi.MaxRconOutputBytes) + "OVERFLOW", ExitCode: 1}
+	})
+	if _, err := e.m.Rcon(context.Background(), 1, "list"); !errors.Is(err, agentapi.ErrRconUnavailable) {
+		t.Fatalf("failing rcon-cli with overlong output = %v, want ErrRconUnavailable", err)
+	}
+}
+
+// TestLogsCutStreamEndsLikeRemovedContainer: Docker cutting the stream inside a frame
+// (container removed) ends Logs with nil like a clean end, but an unterminated line is not
+// emitted half: a reconnect with since delivers it whole.
+func TestLogsCutStreamEndsLikeRemovedContainer(t *testing.T) {
+	e := newEnv(t)
+	e.ensure(t, ensureReq(1, "survival", 1)) // not running: the stream ends after the history
+	name := instances.ContainerName(1)
+	t1 := e.d.AppendLog(name, docker.Stdout, "complete")
+	e.d.AppendRawLog(name, docker.Stdout, []byte("2026-10-10T12:00:09.000000000Z half a li"))
+	e.d.AppendUnframed(name, []byte{1, 0, 0, 0, 0, 0, 0, 9, 'n'}) // frame of 9 bytes, cut after 1
+	lines, _, done := collectLogs(context.Background(), e.m, agentapi.LogsRequest{ID: 1, Tail: 100})
+	if err := waitDone(t, done); err != nil {
+		t.Fatalf("Logs of a cut stream = %v, want nil", err)
+	}
+	if got, want := drain(lines), []agentapi.LogLine{{TS: t1.UnixNano(), Stream: agentapi.StreamOut, Line: "complete"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %+v, want %+v", got, want)
+	}
+}
+
+// TestConsoleRefusesContainerOfAnotherServer: once an ensure has named the server that
+// owns the id, logs and rcon never reach a leftover container of another server.
+func TestConsoleRefusesContainerOfAnotherServer(t *testing.T) {
+	e := newEnv(t)
+	e.ensure(t, ensureReq(5, "old", 7))
+	e.power(t, 5, agentapi.PowerStart)
+	e.ensure(t, ensureReq(5, "new", 1)) // refused, remembers the name "new"
+	ctx := context.Background()
+	startCalled := false
+	err := e.m.Logs(ctx, agentapi.LogsRequest{ID: 5, Tail: 10}, func(bool) { startCalled = true }, func(agentapi.LogLine) error { return nil })
+	if !errors.Is(err, agentapi.ErrNotFound) || startCalled {
+		t.Fatalf("Logs of another server's container = %v (start called %v), want ErrNotFound", err, startCalled)
+	}
+	if _, err := e.m.Rcon(ctx, 5, "list"); !errors.Is(err, agentapi.ErrNotFound) {
+		t.Fatalf("Rcon on another server's container = %v, want ErrNotFound", err)
+	}
+	if q, execs := e.d.LogQueries(), e.d.Execs(); len(q) != 0 || len(execs) != 0 {
+		t.Fatalf("another server's container reached: log queries %q, execs %+v", q, execs)
+	}
+}
