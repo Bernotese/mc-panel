@@ -10,7 +10,7 @@ import { PowerButtons } from './power-buttons'
 import { StatusBadge } from './status-badge'
 import { usePower } from './use-power'
 
-export function ServerOverview({ server, instance }: { server: Server; instance: InstanceConfig }) {
+export function ServerOverview({ server, instance, extracting = false }: { server: Server; instance: InstanceConfig; extracting?: boolean }) {
   const { t } = useTranslation()
   const fmt = useFormat()
   const { status } = server
@@ -20,7 +20,7 @@ export function ServerOverview({ server, instance }: { server: Server; instance:
 
   return (
     <div className="space-y-4">
-      {status.restart_required ? <RestartBanner server={server} canPower={canPower} /> : null}
+      {status.restart_required ? <RestartBanner server={server} canPower={canPower} extracting={extracting} /> : null}
       {status.state === 'unknown' ? <p className="text-muted-foreground text-sm">{t('servers.overview.unknown_hint')}</p> : null}
       <SectionCard title={t('servers.overview.title')}>
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 text-sm">
@@ -62,13 +62,13 @@ export function ServerOverview({ server, instance }: { server: Server; instance:
       </SectionCard>
       <OnlinePlayersCard serverId={server.id} />
       <SectionCard title={t('servers.overview.controls')}>
-        {canPower ? <PowerButtons server={server} /> : <p className="text-muted-foreground text-sm">{t('servers.no_power')}</p>}
+        {canPower ? <PowerButtons server={server} extracting={extracting} /> : <p className="text-muted-foreground text-sm">{t('servers.no_power')}</p>}
       </SectionCard>
     </div>
   )
 }
 
-function RestartBanner({ server, canPower }: { server: Server; canPower: boolean }) {
+function RestartBanner({ server, canPower, extracting }: { server: Server; canPower: boolean; extracting: boolean }) {
   const { t } = useTranslation()
   const power = usePower(server)
   return (
@@ -78,7 +78,7 @@ function RestartBanner({ server, canPower }: { server: Server; canPower: boolean
         <p className="text-muted-foreground text-sm">{t('servers.restart.description')}</p>
       </div>
       {canPower ? (
-        <Button type="button" disabled={power.isPending} onClick={() => power.mutate('restart')}>
+        <Button type="button" disabled={power.isPending || extracting} onClick={() => power.mutate('restart')}>
           {t('servers.restart.now')}
         </Button>
       ) : null}

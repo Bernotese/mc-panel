@@ -31,4 +31,13 @@ describe('UserPermissionsPage', () => {
     expect(await screen.findByText('Administratoren haben automatisch alle Rechte auf allen Servern.')).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: 'survival: Ansehen' })).toBeDisabled()
   })
+
+  it('warns before granting file access', async () => {
+    const user = userEvent.setup()
+    await renderWithProviders(<UserPermissionsPage userId={2} />, { me: loginAs('admin', { sudo: true }) })
+    await screen.findByRole('heading', { name: 'Rechte von alice' })
+    expect(screen.queryByText(/erlaubt Code-Ausführung/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: 'survival: Dateien' }))
+    expect(screen.getByText(/„Dateien“ erlaubt Code-Ausführung im Minecraft-Server/)).toBeInTheDocument()
+  })
 })

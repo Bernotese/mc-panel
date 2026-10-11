@@ -7,7 +7,7 @@ import { POWER_ACTIONS, powerAllowed } from './status'
 import { usePower } from './use-power'
 
 /** Start, stop (after confirmation) and restart; actions that make no sense in the current state are disabled. */
-export function PowerButtons({ server }: { server: Pick<Server, 'id' | 'name' | 'status'> }) {
+export function PowerButtons({ server, extracting = false }: { server: Pick<Server, 'id' | 'name' | 'status'>; extracting?: boolean }) {
   const { t } = useTranslation()
   const [confirmStop, setConfirmStop] = useState(false)
   const power = usePower(server)
@@ -21,13 +21,14 @@ export function PowerButtons({ server }: { server: Pick<Server, 'id' | 'name' | 
             type="button"
             size="sm"
             variant={action === 'stop' ? 'outline' : 'secondary'}
-            disabled={power.isPending || !powerAllowed(server.status.state, action)}
+            disabled={power.isPending || !powerAllowed(server.status.state, action) || (extracting && action !== 'stop')}
             onClick={() => (action === 'stop' ? setConfirmStop(true) : power.mutate(action))}
           >
             {t(`servers.power.${action}`)}
           </Button>
         ))}
       </div>
+      {extracting ? <p className="text-muted-foreground text-sm">{t('servers.extracting_lock')}</p> : null}
       <ConfirmDialog
         open={confirmStop}
         onOpenChange={setConfirmStop}

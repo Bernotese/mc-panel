@@ -1,7 +1,9 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { db, loginAs } from '@/mocks/db'
+import { server } from '@/mocks/node'
 import { renderWithProviders } from '@/test/render'
 import { ServerDetailPage } from './server-detail-page'
 
@@ -206,5 +208,19 @@ describe('ServerDetailPage', () => {
     await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
     await screen.findByRole('heading', { name: 'survival', level: 1 })
     expect(screen.queryByRole('tab', { name: 'Dateien' })).not.toBeInTheDocument()
+  })
+
+  it('blocks starting while an extraction runs', async () => {
+    server.use(
+      http.get('*/api/servers/:id/files/jobs', () =>
+        HttpResponse.json({
+          job: { id: 'j', state: 'running', path: 'w.zip', dest: 'w', bytes: 1, entries: 1, total_bytes: 10, total_entries: 10, error: '', started_at: Date.now(), finished_at: 0 },
+        }),
+      ),
+    )
+    await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('admin') })
+    expect(await screen.findByText('Entpacken läuft – Starten ist erst danach möglich.')).toBeInTheDocument()
+    const group = screen.getByRole('group', { name: 'Steuerung für creative' })
+    expect(within(group).getByRole('button', { name: 'Starten' })).toBeDisabled()
   })
 })
