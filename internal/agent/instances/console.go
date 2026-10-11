@@ -31,6 +31,9 @@ const (
 	maxRawLogLine    = agentapi.MaxLogLineBytes + 64
 	truncatedMark    = "\n[… gekürzt]"
 	exitPollInterval = 20 * time.Millisecond
+	// truncatedExitWait bounds the wait for the exit code after the output was cut: the
+	// process may block writing the rest we no longer read.
+	truncatedExitWait = 2 * time.Second
 )
 
 // consoleState counts the running console commands per instance; the zero value is ready.
@@ -92,8 +95,9 @@ func (m *Manager) consoleContainer(ctx context.Context, id int64) (docker.Contai
 // stream are returned (ErrInvalid, ErrNotFound, ErrDockerUnavailable, …); then start is
 // called once with the container state seen by the inspect, and emit for every line until
 // Docker ends the stream (container stopped or removed, or a stopped container's history
-// is done: nil), ctx ends (ctx.Err()) or emit fails (its error). It never waits for a
-// stopped container to come back; the panel reconnects.
+// is done: nil, also when Docker cuts the stream inside a frame), ctx ends (ctx.Err()) or
+// emit fails (its error). It never waits for a stopped container to come back; the panel
+// reconnects.
 func (m *Manager) Logs(ctx context.Context, req agentapi.LogsRequest, start func(running bool), emit func(agentapi.LogLine) error) error {
 	if err := req.Validate(); err != nil {
 		return err
@@ -150,6 +154,11 @@ func copyLogLines(r io.Reader, emit func(agentapi.LogLine) error) error {
 				return err
 			}
 			return flush(&errs, agentapi.StreamErr, true)
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			// Docker cut the stream inside a frame (container removed). End like a clean end,
+			// but without the unterminated rest: the panel resumes with since and gets it whole.
+			return nil
 		}
 		if err != nil {
 			return err
@@ -310,13 +319,17 @@ func (m *Manager) Rcon(ctx context.Context, id int64, command string) (string, e
 	if err != nil {
 		return "", fail(err)
 	}
+	var code int
 	if truncated {
-		// We stopped reading; the process may still be blocked writing, so its exit code
-		// would only arrive with the timeout. The answer itself is complete enough.
-		return out, nil
-	}
-	code, err := m.execExitCode(ctx, execID)
-	if err != nil {
+		// We stopped reading; the process may be blocked writing the rest, so wait only
+		// briefly for its exit code. Without one the cut output is the answer.
+		wctx, wcancel := context.WithTimeout(ctx, truncatedExitWait)
+		code, err = m.execExitCode(wctx, execID)
+		wcancel()
+		if err != nil {
+			return out, nil
+		}
+	} else if code, err = m.execExitCode(ctx, execID); err != nil {
 		return "", fail(err)
 	}
 	if code != 0 {

@@ -17,9 +17,10 @@ import (
 const logTimeFormat = "2006-01-02T15:04:05.000000000Z07:00"
 
 type logEntry struct {
-	at      time.Time
-	stream  docker.StreamType
-	payload []byte
+	at       time.Time
+	stream   docker.StreamType
+	payload  []byte
+	unframed bool // written as is, without a frame header
 }
 
 // ExecResult is what a fake exec process prints and returns.
@@ -59,6 +60,15 @@ func (d *Daemon) AppendRawLog(name string, stream docker.StreamType, payload []b
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.logs[name] = append(d.logs[name], logEntry{at: d.nextLogTime(), stream: stream, payload: slices.Clone(payload)})
+	d.wakeLogs()
+}
+
+// AppendUnframed adds data that is written as is, without a frame header, e.g. a frame
+// header promising more bytes than follow (a stream cut inside a frame).
+func (d *Daemon) AppendUnframed(name string, data []byte) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.logs[name] = append(d.logs[name], logEntry{at: d.nextLogTime(), payload: slices.Clone(data), unframed: true})
 	d.wakeLogs()
 }
 
@@ -179,7 +189,13 @@ func (d *Daemon) serveLogs(w http.ResponseWriter, r *http.Request, ref string) {
 		}
 		first = false
 		for _, e := range out {
-			if err := docker.WriteFrame(w, e.stream, e.payload); err != nil {
+			var err error
+			if e.unframed {
+				_, err = w.Write(e.payload)
+			} else {
+				err = docker.WriteFrame(w, e.stream, e.payload)
+			}
+			if err != nil {
 				return
 			}
 		}
