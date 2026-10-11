@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploys mc-panel from a git ref onto the internal test VM (Ubuntu 26.04, no inbound internet):
 # installs the toolchain and runtime packages on first use, clones/fetches the repo with the
-# VM's GitHub deploy key, builds panel and agent, installs them with systemd units and puts
+# VM's GitHub deploy key, builds panel, agent and files, installs them with systemd units and puts
 # Caddy in front with its internal CA (no Let's Encrypt). Names resolve through sslip.io:
 # panel.<ip>.sslip.io for the UI, <server>.mc.<ip>.sslip.io for Minecraft (dots as dashes).
 #
@@ -69,7 +69,7 @@ mc-panel $(git -C "$SRC" describe --always --dirty) deployed.
   Panel:        https://$panel_host/
   Basisdomain:  $mc_domain   (Minecraft: <servername>.$mc_domain)
   Caddy-CA:     $HOME/caddy-root.crt (im Browser vertrauen, sonst Zertifikatswarnung)
-  Logs:         journalctl -u mcpanel-agent -u mcpanel-panel -f
+  Logs:         journalctl -u mcpanel-agent -u mcpanel-files -u mcpanel-panel -f
 EOF
 }
 
@@ -165,7 +165,10 @@ install_system() {
     sudo useradd --system --user-group --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin mcpanel-mc
   sudo install -d -m 0755 -o root -g root /srv/mc-panel
   sudo install -d -m 0750 -o root -g mcpanel /etc/mc-panel
-  sudo install -m 0755 "$SRC/bin/panel" "$SRC/bin/agent" /usr/local/bin/
+  sudo install -m 0755 "$SRC/bin/panel" "$SRC/bin/agent" "$SRC/bin/files" /usr/local/bin/
+  # Spec 3b §3.3: the files service (mcpanel-mc) may enter instances/, never write it; the
+  # agent enforces the same owner and mode at start.
+  sudo install -d -m 0750 -o root -g mcpanel-mc /srv/mc-panel/instances
 
   sudo tee /etc/mc-panel/agent.toml >/dev/null <<EOF
 socket = "/run/mc-panel/agent.sock"
@@ -176,11 +179,24 @@ mc_user = "mcpanel-mc"
 EOF
   sudo chmod 0600 /etc/mc-panel/agent.toml
 
+  # The files service runs as mcpanel-mc without supplementary groups, so it cannot read
+  # /etc/mc-panel (root:mcpanel 0750): its config lives in a directory of its own. socket and
+  # socket_mode are unused here (systemd hands over the socket, see mcpanel-files.socket).
+  sudo install -d -m 0750 -o root -g mcpanel-mc /etc/mc-panel-files
+  sudo tee /etc/mc-panel-files/files.toml >/dev/null <<EOF
+socket = "/run/mc-panel-files/files.sock"
+panel_uid = $(id -u mcpanel)
+instances_dir = "/srv/mc-panel"
+EOF
+  sudo chown root:mcpanel-mc /etc/mc-panel-files/files.toml
+  sudo chmod 0640 /etc/mc-panel-files/files.toml
+
   sudo tee /etc/mc-panel/panel.toml >/dev/null <<EOF
 listen = "127.0.0.1:8080"
 public_url = "https://$panel_host"
 data_dir = "/var/lib/mc-panel"
 agent_socket = "/run/mc-panel/agent.sock"
+files_socket = "/run/mc-panel-files/files.sock"
 trusted_proxies = ["127.0.0.1/32"]
 EOF
   sudo chown root:mcpanel /etc/mc-panel/panel.toml
@@ -205,11 +221,64 @@ RestartSec=2
 WantedBy=multi-user.target
 EOF
 
+  # Spec 3b §3.1: the files service never runs as root and has no supplementary groups. systemd
+  # creates the socket (owner mcpanel-mc, group mcpanel, 0660) in a directory of its own and
+  # hands it over (LISTEN_FDS); /run/mc-panel stays the agent's, so stopping one unit never
+  # removes the other's socket.
+  sudo tee /etc/systemd/system/mcpanel-files.socket >/dev/null <<'EOF'
+[Unit]
+Description=mc-panel files service socket
+
+[Socket]
+ListenStream=/run/mc-panel-files/files.sock
+SocketUser=mcpanel-mc
+SocketGroup=mcpanel
+SocketMode=0660
+DirectoryMode=0755
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target
+EOF
+
+  # MemoryMax/TasksMax: defense in depth against crafted archives (zip parsing); the service
+  # streams, so 512M is ample.
+  sudo tee /etc/systemd/system/mcpanel-files.service >/dev/null <<'EOF'
+[Unit]
+Description=mc-panel files service (unprivileged, Minecraft data)
+Requires=mcpanel-files.socket
+Wants=mcpanel-agent.service
+After=network-online.target mcpanel-files.socket mcpanel-agent.service
+
+[Service]
+User=mcpanel-mc
+Group=mcpanel-mc
+ExecStart=/usr/local/bin/files -config /etc/mc-panel-files/files.toml
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ReadWritePaths=/srv/mc-panel/instances
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+UMask=0027
+MemoryMax=512M
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
   sudo tee /etc/systemd/system/mcpanel-panel.service >/dev/null <<'EOF'
 [Unit]
 Description=mc-panel web panel
-Wants=mcpanel-agent.service
-After=network-online.target mcpanel-agent.service
+Wants=mcpanel-agent.service mcpanel-files.socket
+After=network-online.target mcpanel-agent.service mcpanel-files.socket
 
 [Service]
 User=mcpanel
@@ -247,13 +316,44 @@ $ip {
 EOF
   quiet sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
   sudo systemctl daemon-reload
-  sudo systemctl enable mcpanel-agent mcpanel-panel caddy >/dev/null 2>&1
+  sudo systemctl enable mcpanel-agent mcpanel-files.socket mcpanel-files.service mcpanel-panel caddy >/dev/null 2>&1
+}
+
+# check_files_service: socket unit and service active, socket mcpanel-mc:mcpanel 0660; the
+# service runs as mcpanel-mc without supplementary groups, without capabilities and with
+# no_new_privs (spec 3b §3.1); prints what is wrong otherwise.
+check_files_service() {
+  local pid uid status
+  if ! sudo systemctl is-active --quiet mcpanel-files.socket || ! sudo systemctl is-active --quiet mcpanel-files.service; then
+    echo "testvm-deploy: mcpanel-files.socket/.service not active" >&2
+    sudo systemctl --no-pager --lines=20 status mcpanel-files.socket mcpanel-files.service >&2 || true
+    return 1
+  fi
+  if [ "$(sudo stat -c '%U:%G %a' /run/mc-panel-files/files.sock)" != "mcpanel-mc:mcpanel 660" ] ||
+    [ "$(sudo stat -c '%a' /run/mc-panel-files)" != 755 ]; then
+    echo "testvm-deploy: files socket: $(sudo stat -c '%U:%G %a %n' /run/mc-panel-files /run/mc-panel-files/files.sock)" >&2
+    return 1
+  fi
+  pid="$(systemctl show -p MainPID --value mcpanel-files)"
+  uid="$(id -u mcpanel-mc)"
+  status="$(sudo cat "/proc/$pid/status")"
+  if ! grep -qxP "Uid:\t$uid\t$uid\t$uid\t$uid" <<<"$status" ||
+    ! grep -qxP 'CapEff:\t0000000000000000' <<<"$status" ||
+    ! grep -qxP 'NoNewPrivs:\t1' <<<"$status" ||
+    grep -P '^Groups:' <<<"$status" | grep -qw "$(getent group mcpanel | cut -d: -f3)"; then
+    echo "testvm-deploy: mcpanel-files runs with unexpected credentials:" >&2
+    grep -E '^(Uid|Gid|Groups|CapEff|NoNewPrivs):' <<<"$status" >&2
+    return 1
+  fi
 }
 
 restart_and_check() {
   local panel_host="$1"
   log "restart"
   sudo systemctl restart mcpanel-agent
+  sudo systemctl stop mcpanel-files.service
+  sudo systemctl restart mcpanel-files.socket
+  sudo systemctl start mcpanel-files.service
   sudo systemctl restart mcpanel-panel
   sudo systemctl reload-or-restart caddy
   local _
@@ -261,6 +361,7 @@ restart_and_check() {
     if curl -fsS -o /dev/null --cacert <(sudo cat /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt 2>/dev/null) \
       --resolve "$panel_host:443:127.0.0.1" "https://$panel_host/api/health" 2>/dev/null; then
       sudo install -m 0644 -o "$(id -un)" /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt "$HOME/caddy-root.crt"
+      check_files_service || exit 1
       return 0
     fi
     sleep 1
