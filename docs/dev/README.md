@@ -83,8 +83,11 @@ MCPANEL_DEV_DOCKER=1 make dev
 - Der dev-agent nutzt dann den Docker-Socket von OrbStack, Docker Desktop oder `/var/run/docker.sock` (in dieser Reihenfolge), legt das Netz `mcpanel-mc` und den Container `mcpanel-router` an und schreibt Instanzdaten nach `.dev/mc/`. Der Router veröffentlicht Port 25565 auf allen Netzwerkschnittstellen des Macs, ist also im lokalen Netz erreichbar.
 - Basisdomain in den Einstellungen: `mc.localhost`; für den Minecraft-Client `/etc/hosts` um `127.0.0.1 <name>.mc.localhost` ergänzen.
 - Aufräumen: `docker rm -f $(docker ps -aq --filter label=mcpanel.instance) mcpanel-router; docker network rm mcpanel-mc`.
+- Nach dem Update von TP2 jeden Server mit „Neustart nötig“ über das panel neu starten, bevor Ops/Whitelist im Spieler-Tab geändert werden: Laufende Container tragen sonst noch `OPS`/`WHITELIST`/`EXISTING_*_FILE=SYNCHRONIZE`, und nach einem Absturz oder `stop` überschreibt itzg `ops.json`/`whitelist.json` aus der alten Umgebung.
+- Konsolenbefehle, die mit `-` beginnen (nach optionalen Leerzeichen und einem `/`), lehnen panel und agent ab (`400 validation_failed`): sonst würde `rcon-cli` sie als Option lesen; der agent ruft `rcon-cli -- <befehl>` auf.
+- Konsole und Spieler-Tab brauchen einen laufenden Container. Ohne Docker antworten Befehle und Spielerlisten mit `503 docker_unavailable`, die Karte „Online-Spieler“ zeigt „nicht verfügbar“; der Log-Stream antwortet trotzdem mit 200, und die Konsole zeigt „Konsole nicht erreichbar“ bzw. „Verbinde neu …“. Die UI-Vorschau (`make preview`) und `npm run dev:mock` liefern dagegen simulierte Log-Zeilen (alle 2 s eine neue, mit ANSI-/`§`-Farben und RCON-Rauschen), Befehlsantworten und Spielerlisten.
 
-Funktionstests gegen echte Server (Clients, Modpacks, Neustarts) laufen getrennt auf der Test-VM (nächster Abschnitt); die Checkliste steht in `docs/dev/acceptance-tp2.md`.
+Funktionstests gegen echte Server (Clients, Modpacks, Neustarts, Konsole) laufen getrennt auf der Test-VM (nächster Abschnitt); die Checklisten stehen in `docs/dev/acceptance-tp2.md` (Server-Lebenszyklus) und `docs/dev/acceptance-tp3a.md` (Konsole, Logs, Spieler).
 
 ## Test-VM
 
@@ -140,6 +143,7 @@ In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er 
   Caddy bekommt Zugriff über eine **eigene** Socket-Gruppe (z. B. Gruppe `caddy` als Socket-Gruppe), **nicht** durch Aufnahme in die Gruppe `mcpanel` (sonst könnte Caddy den agent-Socket löschen oder ersetzen).
 - Requests über den Unix-Socket gelten als vom Proxy kommend: die Client-IP ist der rechteste nicht vertrauenswürdige Eintrag in `X-Forwarded-For` (Caddy setzt ihn). Fehlt ein verwertbarer Eintrag, wird der Request abgewiesen (`403 ip_blocked`); Health-Checks direkt am Socket brauchen deshalb einen Header, z. B. `curl --unix-socket /run/mc-panel/panel.sock -H 'X-Forwarded-For: 127.0.0.1' http://panel/api/health`. Aktive Caddy-Health-Checks (`health_uri`) senden kein `X-Forwarded-For` und würden mit `403` scheitern — entweder `health_headers` setzen oder auf aktive Checks verzichten. Andere Proxys müssen `X-Forwarded-For` ohne Port setzen, sonst `403`.
 - TCP bleibt möglich (`listen = "127.0.0.1:8080"`); dann wird `X-Forwarded-For` nur von `trusted_proxies` übernommen. Loopback ist nur im Dev-Modus von „Admin-Login nur aus Allowlist“ ausgenommen.
+- Die Konsole streamt das Server-Log als Server-Sent Events (`GET /api/servers/{id}/console/stream`, `text/event-stream`, Heartbeat-Kommentar alle 15 s, ein Stream pro offenem Konsolen-Tab, höchstens 4 pro Benutzer, der 5. bekommt `429 rate_limited`). Caddy reicht SSE ohne Pufferung und ohne Zusatzkonfiguration durch. Ein anderer Proxy darf die Antwort nicht puffern (das panel setzt `X-Accel-Buffering: no` für nginx) und braucht ein Lese-Timeout über 15 s.
 - Außerhalb des Dev-Modus sendet das panel `Strict-Transport-Security: max-age=31536000`.
 - CLI-Befehle auf dem Server immer als panel-Benutzer ausführen (`sudo -u mcpanel panel admin unlock …`), sonst entstehen root-eigene `panel.db-wal`/`-shm`, die der Dienst nicht öffnen kann.
 - Eine 2FA-Sperre (10 falsche Codes in 15 min) hebt `admin unlock` nicht auf; sie endet nach 15 min oder mit einem panel-Neustart.
@@ -169,7 +173,7 @@ In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er 
 | `openapi` | `npx --yes @redocly/cli@2.54.2 lint api/openapi.yaml --extends=minimal` |
 | `nftables` | nur in der CI (Linux, root): `go test -tags nftintegration -exec sudo ./internal/agent/...` und der Abnahmetest `sudo scripts/ci-acceptance.sh bin/panel bin/agent` (5 Fehlversuche → IP im nftables-Jail). Das Skript verändert den Host (Benutzer, Netz-Namespace, nftables) und ist nur für Wegwerf-Runner gedacht. |
 | `nftables` (Docker-Integration) | nur in der CI: `go test -tags dockerintegration -exec "sudo env MCPANEL_IT_STRICT=1" ./internal/agent/...` |
-| `instances` | nur in der CI: `sudo scripts/ci-instances.sh bin/agent` (echter agent + Docker + Paper-Server; verändert den Host) |
+| `instances` | nur in der CI: `sudo scripts/ci-instances.sh bin/agent` (echter agent + Docker + Paper-Server: Routing, Härtung, Konsole mit RCON, Log-Stream und Spielerlisten, präparierte Spielerdateien, Absturz-Neustart, Löschen; verändert den Host) |
 | `build` | `make build`, `make release`, dann `file dist/*/panel dist/*/agent` |
 
 Linux-spezifische Dateien lokal linten: `GOOS=linux .dev/tools/golangci-lint run ./...`.
