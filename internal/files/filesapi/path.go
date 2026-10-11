@@ -12,8 +12,8 @@ const (
 	hiddenPrefix      = ".mcpanel-"
 )
 
-// topHidden are the itzg files holding the RCON password (spec §3.4).
-var topHidden = map[string]bool{".rcon-cli.env": true, ".rcon-cli.yaml": true}
+// topHidden are the itzg files holding the RCON password (spec §3.4), lower case.
+var topHidden = []string{".rcon-cli.env", ".rcon-cli.yaml"}
 
 // CleanPath validates p per spec §3.4 and returns it normalised: "" for the root, no trailing
 // "/". Errors wrap ErrInvalid. Hidden paths are not rejected here (IsHidden decides).
@@ -48,17 +48,21 @@ func CleanPath(p string) (string, error) {
 }
 
 // IsHidden reports whether a cleaned path is or lies below a hidden name: the top-level RCON
-// files or any component starting with ".mcpanel-" (temporary files of the service).
+// files or any component starting with ".mcpanel-" (temporary files of the service). Names are
+// compared case-insensitively: on a case-insensitive file system (macOS dev) ".RCON-CLI.ENV"
+// opens the same file.
 func IsHidden(clean string) bool {
 	if clean == "" {
 		return false
 	}
 	parts := strings.Split(clean, "/")
-	if topHidden[parts[0]] {
-		return true
+	for _, h := range topHidden {
+		if strings.EqualFold(parts[0], h) {
+			return true
+		}
 	}
 	for _, c := range parts {
-		if strings.HasPrefix(c, hiddenPrefix) {
+		if len(c) >= len(hiddenPrefix) && strings.EqualFold(c[:len(hiddenPrefix)], hiddenPrefix) {
 			return true
 		}
 	}

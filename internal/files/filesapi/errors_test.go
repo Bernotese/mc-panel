@@ -58,3 +58,20 @@ func TestStatusErrorIs(t *testing.T) {
 		t.Fatal("a known code must not also match ErrUnavailable")
 	}
 }
+
+// TestStatusErrorNeedsMatchingStatus: a code only counts with its own HTTP status; anything
+// else is a broken answer of the service.
+func TestStatusErrorNeedsMatchingStatus(t *testing.T) {
+	for _, e := range []*filesapi.StatusError{
+		{Status: 500, Code: "not_found"},
+		{Status: 200, Code: "exists"},
+		{Status: 404, Code: "exists"},
+	} {
+		if !errors.Is(e, filesapi.ErrUnavailable) {
+			t.Errorf("%+v is not ErrUnavailable", e)
+		}
+		if errors.Is(e, filesapi.ErrNotFound) || errors.Is(e, filesapi.ErrExists) {
+			t.Errorf("%+v matches a sentinel despite its status", e)
+		}
+	}
+}

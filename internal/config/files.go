@@ -9,11 +9,13 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 )
 
 // maxTextBytesLimit keeps every editor text within one write request after JSON escaping
-// (filesapi.MaxJSONBytes = 32 MiB, escaping grows text up to 6x).
-const maxTextBytesLimit = (32 << 20) / 6
+// (escaping grows text up to 6x; the small fields of the request get MaxSmallJSONBytes).
+const maxTextBytesLimit = (filesapi.MaxJSONBytes - filesapi.MaxSmallJSONBytes) / 6
 
 // FilesLimits are the limits of the files service (spec 3b §3.1).
 type FilesLimits struct {
@@ -106,7 +108,10 @@ func (f Files) Validate() error {
 	if m, err := strconv.ParseUint(f.SocketMode, 8, 32); err != nil || m > 0o777 {
 		errs = append(errs, fmt.Errorf("socket_mode: %q must be an octal mode between 0 and 0777", f.SocketMode))
 	}
-	if f.PanelUID < 0 && !f.Dev {
+	switch {
+	case f.PanelUID < -1:
+		errs = append(errs, fmt.Errorf("panel_uid: %d is not a uid (-1 = unset)", f.PanelUID))
+	case f.PanelUID == -1 && !f.Dev:
 		errs = append(errs, errors.New("panel_uid must be set to the uid of the panel user"))
 	}
 	if err := cleanAbsPath("instances_dir", f.InstancesDir); err != nil {

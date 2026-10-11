@@ -66,3 +66,30 @@ func TestJoin(t *testing.T) {
 		t.Fatalf("Join = %q", got)
 	}
 }
+
+// TestCleanPathPinnedNames: look-alike slashes and C1 control characters are ordinary name
+// characters (only ASCII "/" separates components); pinned so a change is deliberate.
+func TestCleanPathPinnedNames(t *testing.T) {
+	for _, in := range []string{"a／b", "a∕b", "a\u0085b", "\u009fx"} {
+		if got, err := filesapi.CleanPath(in); err != nil || got != in {
+			t.Errorf("CleanPath(%q) = %q, %v; want it unchanged", in, got, err)
+		}
+	}
+}
+
+// TestIsHiddenIgnoresCase: macOS dev volumes are case-insensitive, so ".RCON-CLI.ENV" opens the
+// same file as ".rcon-cli.env".
+func TestIsHiddenIgnoresCase(t *testing.T) {
+	for in, want := range map[string]bool{
+		".RCON-CLI.ENV":         true,
+		".Rcon-Cli.Yaml":        true,
+		".rcon-cli.env/x":       true,
+		".MCPANEL-tmp":          true,
+		"world/.McPanel-upload": true,
+		"plugins/.RCON-CLI.ENV": false,
+	} {
+		if got := filesapi.IsHidden(in); got != want {
+			t.Errorf("IsHidden(%q) = %v, want %v", in, got, want)
+		}
+	}
+}

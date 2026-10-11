@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 )
@@ -197,5 +198,127 @@ func TestClientJob(t *testing.T) {
 	}
 	if got, err := c.Job(context.Background(), 2); err != nil || got != nil {
 		t.Fatalf("Job(2) = %+v, %v; want nil", got, err)
+	}
+}
+
+func TestClientDownloadRejectsOtherAnswers(t *testing.T) {
+	c := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("path") {
+		case "no-content":
+			w.WriteHeader(http.StatusNoContent)
+		case "partial":
+			w.Header().Set(filesapi.HeaderKind, "file")
+			w.WriteHeader(http.StatusPartialContent)
+		case "missing":
+			writeJSON(w, http.StatusNotFound, filesapi.ErrorResponse{Error: "no such file", Code: filesapi.CodeNotFound})
+		case "redirect":
+			http.Redirect(w, r, "/elsewhere", http.StatusFound)
+		case "nokind":
+			_, _ = w.Write([]byte("data"))
+		default:
+			w.Header().Set(filesapi.HeaderKind, "fifo")
+			_, _ = w.Write([]byte("data"))
+		}
+	}))
+	for path, want := range map[string]error{
+		"no-content": filesapi.ErrUnavailable, "partial": filesapi.ErrUnavailable, "missing": filesapi.ErrNotFound,
+		"redirect": filesapi.ErrUnavailable, "nokind": filesapi.ErrUnavailable, "weird": filesapi.ErrUnavailable,
+	} {
+		d, err := c.Download(context.Background(), 1, path)
+		if !errors.Is(err, want) || d.Body != nil {
+			t.Errorf("%s: Download = %+v, %v; want %v and no body", path, d, err, want)
+		}
+	}
+}
+
+func TestClientDownloadHeaderTimeout(t *testing.T) {
+	release := make(chan struct{})
+	c := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer close(release)
+	filesapi.SetDownloadHeaderTimeout(c, 50*time.Millisecond)
+	if _, err := c.Download(context.Background(), 1, "slow"); !errors.Is(err, filesapi.ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestClientDownloadStreamEndsWithContext(t *testing.T) {
+	c := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(filesapi.HeaderKind, "dir")
+		_, _ = w.Write([]byte("PK"))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done() // a stream that never ends by itself
+	}))
+	ctx, cancel := context.WithCancel(context.Background())
+	d, err := c.Download(ctx, 1, "world")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Body.Close() }()
+	buf := make([]byte, 2)
+	if _, err := io.ReadFull(d.Body, buf); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	done := make(chan error, 1)
+	go func() { _, err := io.Copy(io.Discard, d.Body); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("stream ended cleanly after cancel, want an error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not end after the context was cancelled")
+	}
+}
+
+func TestClientHealth(t *testing.T) {
+	status := "ok"
+	c := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, filesapi.HealthResponse{Status: status, Version: "test"})
+	}))
+	if err := c.Health(context.Background()); err != nil {
+		t.Fatalf("ok: %v", err)
+	}
+	status = "starting"
+	if err := c.Health(context.Background()); !errors.Is(err, filesapi.ErrUnavailable) {
+		t.Fatalf("starting: err = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestClientRejectsOversizedAndRedirectedAnswers(t *testing.T) {
+	c := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == filesapi.PathMkdir {
+			http.Redirect(w, r, "/v1/elsewhere", http.StatusTemporaryRedirect)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":"`))
+		_, _ = w.Write(bytes.Repeat([]byte("a"), filesapi.MaxJSONBytes+1))
+		_, _ = w.Write([]byte(`","mtime":1,"size":1}`))
+	}))
+	if _, err := c.Read(context.Background(), 1, "big.txt"); !errors.Is(err, filesapi.ErrUnavailable) {
+		t.Fatalf("oversized: err = %v, want ErrUnavailable", err)
+	}
+	if err := c.Mkdir(context.Background(), 1, "x"); !errors.Is(err, filesapi.ErrUnavailable) {
+		t.Fatalf("redirect: err = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestClientUploadEmptyFile(t *testing.T) {
+	c := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength != 0 || len(r.TransferEncoding) != 0 {
+			http.Error(w, "want Content-Length: 0", 400)
+			return
+		}
+		writeJSON(w, 201, filesapi.UploadResponse{Size: 0})
+	}))
+	got, err := c.Upload(context.Background(), 1, "empty.txt", false, 0, strings.NewReader(""))
+	if err != nil || got.Size != 0 {
+		t.Fatalf("Upload = %+v, %v", got, err)
 	}
 }
