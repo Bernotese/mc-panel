@@ -133,6 +133,12 @@ func TestExtractServiceErrors(t *testing.T) {
 			t.Errorf("%v: %d %s, want %d %s", tc.err, rec.Code, rec.Body, tc.code, tc.ec)
 			continue
 		}
+		if tc.err == filesapi.ErrBusy { // a rejection, not audited (review B4)
+			if len(e.rec.Entries) != 0 {
+				t.Errorf("busy: audit = %v", e.rec.Actions())
+			}
+			continue
+		}
 		last := e.lastEntry()
 		if last.Action != audit.ActionFileExtract || last.Result != audit.ResultFailure || last.Details["dest"] != "w" {
 			t.Errorf("%v: audit = %+v", tc.err, last)
