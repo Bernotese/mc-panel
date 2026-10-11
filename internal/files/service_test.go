@@ -104,7 +104,7 @@ func TestCleanupTempRemovesLeftovers(t *testing.T) {
 	put(t, data, "world/.mcpanel-tmp-2/region/r.mca", "partial extract")
 	put(t, data, "world/level.dat", "keep")
 	put(t, data, ".mcpanel-other", "not a temp name")
-	if n := s.CleanupTemp(); n != 2 {
+	if n := s.CleanupTemp(ctx); n != 2 {
 		t.Fatalf("removed %d entries, want 2", n)
 	}
 	if _, ok := get(t, data, ".mcpanel-tmp-1"); ok {
@@ -248,7 +248,7 @@ func TestCommit(t *testing.T) {
 
 	stage := func(content string) string {
 		t.Helper()
-		tmp, err := tempName("dir")
+		tmp, err := s.tempName("dir")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -340,7 +340,7 @@ func TestCleanupTempNeverFollowsSymlinks(t *testing.T) {
 	odd := filepath.Join(s.cfg.InstancesDir, "instances", "01")
 	put(t, odd, ".mcpanel-tmp-odd", "x")
 
-	if n := s.CleanupTemp(); n != 2 { // .mcpanel-tmp-link (the link) and real/.mcpanel-tmp-target
+	if n := s.CleanupTemp(ctx); n != 2 { // .mcpanel-tmp-link (the link) and real/.mcpanel-tmp-target
 		t.Fatalf("removed %d entries, want 2", n)
 	}
 	if _, err := os.Lstat(filepath.Join(data, ".mcpanel-tmp-link")); !os.IsNotExist(err) {

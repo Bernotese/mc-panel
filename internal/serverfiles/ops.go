@@ -3,6 +3,7 @@ package serverfiles
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"slices"
 
@@ -96,6 +97,11 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	release, ok := h.editorSlot(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	res, err := h.files.Read(r.Context(), s.ID, p)
 	if err != nil {
 		h.writeFilesError(w, r, err)
@@ -110,11 +116,33 @@ func (h *Handler) handleWrite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	release, ok := h.editorSlot(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	// The editor may save up to filesapi.MaxJSONBytes (decision 1); UnlimitedBody exempts this
-	// route from the global 1 MiB limit from Task 10 on.
-	r.Body = http.MaxBytesReader(w, r.Body, filesapi.MaxJSONBytes)
+	// route from the global 1 MiB limit. Over a slow connection that takes longer than the
+	// server's ReadTimeout: every read gets its own deadline, like an upload (review B6), but
+	// the whole body must arrive within saveTimeout (it holds an editor slot meanwhile).
+	rc := http.NewResponseController(w)
+	until := h.ioClock.Now().Add(h.saveTimeout)
+	body := &deadlineReader{
+		r: r.Body,
+		dl: func() error {
+			next := h.ioClock.Now().Add(h.ioTimeout)
+			if until.Before(next) {
+				next = until
+			}
+			return ignoreUnsupported(rc.SetReadDeadline(next))
+		},
+		eof: r.ContentLength == 0,
+	}
+	r.Body = http.MaxBytesReader(w, io.NopCloser(body), filesapi.MaxJSONBytes)
 	var req writeRequest
-	if !httpx.DecodeJSON(w, r, &req) {
+	decoded := httpx.DecodeJSON(w, r, &req)
+	body.finish()
+	if !decoded {
 		return
 	}
 	if req.Content.Value == nil {
@@ -132,7 +160,8 @@ func (h *Handler) handleWrite(w http.ResponseWriter, r *http.Request) {
 	res, err := h.files.Write(context.WithoutCancel(ctx), filesapi.WriteRequest{
 		ID: s.ID, Path: p, Content: *req.Content.Value, ExpectedMTime: req.ExpectedMTime.Value,
 	})
-	h.record(ctx, audit.ActionFileWrite, s.ID, result(err), map[string]any{"path": p})
+	h.extendWrite(w, r)
+	h.recordResult(ctx, audit.ActionFileWrite, s.ID, err, map[string]any{"path": p})
 	if err != nil {
 		h.writeFilesError(w, r, err)
 		return
@@ -155,7 +184,7 @@ func (h *Handler) handleMkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := h.files.Mkdir(context.WithoutCancel(ctx), s.ID, p)
-	h.record(ctx, audit.ActionFileMkdir, s.ID, result(err), map[string]any{"path": p})
+	h.recordResult(ctx, audit.ActionFileMkdir, s.ID, err, map[string]any{"path": p})
 	if err != nil {
 		h.writeFilesError(w, r, err)
 		return
@@ -182,7 +211,7 @@ func (h *Handler) handleRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := h.files.Rename(context.WithoutCancel(ctx), filesapi.RenameRequest{ID: s.ID, From: from, To: to})
-	h.record(ctx, audit.ActionFileRename, s.ID, result(err), map[string]any{"from": from, "to": to})
+	h.recordResult(ctx, audit.ActionFileRename, s.ID, err, map[string]any{"from": from, "to": to})
 	if err != nil {
 		h.writeFilesError(w, r, err)
 		return
@@ -204,8 +233,10 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Deleting a world can take minutes (filesapi.DeleteTimeout), longer than the WriteTimeout.
 	err := h.files.Delete(context.WithoutCancel(ctx), s.ID, p)
-	h.record(ctx, audit.ActionFileDelete, s.ID, result(err), map[string]any{"path": p})
+	h.extendWrite(w, r)
+	h.recordResult(ctx, audit.ActionFileDelete, s.ID, err, map[string]any{"path": p})
 	if err != nil {
 		h.writeFilesError(w, r, err)
 		return

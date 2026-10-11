@@ -3,6 +3,7 @@ package serverfiles_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -131,6 +132,12 @@ func TestExtractServiceErrors(t *testing.T) {
 		rec := e.do(http.MethodPost, srvPath(id, "/files/extract"), map[string]string{"path": "w.zip", "dest": "w"}, &admin)
 		if rec.Code != tc.code || errCode(t, rec) != tc.ec {
 			t.Errorf("%v: %d %s, want %d %s", tc.err, rec.Code, rec.Body, tc.code, tc.ec)
+			continue
+		}
+		if errors.Is(tc.err, filesapi.ErrBusy) { // a rejection, not audited (review B4)
+			if len(e.rec.Entries) != 0 {
+				t.Errorf("busy: audit = %v", e.rec.Actions())
+			}
 			continue
 		}
 		last := e.lastEntry()

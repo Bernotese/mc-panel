@@ -7,7 +7,7 @@ import { EditorState, Prec, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { basicSetup } from 'codemirror'
 import { useEffect, useRef } from 'react'
-import type { EditorLanguage } from './format'
+import { isFileDrag, lineSeparator, type EditorLanguage } from './format'
 
 export interface CodeEditorProps {
   value: string
@@ -54,6 +54,7 @@ export default function CodeEditor({ value, language, label, onChange, onSave }:
 
   useEffect(() => {
     if (!host.current) return
+    const separator = lineSeparator(value)
     const view = new EditorView({
       parent: host.current,
       state: EditorState.create({
@@ -61,6 +62,15 @@ export default function CodeEditor({ value, language, label, onChange, onSave }:
         extensions: [
           basicSetup,
           languageExtension(language),
+          separator ? EditorState.lineSeparator.of(separator) : [],
+          // A file dropped onto the editor would be inserted as text; uploads go through the file list.
+          EditorView.domEventHandlers({
+            drop: (event) => {
+              if (!isFileDrag(event)) return false
+              event.preventDefault()
+              return true
+            },
+          }),
           theme,
           EditorView.contentAttributes.of({ 'aria-label': label }),
           Prec.highest(
@@ -76,7 +86,8 @@ export default function CodeEditor({ value, language, label, onChange, onSave }:
             ]),
           ),
           EditorView.updateListener.of((update) => {
-            if (update.docChanged) callbacks.current.onChange(update.state.doc.toString())
+            // sliceDoc joins lines with the document's own separator (CRLF stays CRLF).
+            if (update.docChanged) callbacks.current.onChange(update.state.sliceDoc())
           }),
         ],
       }),

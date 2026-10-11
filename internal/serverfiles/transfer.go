@@ -5,34 +5,48 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
-// maxUploadsPerUser bounds parallel uploads of one account (spec §5.1).
-const maxUploadsPerUser = 2
+const (
+	// maxUploadsPerUser bounds parallel uploads of one account (spec §5.1).
+	maxUploadsPerUser = 2
+	// maxDownloadsPerUser bounds parallel downloads of one account; the service limits folder
+	// zips and file downloads in total as well.
+	maxDownloadsPerUser = 4
+	// maxZipsPerUser bounds the folder zips one account streams at a time: the service streams
+	// only a few zips in total (each holds its central directory in memory), and one account
+	// must not take them all. Whether a download is a folder is known from the service's
+	// answer; a second zip is cancelled right there.
+	maxZipsPerUser = 1
+)
 
-// uploadSlots counts running uploads per user.
-type uploadSlots struct {
-	mu sync.Mutex
-	n  map[int64]int
+// userSlots counts running transfers per user.
+type userSlots struct {
+	mu  sync.Mutex
+	max int
+	n   map[int64]int
 }
 
-func newUploadSlots() *uploadSlots { return &uploadSlots{n: map[int64]int{}} }
+func newUserSlots(maxPerUser int) *userSlots { return &userSlots{max: maxPerUser, n: map[int64]int{}} }
 
 // acquire takes a slot of userID; release must be called exactly once.
-func (u *uploadSlots) acquire(userID int64) (release func(), ok bool) {
+func (u *userSlots) acquire(userID int64) (release func(), ok bool) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if u.n[userID] >= maxUploadsPerUser {
+	if u.n[userID] >= u.max {
 		return nil, false
 	}
 	u.n[userID]++
@@ -72,9 +86,18 @@ type deadlineReader struct {
 	r  io.Reader
 	dl func() error // sets a fresh read deadline
 
-	mu   sync.Mutex
-	eof  bool
-	done bool
+	mu      sync.Mutex
+	eof     bool
+	done    bool
+	readErr error // the first error of the body other than io.EOF
+}
+
+// stalled reports whether the body ran into its read deadline (the browser stopped sending).
+func (d *deadlineReader) stalled() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var ne net.Error
+	return errors.Is(d.readErr, os.ErrDeadlineExceeded) || (errors.As(d.readErr, &ne) && ne.Timeout())
 }
 
 func (d *deadlineReader) Read(p []byte) (int, error) {
@@ -93,9 +116,13 @@ func (d *deadlineReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	n, err := d.r.Read(p)
-	if errors.Is(err, io.EOF) {
+	if err != nil {
 		d.mu.Lock()
-		d.eof = true
+		if errors.Is(err, io.EOF) {
+			d.eof = true
+		} else if d.readErr == nil {
+			d.readErr = err
+		}
 		d.mu.Unlock()
 	}
 	return n, err
@@ -205,10 +232,14 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	res, err := h.files.Upload(ctx, s.ID, p, overwrite, r.ContentLength, body)
 	body.finish()
 	// The answer may come long after the WriteTimeout that started with the request.
-	if dlErr := ignoreUnsupported(rc.SetWriteDeadline(h.ioClock.Now().Add(h.ioTimeout))); dlErr != nil {
-		h.log.DebugContext(ctx, "set write deadline", "err", dlErr)
+	h.extendWrite(w, r)
+	h.recordResult(ctx, audit.ActionFileUpload, s.ID, err, map[string]any{"path": p, "size": r.ContentLength})
+	if err != nil && body.stalled() {
+		// The browser stopped sending: its problem, not an unreachable file service. net/http
+		// cancels ctx on the failed read, but the browser may still be waiting for the answer.
+		writeValidation(w, r, fmt.Sprintf("the upload stalled (no data for %s)", h.ioTimeout))
+		return
 	}
-	h.record(ctx, audit.ActionFileUpload, s.ID, result(err), map[string]any{"path": p, "size": r.ContentLength})
 	if err != nil {
 		h.writeFilesError(w, r, err)
 		return
@@ -234,16 +265,39 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	pr, _ := principal.From(ctx) // guaranteed by the rbac rule
+	release, ok := h.downloads.acquire(pr.UserID)
+	if !ok {
+		w.Header().Set("Retry-After", "5")
+		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "at most 4 downloads at a time, try again when one is done")
+		return
+	}
+	defer release()
 	// dctx ends the service's download when the browser leaves (ctx) or the service stalls.
 	dctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	d, err := h.files.Download(dctx, s.ID, p)
 	if err != nil {
-		h.record(ctx, audit.ActionFileDownload, s.ID, audit.ResultFailure, map[string]any{"path": p})
+		// Refused downloads (a missing or invalid path, a symlink, a busy service) are
+		// rejections, not audited (spec §5.3); a download that could not be served is.
+		if !rejected(err) && !errors.Is(err, filesapi.ErrNotFound) && !errors.Is(err, filesapi.ErrNotRegular) && !errors.Is(err, filesapi.ErrInvalid) {
+			h.record(ctx, audit.ActionFileDownload, s.ID, audit.ResultFailure, map[string]any{"path": p})
+		}
 		h.writeFilesError(w, r, err)
 		return
 	}
 	defer func() { _ = d.Body.Close() }()
+	if d.IsDir {
+		releaseZip, ok := h.zips.acquire(pr.UserID)
+		if !ok {
+			// Closing the body (deferred) cancels the zip at the service at once; a rejection,
+			// not audited.
+			w.Header().Set("Retry-After", "5")
+			httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "only one folder download at a time, try again when it is done")
+			return
+		}
+		defer releaseZip()
+	}
 	dw := &deadlineWriter{
 		w:     w,
 		dl:    func() error { return ignoreUnsupported(rc.SetWriteDeadline(h.ioClock.Now().Add(h.ioTimeout))) },

@@ -60,3 +60,25 @@ export function sortEntries(entries: readonly FileEntry[], key: SortKey, descend
 export function isZip(name: string): boolean {
   return name.toLowerCase().endsWith('.zip')
 }
+
+/** CRLF documents keep their line endings in the editor (otherwise saving would rewrite every line). */
+export function lineSeparator(content: string): string | undefined {
+  return content.includes('\r\n') ? '\r\n' : undefined
+}
+
+/** A drag that carries files from the desktop (not text dragged inside the page). */
+export function isFileDrag(event: Pick<DragEvent, 'dataTransfer'>): boolean {
+  return event.dataTransfer?.types.includes('Files') ?? false
+}
+
+export type ExtractFailureReason = 'insufficient_storage' | 'exists' | 'too_large' | 'invalid' | 'not_found' | 'shutdown' | 'other'
+
+const EXTRACT_REASONS: ReadonlySet<string> = new Set(['insufficient_storage', 'exists', 'too_large', 'invalid', 'not_found'])
+
+/** The cause of a failed extract job from its (English) error, which starts with the service's error code. */
+export function extractFailureReason(error: string): ExtractFailureReason {
+  const code = error.split(':', 1)[0].trim()
+  if (EXTRACT_REASONS.has(code)) return code as ExtractFailureReason
+  if (error.includes('shutting down')) return 'shutdown'
+  return 'other'
+}

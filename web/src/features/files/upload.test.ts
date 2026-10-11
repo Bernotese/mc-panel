@@ -4,7 +4,7 @@ import { getCsrfToken, setCsrfToken } from '@/api/csrf'
 import { configureApiHandlers } from '@/api/handlers'
 import { ApiError } from '@/api/errors'
 import { server } from '@/mocks/node'
-import { uploadFile } from './upload'
+import { UploadInterruptedError, uploadFile } from './upload'
 
 afterEach(() => setCsrfToken(''))
 
@@ -124,7 +124,33 @@ describe('uploadFile', () => {
 
   it('rejects with a TypeError on network errors', async () => {
     server.use(http.post('*/api/servers/:id/files/upload', () => HttpResponse.error()))
-    const err = await uploadFile(1, 'a', new File(['x'], 'a'), { overwrite: false }).catch((e: unknown) => e)
+    const err = await uploadFile(1, 'a', new File([], 'a'), { overwrite: false }).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(TypeError)
+  })
+
+  // Review F2: over HTTP/1.1 an early 409/413/507 can arrive as a reset connection while the browser still sends.
+  it.each([
+    [4, UploadInterruptedError],
+    [10, TypeError],
+  ])('a network error after %i of 10 bytes rejects with %o', async (loaded, kind) => {
+    class FakeXhr {
+      upload: { onprogress?: (e: { lengthComputable: boolean; loaded: number; total: number }) => void } = {}
+      onerror: (() => void) | null = null
+      open() {}
+      setRequestHeader() {}
+      send() {
+        this.upload.onprogress?.({ lengthComputable: true, loaded, total: 10 })
+        this.onerror?.()
+      }
+      abort() {}
+    }
+    vi.stubGlobal('XMLHttpRequest', FakeXhr)
+    try {
+      const err = await uploadFile(1, 'a', new File(['0123456789'], 'a'), { overwrite: false }).catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(kind)
+      if (kind === TypeError) expect(err).not.toBeInstanceOf(UploadInterruptedError)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
