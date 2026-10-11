@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { SectionCard } from '@/features/profile/section-card'
 import { errorMessage, useErrorToast } from '@/lib/error-message'
 import { deleteFile, fileListQueryOptions, fileListsKey, makeDirectory, renameFile, writeFile } from './api'
+import { FileEditor } from './file-editor'
 import { FileList } from './file-list'
 import { sortEntries, type SortKey } from './format'
 import { NameDialog } from './name-dialog'
@@ -31,11 +32,12 @@ export interface FilesTabProps {
   onDirtyChange?: (dirty: boolean) => void
 }
 
-export function FilesTab({ server }: FilesTabProps) {
+export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const notifyError = useErrorToast()
   const [dir, setDir] = useState('')
+  const [editing, setEditing] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [descending, setDescending] = useState(false)
   const [dialog, setDialog] = useState<DialogState | null>(null)
@@ -78,6 +80,7 @@ export function FilesTab({ server }: FilesTabProps) {
     toast.success(t('files.done.newfile', { name }))
     setDialog(null)
     await refresh()
+    setEditing(joinPath(dir, name))
   }
 
   async function rename(entry: FileEntry, to: string) {
@@ -115,6 +118,7 @@ export function FilesTab({ server }: FilesTabProps) {
           dir={dir}
           entries={sortEntries(list.data.entries, sortKey, descending)}
           onOpenDir={(name) => setDir(joinPath(dir, name))}
+          onOpenFile={(entry) => setEditing(joinPath(dir, entry.name))}
           onRename={(entry) => setDialog({ kind: 'rename', entry })}
           onDelete={(entry) => setDialog({ kind: 'delete', entry })}
         />
@@ -162,7 +166,16 @@ export function FilesTab({ server }: FilesTabProps) {
         </p>
       ) : null}
 
-      <SectionCard title={t('files.title')} actions={toolbar}>
+      <SectionCard title={t('files.title')} actions={editing === null ? toolbar : undefined}>
+        {editing !== null ? (
+          <FileEditor
+            server={server}
+            path={editing}
+            onClose={() => setEditing(null)}
+            onDirtyChange={onDirtyChange}
+            onOpenSettings={onOpenSettings}
+          />
+        ) : (
         <div
           className={dragging ? 'ring-primary relative space-y-3 rounded-md ring-2' : 'relative space-y-3'}
           onDragOver={(event) => {
@@ -234,6 +247,7 @@ export function FilesTab({ server }: FilesTabProps) {
           </div>
           {body()}
         </div>
+        )}
       </SectionCard>
 
       <UploadList items={uploads.items} onCancel={uploads.cancel} onClear={uploads.clear} />
