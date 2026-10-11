@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { Copy } from 'lucide-react'
 import { useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -8,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { playersKey } from '@/features/players/api'
 import { errorMessage } from '@/lib/error-message'
 import { sendConsoleCommand } from './api'
 import { CommandInput } from './command-input'
@@ -21,25 +23,33 @@ const CONNECTION_VARIANT: Record<ConnectionState, 'default' | 'secondary' | 'des
   stopped: 'secondary',
   reconnecting: 'outline',
   unavailable: 'destructive',
+  too_many: 'destructive',
   forbidden: 'destructive',
   not_found: 'destructive',
   unauthorized: 'destructive',
 }
 
+/** States in which the stream will not come back by itself: commands cannot work either. */
+const LOCKED: readonly ConnectionState[] = ['forbidden', 'not_found']
+
 export function ConsoleTab({ server }: { server: Server }) {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const rconId = useId()
   const stream = useConsoleStream(server.id)
   const [query, setQuery] = useState('')
   const [hideRcon, setHideRcon] = useState(true)
   const visible = useMemo(() => visibleEntries(stream.entries, { query, hideRcon }), [stream.entries, query, hideRcon])
   const running = server.status.state === 'running'
+  const locked = LOCKED.includes(stream.connection)
 
   async function send(command: string) {
     const id = stream.addCommand(command)
     try {
       const response = await sendConsoleCommand(server.id, command)
       stream.finishCommand(id, true, response.output)
+      // op, whitelist, ban, kick, … change what the Players tab shows.
+      void queryClient.invalidateQueries({ queryKey: playersKey(server.id) })
     } catch (err) {
       stream.finishCommand(id, false, errorMessage(err, t))
     }
@@ -57,7 +67,9 @@ export function ConsoleTab({ server }: { server: Server }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
-        <Badge variant={CONNECTION_VARIANT[stream.connection]}>{t(`console.connection.${stream.connection}`)}</Badge>
+        <span role="status">
+          <Badge variant={CONNECTION_VARIANT[stream.connection]}>{t(`console.connection.${stream.connection}`)}</Badge>
+        </span>
         <Input
           type="search"
           aria-label={t('console.filter')}
@@ -76,7 +88,11 @@ export function ConsoleTab({ server }: { server: Server }) {
         </Button>
       </div>
       <LogView entries={visible} />
-      <CommandInput disabled={!running} onSubmit={(command) => void send(command)} />
+      <CommandInput
+        disabled={!running || locked}
+        lockedText={locked ? t(`console.connection.${stream.connection}`) : undefined}
+        onSubmit={(command) => void send(command)}
+      />
     </div>
   )
 }

@@ -55,7 +55,8 @@ type Server struct {
 	srv     *http.Server
 
 	streams     chan struct{}   // one token per open log stream (MaxLogStreams)
-	streamCtx   context.Context // cancelled by Shutdown: ends all log streams
+	playerReads chan struct{}   // one token per running player list read (MaxParallelPlayers)
+	streamCtx   context.Context // cancelled by Shutdown: ends all log streams, console commands and player reads
 	stopStreams context.CancelFunc
 
 	readTimeout, writeTimeout time.Duration
@@ -65,7 +66,7 @@ type Server struct {
 func NewServer(fw agentapi.Firewall, version string, log *slog.Logger, opts ...Option) *Server {
 	s := &Server{
 		fw: fw, inst: noInstances{}, console: noConsole{}, version: version, log: log,
-		streams: make(chan struct{}, MaxLogStreams), readTimeout: 5 * time.Second, writeTimeout: 10 * time.Second,
+		streams: make(chan struct{}, MaxLogStreams), playerReads: make(chan struct{}, MaxParallelPlayers), readTimeout: 5 * time.Second, writeTimeout: 10 * time.Second,
 		streamWriteTimeout: streamWriteTimeout,
 	}
 	for _, o := range opts {

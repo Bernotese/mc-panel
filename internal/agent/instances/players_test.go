@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -215,5 +216,62 @@ func TestPlayersClipsEntries(t *testing.T) {
 	}
 	if len(got.Whitelist) != 1000 || utf8.RuneCountInString(got.Whitelist[0].Name) != 256 || got.Whitelist[999].Name != "p999" {
 		t.Fatalf("whitelist: %d entries, first name %d runes", len(got.Whitelist), utf8.RuneCountInString(got.Whitelist[0].Name))
+	}
+}
+
+// TestPlayersDecodesLongListsCheaply: a list file just below 1 MiB full of empty entries
+// ("{},") would be ~350k entries. Only the first 1000 may be decoded; the rest is skipped
+// without materializing it (the agent runs as root, parallel requests must not exhaust it).
+func TestPlayersDecodesLongListsCheaply(t *testing.T) {
+	e := newEnv(t)
+	dir := e.dataDir(t, 1)
+	n := (1<<20 - 16) / 3
+	writeFile(t, filepath.Join(dir, "banned-players.json"), "["+strings.Repeat("{},", n)+"{}]")
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	got, err := e.m.Players(context.Background(), 1)
+	runtime.ReadMemStats(&after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Bans) != 1000 || len(got.Errors) != 0 {
+		t.Fatalf("bans = %d, errors = %v; want the first 1000 entries", len(got.Bans), got.Errors)
+	}
+	// The file itself (1 MiB) plus 1000 entries; decoding all of them takes 30 MB and more.
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > 12<<20 {
+		t.Fatalf("Players allocated %d MiB for a 1 MiB list file", alloc>>20)
+	}
+}
+
+// TestPlayersListFormats: the streaming decoder keeps the rules of a whole-file decode.
+func TestPlayersListFormats(t *testing.T) {
+	e := newEnv(t)
+	cases := []struct {
+		name, content string
+		ops           int
+		unreadable    bool
+	}{
+		{"empty list", `[]`, 0, false},
+		{"null", `null`, 0, false},
+		{"whitespace around", " \n[{\"uuid\":\"u\",\"name\":\"Notch\",\"level\":4}]\n ", 1, false},
+		{"trailing data", `[{"name":"Notch"}] [{"name":"Other"}]`, 0, true},
+		{"trailing garbage", `[{"name":"Notch"}] x`, 0, true},
+		{"number entry", `[1]`, 0, true},
+		{"unterminated", `[{"name":"Notch"}`, 0, true},
+		{"string", `"ops"`, 0, true},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id := int64(i + 1)
+			writeFile(t, filepath.Join(e.dataDir(t, id), "ops.json"), tc.content)
+			got, err := e.players(t, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Ops) != tc.ops || (len(got.Errors) == 1) != tc.unreadable {
+				t.Fatalf("Players = %+v, want %d ops, unreadable %t", got, tc.ops, tc.unreadable)
+			}
+		})
 	}
 }

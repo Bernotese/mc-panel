@@ -7,7 +7,16 @@ import { Label } from '@/components/ui/label'
 import { commandProblem, type CommandProblem } from './command'
 import { emptyHistory, historyDown, historyUp, pushHistory, type HistoryState } from './history'
 
-export function CommandInput({ disabled, onSubmit }: { disabled: boolean; onSubmit(command: string): void }) {
+/** lockedText replaces the "server stopped" placeholder and hint while disabled for another reason. */
+export function CommandInput({
+  disabled,
+  lockedText,
+  onSubmit,
+}: {
+  disabled: boolean
+  lockedText?: string
+  onSubmit(command: string): void
+}) {
   const { t } = useTranslation()
   const id = useId()
   const [value, setValue] = useState('')
@@ -50,7 +59,7 @@ export function CommandInput({ disabled, onSubmit }: { disabled: boolean; onSubm
           autoComplete="off"
           autoCapitalize="off"
           spellCheck={false}
-          placeholder={disabled ? t('console.stopped_placeholder') : t('console.command_placeholder')}
+          placeholder={disabled ? (lockedText ?? t('console.stopped_placeholder')) : t('console.command_placeholder')}
           aria-invalid={problem ? true : undefined}
           aria-describedby={problem ? `${errorId} ${hintId}` : hintId}
           className="font-mono"
@@ -66,7 +75,7 @@ export function CommandInput({ disabled, onSubmit }: { disabled: boolean; onSubm
         </p>
       ) : null}
       <p id={hintId} className="text-muted-foreground text-xs">
-        {disabled ? t('console.stopped_hint') : t('console.stop_hint')}
+        {disabled ? (lockedText ?? t('console.stopped_hint')) : t('console.stop_hint')}
       </p>
     </form>
   )

@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { playerListsKey } from '@/features/players/api'
 import { ServerDetailPage } from '@/features/servers/server-detail-page'
 import { loginAs } from '@/mocks/db'
 import { server } from '@/mocks/node'
@@ -136,5 +137,41 @@ describe('ConsoleTab', () => {
     await user.click(screen.getByRole('button', { name: 'Kopieren' }))
     expect(await screen.findByText('Sichtbare Zeilen kopiert.')).toBeInTheDocument()
     expect(await navigator.clipboard.readText()).toBe('alpha\nbeta')
+  })
+
+  it('announces a lost permission and locks the command line', async () => {
+    server.use(http.get('*/api/servers/:id/console/stream', () => HttpResponse.json({ error: 'forbidden', message: 'no' }, { status: 403 })))
+    const { es } = await openConsole()
+    expect(screen.getByRole('textbox', { name: 'Befehl' })).toBeEnabled()
+    act(() => es.fail(true))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Keine Berechtigung'))
+    expect(screen.getByRole('textbox', { name: 'Befehl' })).toBeDisabled()
+  })
+
+  it('locks the command line for a server that is gone', async () => {
+    server.use(http.get('*/api/servers/:id/console/stream', () => HttpResponse.json({ error: 'not_found', message: 'gone' }, { status: 404 })))
+    const { es } = await openConsole()
+    act(() => es.fail(true))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Server nicht gefunden'))
+    expect(screen.getByRole('textbox', { name: 'Befehl' })).toBeDisabled()
+  })
+
+  it('names the limit of open consoles', async () => {
+    server.use(http.get('*/api/servers/:id/console/stream', () => HttpResponse.json({ error: 'rate_limited', message: 'too many' }, { status: 429 })))
+    const { es } = await openConsole()
+    act(() => es.fail(true))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Zu viele offene Konsolen – schließe eine andere.'))
+  })
+
+  it('refreshes the player data after a command', async () => {
+    const user = userEvent.setup()
+    const { queryClient } = await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
+    queryClient.setQueryData(playerListsKey(1), { ops: [], whitelist: [], bans: [], errors: [] })
+    await user.click(await screen.findByRole('tab', { name: 'Konsole' }))
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+    act(() => FakeEventSource.latest().open())
+    expect(queryClient.getQueryState(playerListsKey(1))?.isInvalidated).toBe(false)
+    await user.type(screen.getByRole('textbox', { name: 'Befehl' }), 'op Steve{Enter}')
+    await waitFor(() => expect(queryClient.getQueryState(playerListsKey(1))?.isInvalidated).toBe(true))
   })
 })

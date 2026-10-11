@@ -544,6 +544,7 @@ paths:
         - { name: tail, in: query, required: false, schema: { type: integer, minimum: 0, maximum: 1000, default: 500 } }
       responses:
         '200': { description: Event stream, content: { text/event-stream: { schema: { type: string } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }

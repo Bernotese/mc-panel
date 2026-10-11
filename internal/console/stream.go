@@ -24,7 +24,8 @@ const (
 	defaultTail       = 500
 	heartbeatInterval = 15 * time.Second
 	recheckInterval   = 30 * time.Second
-	reconnectDelay    = 3 * time.Second
+	reconnectDelay    = 3 * time.Second  // first delay before the agent stream is re-opened
+	maxReconnectDelay = 10 * time.Second // the delay doubles up to this while nothing changes
 	writeTimeout      = 30 * time.Second
 	maxStreamsPerUser = 4
 	lineBuffer        = 64
@@ -232,6 +233,8 @@ type logSession struct {
 	// lines with the same timestamp all get through.
 	skipBefore int64
 	running    *bool // last state sent; nil = none yet
+	// progress: a line or a state event was sent since the agent stream was last (re)opened.
+	progress bool
 }
 
 type lineOrErr struct {
@@ -244,8 +247,10 @@ func (s *logSession) run() {
 	defer stopHeartbeat()
 	recheck, stopRecheck := s.h.timers.Every(recheckInterval)
 	defer stopRecheck()
+	delay := reconnectDelay
 	for {
 		s.skipBefore = s.req.Since
+		s.progress = false
 		stream, err := s.h.agent.Logs(s.ctx, s.req)
 		switch {
 		case err == nil:
@@ -262,13 +267,23 @@ func (s *logSession) run() {
 			}
 		case s.ctx.Err() != nil:
 			return
+		case errors.Is(err, agentapi.ErrBusy):
+			// Operators should see that the agent's log streams are used up.
+			s.h.log.InfoContext(s.ctx, "console log stream refused: agent log stream limit reached", "server", s.serverID, "err", err)
 		default:
 			s.h.log.DebugContext(s.ctx, "console log stream unavailable", "server", s.serverID, "err", err)
 		}
 		if s.setRunning(false) != nil {
 			return
 		}
-		if !s.wait(heartbeat, recheck) {
+		// A stopped server's log is re-read from Docker on every reconnect: back off while
+		// nothing new arrives (spec §6.2), start over after a line or a state change.
+		if s.progress {
+			delay = reconnectDelay
+		} else {
+			delay = min(2*delay, maxReconnectDelay)
+		}
+		if !s.wait(delay, heartbeat, recheck) {
 			return
 		}
 	}
@@ -335,25 +350,27 @@ func (s *logSession) sendLine(l agentapi.LogLine) error {
 		s.req.Since = max(s.req.Since, l.TS+1)
 		id = strconv.FormatInt(s.req.Since-1, 10)
 	}
+	s.progress = true
 	return s.sw.event("line", id, lineEvent{TS: l.TS / int64(time.Millisecond), Stream: l.Stream, Line: l.Line})
 }
 
 // setRunning sends a state event if v differs from the last state sent (no flapping while a
-// stopped server is retried every 3 s).
+// stopped server is retried).
 func (s *logSession) setRunning(v bool) error {
 	if s.running != nil && *s.running == v {
 		return nil
 	}
 	s.running = &v
+	s.progress = true
 	if err := s.sw.event("state", "", stateEvent{Running: v}); err != nil {
 		return err
 	}
 	return s.sw.flush()
 }
 
-// wait sleeps until the next reconnect attempt, still serving heartbeat and recheck.
-func (s *logSession) wait(heartbeat, recheck <-chan time.Time) bool {
-	retry, stop := s.h.timers.After(reconnectDelay)
+// wait sleeps delay until the next reconnect attempt, still serving heartbeat and recheck.
+func (s *logSession) wait(delay time.Duration, heartbeat, recheck <-chan time.Time) bool {
+	retry, stop := s.h.timers.After(delay)
 	defer stop()
 	for {
 		select {

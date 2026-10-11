@@ -35,6 +35,8 @@ type stubConsoleConfig struct {
 	rconDelay  time.Duration
 	players    agentapi.PlayersResponse
 	playersErr error
+	// playersGate, if set, holds every Players call until it is closed or ctx ends.
+	playersGate chan struct{}
 }
 
 // stubConsole is a configurable Console; set changes it between requests.
@@ -132,8 +134,15 @@ func (s *stubConsole) Rcon(ctx context.Context, _ int64, command string) (string
 	return cfg.rconOut, cfg.rconErr
 }
 
-func (s *stubConsole) Players(context.Context, int64) (agentapi.PlayersResponse, error) {
+func (s *stubConsole) Players(ctx context.Context, _ int64) (agentapi.PlayersResponse, error) {
 	cfg := s.enter("players")
+	if cfg.playersGate != nil {
+		select {
+		case <-cfg.playersGate:
+		case <-ctx.Done():
+			return agentapi.PlayersResponse{}, ctx.Err()
+		}
+	}
 	return cfg.players, cfg.playersErr
 }
 
@@ -259,6 +268,10 @@ func TestServerRejectsInvalidConsoleRequests(t *testing.T) {
 		{"rcon del", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"say \u007f"}`, 400},
 		{"rcon 1001 bytes", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"` + strings.Repeat("a", 1001) + `"}`, 400},
 		{"rcon id 0", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":0,"command":"list"}`, 400},
+		// rcon-cli would parse these as its own options (connect elsewhere with the password).
+		{"rcon long option", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"--host=attacker.example"}`, 400},
+		{"rcon short option", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"-h"}`, 400},
+		{"rcon option after slash", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"/--host=attacker.example"}`, 400},
 		{"rcon unknown field", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"list","user":"root"}`, 400},
 		{"rcon too large", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"` + strings.Repeat("a", 17<<10) + `"}`, 413},
 		{"players id 0", "POST", agentapi.PathInstancePlayers, jsonCT, `{"id":0}`, 400},
@@ -390,6 +403,47 @@ func TestServerLogStreamLimit(t *testing.T) {
 	}
 }
 
+// TestServerPlayersLimit: at most MaxParallelPlayers list reads run at once (each reads up to
+// three 1 MiB files as root); one more is 429 busy, and the slots are freed afterwards.
+func TestServerPlayersLimit(t *testing.T) {
+	gate := make(chan struct{})
+	st := newStubConsole(stubConsoleConfig{playersGate: gate})
+	srv := newConsoleServer(st)
+	var wg sync.WaitGroup
+	codes := make(chan int, agent.MaxParallelPlayers)
+	for range agent.MaxParallelPlayers {
+		wg.Go(func() { codes <- serve(srv, http.MethodPost, agentapi.PathInstancePlayers, jsonCT, `{"id":1}`).Code })
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for st.callCount() < agent.MaxParallelPlayers {
+		if time.Now().After(deadline) {
+			close(gate)
+			t.Fatalf("only %d of %d player reads started", st.callCount(), agent.MaxParallelPlayers)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	rec := serve(srv, http.MethodPost, agentapi.PathInstancePlayers, jsonCT, `{"id":1}`)
+	var er agentapi.ErrorResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &er)
+	close(gate)
+	wg.Wait()
+	close(codes)
+	if rec.Code != http.StatusTooManyRequests || er.Code != agentapi.ErrorCodeBusy {
+		t.Fatalf("read %d: %d %s, want 429 busy", agent.MaxParallelPlayers+1, rec.Code, rec.Body)
+	}
+	if n := st.callCount(); n != agent.MaxParallelPlayers {
+		t.Fatalf("backend calls = %d, want %d (the refused read must not reach it)", n, agent.MaxParallelPlayers)
+	}
+	for code := range codes {
+		if code != http.StatusOK {
+			t.Fatalf("held read = %d, want 200", code)
+		}
+	}
+	if rec := serve(srv, http.MethodPost, agentapi.PathInstancePlayers, jsonCT, `{"id":1}`); rec.Code != http.StatusOK {
+		t.Fatalf("read after the others finished = %d %s, want 200", rec.Code, rec.Body)
+	}
+}
+
 func TestServerLongRequestsOutliveReadTimeout(t *testing.T) {
 	st := newStubConsole(stubConsoleConfig{
 		running: true,
@@ -447,6 +501,40 @@ func TestServerShutdownEndsLogStreams(t *testing.T) {
 	// stopped" to the panel.
 	if _, err := stream.Next(); err == nil || errors.Is(err, io.EOF) {
 		t.Fatalf("log stream after shutdown: Next = %v, want a broken stream (not io.EOF)", err)
+	}
+}
+
+// TestServerShutdownEndsConsoleCalls: Shutdown does not wait for a hanging console command
+// or player read (the agent's shutdown timeout is shorter than a console command may take).
+func TestServerShutdownEndsConsoleCalls(t *testing.T) {
+	st := newStubConsole(stubConsoleConfig{rconDelay: time.Minute, playersGate: make(chan struct{})})
+	path := socketPath(t)
+	l, err := agent.Listen(path, 0o600, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newConsoleServer(st)
+	go func() { _ = srv.Serve(l) }()
+	c := agent.NewClient(path)
+	errs := make(chan error, 2)
+	go func() { _, err := c.Rcon(context.Background(), 1, "list"); errs <- err }()
+	go func() { _, err := c.Players(context.Background(), 1); errs <- err }()
+	deadline := time.Now().Add(5 * time.Second)
+	for st.callCount() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("console calls did not start")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown with running console calls = %v", err)
+	}
+	for range 2 {
+		if err := <-errs; err == nil {
+			t.Fatal("a console call cut by shutdown succeeded")
+		}
 	}
 }
 

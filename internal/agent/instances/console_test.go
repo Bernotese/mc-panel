@@ -276,15 +276,30 @@ func TestRconRunsCommandInContainer(t *testing.T) {
 	e := newEnv(t)
 	e.startInstance(t, 1, "survival")
 	out, err := e.m.Rcon(context.Background(), 1, "say Hallo Welt")
-	if err != nil || out != "say Hallo Welt" { // the fake echoes the arguments after the program
+	if err != nil || out != "-- say Hallo Welt" { // the fake echoes the arguments after the program
 		t.Fatalf("Rcon = %q, %v", out, err)
 	}
+	// "--" ends rcon-cli's options: the command is never parsed as one (--host, --config, …).
 	want := dockertest.ExecRecord{Container: instances.ContainerName(1), Config: docker.ExecConfig{
-		Cmd: []string{"rcon-cli", "say Hallo Welt"}, User: fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
+		Cmd: []string{"rcon-cli", "--", "say Hallo Welt"}, User: fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 		WorkingDir: "/data", Env: []string{"HOME=/data"}, AttachStdout: true, AttachStderr: true,
 	}}
 	if execs := e.d.Execs(); len(execs) != 1 || !reflect.DeepEqual(execs[0], want) {
 		t.Fatalf("execs = %+v, want %+v", execs, want)
+	}
+}
+
+// TestRconRejectsOptions: a command rcon-cli could read as its own option never reaches exec.
+func TestRconRejectsOptions(t *testing.T) {
+	e := newEnv(t)
+	e.startInstance(t, 1, "survival")
+	for _, cmd := range []string{"--host=attacker.example", "-h", "/--host=attacker.example"} {
+		if _, err := e.m.Rcon(context.Background(), 1, cmd); !errors.Is(err, instancespec.ErrInvalid) {
+			t.Errorf("Rcon(%q) = %v, want ErrInvalid", cmd, err)
+		}
+	}
+	if execs := e.d.Execs(); len(execs) != 0 {
+		t.Fatalf("execs = %+v, want none", execs)
 	}
 }
 
@@ -393,7 +408,7 @@ func TestRconParallelLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if out, err := e.m.Rcon(ctx, 1, "list"); err != nil || out != "list" {
+	if out, err := e.m.Rcon(ctx, 1, "list"); err != nil || out != "-- list" {
 		t.Fatalf("after the burst = %q, %v (slots must be free again)", out, err)
 	}
 }
