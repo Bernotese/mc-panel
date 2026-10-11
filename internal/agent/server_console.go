@@ -75,7 +75,7 @@ func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
 	defer stop()
 
 	// The first deadline also covers the inspect and Docker opening the log before start.
-	rc := longRequest(w, streamWriteTimeout)
+	rc := longRequest(w, s.streamWriteTimeout)
 	enc := json.NewEncoder(w)
 	started := false
 	start := func(running bool) {
@@ -90,23 +90,43 @@ func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
 		_ = rc.Flush()
 	}
 	emit := func(line agentapi.LogLine) error {
-		_ = rc.SetWriteDeadline(time.Now().Add(streamWriteTimeout))
+		if !started { // a backend bug; still answer with a valid stream
+			start(false)
+		}
+		_ = rc.SetWriteDeadline(time.Now().Add(s.streamWriteTimeout))
 		if err := enc.Encode(line); err != nil {
 			return err
 		}
 		return rc.Flush()
 	}
 	err := s.console.Logs(ctx, req, start, emit)
+	shutdown := s.streamCtx.Err() != nil
 	switch {
-	case started:
-		if err != nil && ctx.Err() == nil {
+	case r.Context().Err() != nil:
+		s.callerGone(r, "logs", req.ID) // nobody reads the answer any more
+		return
+	case !started && err != nil && !shutdown:
+		s.consoleError(w, r, "logs", req.ID, err)
+		return
+	case err != nil || shutdown:
+		// Only the end of the container's log may look like a clean end: the panel reads
+		// io.EOF as "container stopped". A backend error or a shutdown breaks the stream.
+		if !shutdown {
 			s.log.Warn("log stream ended with an error", "id", req.ID, "err", err, "peer_uid", peerUID(r))
 		}
-	case err == nil:
-		start(false) // a backend that returned without opening a stream: an empty log
-	default:
-		s.consoleError(w, r, "logs", req.ID, err)
+		panic(http.ErrAbortHandler)
 	}
+	if !started {
+		start(false) // a backend that returned without opening a stream: an empty log
+	}
+	// net/http writes the closing chunk after the handler returns; the deadline of the last
+	// line may have passed long ago.
+	_ = rc.SetWriteDeadline(time.Now().Add(s.streamWriteTimeout))
+}
+
+// callerGone logs a request whose caller went away before the answer (panel aborted).
+func (s *Server) callerGone(r *http.Request, op string, id int64) {
+	s.log.Debug("console request ended by the caller", "op", op, "id", id, "peer_uid", peerUID(r))
 }
 
 func (s *Server) rcon(w http.ResponseWriter, r *http.Request) {
@@ -149,6 +169,10 @@ func (s *Server) players(w http.ResponseWriter, r *http.Request) {
 // consoleError maps console errors to status and code; anything unknown becomes a generic
 // 500 with the details only in the log.
 func (s *Server) consoleError(w http.ResponseWriter, r *http.Request, op string, id int64, err error) {
+	if r.Context().Err() != nil {
+		s.callerGone(r, op, id)
+		return
+	}
 	switch {
 	case errors.Is(err, instancespec.ErrInvalid):
 		s.reject(w, r, http.StatusBadRequest, err)

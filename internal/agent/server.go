@@ -59,12 +59,14 @@ type Server struct {
 	stopStreams context.CancelFunc
 
 	readTimeout, writeTimeout time.Duration
+	streamWriteTimeout        time.Duration // deadline of every write of a log stream
 }
 
 func NewServer(fw agentapi.Firewall, version string, log *slog.Logger, opts ...Option) *Server {
 	s := &Server{
 		fw: fw, inst: noInstances{}, console: noConsole{}, version: version, log: log,
 		streams: make(chan struct{}, MaxLogStreams), readTimeout: 5 * time.Second, writeTimeout: 10 * time.Second,
+		streamWriteTimeout: streamWriteTimeout,
 	}
 	for _, o := range opts {
 		o(s)
