@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Bernotese/mc-panel/internal/config"
+	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 )
 
 func TestDefaultFiles(t *testing.T) {
@@ -102,5 +103,31 @@ func TestPanelFilesSocket(t *testing.T) {
 	p.FilesSocket = ""
 	if err := p.Validate(); err == nil {
 		t.Fatal("empty files_socket accepted")
+	}
+}
+
+func TestFilesPanelUIDRange(t *testing.T) {
+	f := config.DefaultFiles()
+	f.Dev = true
+	f.PanelUID = -2
+	if err := f.Validate(); err == nil {
+		t.Fatal("panel_uid -2 accepted")
+	}
+	f.PanelUID = -1
+	if err := f.Validate(); err != nil {
+		t.Fatalf("dev with unset panel_uid: %v", err)
+	}
+}
+
+func TestFilesTextLimitFitsJSON(t *testing.T) {
+	f := config.DefaultFiles()
+	f.PanelUID = 998
+	f.Limits.MaxTextBytes = (filesapi.MaxJSONBytes - filesapi.MaxSmallJSONBytes) / 6
+	if err := f.Validate(); err != nil {
+		t.Fatalf("largest text limit: %v", err)
+	}
+	f.Limits.MaxTextBytes++
+	if err := f.Validate(); err == nil {
+		t.Fatal("text limit above (MaxJSONBytes-MaxSmallJSONBytes)/6 accepted")
 	}
 }

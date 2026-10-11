@@ -30,7 +30,8 @@ const (
 
 // UnixClient talks to mcpanel-files over its unix socket. Safe for concurrent use.
 type UnixClient struct {
-	hc *http.Client
+	hc                    *http.Client
+	downloadHeaderTimeout time.Duration
 }
 
 var _ Client = (*UnixClient)(nil)
@@ -47,10 +48,13 @@ func NewClient(socketPath string) *UnixClient {
 		DisableCompression:  true,
 		// Proxy stays nil: HTTP(S)_PROXY must never redirect file traffic.
 	}
-	return &UnixClient{hc: &http.Client{
-		Transport:     tr,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}}
+	return &UnixClient{
+		hc: &http.Client{
+			Transport:     tr,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
+		downloadHeaderTimeout: DownloadHeaderTimeout,
+	}
 }
 
 func checkID(id int64) error {
@@ -176,7 +180,13 @@ func (c *UnixClient) Upload(ctx context.Context, id int64, p string, overwrite b
 		ow = "1"
 	}
 	q := url.Values{"id": {strconv.FormatInt(id, 10)}, "path": {p}, "overwrite": {ow}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, baseURL+PathUpload+"?"+q.Encode(), io.NopCloser(body))
+	// An empty file goes out as http.NoBody: net/http would otherwise probe the reader and could
+	// fall back to chunked encoding, which the service refuses (Content-Length is required).
+	var rb io.Reader = http.NoBody
+	if size > 0 {
+		rb = io.NopCloser(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, baseURL+PathUpload+"?"+q.Encode(), rb)
 	if err != nil {
 		return UploadResponse{}, fmt.Errorf("files: build request: %w", err)
 	}
@@ -205,26 +215,32 @@ func (c *UnixClient) Download(ctx context.Context, id int64, p string) (Download
 		cancel()
 		return Download{}, fmt.Errorf("files: build request: %w", err)
 	}
-	timer := time.AfterFunc(DownloadHeaderTimeout, cancel)
+	timer := time.AfterFunc(c.downloadHeaderTimeout, cancel)
 	resp, err := c.hc.Do(req)
 	if !timer.Stop() {
 		if err == nil {
 			_ = resp.Body.Close()
 		}
 		cancel()
-		return Download{}, fmt.Errorf("%w: download: no response within %s", ErrUnavailable, DownloadHeaderTimeout)
+		return Download{}, fmt.Errorf("%w: download: no response within %s", ErrUnavailable, c.downloadHeaderTimeout)
 	}
 	if err != nil {
 		cancel()
 		return Download{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	if resp.StatusCode != http.StatusOK {
+	// Only a 200 with a known kind is a download; every other answer (also 204/206) is an error,
+	// so a caller never gets a Download without a Body.
+	kind := resp.Header.Get(HeaderKind)
+	if resp.StatusCode != http.StatusOK || (kind != "file" && kind != "dir") {
 		defer cancel()
 		defer func() { _ = resp.Body.Close() }()
-		return Download{}, decode(resp, nil)
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			return Download{}, decode(resp, nil)
+		}
+		return Download{}, fmt.Errorf("%w: download: unexpected answer %d (kind %q)", ErrUnavailable, resp.StatusCode, kind)
 	}
 	d := Download{Body: &cancelBody{ReadCloser: resp.Body, cancel: cancel}, Size: resp.ContentLength}
-	if resp.Header.Get(HeaderKind) == "dir" {
+	if kind == "dir" {
 		d.IsDir, d.Size = true, -1
 	}
 	if p != "" {

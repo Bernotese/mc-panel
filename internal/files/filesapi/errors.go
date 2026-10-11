@@ -84,11 +84,14 @@ func (e *StatusError) Error() string {
 	return "files: HTTP " + http.StatusText(e.Status) + ": " + e.Message
 }
 
-// Is maps a known code to its sentinel; unknown codes and answers without a code match
-// ErrUnavailable.
+// Is maps a known code to its sentinel, but only when the answer carries that code's own HTTP
+// status; unknown codes, answers without a code and code/status mismatches (a broken service)
+// match ErrUnavailable.
 func (e *StatusError) Is(target error) bool {
-	if s := ErrorFromCode(e.Code); s != nil {
-		return target == s
+	for _, c := range codes {
+		if c.code == e.Code && c.status == e.Status {
+			return target == c.err
+		}
 	}
 	return target == ErrUnavailable
 }
