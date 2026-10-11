@@ -52,6 +52,8 @@ func NewServer(svc *Service, version string, log *slog.Logger) *Server {
 		filesapi.PathDelete:   {method: http.MethodPost, handler: s.delete},
 		filesapi.PathUpload:   {method: http.MethodPut, handler: s.upload},
 		filesapi.PathDownload: {method: http.MethodGet, handler: s.download},
+		filesapi.PathExtract:  {method: http.MethodPost, handler: s.extract},
+		filesapi.PathJobs:     {method: http.MethodGet, handler: s.jobs},
 	}
 	s.srv = &http.Server{
 		Handler:           s,
@@ -379,4 +381,26 @@ type deadlineWriter struct {
 func (d *deadlineWriter) Write(p []byte) (int, error) {
 	_ = d.rc.SetWriteDeadline(d.now().Add(ioTimeout))
 	return d.w.Write(p)
+}
+
+func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
+	var req filesapi.ExtractRequest
+	if !s.decode(w, r, &req, filesapi.MaxSmallJSONBytes) {
+		return
+	}
+	job, err := s.svc.Extract(r.Context(), req)
+	if err != nil {
+		s.fail(w, r, "extract", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) jobs(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.URL.Query().Get("id"))
+	if err != nil {
+		s.fail(w, r, "jobs", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, filesapi.JobsResponse{Job: s.svc.Job(id)})
 }
