@@ -64,7 +64,7 @@ Browser ──/api/servers/{id}/files/*──▶ panel (mcpanel) ──HTTP/Unix
 ```toml
 socket        = "/run/mc-panel-files/files.sock" # nur ohne systemd-Socket-Aktivierung genutzt
 socket_mode   = "0660"                           # dto.; Gruppe = primäre Gruppe des Dienstes
-panel_uid     = 998                            # UID des Benutzers mcpanel; Pflicht in Produktion, nur diese Peer-UID darf verbinden
+panel_uid     = 998                            # UID des Benutzers mcpanel; Pflicht in Produktion (zugelassen: diese UID und root)
 instances_dir = "/srv/mc-panel"
 dev           = false
 [limits]
@@ -77,7 +77,7 @@ max_list_entries   = 10000
 ```
 
 - **Socket:** In Produktion per systemd-Socket-Aktivierung: `mcpanel-files.socket` mit `ListenStream=/run/mc-panel-files/files.sock`, `SocketUser=mcpanel-mc`, `SocketGroup=mcpanel`, `SocketMode=0660` – der Dienst muss dafür nicht Mitglied der Gruppe `mcpanel` sein und sieht `/etc/mc-panel` nicht. Der Dienst übernimmt den Socket über `LISTEN_FDS`/`LISTEN_PID`; ohne Aktivierung (Dev, CI) legt er `socket` selbst mit `socket_mode` an. Eigenes Verzeichnis `/run/mc-panel-files` (nicht `/run/mc-panel`), damit das Stoppen einer Unit nie den Socket der anderen löscht.
-- Peer-UID-Prüfung über das vorhandene Paket `internal/agent/peercred` (Linux `SO_PEERCRED`, macOS `LOCAL_PEERCRED`) ist immer aktiv; sie ist die eigentliche Zugangskontrolle.
+- Peer-UID-Prüfung über das vorhandene Paket `internal/agent/peercred` (Linux `SO_PEERCRED`, macOS `LOCAL_PEERCRED`) ist immer aktiv; sie ist die eigentliche Zugangskontrolle. Zugelassen sind der panel-Benutzer und – wie beim agent – root (Betreiber, Skripte); der Dienst selbst läuft nie als root.
 - Fehlende Schlüssel unter `[limits]` erhalten die Defaults oben.
 - `panel.toml` bekommt `files_socket` (Default `/run/mc-panel-files/files.sock`, Dev `.dev/files.sock`).
 - **Dev-Modus** (`make dev`, macOS): Dienst läuft als aktueller Benutzer mit `instances_dir = .dev/mc` (wie der dev-agent), Peer-UID = aktueller Benutzer; fehlt `instances/<id>`, legt er es an (damit der Dateibrowser ohne Docker funktioniert).

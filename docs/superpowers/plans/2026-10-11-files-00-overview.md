@@ -50,7 +50,7 @@ Dateieigentum in Phase B (disjunkt):
 ## Global Constraints
 
 - Alle Global Constraints aus TP1–3a und alle Konventionen aus `CLAUDE.md` gelten (`clock.Clock`, Kontext überall, Go-Tests nur Standardbibliothek, keine neuen Go-Abhängigkeiten, Lint-Ausnahmen gezielt mit Begründung, Conventional Commits mit `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`).
-- Peer-UID des Dienstes: nur `panel_uid`, nie root.
+- Peer-UID des Dienstes: `panel_uid` und root (wie beim agent). Der Dienst selbst läuft nie als root.
 - Recht: alle Datei-Routen `rbac.Server(rbac.PermServerFiles, "id")`; Admins immer.
 - Dienst läuft als `mcpanel-mc`, nie als root; jede Dateioperation über `*os.Root` auf `<instances_dir>/instances/<id>`; Symlinks werden nie verfolgt (`Lstat` vor dem Öffnen, `Stat` + `os.SameFile` danach), Lesen mit `O_NONBLOCK`.
 - Pfadregeln `filesapi.CleanPath` (Spec §3.4): relativ, `/`, kein `..`, kein `\`, keine leeren Komponenten, keine Steuerzeichen, gültiges UTF-8, ≤ 4096 Bytes, Komponente ≤ 255 Bytes. Verborgen: `.rcon-cli.env`, `.rcon-cli.yaml` (oberste Ebene), jede Komponente mit Präfix `.mcpanel-`.
