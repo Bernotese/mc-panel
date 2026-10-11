@@ -54,9 +54,11 @@ describe('FileEditor', () => {
   it('saves with Ctrl+S while the save button has the focus', async () => {
     const { user, editor } = await openConfig()
     await user.type(editor, 'x')
+    expect(screen.getByText('Ungespeicherte Änderungen')).toBeInTheDocument()
     screen.getByRole('button', { name: 'Speichern' }).focus()
     await user.keyboard('{Control>}s{/Control}')
-    expect(await screen.findByText('Gespeichert.')).toBeInTheDocument()
+    // The toast store is global (an earlier test's "Gespeichert." may still show): the marker proves the save.
+    await waitFor(() => expect(screen.queryByText('Ungespeicherte Änderungen')).not.toBeInTheDocument())
   })
 
   it('offers reload or overwrite after a conflicting save', async () => {
