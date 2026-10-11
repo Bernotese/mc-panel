@@ -14,10 +14,13 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/peercred"
+	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 )
 
 const (
+	ioTimeout         = 60 * time.Second // stream deadline per read or write (spec §4.1)
+	uploadDrainTime   = 5 * time.Second  // see failEarly
 	readHeaderTimeout = 5 * time.Second
 	requestTimeout    = 30 * time.Second
 )
@@ -32,20 +35,23 @@ type Server struct {
 	svc     *Service
 	version string
 	log     *slog.Logger
+	io      clock.Clock // stream deadlines: always real time
 	routes  map[string]route
 	srv     *http.Server
 }
 
 func NewServer(svc *Service, version string, log *slog.Logger) *Server {
-	s := &Server{svc: svc, version: version, log: log}
+	s := &Server{svc: svc, version: version, log: log, io: clock.Real{}}
 	s.routes = map[string]route{
-		filesapi.PathHealth: {method: http.MethodGet, handler: s.health},
-		filesapi.PathList:   {method: http.MethodPost, handler: s.list},
-		filesapi.PathRead:   {method: http.MethodPost, handler: s.read},
-		filesapi.PathWrite:  {method: http.MethodPost, handler: s.write},
-		filesapi.PathMkdir:  {method: http.MethodPost, handler: s.mkdir},
-		filesapi.PathRename: {method: http.MethodPost, handler: s.rename},
-		filesapi.PathDelete: {method: http.MethodPost, handler: s.delete},
+		filesapi.PathHealth:   {method: http.MethodGet, handler: s.health},
+		filesapi.PathList:     {method: http.MethodPost, handler: s.list},
+		filesapi.PathRead:     {method: http.MethodPost, handler: s.read},
+		filesapi.PathWrite:    {method: http.MethodPost, handler: s.write},
+		filesapi.PathMkdir:    {method: http.MethodPost, handler: s.mkdir},
+		filesapi.PathRename:   {method: http.MethodPost, handler: s.rename},
+		filesapi.PathDelete:   {method: http.MethodPost, handler: s.delete},
+		filesapi.PathUpload:   {method: http.MethodPut, handler: s.upload},
+		filesapi.PathDownload: {method: http.MethodGet, handler: s.download},
 	}
 	s.srv = &http.Server{
 		Handler:           s,
@@ -249,4 +255,128 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// upload: PUT ?id=&path=&overwrite=0|1, body = file. The server-wide deadlines do not apply;
+// every read gets ioTimeout.
+func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
+	rc := http.NewResponseController(w)
+	// Full duplex: an error found before the body has been read completely (409, 413, 429, 507,
+	// a full disk) is answered while the client is still sending (failEarly).
+	_ = rc.EnableFullDuplex()
+	body := &deadlineReader{r: r.Body, rc: rc, now: s.io.Now}
+	res, err := s.receive(r, rc, body)
+	_ = rc.SetReadDeadline(time.Time{})
+	_ = rc.SetWriteDeadline(s.io.Now().Add(ioTimeout))
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusCreated, res)
+	case body.eof || r.ContentLength == 0:
+		s.fail(w, r, "upload", err)
+	default:
+		s.failEarly(w, r, rc, err)
+	}
+}
+
+func (s *Server) receive(r *http.Request, rc *http.ResponseController, body io.Reader) (filesapi.UploadResponse, error) {
+	q := r.URL.Query()
+	id, err := parseID(q.Get("id"))
+	if err != nil {
+		return filesapi.UploadResponse{}, err
+	}
+	ow := q.Get("overwrite")
+	if ow != "" && ow != "0" && ow != "1" {
+		return filesapi.UploadResponse{}, fmt.Errorf("%w: overwrite must be 0 or 1", filesapi.ErrInvalid)
+	}
+	_ = rc.SetWriteDeadline(time.Time{})
+	return s.svc.Upload(r.Context(), id, q.Get("path"), ow == "1", r.ContentLength, body)
+}
+
+// failEarly answers an upload error while the client may still be sending the body. The
+// answer goes out at once with "Connection: close"; then the rest of the body is read and
+// discarded until the client closes the connection - a Go client (the panel) does so as soon
+// as it has read the answer - or uploadDrainTime has passed. Closing the connection right away
+// instead could reset it while the client is still writing, and the client would see a broken
+// connection instead of the answer.
+func (s *Server) failEarly(w http.ResponseWriter, r *http.Request, rc *http.ResponseController, err error) {
+	w.Header().Set("Connection", "close")
+	s.fail(w, r, "upload", err)
+	if r.Context().Err() != nil {
+		return
+	}
+	_ = rc.Flush()
+	_ = rc.SetReadDeadline(s.io.Now().Add(uploadDrainTime))
+	_, _ = io.Copy(io.Discard, r.Body)
+}
+
+// download: GET ?id=&path=. Errors after the first byte abort the response (the client must
+// not take a cut file for a complete one).
+func (s *Server) download(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	id, err := parseID(q.Get("id"))
+	if err != nil {
+		s.fail(w, r, "download", err)
+		return
+	}
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Time{})
+	started := false
+	start := func(isDir bool, size int64) {
+		started = true
+		h := w.Header()
+		if isDir {
+			h.Set(filesapi.HeaderKind, "dir")
+			h.Set("Content-Type", "application/zip")
+		} else {
+			h.Set(filesapi.HeaderKind, "file")
+			h.Set("Content-Type", "application/octet-stream")
+			h.Set("Content-Length", strconv.FormatInt(size, 10))
+		}
+		_ = rc.SetWriteDeadline(s.io.Now().Add(ioTimeout))
+		w.WriteHeader(http.StatusOK)
+	}
+	err = s.svc.Download(r.Context(), id, q.Get("path"), start, &deadlineWriter{w: w, rc: rc, now: s.io.Now})
+	if err == nil {
+		return
+	}
+	if !started {
+		_ = rc.SetWriteDeadline(s.io.Now().Add(ioTimeout))
+		s.fail(w, r, "download", err)
+		return
+	}
+	if r.Context().Err() == nil {
+		s.log.Warn("files: download aborted", "path", q.Get("path"), "id", id, "err", err)
+	}
+	panic(http.ErrAbortHandler)
+}
+
+// deadlineReader renews the connection's read deadline before every read, so an upload may
+// take hours but never stalls for longer than ioTimeout. eof records that the body was read
+// to its end.
+type deadlineReader struct {
+	r   io.Reader
+	rc  *http.ResponseController
+	now func() time.Time
+	eof bool
+}
+
+func (d *deadlineReader) Read(p []byte) (int, error) {
+	_ = d.rc.SetReadDeadline(d.now().Add(ioTimeout))
+	n, err := d.r.Read(p)
+	if errors.Is(err, io.EOF) {
+		d.eof = true
+	}
+	return n, err
+}
+
+// deadlineWriter renews the write deadline before every write (downloads).
+type deadlineWriter struct {
+	w   io.Writer
+	rc  *http.ResponseController
+	now func() time.Time
+}
+
+func (d *deadlineWriter) Write(p []byte) (int, error) {
+	_ = d.rc.SetWriteDeadline(d.now().Add(ioTimeout))
+	return d.w.Write(p)
 }
