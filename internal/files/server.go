@@ -156,8 +156,12 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, op string, err err
 }
 
 // statusFor maps an error to the HTTP status and wire code (filesapi.CodeOf; other errors
-// are internal: 500 without a code).
+// are internal: 500 without a code). A service that is shutting down answers 503 without a
+// code, which the client reports as filesapi.ErrUnavailable (panel: 503 files_unavailable).
 func statusFor(err error) (int, string) {
+	if errors.Is(err, errShuttingDown) {
+		return http.StatusServiceUnavailable, ""
+	}
 	code, status := filesapi.CodeOf(err)
 	return status, code
 }
