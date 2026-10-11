@@ -45,7 +45,7 @@ func cleanupRoot(root *os.Root, log *slog.Logger, id int64) int {
 	var victims []string
 	_ = fs.WalkDir(root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // unreadable parts are skipped
+			return nil //nolint:nilerr // unreadable parts are skipped, the rest is still cleaned up
 		}
 		if p != "." && strings.HasPrefix(d.Name(), tempPrefix) {
 			victims = append(victims, p)
