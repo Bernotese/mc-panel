@@ -60,8 +60,10 @@ post_status() {
 # rcon <command> <outfile>: one console command through the agent; the body is JSON-encoded
 # by Python, so the command text never ends up in the shell or in hand-written JSON.
 rcon() {
-  agent -X POST http://agent/v1/instances/rcon \
-    -d "$(python3 -I -c 'import json, sys; print(json.dumps({"id": 9001, "command": sys.argv[1]}))' "$1")" >"$2"
+  local code
+  code="$(post_status /v1/instances/rcon \
+    "$(python3 -I -c 'import json, sys; print(json.dumps({"id": 9001, "command": sys.argv[1]}))' "$1")" "$2")" || return 1
+  [ "$code" = 200 ] || { echo "rcon HTTP $code" >&2; return 1; }
 }
 
 # rcon_output <file>: prints the "output" field of an rcon answer.
@@ -247,19 +249,26 @@ print(max(l["ts"] for l in lines))' "$work/logs.ndjson")" || fail "logs stream c
 echo "OK: logs stream (NDJSON, $(wc -l <"$work/logs.ndjson") lines, contains \"Done (\")"
 
 # since = last timestamp + 1 ns must not repeat any line already seen (spec §6.2). New lines
-# (e.g. the RCON thread messages of the calls above) may appear; they are newer.
-logs "{\"id\": 9001, \"tail\": 0, \"since\": $((last_ts + 1))}" "$work/since.ndjson" 3
+# (e.g. the RCON thread messages of the calls above) may appear; they are newer. tail 1000 is
+# sent along on purpose: since must win over tail, otherwise the whole log would come back. A
+# marker written after last_ts must show up, so an ignored or swallowing since fails too.
+rcon "say tp3a-since-marker" "$work/rcon.json" || fail "rcon say marker"
+logs "{\"id\": 9001, \"tail\": 1000, \"since\": $((last_ts + 1))}" "$work/since.ndjson" 3
 python3 -I -c '
 import json, sys
 last = int(sys.argv[2])
-old = [l for l in (json.loads(x) for x in open(sys.argv[1]) if x.strip()) if l["ts"] <= last]
+lines = [json.loads(x) for x in open(sys.argv[1]) if x.strip()]
+old = [l for l in lines if l["ts"] <= last]
 if old:
-    sys.exit("since returned %d already seen lines, first: %r" % (len(old), old[0]))' "$work/since.ndjson" "$last_ts" || fail "logs since"
-echo "OK: logs since=<last ts>+1 repeats no line"
+    sys.exit("since returned %d already seen lines, first: %r" % (len(old), old[0]))
+if not any("tp3a-since-marker" in l["line"] and l["ts"] > last for l in lines):
+    sys.exit("since stream lacks the marker line written after the cut (%d lines)" % len(lines))' "$work/since.ndjson" "$last_ts" || fail "logs since"
+echo "OK: logs since=<last ts>+1 (with tail 1000) repeats no line and delivers the newer marker"
 
 echo "== console: player lists follow rcon changes (no restart)"
+# whitelist add/op/ban Notch need a Mojang lookup (ONLINE_MODE=true): the runner needs internet.
 for c in "whitelist add Notch" "op Notch" "ban Notch ci acceptance"; do
-  rcon "$c" "$work/rcon.json" || fail "rcon $c: $(cat "$work/rcon.json" 2>/dev/null)"
+  rcon "$c" "$work/rcon.json" || fail "rcon $c failed (Mojang lookup?): $(cat "$work/rcon.json" 2>/dev/null)"
   echo "rcon $c: $(rcon_output "$work/rcon.json")"
 done
 players "$work/players.json"
