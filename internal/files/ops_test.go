@@ -439,3 +439,47 @@ func TestNoReadPathReturnsTheRconPassword(t *testing.T) {
 		}
 	}
 }
+
+func TestHiddenNamesIgnoreCase(t *testing.T) {
+	s, data := newService(t)
+	layout(t, data)
+	for _, name := range []string{".RCON-CLI.ENV", ".Rcon-Cli.Yaml", ".MCPanel-x", "plugins/.MCPANEL-tmp-1"} {
+		if err := s.Mkdir(ctx, 1, name); !errors.Is(err, filesapi.ErrNotFound) {
+			t.Errorf("mkdir %s: %v, want ErrNotFound", name, err)
+		}
+		if err := s.Delete(ctx, 1, name); !errors.Is(err, filesapi.ErrNotFound) {
+			t.Errorf("delete %s: %v, want ErrNotFound", name, err)
+		}
+		if err := s.Rename(ctx, filesapi.RenameRequest{ID: 1, From: name, To: "stolen"}); !errors.Is(err, filesapi.ErrNotFound) {
+			t.Errorf("rename from %s: %v, want ErrNotFound", name, err)
+		}
+		if err := s.Rename(ctx, filesapi.RenameRequest{ID: 1, From: "plugins/EssentialsX.jar", To: name}); !errors.Is(err, filesapi.ErrNotFound) {
+			t.Errorf("rename to %s: %v, want ErrNotFound", name, err)
+		}
+	}
+	// Moving something to a reserved temp name would hide it (and CleanupTemp would delete it).
+	if err := s.Rename(ctx, filesapi.RenameRequest{ID: 1, From: "world", To: "plugins/.mcpanel-tmp-keep"}); !errors.Is(err, filesapi.ErrNotFound) {
+		t.Fatalf("rename to a temp name: %v, want ErrNotFound", err)
+	}
+	if v, ok := get(t, data, ".rcon-cli.env"); !ok || v != "password=s3cret\n" {
+		t.Fatal(".rcon-cli.env was touched")
+	}
+	if _, ok := get(t, data, "world/level.dat"); !ok {
+		t.Fatal("world was moved")
+	}
+}
+
+// A folder that contains a file named .rcon-cli.env below the top level is an ordinary folder.
+func TestRenameFolderWithNestedRconName(t *testing.T) {
+	s, data := newService(t)
+	layout(t, data)
+	if err := s.Rename(ctx, filesapi.RenameRequest{ID: 1, From: "plugins", To: "plugins-old"}); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := get(t, data, "plugins-old/.rcon-cli.env"); !ok || v != "nested, visible" {
+		t.Fatalf("nested file not moved: %q", v)
+	}
+	if v, ok := get(t, data, ".rcon-cli.env"); !ok || v != "password=s3cret\n" {
+		t.Fatal("top-level .rcon-cli.env was touched")
+	}
+}
