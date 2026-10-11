@@ -146,6 +146,15 @@ func (d *Daemon) serveLogs(w http.ResponseWriter, r *http.Request, ref string) {
 	}
 	name := c.Name
 	d.logQueries = append(d.logQueries, r.URL.RawQuery)
+	// snapshot (caller holds d.mu) reads entries, state and the wake channel together, so
+	// no change between two snapshots is missed.
+	snapshot := func() ([]logEntry, bool, chan struct{}) {
+		cur := d.containers[name]
+		return slices.Clone(d.logs[name]), cur != nil && cur.Status == "running", d.logWake
+	}
+	// The history (and tail) is fixed when the request arrives, like Docker: a line
+	// appended after the headers went out is a followed line, never cut by tail.
+	entries, running, wake := snapshot()
 	d.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/vnd.docker.multiplexed-stream")
@@ -158,13 +167,6 @@ func (d *Daemon) serveLogs(w http.ResponseWriter, r *http.Request, ref string) {
 	flush()
 	next, first := 0, true
 	for {
-		d.mu.Lock()
-		entries := slices.Clone(d.logs[name])
-		cur := d.containers[name]
-		running := cur != nil && cur.Status == "running"
-		wake := d.logWake
-		d.mu.Unlock()
-
 		var out []logEntry
 		for _, e := range entries[next:] {
 			if since.IsZero() || !e.at.Before(since) {
@@ -190,6 +192,9 @@ func (d *Daemon) serveLogs(w http.ResponseWriter, r *http.Request, ref string) {
 		case <-r.Context().Done():
 			return
 		}
+		d.mu.Lock()
+		entries, running, wake = snapshot()
+		d.mu.Unlock()
 	}
 }
 
