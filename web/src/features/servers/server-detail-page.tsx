@@ -3,10 +3,13 @@ import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { isApiError } from '@/api/errors'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { PageHeader } from '@/components/page-header'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMe } from '@/features/auth/me'
 import { ConsoleTab } from '@/features/console/console-tab'
+import { FilesTab } from '@/features/files/files-tab'
+import { isExtracting, useFileJob } from '@/features/files/use-file-job'
 import { PlayersTab } from '@/features/players/players-tab'
 import { errorMessage } from '@/lib/error-message'
 import { serverQueryOptions } from './api'
@@ -17,7 +20,7 @@ import { ServerSettingsTab } from './server-settings-tab'
 import { detailPollInterval } from './status'
 import { StatusBadge } from './status-badge'
 
-type DetailTab = 'overview' | 'console' | 'players' | 'settings' | 'delete'
+type DetailTab = 'overview' | 'console' | 'players' | 'files' | 'settings' | 'delete'
 
 /** Keyed by id: the router reuses the component when only the :id parameter changes, but tab and console must reset. */
 export function ServerDetailPage({ serverId }: { serverId: number }) {
@@ -34,6 +37,12 @@ function ServerDetail({ serverId }: { serverId: number }) {
     refetchInterval: (q) => detailPollInterval(q.state.data, q.state.error),
   })
   const [tab, setTab] = useState<DetailTab>('overview')
+  const [filesDirty, setFilesDirty] = useState(false)
+  const [pendingTab, setPendingTab] = useState<DetailTab | null>(null)
+  // Users with server.files see the lock; everyone else gets the panel's 409 "extracting" on start.
+  const filesAllowed = query.data?.permissions.includes('server.files') === true && query.data.instance !== null
+  const fileJob = useFileJob(serverId, filesAllowed)
+  const extracting = isExtracting(fileJob.data)
 
   if (query.isPending) return <p className="text-muted-foreground">{t('common.loading')}</p>
   // A failed refetch keeps the old data: after 403/404 the server is gone or hidden, so stale data must not look live.
@@ -77,26 +86,35 @@ function ServerDetail({ serverId }: { serverId: number }) {
 
   const instance = server.instance
   const canConsole = server.permissions.includes('server.console')
+  const canFiles = server.permissions.includes('server.files')
   const available: DetailTab[] = ['overview']
   if (canConsole) available.push('console', 'players')
+  if (canFiles) available.push('files')
   if (isAdmin) available.push('settings', 'delete')
   // A tab whose permission was revoked while it was open falls back to the overview.
   const active = available.includes(tab) ? tab : 'overview'
 
+  function changeTab(next: DetailTab) {
+    // Radix unmounts inactive tabs: leaving "files" with unsaved editor changes would silently lose them.
+    if (active === 'files' && next !== 'files' && filesDirty) setPendingTab(next)
+    else setTab(next)
+  }
+
   return (
     <>
       {header}
-      <Tabs value={active} onValueChange={(value) => setTab(value as DetailTab)}>
+      <Tabs value={active} onValueChange={(value) => changeTab(value as DetailTab)}>
         {/* Five tabs are wider than a phone: the bar scrolls, not the page. */}
         <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="overview">{t('servers.detail.tabs.overview')}</TabsTrigger>
           {canConsole ? <TabsTrigger value="console">{t('servers.detail.tabs.console')}</TabsTrigger> : null}
           {canConsole ? <TabsTrigger value="players">{t('servers.detail.tabs.players')}</TabsTrigger> : null}
+          {canFiles ? <TabsTrigger value="files">{t('servers.detail.tabs.files')}</TabsTrigger> : null}
           {isAdmin ? <TabsTrigger value="settings">{t('servers.detail.tabs.settings')}</TabsTrigger> : null}
           {isAdmin ? <TabsTrigger value="delete">{t('servers.detail.tabs.delete')}</TabsTrigger> : null}
         </TabsList>
         <TabsContent value="overview" className="pt-4">
-          <ServerOverview server={server} instance={instance} />
+          <ServerOverview server={server} instance={instance} extracting={extracting} />
         </TabsContent>
         {canConsole ? (
           <TabsContent value="console" className="pt-4">
@@ -106,6 +124,11 @@ function ServerDetail({ serverId }: { serverId: number }) {
         {canConsole ? (
           <TabsContent value="players" className="pt-4">
             <PlayersTab server={server} onOpenSettings={isAdmin ? () => setTab('settings') : undefined} />
+          </TabsContent>
+        ) : null}
+        {canFiles ? (
+          <TabsContent value="files" className="pt-4">
+            <FilesTab server={server} onDirtyChange={setFilesDirty} onOpenSettings={isAdmin ? () => changeTab('settings') : undefined} />
           </TabsContent>
         ) : null}
         {isAdmin ? (
@@ -119,6 +142,19 @@ function ServerDetail({ serverId }: { serverId: number }) {
           </TabsContent>
         ) : null}
       </Tabs>
+      <ConfirmDialog
+        open={pendingTab !== null}
+        onOpenChange={(open) => (open ? undefined : setPendingTab(null))}
+        title={t('files.editor.discard_title')}
+        description={t('files.editor.discard_tab')}
+        confirmLabel={t('files.editor.discard')}
+        destructive
+        onConfirm={() => {
+          setFilesDirty(false)
+          if (pendingTab) setTab(pendingTab)
+          setPendingTab(null)
+        }}
+      />
     </>
   )
 }

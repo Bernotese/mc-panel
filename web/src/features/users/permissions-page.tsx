@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { serversQueryOptions } from '@/features/servers/api'
 import { errorMessage, useErrorToast } from '@/lib/error-message'
-import { fromMatrix, sameMatrix, toggle, toMatrix, type Matrix } from './permission-matrix'
+import { fromMatrix, newlyGranted, sameMatrix, toggle, toMatrix, type Matrix } from './permission-matrix'
 
 export function UserPermissionsPage({ userId }: { userId: number }) {
   const { t } = useTranslation()
@@ -74,6 +74,8 @@ export function UserPermissionsPage({ userId }: { userId: number }) {
     ),
   ]
 
+  const filesWarning = !targetIsAdmin && saved !== null && newlyGranted(current, saved, 'server.files').length > 0
+
   return (
     <>
       <PageHeader
@@ -95,6 +97,11 @@ export function UserPermissionsPage({ userId }: { userId: number }) {
         <Badge variant="outline" className="mb-4">
           {t('permissions.unsaved')}
         </Badge>
+      ) : null}
+      {filesWarning ? (
+        <p role="status" className="border-destructive/50 mb-4 rounded-md border p-3 text-sm">
+          {t('permissions.files_warning')}
+        </p>
       ) : null}
       <DataList items={servers.data} columns={columns} rowKey={(s) => s.id} caption={t('permissions.caption')} empty={t('permissions.no_servers')} />
     </>

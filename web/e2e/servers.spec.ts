@@ -114,3 +114,73 @@ test('a user without console permission sees online players but no console', asy
   await expect(page.getByRole('tab', { name: 'Konsole' })).toHaveCount(0)
   await expect(page.getByRole('tab', { name: 'Spieler' })).toHaveCount(0)
 })
+
+test('admin edits a config, uploads, renames and deletes files', async ({ page }) => {
+  await signIn(page, 'admin', true)
+  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await expect(page).toHaveURL(/\/servers\/1$/)
+  await page.getByRole('tab', { name: 'Dateien' }).click()
+  const files = page.getByRole('region', { name: 'Dateien' })
+
+  await files.getByRole('button', { name: 'plugins', exact: true }).click()
+  await files.getByRole('button', { name: 'Essentials', exact: true }).click()
+  await files.getByRole('button', { name: 'config.yml', exact: true }).click()
+  const editor = page.getByRole('textbox', { name: 'Inhalt von config.yml' })
+  await expect(editor).toBeVisible()
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('\n# geändert im Test')
+  await expect(page.getByText('Ungespeicherte Änderungen')).toBeVisible()
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(page.getByText('Gespeichert.')).toBeVisible()
+  await page.getByRole('button', { name: 'Zurück zur Liste' }).click()
+
+  await page.getByLabel('Dateien hochladen').setInputFiles({ name: 'hallo.txt', mimeType: 'text/plain', buffer: Buffer.from('hallo welt') })
+  const uploads = page.getByRole('region', { name: 'Uploads' })
+  await expect(uploads.getByText('Hochgeladen')).toBeVisible()
+  await expect(files.getByRole('button', { name: 'hallo.txt', exact: true })).toBeVisible()
+
+  await files.getByRole('button', { name: 'Aktionen für hallo.txt', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Umbenennen oder verschieben' }).click()
+  const rename = page.getByRole('dialog', { name: '„hallo.txt“ umbenennen oder verschieben' })
+  await rename.getByLabel('Neuer Pfad').fill('plugins/Essentials/servus.txt')
+  await rename.getByRole('button', { name: 'Umbenennen' }).click()
+  await expect(files.getByRole('button', { name: 'servus.txt', exact: true })).toBeVisible()
+
+  await files.getByRole('button', { name: 'Aktionen für servus.txt', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Löschen' }).click()
+  await page.getByRole('dialog', { name: '„servus.txt“ löschen?' }).getByRole('button', { name: 'Endgültig löschen' }).click()
+  await expect(files.getByRole('button', { name: 'servus.txt', exact: true })).toHaveCount(0)
+})
+
+test('admin uploads a world zip to a stopped server and extracts it', async ({ page }) => {
+  await signIn(page, 'admin', true)
+  await page.getByRole('link', { name: 'creative', exact: true }).click()
+  await expect(page).toHaveURL(/\/servers\/2$/)
+  await page.getByRole('tab', { name: 'Dateien' }).click()
+  const files = page.getByRole('region', { name: 'Dateien' })
+
+  await page.getByLabel('Dateien hochladen').setInputFiles({
+    name: 'neue-welt.zip',
+    mimeType: 'application/zip',
+    buffer: Buffer.from('PK\u0005\u0006' + '\u0000'.repeat(18), 'binary'),
+  })
+  await expect(page.getByRole('region', { name: 'Uploads' }).getByText('Hochgeladen')).toBeVisible()
+
+  await files.getByRole('button', { name: 'Aktionen für neue-welt.zip', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Entpacken …' }).click()
+  const dialog = page.getByRole('dialog', { name: '„neue-welt.zip“ entpacken' })
+  await expect(dialog.getByLabel('Zielordner')).toHaveValue('neue-welt')
+  await dialog.getByRole('button', { name: 'Entpacken' }).click()
+  await expect(page.getByRole('progressbar', { name: 'Fortschritt beim Entpacken' })).toBeVisible()
+  await expect(page.getByText('„neue-welt.zip“ wurde nach neue-welt entpackt.')).toBeVisible({ timeout: 15_000 })
+  await expect(files.getByRole('button', { name: 'neue-welt', exact: true })).toBeVisible()
+})
+
+test('a user without file permission sees no files tab', async ({ page }) => {
+  await signIn(page, 'alice', false)
+  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await expect(page).toHaveURL(/\/servers\/1$/)
+  await expect(page.getByRole('tab', { name: 'Übersicht' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'Dateien' })).toHaveCount(0)
+})
