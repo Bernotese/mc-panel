@@ -155,5 +155,10 @@ func (h *Handler) ExtractRunning(ctx context.Context, serverID int64) bool {
 	ctx, cancel := context.WithTimeout(ctx, gateTimeout)
 	defer cancel()
 	job, err := h.files.Job(ctx, serverID)
-	return err == nil && job != nil && job.State == filesapi.JobRunning
+	if err != nil {
+		h.log.WarnContext(ctx, "files: extract gate open, job state unknown (file service unreachable)",
+			"server_id", serverID, "err", err)
+		return false
+	}
+	return job != nil && job.State == filesapi.JobRunning
 }
