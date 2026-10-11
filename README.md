@@ -5,8 +5,9 @@ Selbst gehostetes Web-Panel für die eigenen Minecraft-Server auf einem Linux-VP
 ## Funktionen
 
 - **Minecraft-Server** als gehärtete Docker-Container (`itzg/minecraft-server`): Vanilla, Paper, Purpur, Fabric, NeoForge sowie Modrinth- und CurseForge-Modpacks. Versionen, Java, RAM und freigegebene `server.properties` sind einstellbar, Start/Stopp/Neustart mit Auto-Restart. Das Routing läuft über den Hostnamen (`<server>.<basisdomain>`) und einen gemeinsamen Port 25565 (mc-router).
+- **Konsole und Spieler:** Live-Log im Browser (läuft über Neustarts weiter), Befehle per RCON, Online-Spieler, Ops, Whitelist und Bans ohne Neustart pflegen (Kick, Ban, Entbannen, Op, Whitelist). Was im Spiel vergeben wird, bleibt erhalten.
 - **Anmeldung:** Passwort plus zweiter Faktor (TOTP oder Passkey, für Admins Pflicht), Wiederherstellungscodes, Sessions mit Idle- und Absolut-Timeout, Sudo-Modus für kritische Aktionen.
-- **Rechte:** Admins und Benutzer mit Rechten pro Server (`server.view`, `server.power`).
+- **Rechte:** Admins und Benutzer mit Rechten pro Server (`server.view`, `server.power`, `server.console`).
 - **Abwehr:** Rate-Limits, Jail nach Fehlversuchen (in der App und per nftables auf dem Host), IP-Regeln, Länderfilter (GeoIP), Security Center in der Oberfläche, Benachrichtigungen über Discord und ntfy.
 - **Audit-Log:** unveränderlich und hash-verkettet, prüfbar mit `panel audit verify`.
 
@@ -40,8 +41,10 @@ Zum Ausprobieren gegen das echte Backend mit Docker gibt es eine interne Test-VM
 |---|---|
 | [`docs/dev/README.md`](docs/dev/README.md) | Toolchain, Make-Targets, Test-VM, CI lokal nachstellen, Lint-Konventionen, Release, Hinweise zur Produktion |
 | [`docs/dev/acceptance-tp2.md`](docs/dev/acceptance-tp2.md) | manuelle Abnahme der Minecraft-Server auf einem Testserver |
+| [`docs/dev/acceptance-tp3a.md`](docs/dev/acceptance-tp3a.md) | manuelle Abnahme von Konsole, Logs und Spieler-Verwaltung auf der Test-VM |
 | [`docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`](docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md) | Architektur, Security-Anforderungen, Roadmap |
 | [`docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md`](docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md) | Minecraft-Instanzen (Docker, Router, Reconcile) |
+| [`docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md`](docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md) | Konsole, Live-Log, Spieler-Verwaltung (RCON, SSE) |
 | [`api/openapi.yaml`](api/openapi.yaml) | API-Vertrag (Quelle für die TypeScript-Typen) |
 | [`CLAUDE.md`](CLAUDE.md) | Arbeitsregeln und Architektur-Kurzfassung für Claude Code |
 
@@ -51,7 +54,8 @@ Zum Ausprobieren gegen das echte Backend mit Docker gibt es eine interne Test-VM
 |---|---|---|
 | 1 | Fundament + Security | fertig |
 | 2 | Instanzen-Lifecycle | fertig |
-| 3 | Live-Betrieb (Konsole, Logs, Dateien, Plugins/Mods, Spieler) | offen |
+| 3a | Live-Betrieb: Konsole, Logs, Spieler | fertig |
+| 3b | Live-Betrieb: Dateien, Plugins/Mods | offen |
 | 4 | Backups | offen |
 | 5 | Monitoring + Alerts | offen |
 | 6 | Installer-CLI (`install`/`update`/`doctor`, Caddy, VPS-Härtung) | offen |
