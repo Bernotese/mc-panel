@@ -66,11 +66,33 @@ builds:
             sh -c 'go version -m "{{ .Path }}" | grep -q "CGO_ENABLED=0" || { echo "cgo detected in {{ .Path }}" >&2; exit 1; }'
           output: true
 
+  - id: files
+    main: ./cmd/files
+    binary: files
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    hooks:
+      post:
+        - cmd: >-
+            sh -c 'go version -m "{{ .Path }}" | grep -q "CGO_ENABLED=0" || { echo "cgo detected in {{ .Path }}" >&2; exit 1; }'
+          output: true
+
 archives:
   - id: default
     ids:
       - panel
       - agent
+      - files
     formats:
       - tar.gz
     name_template: "mc-panel_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
