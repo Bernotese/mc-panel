@@ -86,7 +86,9 @@ type RconResponse struct {
 
 // ValidateCommand checks a console command (shared by panel and agent): 1..MaxCommandBytes
 // bytes, valid UTF-8, no control character (< 0x20, so no newline or tab, and no 0x7f), not
-// only spaces. rcon-cli gets it as one argv element, never through a shell.
+// only spaces, and no leading '-' (also not after spaces and one slash): rcon-cli would parse
+// it as its own option (--host, --config, …), and no Minecraft command starts with one.
+// rcon-cli gets it as one argv element after "--", never through a shell.
 func ValidateCommand(cmd string) error {
 	switch {
 	case len(cmd) == 0 || len(cmd) > MaxCommandBytes:
@@ -97,6 +99,8 @@ func ValidateCommand(cmd string) error {
 		return fmt.Errorf("%w: command: must not contain control characters", instancespec.ErrInvalid)
 	case strings.Trim(cmd, " ") == "":
 		return fmt.Errorf("%w: command: must not be blank", instancespec.ErrInvalid)
+	case strings.HasPrefix(strings.TrimLeft(strings.TrimPrefix(strings.TrimLeft(cmd, " "), "/"), " "), "-"):
+		return fmt.Errorf("%w: command: must not start with '-'", instancespec.ErrInvalid)
 	}
 	return nil
 }
