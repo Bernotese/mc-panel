@@ -226,8 +226,12 @@ type logSession struct {
 	sw       *sseWriter
 	p        principal.Principal
 	serverID int64
-	req      agentapi.LogsRequest // next request to the agent
-	running  *bool                // last state sent; nil = none yet
+	req      agentapi.LogsRequest // next request to the agent; Since = newest timestamp sent + 1
+	// skipBefore is the Since of the open agent stream: older lines repeat lines sent before
+	// the reconnect. Lines of one agent stream are never compared with each other, so several
+	// lines with the same timestamp all get through.
+	skipBefore int64
+	running    *bool // last state sent; nil = none yet
 }
 
 type lineOrErr struct {
@@ -241,6 +245,7 @@ func (s *logSession) run() {
 	recheck, stopRecheck := s.h.timers.Every(recheckInterval)
 	defer stopRecheck()
 	for {
+		s.skipBefore = s.req.Since
 		stream, err := s.h.agent.Logs(s.ctx, s.req)
 		switch {
 		case err == nil:
@@ -317,14 +322,15 @@ func (s *logSession) follow(stream agentapi.LogStream, heartbeat, recheck <-chan
 	}
 }
 
-// sendLine forwards one line unless it repeats one already sent (spec §6.2: since = ts + 1).
+// sendLine forwards one line unless it repeats one sent before the reconnect (spec §6.2:
+// since = ts + 1).
 func (s *logSession) sendLine(l agentapi.LogLine) error {
-	if s.req.Since > 0 && l.TS < s.req.Since {
+	if l.TS < s.skipBefore {
 		return nil
 	}
 	id := ""
 	if l.TS > 0 {
-		s.req.Since = l.TS + 1
+		s.req.Since = max(s.req.Since, l.TS+1)
 		id = strconv.FormatInt(l.TS, 10)
 	}
 	return s.sw.event("line", id, lineEvent{TS: l.TS / int64(time.Millisecond), Stream: l.Stream, Line: l.Line})
