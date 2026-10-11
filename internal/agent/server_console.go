@@ -16,6 +16,9 @@ import (
 const (
 	// MaxLogStreams bounds the log streams open at once (spec §5.2).
 	MaxLogStreams = 16
+	// MaxParallelPlayers bounds the player list reads running at once (each reads up to three
+	// 1 MiB files of the container user as root); one more is 429 busy.
+	MaxParallelPlayers = 2
 	// streamWriteTimeout is the deadline of every write of a log stream (spec §5.2).
 	streamWriteTimeout = 30 * time.Second
 	// rconWriteTimeout covers one console command (instances.RconTimeout = 10 s) plus margin.
@@ -139,7 +142,9 @@ func (s *Server) rcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	longRequest(w, rconWriteTimeout)
-	out, err := s.console.Rcon(r.Context(), req.ID, req.Command)
+	ctx, done := s.consoleCtx(r)
+	defer done()
+	out, err := s.console.Rcon(ctx, req.ID, req.Command)
 	if err != nil {
 		s.consoleError(w, r, "rcon", req.ID, err)
 		return
@@ -158,12 +163,30 @@ func (s *Server) players(w http.ResponseWriter, r *http.Request) {
 		s.reject(w, r, http.StatusBadRequest, err)
 		return
 	}
-	resp, err := s.console.Players(r.Context(), req.ID)
+	select {
+	case s.playerReads <- struct{}{}:
+		defer func() { <-s.playerReads }()
+	default:
+		s.rejectCode(w, r, http.StatusTooManyRequests, agentapi.ErrorCodeBusy,
+			fmt.Errorf("%w: %d player list reads are running", agentapi.ErrBusy, MaxParallelPlayers))
+		return
+	}
+	ctx, done := s.consoleCtx(r)
+	defer done()
+	resp, err := s.console.Players(ctx, req.ID)
 	if err != nil {
 		s.consoleError(w, r, "players", req.ID, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// consoleCtx is the request context, also cancelled by Shutdown: a console command or player
+// read must not hold the shutdown (whose timeout is shorter than a console command may take).
+func (s *Server) consoleCtx(r *http.Request) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(r.Context())
+	stop := context.AfterFunc(s.streamCtx, cancel)
+	return ctx, func() { stop(); cancel() }
 }
 
 // consoleError maps console errors to status and code; anything unknown becomes a generic
@@ -172,6 +195,11 @@ func (s *Server) consoleError(w http.ResponseWriter, r *http.Request, op string,
 	if r.Context().Err() != nil {
 		s.callerGone(r, op, id)
 		return
+	}
+	if s.streamCtx.Err() != nil && errors.Is(err, context.Canceled) {
+		// Ended by Shutdown: break the connection, the panel reports the agent as unavailable.
+		s.log.Info("console request ended by shutdown", "op", op, "id", id, "peer_uid", peerUID(r))
+		panic(http.ErrAbortHandler)
 	}
 	switch {
 	case errors.Is(err, instancespec.ErrInvalid):

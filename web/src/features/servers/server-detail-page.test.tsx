@@ -194,4 +194,11 @@ describe('ServerDetailPage', () => {
     expect(screen.queryByText('Diese Aktion muss bestätigt werden.')).not.toBeInTheDocument()
     expect(db.servers.some((s) => s.id === 3)).toBe(true)
   })
+
+  it('lets the tab bar scroll sideways instead of the page on narrow screens', async () => {
+    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
+    const tabs = await screen.findByRole('tablist')
+    expect(within(tabs).getAllByRole('tab')).toHaveLength(5)
+    expect(tabs).toHaveClass('max-w-full', 'justify-start', 'overflow-x-auto')
+  })
 })
