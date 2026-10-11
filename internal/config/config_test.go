@@ -43,7 +43,7 @@ func TestDevPanel(t *testing.T) {
 	}
 	if !p.Dev || p.PublicURL != "http://localhost:5173" || p.RPID() != "localhost" ||
 		p.Origin() != "http://localhost:5173" || p.DataDir != "/repo/.dev/data" ||
-		p.AgentSocket != "/repo/.dev/agent.sock" {
+		p.AgentSocket != "/repo/.dev/agent.sock" || p.FilesSocket != "/repo/.dev/files.sock" {
 		t.Fatalf("unexpected dev config: %+v", p)
 	}
 }
