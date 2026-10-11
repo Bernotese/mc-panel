@@ -80,8 +80,10 @@ func TestCommandValidation(t *testing.T) {
 	e := newEnv(t)
 	id := createInstance(t, e.db, "survival")
 	admin := e.admin()
+	// Invalid UTF-8 cannot reach the handler: encoding/json replaces it with U+FFFD on both
+	// sides (agentapi.ValidateCommand covers it in the agentapi tests).
 	for _, cmd := range []string{
-		"", "/", "   ", "/   ", "say\nhi", "say\rhi", "say\thi", "a\x00b", "a\x7fb", "\xff\xfe",
+		"", "/", "   ", "/   ", "say\nhi", "say\rhi", "say\thi", "a\x00b", "a\x7fb",
 		strings.Repeat("a", 1001), "/" + strings.Repeat("a", 1001),
 	} {
 		rec := e.do(http.MethodPost, srvPath(id, "/console"), map[string]string{"command": cmd}, &admin)
