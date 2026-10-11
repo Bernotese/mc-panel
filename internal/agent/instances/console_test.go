@@ -408,7 +408,7 @@ func TestRconParallelLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if out, err := e.m.Rcon(ctx, 1, "list"); err != nil || out != "list" {
+	if out, err := e.m.Rcon(ctx, 1, "list"); err != nil || out != "-- list" {
 		t.Fatalf("after the burst = %q, %v (slots must be free again)", out, err)
 	}
 }
