@@ -121,7 +121,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 
 	// Without docker_socket (dev default) there is no instance manager: the server
-	// answers instance writes with 503 docker_unavailable and creates no containers.
+	// answers instance writes and console calls with 503 docker_unavailable and
+	// creates no containers.
 	var opts []agent.Option
 	stopInstances := func() {}
 	if cfg.DockerSocket != "" {
@@ -149,7 +150,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			<-runDone
 			mgr.Close()
 		}
-		opts = append(opts, agent.WithInstances(mgr))
+		opts = append(opts, agent.WithInstances(mgr), agent.WithConsole(mgr))
 	}
 
 	srv := agent.NewServer(fw, version, log, opts...)
