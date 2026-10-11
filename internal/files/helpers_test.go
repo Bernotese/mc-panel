@@ -82,7 +82,7 @@ func put(t *testing.T, dir, rel, content string) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil { //nolint:gosec // G703: test fixture below t.TempDir()
 		t.Fatal(err)
 	}
 }

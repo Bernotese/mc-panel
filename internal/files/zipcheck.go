@@ -117,18 +117,14 @@ func readZip64End(r io.ReaderAt, endOff int64) (records, cdSize, cdOff uint64, o
 // comment) until something else follows, as archive/zip reads them.
 func countHeaders(r io.Reader, maxEntries int64) error {
 	br := bufio.NewReader(r)
-	var hdr [cdHeaderLen]byte
 	var n, total int64
 	for {
-		if _, err := io.ReadFull(br, hdr[:]); err != nil || binary.LittleEndian.Uint32(hdr[:]) != cdHeaderSig {
-			return nil
-		}
-		vl := int(binary.LittleEndian.Uint16(hdr[28:])) + int(binary.LittleEndian.Uint16(hdr[30:])) + int(binary.LittleEndian.Uint16(hdr[32:]))
-		if _, err := br.Discard(vl); err != nil {
+		size, ok := nextHeader(br)
+		if !ok {
 			return nil
 		}
 		n++
-		total += int64(cdHeaderLen + vl)
+		total += size
 		switch {
 		case n > maxEntries:
 			return fmt.Errorf("%w: the archive has more than %d entries", filesapi.ErrTooLarge, maxEntries)
@@ -136,4 +132,18 @@ func countHeaders(r io.Reader, maxEntries int64) error {
 			return fmt.Errorf("%w: the archive's central directory exceeds %d bytes", filesapi.ErrTooLarge, maxCentralDirBytes)
 		}
 	}
+}
+
+// nextHeader skips one complete central-directory header and returns its size; ok is false
+// when no complete header follows (where archive/zip stops reading as well).
+func nextHeader(br *bufio.Reader) (size int64, ok bool) {
+	var hdr [cdHeaderLen]byte
+	if _, err := io.ReadFull(br, hdr[:]); err != nil || binary.LittleEndian.Uint32(hdr[:]) != cdHeaderSig {
+		return 0, false
+	}
+	vl := int(binary.LittleEndian.Uint16(hdr[28:])) + int(binary.LittleEndian.Uint16(hdr[30:])) + int(binary.LittleEndian.Uint16(hdr[32:]))
+	if _, err := br.Discard(vl); err != nil {
+		return 0, false
+	}
+	return int64(cdHeaderLen + vl), true
 }
