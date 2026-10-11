@@ -48,37 +48,55 @@ func WithInstances(in Instances) Option { return func(s *Server) { s.inst = in }
 type Server struct {
 	fw      agentapi.Firewall
 	inst    Instances
+	console Console
 	version string
 	log     *slog.Logger
 	routes  map[string]route
 	srv     *http.Server
+
+	streams     chan struct{}   // one token per open log stream (MaxLogStreams)
+	streamCtx   context.Context // cancelled by Shutdown: ends all log streams
+	stopStreams context.CancelFunc
+
+	readTimeout, writeTimeout time.Duration
+	streamWriteTimeout        time.Duration // deadline of every write of a log stream
 }
 
 func NewServer(fw agentapi.Firewall, version string, log *slog.Logger, opts ...Option) *Server {
-	s := &Server{fw: fw, inst: noInstances{}, version: version, log: log}
+	s := &Server{
+		fw: fw, inst: noInstances{}, console: noConsole{}, version: version, log: log,
+		streams: make(chan struct{}, MaxLogStreams), readTimeout: 5 * time.Second, writeTimeout: 10 * time.Second,
+		streamWriteTimeout: streamWriteTimeout,
+	}
 	for _, o := range opts {
 		o(s)
 	}
+	// Shutdown waits for running requests, and a log stream only ends with its context.
+	s.streamCtx, s.stopStreams = context.WithCancel(context.Background()) //nolint:gosec // G118: stopStreams runs on Shutdown (RegisterOnShutdown below)
 	s.routes = map[string]route{
-		agentapi.PathHealth:         {method: http.MethodGet, handler: s.health},
-		agentapi.PathBan:            {method: http.MethodPost, handler: s.ban},
-		agentapi.PathUnban:          {method: http.MethodPost, handler: s.unban},
-		agentapi.PathBans:           {method: http.MethodGet, handler: s.bans},
-		agentapi.PathInstances:      {method: http.MethodGet, handler: s.instances},
-		agentapi.PathInstanceEnsure: {method: http.MethodPost, handler: s.ensure},
-		agentapi.PathInstancePower:  {method: http.MethodPost, handler: s.power},
-		agentapi.PathInstanceRemove: {method: http.MethodPost, handler: s.remove},
+		agentapi.PathHealth:          {method: http.MethodGet, handler: s.health},
+		agentapi.PathBan:             {method: http.MethodPost, handler: s.ban},
+		agentapi.PathUnban:           {method: http.MethodPost, handler: s.unban},
+		agentapi.PathBans:            {method: http.MethodGet, handler: s.bans},
+		agentapi.PathInstances:       {method: http.MethodGet, handler: s.instances},
+		agentapi.PathInstanceEnsure:  {method: http.MethodPost, handler: s.ensure},
+		agentapi.PathInstancePower:   {method: http.MethodPost, handler: s.power},
+		agentapi.PathInstanceRemove:  {method: http.MethodPost, handler: s.remove},
+		agentapi.PathInstanceLogs:    {method: http.MethodPost, handler: s.logs},
+		agentapi.PathInstanceRcon:    {method: http.MethodPost, handler: s.rcon},
+		agentapi.PathInstancePlayers: {method: http.MethodPost, handler: s.players},
 	}
 	s.srv = &http.Server{
 		Handler:           s,
 		ConnContext:       peercred.ConnContext,
 		ReadHeaderTimeout: 2 * time.Second,
-		ReadTimeout:       5 * time.Second,
-		WriteTimeout:      10 * time.Second,
+		ReadTimeout:       s.readTimeout,
+		WriteTimeout:      s.writeTimeout,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    8 << 10,
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
+	s.srv.RegisterOnShutdown(s.stopStreams)
 	return s
 }
 
