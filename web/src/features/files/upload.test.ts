@@ -1,4 +1,4 @@
-import { delay, http, HttpResponse } from 'msw'
+import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getCsrfToken, setCsrfToken } from '@/api/csrf'
 import { configureApiHandlers } from '@/api/handlers'
@@ -68,17 +68,34 @@ describe('uploadFile', () => {
     expect(calls).toBe(2)
   })
 
-  it('rejects with AbortError when cancelled while the request is in flight', async () => {
-    server.use(
-      http.post('*/api/servers/:id/files/upload', async () => {
-        await delay(500)
-        return HttpResponse.json({ size: 1 }, { status: 201 })
-      }),
-    )
-    const controller = new AbortController()
-    const pending = uploadFile(1, 'a', new File(['x'], 'a'), { overwrite: false, signal: controller.signal }).catch((e: unknown) => e)
-    controller.abort() // xhr.send() has already run, so this aborts a request in flight
-    expect(((await pending) as DOMException).name).toBe('AbortError')
+  it('aborts the XHR and rejects with AbortError when cancelled in flight', async () => {
+    // MSW's XHR interceptor does not honour abort(), so a minimal stand-in checks the wiring.
+    const instances: FakeXhr[] = []
+    class FakeXhr {
+      upload: Record<string, unknown> = {}
+      onabort: (() => void) | null = null
+      aborted = false
+      constructor() {
+        instances.push(this)
+      }
+      open() {}
+      setRequestHeader() {}
+      send() {}
+      abort() {
+        this.aborted = true
+        this.onabort?.()
+      }
+    }
+    vi.stubGlobal('XMLHttpRequest', FakeXhr)
+    try {
+      const controller = new AbortController()
+      const pending = uploadFile(1, 'a', new File(['x'], 'a'), { overwrite: false, signal: controller.signal }).catch((e: unknown) => e)
+      controller.abort()
+      expect(((await pending) as DOMException).name).toBe('AbortError')
+      expect(instances[0].aborted).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('signs the user out on 401 and drops the token', async () => {
