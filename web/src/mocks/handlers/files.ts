@@ -21,10 +21,15 @@ export function cleanPath(raw: unknown): string | null {
   return p
 }
 
+/** Same rules as filesapi.IsHidden, case-insensitive (macOS file systems are). */
 function isHidden(p: string): boolean {
   if (p === '') return false
-  const parts = p.split('/')
+  const parts = p.toLowerCase().split('/')
   return TOP_HIDDEN.has(parts[0]) || parts.some((c) => c.startsWith('.mcpanel-'))
+}
+
+function hidden(): ErrorResponse {
+  return apiError(404, 'not_found', 'no such file')
 }
 
 /** Session, server.files and server lookup shared by every file operation. */
@@ -70,9 +75,9 @@ function target(server: MockServer): string {
   return `server:${server.id}`
 }
 
-function entries(dir: MockNode): FileEntry[] {
+function entries(dir: MockNode, path: string): FileEntry[] {
   return Object.entries(dir.children ?? {})
-    .filter(([name]) => !isHidden(name))
+    .filter(([name]) => !isHidden(path === '' ? name : `${path}/${name}`))
     .map(([name, n]) => ({ name, type: n.type, size: n.size, mtime: n.mtime }))
     .sort((a, b) => (a.type === 'dir') === (b.type === 'dir') ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1)
 }
@@ -114,11 +119,11 @@ export const filesOperations: MockOperation[] = [
       const p = cleanPath(new URL(request.url).searchParams.get('path'))
       if (p === null) return invalid()
       if (!a.root) return noData()
-      if (isHidden(p)) return apiError(404, 'not_found', 'no such file')
+      if (isHidden(p)) return hidden()
       const node = lookup(a.root, p)
       if (!node) return apiError(404, 'not_found', 'no such directory')
       if (node.type !== 'dir') return apiError(400, 'not_regular', 'not a directory')
-      return HttpResponse.json({ path: p, entries: entries(node), truncated: false })
+      return HttpResponse.json({ path: p, entries: entries(node, p), truncated: false })
     }),
   ),
   op(
@@ -143,9 +148,10 @@ export const filesOperations: MockOperation[] = [
       if (a instanceof Response) return a
       const body = await readJson<WriteFileRequest>(request)
       const p = cleanPath(body?.path)
-      if (!body || p === null || p === '' || typeof body.content !== 'string') return invalid()
+      const expected: unknown = body?.expected_mtime
+      if (!body || p === null || p === '' || typeof body.content !== 'string' || (expected !== null && typeof expected !== 'number')) return invalid()
       if (!a.root) return noData()
-      if (isHidden(p)) return apiError(404, 'not_found', 'no such file')
+      if (isHidden(p)) return hidden()
       const parent = parentDir(a.root, p)
       if (!parent?.children) return apiError(404, 'not_found', 'no such directory')
       const { name } = split(p)
@@ -175,7 +181,7 @@ export const filesOperations: MockOperation[] = [
       const p = cleanPath(url.searchParams.get('path'))
       if (p === null || p === '') return invalid()
       if (!a.root) return noData()
-      if (isHidden(p)) return invalid()
+      if (isHidden(p)) return hidden()
       const parent = parentDir(a.root, p)
       if (!parent?.children) return apiError(404, 'not_found', 'no such directory')
       const { name } = split(p)
@@ -222,8 +228,9 @@ export const filesOperations: MockOperation[] = [
       const a = access(request, params)
       if (a instanceof Response) return a
       const p = cleanPath((await readJson<{ path?: string }>(request))?.path)
-      if (p === null || p === '' || isHidden(p)) return invalid()
+      if (p === null || p === '') return invalid()
       if (!a.root) return noData()
+      if (isHidden(p)) return hidden()
       const parent = parentDir(a.root, p)
       if (!parent?.children) return apiError(404, 'not_found', 'no such directory')
       const { name } = split(p)
@@ -241,9 +248,10 @@ export const filesOperations: MockOperation[] = [
       const body = await readJson<RenameFileRequest>(request)
       const from = cleanPath(body?.from)
       const to = cleanPath(body?.to)
-      if (from === null || to === null || from === '' || to === '' || isHidden(from) || isHidden(to)) return invalid()
+      if (from === null || to === null || from === '' || to === '') return invalid()
       if (to === from || to.startsWith(`${from}/`)) return apiError(400, 'validation_failed', 'cannot move a folder into itself')
       if (!a.root) return noData()
+      if (isHidden(from) || isHidden(to)) return hidden()
       const src = parentDir(a.root, from)
       const dst = parentDir(a.root, to)
       const node = src?.children?.[split(from).name]
@@ -261,8 +269,9 @@ export const filesOperations: MockOperation[] = [
       const a = access(request, params)
       if (a instanceof Response) return a
       const p = cleanPath((await readJson<{ path?: string }>(request))?.path)
-      if (p === null || p === '' || isHidden(p)) return invalid()
+      if (p === null || p === '') return invalid()
       if (!a.root) return noData()
+      if (isHidden(p)) return hidden()
       const parent = parentDir(a.root, p)
       const { name } = split(p)
       if (!parent?.children?.[name]) return apiError(404, 'not_found', 'no such file')
@@ -279,8 +288,11 @@ export const filesOperations: MockOperation[] = [
       const body = await readJson<ExtractRequest>(request)
       const p = cleanPath(body?.path)
       const dest = cleanPath(body?.dest)
-      if (p === null || dest === null || p === '' || dest === '' || isHidden(p) || isHidden(dest)) return invalid()
+      if (p === null || dest === null || p === '' || dest === '') return invalid()
       if (!a.root) return noData()
+      if (isHidden(p) || isHidden(dest)) return hidden()
+      // Like the panel: without the actual state (agent unreachable) nothing is extracted.
+      if (a.server.status.state === 'unknown') return apiError(503, 'agent_unavailable', 'agent not reachable')
       if (a.server.status.state !== 'stopped') return apiError(409, 'instance_running', 'stop the server first')
       const zip = lookup(a.root, p)
       if (!zip) return apiError(404, 'not_found', 'no such file')

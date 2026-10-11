@@ -83,6 +83,10 @@ func TestUnlimitedBody(t *testing.T) {
 		"POST /api/servers/7/files/upload/":       false,
 		"POST /api/servers/7/files/mkdir":         false,
 		"POST /api/servers/7/console":             false,
+		// chi routes escaped paths by RawPath; such a request never reaches the upload route.
+		"POST /api/servers/7/files%2Fupload": false,
+		"POST /api/servers/7/FILES/upload":   false,
+		"POST /api/servers/07x/files/upload": false,
 	} {
 		var method, path string
 		for i := range target {
@@ -109,5 +113,28 @@ func TestStubAnswersFilesUnavailable(t *testing.T) {
 	}
 	if h.ExtractRunning(t.Context(), 1) {
 		t.Fatal("stub ExtractRunning must be false")
+	}
+}
+
+// TestUnlimitedBodyMatchesTheUploadRoute: the exemption is only meaningful while the upload route
+// is registered under exactly the pattern UnlimitedBody recognises.
+func TestUnlimitedBodyMatchesTheUploadRoute(t *testing.T) {
+	mux, rt := newRouter(t)
+	found := false
+	for _, r := range rt.Routes() {
+		if r.Method == http.MethodPost && r.Pattern == "/api/servers/{id}/files/upload" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("POST /api/servers/{id}/files/upload is not registered")
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/servers/7/files/upload", nil)
+	rctx := chi.NewRouteContext()
+	if !mux.Match(rctx, req.Method, req.URL.Path) || rctx.RoutePattern() != "/api/servers/{id}/files/upload" {
+		t.Fatalf("upload request routes to %q", rctx.RoutePattern())
+	}
+	if !serverfiles.UnlimitedBody(req) {
+		t.Fatal("the upload request is not exempt from the body limit")
 	}
 }
