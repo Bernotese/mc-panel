@@ -190,6 +190,8 @@ func TestStreamLastEventID(t *testing.T) {
 		{"", "abc", agentapi.LogsRequest{Tail: 500}},
 		{"", "-5", agentapi.LogsRequest{Tail: 500}},
 		{"", "0", agentapi.LogsRequest{Tail: 500}},
+		{"", "9223372036854775807", agentapi.LogsRequest{Tail: 500}},  // since would overflow
+		{"", "99999999999999999999", agentapi.LogsRequest{Tail: 500}}, // not an int64
 	} {
 		e := newEnv(t)
 		id := createInstance(t, e.db, "survival")
@@ -277,11 +279,23 @@ func TestStreamKeepsLinesWithEqualTimestamps(t *testing.T) {
 	s1.send(t, agentapi.LogLine{TS: 50, Stream: agentapi.StreamOut, Line: "a"})
 	s1.send(t, agentapi.LogLine{TS: 50, Stream: agentapi.StreamOut, Line: "b"})
 	s1.send(t, agentapi.LogLine{TS: 49, Stream: agentapi.StreamErr, Line: "c"}) // stderr copied a bit late
+	// The id is the newest timestamp sent so far, so a browser reconnecting with Last-Event-ID
+	// after the late "c" (ts 49) does not get both lines of ts 50 again.
 	for _, want := range []string{`"line":"a"`, `"line":"b"`, `"line":"c"`} {
-		if ev := c.next(); ev.Event != "line" || !strings.Contains(ev.Data, want) {
-			t.Fatalf("event = %+v, want %s", ev, want)
+		if ev := c.next(); ev.Event != "line" || ev.ID != "50" || !strings.Contains(ev.Data, want) {
+			t.Fatalf("event = %+v, want %s with id 50", ev, want)
 		}
 	}
+	// The browser's reconnect after "c". It gets an agent stream of its own, so it never waits
+	// for the shared 3 s reconnect timer that c needs below.
+	s2a := e.agent.prepare()
+	c2 := e.openStream(srv, e.admin(), id, "", "50")
+	waitFor(t, "the browser's reconnect", func() bool { return len(e.agent.requests()) == 2 })
+	if got := e.agent.requests()[1]; got != (agentapi.LogsRequest{ID: id, Tail: 500, Since: 51}) {
+		t.Fatalf("reconnect with Last-Event-ID 50: request %+v, want since 51", got)
+	}
+	c2.close()
+	s2a.waitClosed(t)
 	s1.finish()
 	expectState(t, c.next(), false)
 	s2 := e.agent.prepare()
@@ -295,7 +309,7 @@ func TestStreamKeepsLinesWithEqualTimestamps(t *testing.T) {
 			t.Fatalf("after reconnect: event = %+v, want %s", ev, want)
 		}
 	}
-	if reqs := e.agent.requests(); len(reqs) != 2 || reqs[1].Since != 51 {
+	if reqs := e.agent.requests(); len(reqs) != 3 || reqs[2].Since != 51 {
 		t.Fatalf("requests = %+v, want the reconnect with since = newest timestamp + 1", reqs)
 	}
 }
