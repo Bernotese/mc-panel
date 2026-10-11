@@ -24,6 +24,7 @@ import (
 
 const (
 	tempPrefix      = ".mcpanel-tmp-"
+	maxUploads      = 4
 	cleanupMaxDepth = 64
 	fileMode        = 0o644
 	dirMode         = 0o755
@@ -42,14 +43,15 @@ type Config struct {
 
 // Service performs the file operations of all instances.
 type Service struct {
-	cfg   Config
-	clock clock.Clock
-	log   *slog.Logger
-	disk  DiskSpace
+	cfg     Config
+	clock   clock.Clock
+	log     *slog.Logger
+	disk    DiskSpace
+	uploads chan struct{} // at most maxUploads concurrent uploads
 }
 
 func New(cfg Config) *Service {
-	s := &Service{cfg: cfg, clock: cfg.Clock, log: cfg.Log, disk: cfg.Disk}
+	s := &Service{cfg: cfg, clock: cfg.Clock, log: cfg.Log, disk: cfg.Disk, uploads: make(chan struct{}, maxUploads)}
 	if s.clock == nil {
 		s.clock = clock.Real{}
 	}
