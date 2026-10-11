@@ -113,6 +113,15 @@ export function useUploadQueue(serverId: number, { onUploaded, transport = uploa
       .finally(() => controllers.current.delete(nextId))
   }, [serverId, nextId, nextPath, nextOverwrite])
 
+  // Only queued/uploading/conflict items still need their File; release the rest so memory can be reclaimed.
+  useEffect(() => {
+    for (const item of items) {
+      if (item.status === 'done' || item.status === 'failed' || item.status === 'cancelled' || item.status === 'skipped') {
+        files.current.delete(item.id)
+      }
+    }
+  }, [items])
+
   // Leaving the tab cancels running uploads; the service discards the temp file (spec §4).
   useEffect(() => {
     const running = controllers.current

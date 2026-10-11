@@ -42,7 +42,8 @@ export function pathProblem(input: string): PathProblem | null {
 /** True for the top-level RCON files and anything named .mcpanel-* at any depth (spec §3.4). */
 export function isHiddenPath(path: string): boolean {
   if (path === '') return false
-  const parts = path.split('/')
+  // Case-insensitive like filesapi.IsHidden (strings.EqualFold).
+  const parts = path.toLowerCase().split('/')
   if (parts.length === 1 && HIDDEN_TOP.has(parts[0])) return true
   return parts.some((p) => p.startsWith(HIDDEN_PREFIX))
 }

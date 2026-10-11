@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { errorMessage } from '@/lib/error-message'
 import { extractArchive, fileJobKey } from './api'
+import { isExtracting, useFileJob } from './use-file-job'
 import { baseName, joinPath, parentPath, stripZip, targetProblem } from './path'
 
 /** Extracting only while the server is stopped (spec §6.3); the panel checks again (409 instance_running). */
@@ -19,7 +20,9 @@ export function ExtractDialog({ server, path, onClose }: { server: Server; path:
   const [dest, setDest] = useState(joinPath(parentPath(path), stripZip(name)))
   const [message, setMessage] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
-  const stopped = server.status.state === 'stopped'
+  const unknown = server.status.state === 'unknown'
+  const jobRunning = isExtracting(useFileJob(server.id, true).data)
+  const stopped = server.status.state === 'stopped' && !jobRunning
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -52,7 +55,7 @@ export function ExtractDialog({ server, path, onClose }: { server: Server; path:
           </DialogHeader>
           {!stopped ? (
             <p role="status" className="rounded-md border p-3 text-sm">
-              {t('files.extract.stopped_only')}
+              {unknown ? t('files.extract.agent_unavailable') : jobRunning ? t('files.extract.already_running') : t('files.extract.stopped_only')}
             </p>
           ) : null}
           <div className="space-y-2">

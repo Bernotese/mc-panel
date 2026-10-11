@@ -1,7 +1,7 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { db, loginAs } from '@/mocks/db'
 import { server } from '@/mocks/node'
 import { renderWithProviders } from '@/test/render'
@@ -222,5 +222,43 @@ describe('ServerDetailPage', () => {
     expect(await screen.findByText('Entpacken läuft – Starten ist erst danach möglich.')).toBeInTheDocument()
     const group = screen.getByRole('group', { name: 'Steuerung für creative' })
     expect(within(group).getByRole('button', { name: 'Starten' })).toBeDisabled()
+  })
+
+  it('shows the extraction lock text when the panel answers a start with 409', async () => {
+    server.use(http.post('*/api/servers/:id/power', () => HttpResponse.json({ error: 'conflict', message: 'extracting' }, { status: 409 })))
+    const user = userEvent.setup()
+    await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('admin') })
+    const group = await screen.findByRole('group', { name: 'Steuerung für creative' })
+    await user.click(within(group).getByRole('button', { name: 'Starten' }))
+    expect(await screen.findByText('Entpacken läuft – Starten ist erst danach möglich.')).toBeInTheDocument()
+    expect(screen.queryByText('Konflikt mit dem aktuellen Zustand')).not.toBeInTheDocument()
+  })
+
+  describe('when the job finishes', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('lifts the power lock and stops polling', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      let polls = 0
+      const running = { id: 'j', state: 'running', path: 'w.zip', dest: 'w', bytes: 1, entries: 1, total_bytes: 10, total_entries: 10, error: '', started_at: Date.now(), finished_at: 0 }
+      server.use(
+        http.get('*/api/servers/:id/files/jobs', () => {
+          polls += 1
+          return HttpResponse.json({ job: polls === 1 ? running : { ...running, state: 'done', finished_at: Date.now() } })
+        }),
+      )
+      await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('admin') })
+      const group = await screen.findByRole('group', { name: 'Steuerung für creative' })
+      expect(await screen.findByText('Entpacken läuft – Starten ist erst danach möglich.')).toBeInTheDocument()
+      expect(within(group).getByRole('button', { name: 'Starten' })).toBeDisabled()
+      await act(() => vi.advanceTimersByTimeAsync(2_100))
+      await waitFor(() => expect(screen.queryByText('Entpacken läuft – Starten ist erst danach möglich.')).not.toBeInTheDocument())
+      expect(within(group).getByRole('button', { name: 'Starten' })).toBeEnabled()
+      const seen = polls
+      await act(() => vi.advanceTimersByTimeAsync(10_000))
+      expect(polls).toBe(seen)
+    })
   })
 })

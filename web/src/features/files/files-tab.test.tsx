@@ -1,24 +1,8 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { server } from '@/mocks/node'
 import { openFiles } from './test-utils'
-
-function job(state: 'running' | 'done' | 'failed', percent: number) {
-  return {
-    id: 'j1',
-    state,
-    path: 'neue-welt.zip',
-    dest: 'neue-welt',
-    bytes: percent * 10,
-    entries: percent,
-    total_bytes: 1000,
-    total_entries: 100,
-    error: '',
-    started_at: Date.now() - 1000,
-    finished_at: state === 'running' ? 0 : Date.now(),
-  }
-}
 
 describe('FilesTab', () => {
   it('lists the top level with folders, files and links', async () => {
@@ -154,47 +138,93 @@ describe('FilesTab', () => {
     expect(within(uploads).getByText('Dieser Name ist für das panel reserviert.')).toBeInTheDocument()
   })
 
-  it('extracts a zip of a stopped server and reports progress', async () => {
-    let polls = 0
+  it('sends the normalised path when renaming and does nothing for an unchanged path', async () => {
+    let body: unknown = null
     server.use(
-      http.get('*/api/servers/:id/files', () =>
-        HttpResponse.json({
-          path: '',
-          truncated: false,
-          entries: [{ name: 'neue-welt.zip', type: 'file', size: 1024, mtime: Date.now() }],
-        }),
-      ),
-      http.post('*/api/servers/:id/files/extract', async ({ request }) => {
-        const body = (await request.json()) as { path: string; dest: string }
-        expect(body).toEqual({ path: 'neue-welt.zip', dest: 'neue-welt' })
-        return HttpResponse.json(job('running', 10), { status: 202 })
-      }),
-      http.get('*/api/servers/:id/files/jobs', () => {
-        polls += 1
-        return HttpResponse.json({ job: polls < 2 ? job('running', 50) : job('done', 100) })
+      http.post('*/api/servers/:id/files/rename', async ({ request }) => {
+        body = await request.json()
+        return new HttpResponse(null, { status: 204 })
       }),
     )
-    const { user, region } = await openFiles(2)
-    await user.click(await within(region).findByRole('button', { name: 'Aktionen für neue-welt.zip' }))
-    await user.click(screen.getByRole('menuitem', { name: 'Entpacken …' }))
-    const dialog = await screen.findByRole('dialog', { name: '„neue-welt.zip“ entpacken' })
-    expect(within(dialog).getByLabelText('Zielordner')).toHaveValue('neue-welt')
-    await user.click(within(dialog).getByRole('button', { name: 'Entpacken' }))
-    expect(await screen.findByRole('progressbar', { name: 'Fortschritt beim Entpacken' })).toBeInTheDocument()
-    expect(await screen.findByText('„neue-welt.zip“ wurde nach neue-welt entpackt.', {}, { timeout: 6000 })).toBeInTheDocument()
+    const { user, region } = await openFiles()
+    await user.click(await within(region).findByRole('button', { name: 'Aktionen für bukkit.yml' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Umbenennen oder verschieben' }))
+    let dialog = await screen.findByRole('dialog', { name: '„bukkit.yml“ umbenennen oder verschieben' })
+    const input = within(dialog).getByLabelText('Neuer Pfad')
+    await user.clear(input)
+    await user.type(input, 'plugins/bukkit-neu.yml/')
+    await user.click(within(dialog).getByRole('button', { name: 'Umbenennen' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(body).toEqual({ from: 'bukkit.yml', to: 'plugins/bukkit-neu.yml' })
+
+    body = null
+    await user.click(await within(region).findByRole('button', { name: 'Aktionen für ops.json' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Umbenennen oder verschieben' }))
+    dialog = await screen.findByRole('dialog', { name: '„ops.json“ umbenennen oder verschieben' })
+    await user.click(within(dialog).getByRole('button', { name: 'Umbenennen' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(body).toBeNull()
   })
 
-  it('does not offer extracting while the server runs', async () => {
-    server.use(
-      http.get('*/api/servers/:id/files', () =>
-        HttpResponse.json({ path: '', truncated: false, entries: [{ name: 'w.zip', type: 'file', size: 1, mtime: 0 }] }),
-      ),
-    )
-    const { user, region } = await openFiles(1)
-    await user.click(await within(region).findByRole('button', { name: 'Aktionen für w.zip' }))
-    await user.click(screen.getByRole('menuitem', { name: 'Entpacken …' }))
-    const dialog = await screen.findByRole('dialog', { name: '„w.zip“ entpacken' })
-    expect(within(dialog).getByText('Entpacken geht nur bei gestopptem Server.')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: 'Entpacken' })).toBeDisabled()
+  it('refuses reserved names in any letter case', async () => {
+    const { user } = await openFiles()
+    await user.click(await screen.findByRole('button', { name: 'Neue Datei' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Neue Datei in Server-Daten' })
+    await user.type(within(dialog).getByLabelText('Name'), '.RCON-CLI.ENV')
+    await user.click(within(dialog).getByRole('button', { name: 'Anlegen' }))
+    expect(within(dialog).getByText('Dieser Name ist für das panel reserviert.')).toBeInTheDocument()
+  })
+
+  describe('drag and drop', () => {
+    const dragData = (extra: object = {}) => ({ dataTransfer: { types: ['Files'], files: [], items: [], ...extra } })
+    async function zone() {
+      const { region } = await openFiles()
+      await within(region).findByRole('button', { name: 'plugins' })
+      return { region, zone: within(region).getByRole('table').closest('div.relative.space-y-3') as HTMLElement }
+    }
+
+    it('keeps the highlight while moving over children and clears it on a real exit', async () => {
+      const { region, zone: dropZone } = await zone()
+      fireEvent.dragOver(dropZone, dragData())
+      const overlay = await within(region).findByText('Dateien hier ablegen, um sie nach Server-Daten hochzuladen')
+      expect(overlay).toHaveClass('pointer-events-none')
+      const child = within(dropZone).getByRole('table')
+      // jsdom has no DragEvent, so relatedTarget has to be set by hand.
+      const leave = (relatedTarget: Element) => {
+        const event = createEvent.dragLeave(dropZone)
+        Object.defineProperty(event, 'relatedTarget', { value: relatedTarget })
+        fireEvent(dropZone, event)
+      }
+      leave(child)
+      expect(within(region).getByText('Dateien hier ablegen, um sie nach Server-Daten hochzuladen')).toBeInTheDocument()
+      leave(document.body)
+      expect(within(region).queryByText('Dateien hier ablegen, um sie nach Server-Daten hochzuladen')).not.toBeInTheDocument()
+    })
+
+    it('names dropped folders instead of silently ignoring them', async () => {
+      const { region, zone: dropZone } = await zone()
+      const folder = { kind: 'file', webkitGetAsEntry: () => ({ isDirectory: true }), getAsFile: () => null }
+      fireEvent.drop(dropZone, dragData({ items: [folder] }))
+      expect(await within(region).findByText('Ordner werden nicht unterstützt – bitte als Zip hochladen.')).toBeInTheDocument()
+      expect(screen.queryByRole('region', { name: 'Uploads' })).not.toBeInTheDocument()
+    })
+
+    it('uploads dropped files and skips only the folders', async () => {
+      const { zone: dropZone } = await zone()
+      const file = new File(['x'], 'neu.txt')
+      const items = [
+        { kind: 'file', webkitGetAsEntry: () => ({ isDirectory: true }), getAsFile: () => null },
+        { kind: 'file', webkitGetAsEntry: () => ({ isDirectory: false }), getAsFile: () => file },
+      ]
+      fireEvent.drop(dropZone, dragData({ items }))
+      const uploads = await screen.findByRole('region', { name: 'Uploads' })
+      expect(await within(uploads).findByText('neu.txt')).toBeInTheDocument()
+    })
+
+    it('stops the browser from opening a file dropped beside the zone', async () => {
+      await zone()
+      expect(fireEvent.dragOver(document.body, dragData())).toBe(false) // false = preventDefault was called
+      expect(fireEvent.drop(document.body, dragData())).toBe(false)
+    })
   })
 })

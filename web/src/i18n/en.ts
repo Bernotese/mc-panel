@@ -524,6 +524,7 @@ export const en: Messages = {
       new_file: 'New file',
       upload: 'Upload',
       upload_input: 'Upload files',
+      folders_unsupported: 'Folders are not supported – please upload them as a zip.',
       drop: 'Drop files here to upload them to {{dir}}',
     },
     dialog: {
@@ -602,6 +603,8 @@ export const en: Messages = {
       dest: 'Target folder',
       dest_hint: 'The folder must be new or empty.',
       submit: 'Extract',
+      agent_unavailable: 'The agent is unreachable – extracting is not possible right now.',
+      already_running: 'An extraction is already running.',
       stopped_only: 'Extracting is only possible while the server is stopped.',
       running: 'Extracting “{{name}}” …',
       progress: 'Extraction progress',

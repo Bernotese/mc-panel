@@ -128,7 +128,7 @@ function ServerDetail({ serverId }: { serverId: number }) {
         ) : null}
         {canFiles ? (
           <TabsContent value="files" className="pt-4">
-            <FilesTab server={server} onDirtyChange={setFilesDirty} onOpenSettings={isAdmin ? () => setTab('settings') : undefined} />
+            <FilesTab server={server} onDirtyChange={setFilesDirty} onOpenSettings={isAdmin ? () => changeTab('settings') : undefined} />
           </TabsContent>
         ) : null}
         {isAdmin ? (

@@ -84,8 +84,13 @@ export function FileEditor({ server, path, onClose, onDirtyChange, onOpenSetting
 
   async function reload() {
     setConflict(false)
+    try {
+      await queryClient.fetchQuery({ queryKey: contentKey, queryFn: () => readFile(server.id, path), staleTime: 0 })
+    } catch (err) {
+      notifyError(err)
+      return // keep the draft: nothing was reloaded
+    }
     setDraft(null)
-    await queryClient.refetchQueries({ queryKey: contentKey })
     setEditorKey((k) => k + 1)
   }
 
