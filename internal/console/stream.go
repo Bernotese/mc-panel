@@ -328,10 +328,12 @@ func (s *logSession) sendLine(l agentapi.LogLine) error {
 	if l.TS < s.skipBefore {
 		return nil
 	}
+	// The event id is the newest timestamp sent so far (not the line's own, which can be older
+	// than one already sent), so Last-Event-ID + 1 never repeats lines on a browser reconnect.
 	id := ""
 	if l.TS > 0 {
 		s.req.Since = max(s.req.Since, l.TS+1)
-		id = strconv.FormatInt(l.TS, 10)
+		id = strconv.FormatInt(s.req.Since-1, 10)
 	}
 	return s.sw.event("line", id, lineEvent{TS: l.TS / int64(time.Millisecond), Stream: l.Stream, Line: l.Line})
 }
