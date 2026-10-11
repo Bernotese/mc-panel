@@ -187,6 +187,7 @@ jobs:
       - name: Start stack
         run: |
           .dev/bin/agent -dev > agent.log 2>&1 &
+          .dev/bin/files -dev > files.log 2>&1 &
           .dev/bin/panel serve -dev > panel.log 2>&1 &
           (cd web && npx vite --port 5173 --strictPort > ../vite.log 2>&1 &)
           for _ in $(seq 1 30); do
@@ -219,7 +220,7 @@ jobs:
 
       - name: Logs on failure
         if: failure()
-        run: tail -n 200 agent.log panel.log vite.log
+        run: tail -n 200 agent.log files.log panel.log vite.log
 
       - name: Upload Playwright results
         if: failure()
@@ -293,14 +294,17 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build agent
-        run: go build -o bin/agent ./cmd/agent
+      - name: Build agent and files service
+        run: |
+          go build -o bin/agent ./cmd/agent
+          go build -o bin/files ./cmd/files
 
       # Real agent + Docker + itzg Paper server: routing by hostname, hardening, console
       # (rcon, log stream, player lists, planted player files), automatic restart after a
-      # crash, removal.
+      # crash, removal; plus the files service as mcpanel-mc (peer UID, os.Root limits,
+      # redaction, upload/download, extract incl. zip slip).
       - name: Instance acceptance
-        run: sudo scripts/ci-instances.sh bin/agent
+        run: sudo scripts/ci-instances.sh bin/agent bin/files
 
   build:
     name: Build & release snapshot
@@ -375,8 +379,8 @@ jobs:
           version="$(jq -r '.version' dist/metadata.json)"
           echo "snapshot version: ${version}"
           count="$(jq '[.[] | select(.type == "Binary")] | length' dist/artifacts.json)"
-          if [ "${count}" -ne 4 ]; then
-            echo "::error::expected 4 binaries (panel+agent x amd64+arm64), got ${count}"
+          if [ "${count}" -ne 6 ]; then
+            echo "::error::expected 6 binaries (panel+agent+files x amd64+arm64), got ${count}"
             exit 1
           fi
           jq -r '.[] | select(.type == "Binary") | "\(.goarch) \(.name) \(.path)"' dist/artifacts.json |
@@ -408,8 +412,8 @@ jobs:
               exit 1
             fi
             contents="$(tar -tzf "$1" | sort | paste -sd' ' -)"
-            if [ "${contents}" != "agent panel" ]; then
-              echo "::error::$1 contains '${contents}', expected 'agent panel'"
+            if [ "${contents}" != "agent files panel" ]; then
+              echo "::error::$1 contains '${contents}', expected 'agent files panel'"
               exit 1
             fi
           done
