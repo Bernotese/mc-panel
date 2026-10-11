@@ -59,10 +59,11 @@ Browser ──/api/servers/{id}/files/*──▶ panel (mcpanel) ──HTTP/Unix
 ### 3.1 Prozess und Konfiguration
 
 - Binary `files`, systemd-Unit `mcpanel-files.service`: `User=mcpanel-mc`, `Group=mcpanel-mc`, `NoNewPrivileges=yes`, `CapabilityBoundingSet=` (leer), `AmbientCapabilities=` (leer), `ProtectSystem=strict`, `ReadWritePaths=<instances_dir>/instances`, `ProtectHome=yes`, `PrivateTmp=yes`, `PrivateDevices=yes`, `RestrictAddressFamilies=AF_UNIX`, `SystemCallArchitectures=native`, `UMask=0027`.
-- `files.toml` (unbekannte Schlüssel werden abgelehnt, wie beim agent):
+- `files.toml` unter `/etc/mc-panel-files/` (Verzeichnis `root:mcpanel-mc 0750`, Datei 0640 – `mcpanel-mc` kann `/etc/mc-panel` nicht lesen und soll es nicht); unbekannte Schlüssel werden abgelehnt, wie beim agent:
 
 ```toml
-socket        = "/run/mc-panel/files.sock"   # 0660, Gruppe mcpanel
+socket        = "/run/mc-panel-files/files.sock" # nur ohne systemd-Socket-Aktivierung genutzt
+socket_mode   = "0660"                           # dto.; Gruppe = primäre Gruppe des Dienstes
 panel_uid     = 998                            # UID des Benutzers mcpanel; Pflicht in Produktion, nur diese Peer-UID darf verbinden
 instances_dir = "/srv/mc-panel"
 dev           = false
@@ -75,9 +76,11 @@ max_text_bytes     = 5242880       # 5 MiB
 max_list_entries   = 10000
 ```
 
-- Peer-UID-Prüfung über das vorhandene Paket `internal/agent/peercred` (Linux `SO_PEERCRED`, macOS `LOCAL_PEERCRED`).
-- `panel.toml` bekommt `files_socket` (Default `/run/mc-panel/files.sock`, Dev `.dev/files.sock`).
-- **Dev-Modus** (`make dev`, macOS): Dienst läuft als aktueller Benutzer mit `instances_dir = .dev/instances`, Peer-UID = aktueller Benutzer; fehlt `instances/<id>`, legt er es an (damit der Dateibrowser ohne Docker funktioniert).
+- **Socket:** In Produktion per systemd-Socket-Aktivierung: `mcpanel-files.socket` mit `ListenStream=/run/mc-panel-files/files.sock`, `SocketUser=mcpanel-mc`, `SocketGroup=mcpanel`, `SocketMode=0660` – der Dienst muss dafür nicht Mitglied der Gruppe `mcpanel` sein und sieht `/etc/mc-panel` nicht. Der Dienst übernimmt den Socket über `LISTEN_FDS`/`LISTEN_PID`; ohne Aktivierung (Dev, CI) legt er `socket` selbst mit `socket_mode` an. Eigenes Verzeichnis `/run/mc-panel-files` (nicht `/run/mc-panel`), damit das Stoppen einer Unit nie den Socket der anderen löscht.
+- Peer-UID-Prüfung über das vorhandene Paket `internal/agent/peercred` (Linux `SO_PEERCRED`, macOS `LOCAL_PEERCRED`) ist immer aktiv; sie ist die eigentliche Zugangskontrolle.
+- Fehlende Schlüssel unter `[limits]` erhalten die Defaults oben.
+- `panel.toml` bekommt `files_socket` (Default `/run/mc-panel-files/files.sock`, Dev `.dev/files.sock`).
+- **Dev-Modus** (`make dev`, macOS): Dienst läuft als aktueller Benutzer mit `instances_dir = .dev/mc` (wie der dev-agent), Peer-UID = aktueller Benutzer; fehlt `instances/<id>`, legt er es an (damit der Dateibrowser ohne Docker funktioniert).
 
 ### 3.2 Eingrenzung pro Anfrage
 
@@ -87,7 +90,7 @@ max_list_entries   = 10000
 
 ### 3.3 Dateisystem
 
-- Der agent legt `<instances_dir>/instances` künftig als `root:mcpanel-mc 0750` an (statt `root:root 0700`), damit der Dienst hineinkommt; `deleted/` bleibt `root:root 0700`. `CheckInstancesDir` und `ensureLayout` (TP2) werden entsprechend angepasst: Gruppe darf lesen/betreten, nie schreiben.
+- Der agent legt `<instances_dir>/instances` künftig als `root:mcpanel-mc 0750` an (statt `root:root 0700`), damit der Dienst hineinkommt; `deleted/` bleibt `root:root 0700`. `ensureLayout` (TP2) wird entsprechend angepasst: Gruppe darf lesen/betreten, nie schreiben (`CheckInstancesDir` prüft nur `instances_dir` und dessen Eltern und bleibt unverändert).
 - Die Container sehen davon nichts (nur ihr `/data`).
 - Temp-Dateien für Upload, Schreiben und Entpacken liegen im Zielordner als `.mcpanel-tmp-<zufall>` (gleiches Dateisystem → atomares `rename`) und werden beim Start des Dienstes in allen Instanz-Verzeichnissen bis Tiefe 64 entfernt.
 
@@ -111,7 +114,7 @@ Feste Pfade, `DisallowUnknownFields`, Fehler `{error, code}` wie beim agent. JSO
 | `POST /v1/mkdir` | `{id, path}` | `201`; existiert → `409 exists` |
 | `POST /v1/rename` | `{id, from, to}` | `204`; Ziel existiert → `409 exists`; Ordner nicht in sich selbst |
 | `POST /v1/delete` | `{id, path}` | `204`; Ordner rekursiv (`root.RemoveAll`); Wurzel nicht löschbar (`400`) |
-| `POST /v1/extract` | `{id, path, dest}` | `202 {job}`; `path` muss eine reguläre `.zip` sein, `dest` ein neuer oder leerer Ordner |
+| `POST /v1/extract` | `{id, path, dest}` | Vorprüfung synchron (§4.2): Fehler → `400 invalid` (Archiv ungültig/unzulässig), `409 exists` (`dest` nicht leer), `413 too_large`, `507`; sonst `202 {job}`; `path` muss eine reguläre `.zip` sein, `dest` ein neuer oder leerer Ordner |
 | `GET /v1/jobs` | Query `id` | `{job: null \| {id, state, path, dest, bytes, entries, total_bytes, total_entries, error, started_at, finished_at}}`; `state` ∈ `running\|done\|failed` |
 | `GET /v1/health` | – | `{status, version}` |
 
@@ -126,7 +129,7 @@ Fehlercodes des Dienstes: `not_found` (404), `exists` (409), `modified` (409), `
 ### 4.2 Entpacken
 
 - Höchstens ein Job pro Instanz und zwei im Dienst insgesamt (sonst `429 busy`); Jobs leben im Speicher, das letzte Ergebnis pro Instanz bleibt bis zum nächsten Job oder Neustart des Dienstes.
-- Vorprüfung über das Zentralverzeichnis, bevor ein Byte geschrieben wird: jeder Eintragsname erfüllt die Pfadregeln (§3.4, ohne Verborgen-Ausnahme: verborgene Namen → abgelehnt), keine Symlink-Einträge (Modus im Extern-Attribut), keine Verschlüsselung, Kompressionsverfahren nur Store/Deflate, Summe der angegebenen Größen ≤ `max_extract_bytes`, Anzahl ≤ `max_extract_entries`, keine doppelten Namen.
+- Vorprüfung **synchron in der Anfrage** über das Zentralverzeichnis, bevor ein Byte geschrieben wird (Fehler kommen als HTTP-Fehler, nicht als Job): jeder Eintragsname erfüllt die Pfadregeln (§3.4, ohne Verborgen-Ausnahme: verborgene Namen → abgelehnt), keine Symlink-Einträge (Modus im Extern-Attribut), keine Verschlüsselung, Kompressionsverfahren nur Store/Deflate, Summe der angegebenen Größen ≤ `max_extract_bytes` und Anzahl ≤ `max_extract_entries` (beides sonst `413 too_large`), keine doppelten Namen (sonst wie alle Regelverstöße `400 invalid`).
 - Entpacken in einen Temp-Ordner `<dest-parent>/.mcpanel-tmp-<zufall>`, dabei erneutes Zählen der tatsächlich geschriebenen Bytes (Schutz gegen gefälschte Größen); Überschreitung oder Fehler → Temp-Ordner löschen, `state: failed`. Erfolg → `rename` des Temp-Ordners nach `dest` (existiert `dest` leer, wird er vorher entfernt).
 - Dateien 0644, Ordner 0755 (umask 0027 des Dienstes wirkt zusätzlich), Zeitstempel aus dem Zip.
 
@@ -206,7 +209,7 @@ MSW-Mocks mit einem kleinen Datei-Baum pro Server im Speicher (Ordner, `server.p
 ## 7. Entwicklung, Betrieb und CI
 
 - **Mac:** nur `make check` (CLAUDE.md). `make dev` startet zusätzlich `files` im Dev-Modus (§3.1).
-- **Test-VM:** `scripts/testvm-deploy.sh` baut `files`, legt `/etc/mc-panel/files.toml` und `mcpanel-files.service` (§3.1) an, ergänzt `files_socket` in `panel.toml`; der Socket-Ordner `/run/mc-panel` muss für `mcpanel-mc` beschreibbar sein (`RuntimeDirectory` bzw. Gruppenrechte).
+- **Test-VM:** `scripts/testvm-deploy.sh` baut `files`, legt `/etc/mc-panel/files.toml`, `mcpanel-files.socket` und `mcpanel-files.service` (§3.1) an und ergänzt `files_socket` in `panel.toml`.
 - **Release:** GoReleaser baut `files` für `linux/amd64` und `linux/arm64`.
 - **Installer (TP6):** übernimmt Unit, Konfiguration und die Rechte von `instances/` wie in §3.1/§3.3 beschrieben.
 - **CI:** Unit-Tests wie bisher; Linux-spezifische Dateisystemtests (FIFO, `SO_PEERCRED`) laufen im Linux-Job; `scripts/ci-instances.sh` wird erweitert (§8).
