@@ -39,7 +39,7 @@ func (f *fakeTimers) After(d time.Duration) (<-chan time.Time, func()) {
 }
 
 // fire blocks until a stream takes a tick of an Every or After timer of d (at most 5 s).
-// Where both may be waited on at once (30 s: recheck and the longest reconnect delay),
+// Where both could be waited on at once (a reconnect delay equal to a ticker interval),
 // fireAfter picks the After timer.
 func (f *fakeTimers) fire(t *testing.T, d time.Duration) {
 	t.Helper()

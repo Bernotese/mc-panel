@@ -331,7 +331,7 @@ func TestStreamStoppedServerDoesNotFlap(t *testing.T) {
 	}
 	s1.finish() // still false: no event
 	// Reconnects back off while nothing changes (TestStreamStoppedServerBacksOff).
-	for _, d := range []time.Duration{3 * time.Second, 6 * time.Second, 12 * time.Second} {
+	for _, d := range []time.Duration{3 * time.Second, 6 * time.Second, 10 * time.Second} {
 		s := e.agent.prepareStopped()
 		e.timers.fire(t, d)
 		s.finish()
@@ -496,7 +496,7 @@ func TestStreamSurvivesServerTimeouts(t *testing.T) {
 }
 
 // Review K5: while the server stays stopped and no new line arrives, the agent stream is
-// re-opened less and less often (3 s doubling up to 30 s); a new line or a state change
+// re-opened less and less often (3 s doubling up to 10 s); a new line or a state change
 // starts over at 3 s.
 func TestStreamStoppedServerBacksOff(t *testing.T) {
 	e := newEnv(t)
@@ -512,13 +512,13 @@ func TestStreamStoppedServerBacksOff(t *testing.T) {
 		e.timers.fireAfter(t, d)
 		return s
 	}
-	for _, sec := range []time.Duration{3, 6, 12, 24, 30, 30} {
+	for _, sec := range []time.Duration{3, 6, 10, 10} {
 		s := retry(sec * time.Second)
 		s.finish()
 		s.waitClosed(t)
 	}
 	// A new line (the server ran briefly in between) starts over.
-	s := retry(30 * time.Second)
+	s := retry(10 * time.Second)
 	s.send(t, agentapi.LogLine{TS: 9, Stream: agentapi.StreamOut, Line: "new"})
 	if ev := c.next(); ev.Event != "line" || ev.ID != "9" {
 		t.Fatalf("event = %+v, want the new line", ev)
@@ -541,9 +541,9 @@ func TestStreamStoppedServerBacksOff(t *testing.T) {
 	// The agent being unreachable backs off the same way.
 	e.agent.setLogsErr(fmt.Errorf("%w: dial", agentapi.ErrUnavailable))
 	e.timers.fireAfter(t, 6*time.Second)
-	waitFor(t, "attempt with the agent down", func() bool { return len(e.agent.requests()) == 12 })
-	e.timers.fireAfter(t, 12*time.Second)
-	waitFor(t, "next attempt", func() bool { return len(e.agent.requests()) == 13 })
+	waitFor(t, "attempt with the agent down", func() bool { return len(e.agent.requests()) == 10 })
+	e.timers.fireAfter(t, 10*time.Second)
+	waitFor(t, "next attempt", func() bool { return len(e.agent.requests()) == 11 })
 }
 
 // Review K6: an agent at its stream limit (429 busy) is logged at info level, so operators

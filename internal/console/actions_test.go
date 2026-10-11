@@ -187,6 +187,13 @@ func TestPlayerLists(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable || errCode(t, rec) != httpx.CodeAgentUnavailable {
 		t.Fatalf("agent down: %d %s", rec.Code, rec.Body)
 	}
+	// The agent's limit of parallel list reads is global, not one of this server.
+	e.agent.setPlayers(agentapi.PlayersResponse{}, &agent.StatusError{StatusCode: 429, Code: agentapi.ErrorCodeBusy})
+	rec = e.do(http.MethodGet, srvPath(id, "/players/lists"), nil, &admin)
+	if b := decode[httpx.ErrorBody](t, rec); rec.Code != http.StatusTooManyRequests || b.Error != httpx.CodeRateLimited ||
+		rec.Header().Get("Retry-After") == "" || strings.Contains(b.Message, "this server") || !strings.Contains(b.Message, "busy") {
+		t.Fatalf("agent busy: %d %s", rec.Code, rec.Body)
+	}
 	if got := e.rec.Actions(); len(got) != 0 {
 		t.Fatalf("reading lists must not be audited: %v", got)
 	}
