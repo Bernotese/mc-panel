@@ -32,6 +32,10 @@ Manuell auf der Test-VM: alles mit Browser, Minecraft-Client und echter Session.
 | 6a | nur `server.view` | als `freund` Server `survival` öffnen | kein Tab „Dateien“ |
 | 6b | API-Sperre | als `freund` in den DevTools: `await fetch('/api/servers/<id>/files').then(r => r.status)` | `403` |
 | 7 | Audit | als `admin` Audit-Log, Filter auf `file.`-Aktionen; danach `ssh claude@192.168.1.117 "sudo -u mcpanel panel audit verify -config /etc/mc-panel/panel.toml"` | Einträge für Upload (mit Größe), Entpacken (mit Ziel), Umbenennen (von/nach), Speichern, Löschen und Download (2a–5) mit Benutzer `helfer`; Auflisten/Öffnen erscheinen nicht; `verify` meldet OK |
+| 8a | Verlassen bei laufendem Upload | große Datei hochladen, währenddessen den Tab „Einstellungen“ der Detailseite, eine andere Route oder Neuladen wählen | Rückfrage „Laufende Uploads abbrechen?“; „Verlassen“ bricht den Upload ab, Abbrechen der Rückfrage lässt ihn weiterlaufen |
+| 8b | Ordner über dem Eintragslimit | einen Ordner mit mehr als `max_extract_entries` Einträgen herunterladen (Limit zum Test in `/etc/mc-panel-files/files.toml` senken, Dienst neu starten) | klare Fehlermeldung (`413`, Ordner zu groß) statt einer abgebrochenen Zip; im Audit-Log steht ein `file.download`-Eintrag mit Ergebnis `failure` |
+| 8c | Entpacken nach Absturz | Container in den Zustand `error` bringen (z. B. nach wiederholtem Absturz), Zip „Entpacken …“ | Entpacken ist angeboten und läuft; läuft der Container noch, bleibt es gesperrt |
+| 8d | Überschreiben vor dem Senden | eine Datei hochladen, die in der Liste schon steht | Dialog „<Name> existiert bereits“ mit „Soll die vorhandene Datei überschrieben werden?“ erscheint vor dem Senden; „Überschreiben“ ersetzt die Datei, „Überspringen“ sendet nichts |
 
 Zusätzlich auf dem Handy (oder DevTools-Gerätemodus, 390 px): Dateiliste als Karten, Upload über die Dateiauswahl, Editor bedienbar, kein horizontales Scrollen der Seite.
 
