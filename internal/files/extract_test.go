@@ -490,3 +490,19 @@ func TestExtractAfterClose(t *testing.T) {
 		t.Fatal("output after Close")
 	}
 }
+
+// An extract after Close is "unavailable" (503 without a code, which the client maps to
+// ErrUnavailable), not an internal error.
+func TestServerExtractAfterClose(t *testing.T) {
+	s, data := newService(t)
+	putBytes(t, data, "a.zip", makeZip(t, zipEntry{name: "f.txt", body: "x"}))
+	ts := startHTTP(t, NewServer(s, "test", discardLog()))
+	s.Close()
+	status, body := postJSON(t, ts, filesapi.PathExtract, filesapi.ExtractRequest{ID: 1, Path: "a.zip", Dest: "out"})
+	if status != http.StatusServiceUnavailable || errCode(t, body) != "" {
+		t.Fatalf("extract after Close: %d %s", status, body)
+	}
+	if st, code := statusFor(errShuttingDown); st != http.StatusServiceUnavailable || code != "" {
+		t.Fatalf("statusFor(errShuttingDown) = %d %q", st, code)
+	}
+}

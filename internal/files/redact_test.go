@@ -1,6 +1,11 @@
 package files
 
-import "testing"
+import (
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestRedactProperties(t *testing.T) {
 	in := "motd=Hi\nrcon.password=s3cret\r\n  rcon.password : other\nrcon.password\tspaced\nrcon.passwordless=keep\nrcon.port=25575\nrcon.password=\n"
@@ -69,5 +74,35 @@ func TestRedactMultiLineAndCRPasswords(t *testing.T) {
 	orig := "rcon.password=ab\\\n   cd\r\nmotd=x\n"
 	if got := restorePassword(redactProperties(orig), orig); got != orig {
 		t.Fatalf("round trip of a continued password:\n got %q\nwant %q", got, orig)
+	}
+}
+
+// A value continued over millions of lines must not cost quadratic time, and many short lines
+// must not cost memory per line: the editor limit allows 5 MiB of such text.
+func TestRedactIsLinearOnHugeFiles(t *testing.T) {
+	cont := "rcon.password=a\\\n" + strings.Repeat("\\\n", (5<<20)/2)
+	blank := strings.Repeat("\n", 5<<20)
+	for name, in := range map[string]string{"continuation lines": cont, "empty lines": blank} {
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		start := time.Now()
+		red := redactProperties(in)
+		_ = restorePassword(red, in)
+		_, _ = currentPassword(in)
+		took := time.Since(start)
+		runtime.ReadMemStats(&after)
+		if took > 30*time.Second { // linear: ~1 s (5 s with -race); quadratic: far beyond 90 s
+			t.Errorf("%s: %s for 5 MiB", name, took)
+		}
+		if grew := after.TotalAlloc - before.TotalAlloc; grew > 64<<20 {
+			t.Errorf("%s: allocated %d MiB for 5 MiB", name, grew>>20)
+		}
+	}
+	if got := redactProperties(cont); got != "rcon.password=********\n" {
+		t.Fatalf("continued value not redacted as one: %q...", got[:min(len(got), 40)])
+	}
+	if got := restorePassword("rcon.password=********\n", cont); got != cont {
+		t.Fatal("continued value not restored exactly")
 	}
 }

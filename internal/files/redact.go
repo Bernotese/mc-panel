@@ -17,26 +17,27 @@ var passwordLine = regexp.MustCompile(`^([ \t\f]*rcon\.password(?:[ \t\f]*[=:][ 
 // ignores case: on a case-insensitive file system (macOS dev) every spelling opens it.
 func isServerProps(clean string) bool { return strings.EqualFold(clean, serverProps) }
 
-// natLine is a natural line of a properties file and its terminator ("" for the last line).
-type natLine struct{ body, end string }
-
-// naturalLines splits s like java.util.Properties: lines end with "\n", "\r\n" or "\r".
-func naturalLines(s string) []natLine {
-	var out []natLine
-	for s != "" {
-		i := strings.IndexAny(s, "\r\n")
-		if i < 0 {
-			out = append(out, natLine{body: s})
-			break
-		}
-		n := 1
-		if s[i] == '\r' && i+1 < len(s) && s[i+1] == '\n' {
-			n = 2
-		}
-		out = append(out, natLine{body: s[:i], end: s[i : i+n]})
-		s = s[i+n:]
+// lineAt returns the natural line that starts at pos, as java.util.Properties splits lines
+// ("\n", "\r\n" or "\r"): its body is s[pos:end], the next line starts at next.
+func lineAt(s string, pos int) (end, next int) {
+	i := strings.IndexAny(s[pos:], "\r\n")
+	if i < 0 {
+		return len(s), len(s)
 	}
-	return out
+	end = pos + i
+	next = end + 1
+	if s[end] == '\r' && next < len(s) && s[next] == '\n' {
+		next++
+	}
+	return end, next
+}
+
+// matchPassword matches passwordLine on one natural line (cheap pre-filter first).
+func matchPassword(body string) []int {
+	if !strings.Contains(body, "rcon.password") {
+		return nil
+	}
+	return passwordLine.FindStringSubmatchIndex(body)
 }
 
 // commentOrBlank reports whether a natural line that starts a logical line is a comment or
@@ -55,41 +56,44 @@ func continues(body string) bool {
 // mapPasswordLines calls f for every logical line that defines rcon.password, with its prefix
 // and its raw value (continuation lines included); f returns the replacement and whether to
 // keep the line at all. inner (may be nil) maps natural lines that merely look like a password
-// line but continue another logical line. Everything else stays byte for byte.
+// line but continue another logical line. Everything else stays byte for byte. It scans s in
+// place: values are substrings of s, so the work is linear in len(s).
 func mapPasswordLines(s string, f func(prefix, value string) (string, bool), inner func(prefix, value string) string) string {
-	lines := naturalLines(s)
 	var b strings.Builder
 	b.Grow(len(s))
-	for i := 0; i < len(lines); {
-		j := i + 1 // lines[i:j] is one logical line
-		if !commentOrBlank(lines[i].body) {
-			for j < len(lines) && continues(lines[j-1].body) {
-				j++
+	for pos := 0; pos < len(s); {
+		end, next := lineAt(s, pos)
+		first := s[pos:end]
+		// lastStart..lastEnd is the last natural line of the logical line, lastNext what follows.
+		lastStart, lastEnd, lastNext := pos, end, next
+		if !commentOrBlank(first) {
+			for lastNext < len(s) && continues(s[lastStart:lastEnd]) {
+				lastStart = lastNext
+				lastEnd, lastNext = lineAt(s, lastStart)
 			}
 		}
-		if m := passwordLine.FindStringSubmatch(lines[i].body); m != nil {
-			value := m[2]
-			for k := i + 1; k < j; k++ {
-				value += lines[k-1].end + lines[k].body
-			}
-			if out, keep := f(m[1], value); keep {
+		if m := matchPassword(first); m != nil {
+			if out, keep := f(first[:m[3]], s[pos+m[4]:lastEnd]); keep {
 				b.WriteString(out)
-				b.WriteString(lines[j-1].end)
+				b.WriteString(s[lastEnd:lastNext])
 			}
-			i = j
+			pos = lastNext
 			continue
 		}
-		for k := i; k < j; k++ {
-			body := lines[k].body
-			if k > i && inner != nil {
-				if m := passwordLine.FindStringSubmatch(body); m != nil {
-					body = inner(m[1], m[2])
+		b.WriteString(s[pos:next])
+		for cs := next; cs < lastNext; {
+			ce, cn := lineAt(s, cs)
+			body := s[cs:ce]
+			if inner != nil {
+				if m := matchPassword(body); m != nil {
+					body = inner(body[:m[3]], body[m[4]:])
 				}
 			}
 			b.WriteString(body)
-			b.WriteString(lines[k].end)
+			b.WriteString(s[ce:cn])
+			cs = cn
 		}
-		i = j
+		pos = lastNext
 	}
 	return b.String()
 }
