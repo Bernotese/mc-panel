@@ -16,26 +16,25 @@ import (
 // deletedTimeFormat is the UTC timestamp suffix of archived data directories.
 const deletedTimeFormat = "20060102T150405Z"
 
-// ensureLayout makes sure <instances_dir> exists (0755) and that instances/ and
-// deleted/ are private directories of the agent (root:root 0700 in production):
-// the panel user must not read world data, and no container user may swap them.
+// ensureLayout makes sure <instances_dir> exists (0755), that instances/ is root:<mc_user gid>
+// 0750 and deleted/ root:root 0700 (in production). The panel user must not read world data;
+// the files service (running as mc_user, spec 3b §3.3) may enter instances/ but never write
+// into it; no container user may swap either directory.
 func (m *Manager) ensureLayout() error {
 	if err := os.MkdirAll(m.host.InstancesDir, 0o755); err != nil { //nolint:gosec // G301: spec §3.3, root:root 0755; contains no secrets itself
 		return err
 	}
-	for _, d := range []string{filepath.Join(m.host.InstancesDir, "instances"), DeletedDir(m.host.InstancesDir)} {
-		if err := ensurePrivateDir(d); err != nil {
-			return err
-		}
+	if err := ensureDir(filepath.Join(m.host.InstancesDir, "instances"), m.host.GID, 0o750); err != nil {
+		return err
 	}
-	return nil
+	return ensureDir(DeletedDir(m.host.InstancesDir), os.Getegid(), 0o700)
 }
 
-// ensurePrivateDir creates dir if needed and enforces owner = agent process
-// (root in production) and mode 0700 through a descriptor opened with
-// O_NOFOLLOW: a symlink in its place is refused, never followed.
-func ensurePrivateDir(dir string) error {
-	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+// ensureDir creates dir if needed and enforces owner = agent process (root in production),
+// group gid and mode perm through a descriptor opened with O_NOFOLLOW: a symlink in its place
+// is refused, never followed.
+func ensureDir(dir string, gid int, perm os.FileMode) error {
+	if err := os.Mkdir(dir, perm); err != nil && !errors.Is(err, fs.ErrExist) {
 		return err
 	}
 	f, err := openDirNoFollow(dir)
@@ -43,10 +42,10 @@ func ensurePrivateDir(dir string) error {
 		return err
 	}
 	defer func() { _ = f.Close() }()
-	if err := f.Chown(os.Geteuid(), os.Getegid()); err != nil {
+	if err := f.Chown(os.Geteuid(), gid); err != nil {
 		return fmt.Errorf("chown %s: %w", dir, err)
 	}
-	return f.Chmod(0o700)
+	return f.Chmod(perm)
 }
 
 // openDirNoFollow opens dir itself, refusing a symlink or anything but a directory.
