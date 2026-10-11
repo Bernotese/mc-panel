@@ -4,6 +4,22 @@ import { describe, expect, it } from 'vitest'
 import { server } from '@/mocks/node'
 import { openFiles } from './test-utils'
 
+function job(state: 'running' | 'done' | 'failed', percent: number) {
+  return {
+    id: 'j1',
+    state,
+    path: 'neue-welt.zip',
+    dest: 'neue-welt',
+    bytes: percent * 10,
+    entries: percent,
+    total_bytes: 1000,
+    total_entries: 100,
+    error: '',
+    started_at: Date.now() - 1000,
+    finished_at: state === 'running' ? 0 : Date.now(),
+  }
+}
+
 describe('FilesTab', () => {
   it('lists the top level with folders, files and links', async () => {
     const { region } = await openFiles()
@@ -136,5 +152,49 @@ describe('FilesTab', () => {
     await user.upload(screen.getByLabelText('Dateien hochladen'), new File(['x'], '.rcon-cli.env'))
     const uploads = await screen.findByRole('region', { name: 'Uploads' })
     expect(within(uploads).getByText('Dieser Name ist für das panel reserviert.')).toBeInTheDocument()
+  })
+
+  it('extracts a zip of a stopped server and reports progress', async () => {
+    let polls = 0
+    server.use(
+      http.get('*/api/servers/:id/files', () =>
+        HttpResponse.json({
+          path: '',
+          truncated: false,
+          entries: [{ name: 'neue-welt.zip', type: 'file', size: 1024, mtime: Date.now() }],
+        }),
+      ),
+      http.post('*/api/servers/:id/files/extract', async ({ request }) => {
+        const body = (await request.json()) as { path: string; dest: string }
+        expect(body).toEqual({ path: 'neue-welt.zip', dest: 'neue-welt' })
+        return HttpResponse.json(job('running', 10), { status: 202 })
+      }),
+      http.get('*/api/servers/:id/files/jobs', () => {
+        polls += 1
+        return HttpResponse.json({ job: polls < 2 ? job('running', 50) : job('done', 100) })
+      }),
+    )
+    const { user, region } = await openFiles(2)
+    await user.click(await within(region).findByRole('button', { name: 'Aktionen für neue-welt.zip' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Entpacken …' }))
+    const dialog = await screen.findByRole('dialog', { name: '„neue-welt.zip“ entpacken' })
+    expect(within(dialog).getByLabelText('Zielordner')).toHaveValue('neue-welt')
+    await user.click(within(dialog).getByRole('button', { name: 'Entpacken' }))
+    expect(await screen.findByRole('progressbar', { name: 'Fortschritt beim Entpacken' })).toBeInTheDocument()
+    expect(await screen.findByText('„neue-welt.zip“ wurde nach neue-welt entpackt.', {}, { timeout: 6000 })).toBeInTheDocument()
+  })
+
+  it('does not offer extracting while the server runs', async () => {
+    server.use(
+      http.get('*/api/servers/:id/files', () =>
+        HttpResponse.json({ path: '', truncated: false, entries: [{ name: 'w.zip', type: 'file', size: 1, mtime: 0 }] }),
+      ),
+    )
+    const { user, region } = await openFiles(1)
+    await user.click(await within(region).findByRole('button', { name: 'Aktionen für w.zip' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Entpacken …' }))
+    const dialog = await screen.findByRole('dialog', { name: '„w.zip“ entpacken' })
+    expect(within(dialog).getByText('Entpacken geht nur bei gestopptem Server.')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Entpacken' })).toBeDisabled()
   })
 })

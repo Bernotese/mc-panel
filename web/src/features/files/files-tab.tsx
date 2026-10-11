@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDownWideNarrow, ArrowUpNarrowWide, FilePlus, FolderPlus, Upload } from 'lucide-react'
-import { useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { isApiError } from '@/api/errors'
@@ -12,15 +12,18 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { SectionCard } from '@/features/profile/section-card'
 import { errorMessage, useErrorToast } from '@/lib/error-message'
 import { deleteFile, fileListQueryOptions, fileListsKey, makeDirectory, renameFile, writeFile } from './api'
+import { ExtractDialog } from './extract-dialog'
 import { FileEditor } from './file-editor'
 import { FileList } from './file-list'
 import { sortEntries, type SortKey } from './format'
+import { JobStatus } from './job-status'
 import { NameDialog } from './name-dialog'
+import { useFileJob } from './use-file-job'
 import { UploadList } from './upload-list'
 import { useUploadQueue } from './upload-queue'
-import { breadcrumbs, componentProblem, joinPath, targetProblem } from './path'
+import { baseName, breadcrumbs, componentProblem, joinPath, targetProblem } from './path'
 
-type DialogState = { kind: 'mkdir' } | { kind: 'newfile' } | { kind: 'rename'; entry: FileEntry } | { kind: 'delete'; entry: FileEntry }
+type DialogState = { kind: 'mkdir' } | { kind: 'newfile' } | { kind: 'rename'; entry: FileEntry } | { kind: 'delete'; entry: FileEntry } | { kind: 'extract'; path: string }
 
 const SORT_KEYS: SortKey[] = ['name', 'size', 'mtime']
 
@@ -45,8 +48,19 @@ export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProp
   const running = server.status.state === 'running'
   const dirLabel = dir || t('files.root')
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: fileListsKey(server.id) })
+  const refresh = useCallback(() => queryClient.invalidateQueries({ queryKey: fileListsKey(server.id) }), [queryClient, server.id])
   const uploads = useUploadQueue(server.id, { onUploaded: () => void refresh() })
+  const jobQuery = useFileJob(server.id, true)
+  const job = jobQuery.data?.job ?? null
+  const lastState = useRef(job?.state)
+  useEffect(() => {
+    const previous = lastState.current
+    lastState.current = job?.state
+    if (previous !== 'running' || !job || job.state === 'running') return
+    if (job.state === 'done') toast.success(t('files.extract.done', { name: baseName(job.path), dest: job.dest }))
+    else toast.error(t('files.extract.failed', { name: baseName(job.path), error: job.error }))
+    void refresh()
+  }, [job, refresh, t])
   const fileInput = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const conflict = uploads.items.find((i) => i.status === 'conflict')
@@ -118,6 +132,7 @@ export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProp
           dir={dir}
           entries={sortEntries(list.data.entries, sortKey, descending)}
           onOpenDir={(name) => setDir(joinPath(dir, name))}
+          onExtract={(entry) => setDialog({ kind: 'extract', path: joinPath(dir, entry.name) })}
           onOpenFile={(entry) => setEditing(joinPath(dir, entry.name))}
           onRename={(entry) => setDialog({ kind: 'rename', entry })}
           onDelete={(entry) => setDialog({ kind: 'delete', entry })}
@@ -165,6 +180,8 @@ export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProp
           {t('files.running_hint')}
         </p>
       ) : null}
+
+      {job?.state === 'running' ? <JobStatus job={job} /> : null}
 
       <SectionCard title={t('files.title')} actions={editing === null ? toolbar : undefined}>
         {editing !== null ? (
@@ -270,6 +287,7 @@ export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProp
           </DialogContent>
         </Dialog>
       ) : null}
+      {dialog?.kind === 'extract' ? <ExtractDialog server={server} path={dialog.path} onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === 'mkdir' ? (
         <NameDialog
           title={t('files.dialog.new_folder_title', { dir: dirLabel })}

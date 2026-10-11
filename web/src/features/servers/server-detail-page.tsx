@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMe } from '@/features/auth/me'
 import { ConsoleTab } from '@/features/console/console-tab'
 import { FilesTab } from '@/features/files/files-tab'
+import { isExtracting, useFileJob } from '@/features/files/use-file-job'
 import { PlayersTab } from '@/features/players/players-tab'
 import { errorMessage } from '@/lib/error-message'
 import { serverQueryOptions } from './api'
@@ -38,6 +39,10 @@ function ServerDetail({ serverId }: { serverId: number }) {
   const [tab, setTab] = useState<DetailTab>('overview')
   const [filesDirty, setFilesDirty] = useState(false)
   const [pendingTab, setPendingTab] = useState<DetailTab | null>(null)
+  // Users with server.files see the lock; everyone else gets the panel's 409 "extracting" on start.
+  const filesAllowed = query.data?.permissions.includes('server.files') === true && query.data.instance !== null
+  const fileJob = useFileJob(serverId, filesAllowed)
+  const extracting = isExtracting(fileJob.data)
 
   if (query.isPending) return <p className="text-muted-foreground">{t('common.loading')}</p>
   // A failed refetch keeps the old data: after 403/404 the server is gone or hidden, so stale data must not look live.
@@ -109,7 +114,7 @@ function ServerDetail({ serverId }: { serverId: number }) {
           {isAdmin ? <TabsTrigger value="delete">{t('servers.detail.tabs.delete')}</TabsTrigger> : null}
         </TabsList>
         <TabsContent value="overview" className="pt-4">
-          <ServerOverview server={server} instance={instance} />
+          <ServerOverview server={server} instance={instance} extracting={extracting} />
         </TabsContent>
         {canConsole ? (
           <TabsContent value="console" className="pt-4">
