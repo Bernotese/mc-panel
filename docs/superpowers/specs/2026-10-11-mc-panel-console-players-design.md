@@ -1,7 +1,7 @@
 # mc-panel – Teilprojekt 3a: Konsole, Logs, Spieler (Design-Spec)
 
 - **Datum:** 2026-10-11
-- **Status:** Entwurf
+- **Status:** umgesetzt (PRs #18–#24, 2026-10-11)
 - **Autor:** Jannes (mit Claude)
 - **Baut auf:** `2026-10-08-mc-panel-foundation-design.md` (TP1), `2026-10-10-mc-panel-instances-design.md` (TP2)
 
@@ -156,7 +156,7 @@ Alle Routen über `*rbac.Router`, beschrieben in `api/openapi.yaml`, mit MSW-Moc
   - `event: state`, `data: {"running": true|false}` – beim ersten erfolgreichen Öffnen des agent-Streams `true`, bei dessen Ende `false`.
   - Alle 15 s ein Kommentar (`: ping`) als Heartbeat.
 - Start: Mit Header `Last-Event-ID` (gültige Zahl) öffnet das panel den agent-Stream mit `since` = diesem Wert + 1 ns, sonst mit `tail` = 500. Der Query-Parameter `tail` (0–1000) überschreibt den Default.
-- Endet der agent-Stream oder schlägt das Öffnen fehl (`404`, `docker_unavailable`, agent weg), sendet das panel einmalig `state {running: false}` und versucht es erneut mit `since` = letzter gesehener Zeitstempel. So läuft das Log über Neustarts und Neuanlagen des Containers weiter, ohne doppelte Zeilen. Die Wartezeit beginnt bei 3 s und verdoppelt sich bis 10 s, solange weder eine Zeile noch ein Zustandswechsel ankommt (gestoppter Server, agent weg oder ausgelastet); jede Zeile bzw. jeder Zustandswechsel setzt sie zurück. Ein `429 busy` des agent wird auf Info-Ebene geloggt.
+- Endet der agent-Stream oder schlägt das Öffnen fehl (`404`, `docker_unavailable`, agent weg), sendet das panel einmalig `state {running: false}` und versucht es erneut mit `since` = letzter gesehener Zeitstempel. So läuft das Log über Neustarts und Neuanlagen des Containers weiter, ohne doppelte Zeilen. Nach einem Versuch mit Zeile oder Zustandswechsel wartet das panel 3 s; bleibt ein Versuch ohne beides (gestoppter Server, agent weg oder ausgelastet), verdoppelt sich die Wartezeit bis höchstens 10 s (3 → 6 → 10 s); jede Zeile bzw. jeder Zustandswechsel setzt sie zurück. Ein `429 busy` des agent wird auf Info-Ebene geloggt.
 - Prüfung während des Streams (über `clock.Clock`, alle 30 s): Session gültig (nicht abgelaufen, nicht widerrufen, Stufe voll angemeldet), Benutzer existiert, Recht `server.console` (bzw. Admin) besteht noch, Server existiert noch. Fällt eine Prüfung durch, schließt das panel den Stream. Der Stream verlängert die Session nicht (`Touch` nur beim Öffnen wie bei jedem Request).
 - Höchstens 4 gleichzeitige Streams pro Benutzer im panel, sonst `429 rate_limited`. Beim Herunterfahren schließt das panel alle Streams; das Herunterfahren wartet höchstens 20 s (länger als der RCON-Aufruf mit 15 s).
 
@@ -233,11 +233,11 @@ Tabs (nur mit passendem Recht sichtbar): Übersicht · **Konsole** · **Spieler*
 
 ### 7.3 Spieler (`server.console`)
 
-- **Online:** Name, Aktionen Kick, Ban (Dialog mit optionalem Grund), Op/Deop.
+- **Online:** Name, Aktionen Kick, Ban (Dialog mit optionalem Grund), Op geben/Op entziehen.
 - **Whitelist:** Name hinzufügen, entfernen; Hinweis, ob die Whitelist aktiv ist, mit Link zur Einstellung (Admin).
 - **Ops:** hinzufügen, entfernen; Level anzeigen.
 - **Bans:** Name, Grund, von, seit, bis; Entbannen.
-- Ops und Whitelist zeigen eine Warnung „Neustart nötig“, solange der Server noch mit der alten Umgebung (TP2) läuft; die Karte „Online“ zeigt bei gestopptem Server keine Liste. Die Beschriftung der Op-Aktionen lautet „Op“ bzw. „Deop“. Die Tab-Leiste scrollt auf dem Handy horizontal.
+- Ops und Whitelist zeigen eine Warnung „Neustart nötig“, solange der Server noch mit der alten Umgebung (TP2) läuft; die Karte „Online“ zeigt bei gestopptem Server keine Liste. Die Op-Aktionen heißen „Op geben“ bzw. „Op entziehen“ (en „Make op“/„Remove op“); ihr zugänglicher Name enthält den sichtbaren Text plus den Spielernamen („Op geben: Steve“). Die Tab-Leiste scrollt auf dem Handy horizontal.
 - Listen sind auch bei gestopptem Server lesbar; Ändern nur bei laufendem Server (Knöpfe sonst gesperrt, Hinweis). Unlesbare Dateien (`errors`) zeigen einen Hinweis an der betroffenen Liste.
 - Nach jeder Aktion: Toast mit der RCON-Antwort, danach Neuladen von Listen und Online-Spielern.
 
