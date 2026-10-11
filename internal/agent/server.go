@@ -70,7 +70,7 @@ func NewServer(fw agentapi.Firewall, version string, log *slog.Logger, opts ...O
 		o(s)
 	}
 	// Shutdown waits for running requests, and a log stream only ends with its context.
-	s.streamCtx, s.stopStreams = context.WithCancel(context.Background())
+	s.streamCtx, s.stopStreams = context.WithCancel(context.Background()) //nolint:gosec // G118: stopStreams runs on Shutdown (RegisterOnShutdown below)
 	s.routes = map[string]route{
 		agentapi.PathHealth:          {method: http.MethodGet, handler: s.health},
 		agentapi.PathBan:             {method: http.MethodPost, handler: s.ban},
