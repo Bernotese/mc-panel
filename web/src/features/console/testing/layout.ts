@@ -9,5 +9,15 @@ export function stubLogViewport(): void {
     }
     return original.call(this)
   })
+  // @tanstack/virtual-core measures the scroll element via offsetWidth/offsetHeight.
+  for (const [prop, size] of [
+    ['offsetWidth', 800],
+    ['offsetHeight', 600],
+  ] as const) {
+    const getter = Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop)?.get
+    vi.spyOn(HTMLElement.prototype, prop, 'get').mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute('data-console-log') ? size : (getter?.call(this) ?? 0)
+    })
+  }
   HTMLElement.prototype.scrollTo ??= function scrollTo() {}
 }
