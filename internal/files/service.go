@@ -25,6 +25,9 @@ import (
 const (
 	tempPrefix      = ".mcpanel-tmp-"
 	cleanupMaxDepth = 64
+	fileMode        = 0o644
+	dirMode         = 0o755
+	serverProps     = "server.properties"
 )
 
 // Config configures a Service.
