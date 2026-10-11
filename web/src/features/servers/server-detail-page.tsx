@@ -87,7 +87,8 @@ function ServerDetail({ serverId }: { serverId: number }) {
     <>
       {header}
       <Tabs value={active} onValueChange={(value) => setTab(value as DetailTab)}>
-        <TabsList>
+        {/* Five tabs are wider than a phone: the bar scrolls, not the page. */}
+        <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="overview">{t('servers.detail.tabs.overview')}</TabsTrigger>
           {canConsole ? <TabsTrigger value="console">{t('servers.detail.tabs.console')}</TabsTrigger> : null}
           {canConsole ? <TabsTrigger value="players">{t('servers.detail.tabs.players')}</TabsTrigger> : null}

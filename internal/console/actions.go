@@ -23,6 +23,11 @@ func (h *Handler) handlePlayerLists(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, agentapi.ErrNotFound):
 		res = agentapi.PlayersResponse{} // data directory not created yet: nothing stored
+	case errors.Is(err, agentapi.ErrBusy):
+		// The agent bounds list reads of all servers together (agent.MaxParallelPlayers).
+		w.Header().Set("Retry-After", "5")
+		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "the agent is busy reading player lists, try again shortly")
+		return
 	case err != nil:
 		h.writeAgentError(w, r, err)
 		return

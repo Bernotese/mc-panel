@@ -20,7 +20,7 @@ import {
 
 export const EULA_URL = 'https://aka.ms/MinecraftEULA'
 
-/** Properties as edited in the form: numbers and player lists stay text until they are valid. */
+/** Properties as edited in the form: numbers stay text until they are valid. */
 export interface PropertiesDraft {
   motd: string
   difficulty: Difficulty
