@@ -71,7 +71,8 @@ func TestReconcileStopsAndEnsuresWhileExtracting(t *testing.T) {
 	e.agent.set(container("survival", running, 1, agentapi.StateRunning, ""))
 	e.gate.set(running, true)
 	e.gate.set(missing, true)
-	want := []string{fmt.Sprintf("power %d stop", running), fmt.Sprintf("ensure %d r1 recreate=false", missing)}
+	// ServersListInstances sorts by name: "creative" before "survival".
+	want := []string{fmt.Sprintf("ensure %d r1 recreate=false", missing), fmt.Sprintf("power %d stop", running)}
 	if got := e.pass(); !slices.Equal(got, want) {
 		t.Fatalf("calls = %v, want %v", got, want)
 	}
