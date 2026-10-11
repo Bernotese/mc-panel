@@ -34,6 +34,11 @@ var version = "dev"
 // defaultConfigPath is read when neither -config nor -dev is given (a var for tests).
 var defaultConfigPath = "/etc/mc-panel/panel.toml"
 
+// shutdownTimeout bounds the graceful HTTP shutdown. It outlasts a running console command
+// (agent.RconTimeout, 15 s), so a command sent just before the shutdown still gets its answer
+// and audit entry.
+const shutdownTimeout = 20 * time.Second
+
 const usageText = `usage:
   panel serve        [-config path] [-dev]
   panel admin create [-config path] [-dev] -username NAME   (password from stdin)
@@ -250,7 +255,7 @@ func serve(args []string) error {
 
 	srv := newHTTPServer(a.Handler)
 	// Console streams never become idle: without this, srv.Shutdown would wait for them until
-	// its 10 s timeout and then close the connections hard.
+	// its timeout and then close the connections hard.
 	srv.RegisterOnShutdown(a.Shutdown)
 	errCh := make(chan error, 1)
 	go func() {
@@ -267,7 +272,7 @@ func serve(args []string) error {
 	}
 	stop() // a second SIGINT/SIGTERM during shutdown gets the default (terminating) handling
 	// 1. stop HTTP, 2. cancel background loops, 3. wait for them, 4. (deferred) close DB.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("http shutdown failed, closing connections", "err", err)

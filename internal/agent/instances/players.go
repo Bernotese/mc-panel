@@ -1,6 +1,7 @@
 package instances
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -76,21 +77,18 @@ func (m *Manager) Players(_ context.Context, id int64) (agentapi.PlayersResponse
 		return resp, fmt.Errorf("data directory %s changed while it was opened", dir)
 	}
 
-	var ops []opEntry
-	if m.readPlayerFile(root, id, opsFile, &ops, &resp) {
-		for _, o := range ops[:min(len(ops), maxPlayerEntries)] {
+	if ops, ok := readPlayerFile[opEntry](m, root, id, opsFile, &resp); ok {
+		for _, o := range ops {
 			resp.Ops = append(resp.Ops, agentapi.PlayerOp{UUID: clipText(o.UUID), Name: clipText(o.Name), Level: o.Level})
 		}
 	}
-	var wl []whitelistEntry
-	if m.readPlayerFile(root, id, whitelistFile, &wl, &resp) {
-		for _, w := range wl[:min(len(wl), maxPlayerEntries)] {
+	if wl, ok := readPlayerFile[whitelistEntry](m, root, id, whitelistFile, &resp); ok {
+		for _, w := range wl {
 			resp.Whitelist = append(resp.Whitelist, agentapi.PlayerEntry{UUID: clipText(w.UUID), Name: clipText(w.Name)})
 		}
 	}
-	var bans []banEntry
-	if m.readPlayerFile(root, id, bansFile, &bans, &resp) {
-		for _, b := range bans[:min(len(bans), maxPlayerEntries)] {
+	if bans, ok := readPlayerFile[banEntry](m, root, id, bansFile, &resp); ok {
+		for _, b := range bans {
 			resp.Bans = append(resp.Bans, agentapi.PlayerBan{
 				UUID: clipText(b.UUID), Name: clipText(b.Name), Reason: clipText(b.Reason),
 				Source: clipText(b.Source), Created: clipText(b.Created), Expires: clipText(b.Expires),
@@ -100,22 +98,63 @@ func (m *Manager) Players(_ context.Context, id int64) (agentapi.PlayersResponse
 	return resp, nil
 }
 
-// readPlayerFile decodes the JSON list name into dst. It returns false when there is
-// nothing to use; an unreadable file is logged (never its content) and added to Errors.
-func (m *Manager) readPlayerFile(root *os.Root, id int64, name string, dst any, resp *agentapi.PlayersResponse) bool {
+// readPlayerFile decodes the first maxPlayerEntries entries of the JSON list name. It returns
+// false when there is nothing to use; an unreadable file is logged (never its content) and
+// added to Errors.
+func readPlayerFile[T any](m *Manager, root *os.Root, id int64, name string, resp *agentapi.PlayersResponse) ([]T, bool) {
 	data, err := readUntrustedFile(root, name, maxPlayerFileBytes)
 	if errors.Is(err, fs.ErrNotExist) {
-		return false
+		return nil, false
 	}
+	var list []T
 	if err == nil {
-		err = json.Unmarshal(data, dst) // a JSON object instead of a list fails here
+		list, err = decodeList[T](data, maxPlayerEntries)
 	}
 	if err != nil {
 		m.log.Warn("player list unreadable", "id", id, "file", name, "err", err)
 		resp.Errors = append(resp.Errors, name)
-		return false
+		return nil, false
 	}
-	return true
+	return list, true
+}
+
+// decodeList decodes a JSON list (null is an empty one) entry by entry and stops after limit
+// entries: the rest is neither decoded nor checked, so a 1 MiB file of tiny entries never
+// becomes hundreds of thousands of values. Up to the limit it is as strict as json.Unmarshal
+// (no other top-level value, nothing after the list).
+func decodeList[T any](data []byte, limit int) ([]T, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if tok != nil { // null: no list
+		if d, ok := tok.(json.Delim); !ok || d != '[' {
+			return nil, errors.New("not a JSON list")
+		}
+		list := []T{}
+		for dec.More() {
+			if len(list) == limit {
+				return list, nil
+			}
+			var v T
+			if err := dec.Decode(&v); err != nil {
+				return nil, err
+			}
+			list = append(list, v)
+		}
+		if _, err := dec.Token(); err != nil { // the closing ]
+			return nil, err
+		}
+		if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+			return nil, errors.New("data after the JSON list")
+		}
+		return list, nil
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("data after the JSON value")
+	}
+	return nil, nil
 }
 
 // readUntrustedFile reads name below root: only a regular file (no symlink, not even one
@@ -154,5 +193,5 @@ func readUntrustedFile(root *os.Root, name string, limit int64) ([]byte, error) 
 	return data, nil
 }
 
-// clipText cuts s to maxPlayerTextRunes runes (json.Unmarshal already replaced invalid UTF-8).
+// clipText cuts s to maxPlayerTextRunes runes (the JSON decoder already replaced invalid UTF-8).
 func clipText(s string) string { return firstRunes(s, maxPlayerTextRunes) }

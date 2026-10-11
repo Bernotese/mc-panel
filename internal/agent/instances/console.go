@@ -259,7 +259,7 @@ func firstRunes(s string, n int) string {
 	return s
 }
 
-// Rcon runs one console command in mcpanel-mc-<id> as `<rcon-cli> <command>` with the
+// Rcon runs one console command in mcpanel-mc-<id> as `<rcon-cli> -- <command>` with the
 // container user's uid:gid in /data (spec §5.3) and returns its output.
 func (m *Manager) Rcon(ctx context.Context, id int64, command string) (string, error) {
 	if err := (agentapi.RconRequest{ID: id, Command: command}).Validate(); err != nil {
@@ -295,7 +295,8 @@ func (m *Manager) Rcon(ctx context.Context, id int64, command string) (string, e
 		return "", fmt.Errorf("%w: container %s is %s", agentapi.ErrNotRunning, name, info.State.Status)
 	}
 	execID, err := m.dc.ExecCreate(ctx, name, docker.ExecConfig{
-		Cmd:          []string{m.rconCmd, command},
+		// "--" ends rcon-cli's options: the command is never read as one (--host, --config, …).
+		Cmd:          []string{m.rconCmd, "--", command},
 		User:         strconv.Itoa(m.host.UID) + ":" + strconv.Itoa(m.host.GID),
 		WorkingDir:   "/data",
 		Env:          []string{"HOME=/data"},
