@@ -31,7 +31,7 @@ describe('PlayersTab', () => {
     const online = await screen.findByRole('region', { name: 'Online' })
     await user.click(await within(online).findByRole('button', { name: 'Steve kicken' }))
     await waitFor(() => expect(within(online).queryByText('Steve')).not.toBeInTheDocument())
-    await waitFor(() => expect(document.querySelector('[data-sonner-toast]')).not.toBeNull())
+    expect(await screen.findByText(/^Kicked Steve/)).toBeInTheDocument()
   })
 
   it('bans a player with a reason', async () => {
@@ -86,6 +86,9 @@ describe('PlayersTab', () => {
     const add = screen.getAllByRole('button', { name: 'Hinzufügen' })
     expect(add).toHaveLength(2)
     for (const button of add) expect(button).toBeDisabled()
+    // the lists stay readable: they load and show no error
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Operatoren' })).queryByText('Lädt …')).not.toBeInTheDocument())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('leads admins to the whitelist setting', async () => {

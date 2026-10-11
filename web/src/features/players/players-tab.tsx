@@ -18,11 +18,11 @@ function Muted({ children }: { children: ReactNode }) {
 
 export function PlayersTab({ server, onOpenSettings }: { server: Server; onOpenSettings?: () => void }) {
   const { t } = useTranslation()
-  const online = useQuery({ ...onlinePlayersQueryOptions(server.id), refetchInterval: ONLINE_POLL_MS })
+  const running = server.status.state === 'running'
+  const online = useQuery({ ...onlinePlayersQueryOptions(server.id), refetchInterval: running ? ONLINE_POLL_MS : false })
   const lists = useQuery(playerListsQueryOptions(server.id))
   const action = usePlayerAction(server.id)
   const [banTarget, setBanTarget] = useState<string | null>(null)
-  const running = server.status.state === 'running'
   const locked = !running || action.isPending
   const opNames = new Set((lists.data?.ops ?? []).map((o) => o.name.toLowerCase()))
   const whitelistOn = server.instance?.properties.whitelist_enabled === true
@@ -62,6 +62,8 @@ export function PlayersTab({ server, onOpenSettings }: { server: Server; onOpenS
           const isOp = opNames.has(player.name.toLowerCase())
           // Offline-mode servers allow names the panel rejects; actions on them would only fail.
           const disabled = locked || !PLAYER_NAME.test(player.name)
+          // op/deop depend on the ops list: without it a deop could be offered for an op (or the reverse).
+          const opDisabled = disabled || !lists.data
           return (
             <li key={player.name} className="flex flex-wrap items-center justify-between gap-2 py-2">
               <span className="flex items-center gap-2 font-medium">
@@ -94,7 +96,7 @@ export function PlayersTab({ server, onOpenSettings }: { server: Server; onOpenS
                     type="button"
                     size="sm"
                     variant="outline"
-                    disabled={disabled}
+                    disabled={opDisabled}
                     aria-label={t('players.deop_label', { name: player.name })}
                     onClick={() => action.mutate({ action: 'deop', name: player.name })}
                   >
@@ -105,7 +107,7 @@ export function PlayersTab({ server, onOpenSettings }: { server: Server; onOpenS
                     type="button"
                     size="sm"
                     variant="outline"
-                    disabled={disabled}
+                    disabled={opDisabled}
                     aria-label={t('players.op_label', { name: player.name })}
                     onClick={() => action.mutate({ action: 'op', name: player.name })}
                   >
@@ -161,7 +163,7 @@ export function PlayersTab({ server, onOpenSettings }: { server: Server; onOpenS
                     type="button"
                     size="sm"
                     variant="outline"
-                    disabled={locked}
+                    disabled={locked || !PLAYER_NAME.test(entry.name)}
                     aria-label={t('players.whitelist_remove_label', { name: entry.name })}
                     onClick={() => action.mutate({ action: 'whitelist_remove', name: entry.name })}
                   >
@@ -192,7 +194,7 @@ export function PlayersTab({ server, onOpenSettings }: { server: Server; onOpenS
                     type="button"
                     size="sm"
                     variant="outline"
-                    disabled={locked}
+                    disabled={locked || !PLAYER_NAME.test(op.name)}
                     aria-label={t('players.deop_label', { name: op.name })}
                     onClick={() => action.mutate({ action: 'deop', name: op.name })}
                   >
@@ -231,7 +233,7 @@ export function PlayersTab({ server, onOpenSettings }: { server: Server; onOpenS
                     type="button"
                     size="sm"
                     variant="outline"
-                    disabled={locked}
+                    disabled={locked || !PLAYER_NAME.test(ban.name)}
                     aria-label={t('players.pardon_label', { name: ban.name })}
                     onClick={() => action.mutate({ action: 'pardon', name: ban.name })}
                   >
@@ -249,7 +251,7 @@ export function PlayersTab({ server, onOpenSettings }: { server: Server; onOpenS
           key={banTarget}
           name={banTarget}
           open
-          pending={action.isPending}
+          pending={locked}
           onOpenChange={(open) => {
             if (!open) setBanTarget(null)
           }}

@@ -23,6 +23,7 @@ export function BanDialog({ name, open, pending, onOpenChange, onConfirm }: BanD
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (pending) return
     const value = reason.trim()
     const found = value ? reasonProblem(value) : null
     setProblem(found)
