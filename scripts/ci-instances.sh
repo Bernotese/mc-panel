@@ -221,6 +221,8 @@ echo "OK: rcon list: $(rcon_output "$work/rcon.json")"
 
 code="$(post_status /v1/instances/rcon '{"id": 9001, "command": "list\nop Mallory"}' "$work/bad.json")"
 [ "$code" = 400 ] || fail "rcon with newline: HTTP $code $(cat "$work/bad.json")"
+code="$(post_status /v1/instances/rcon '{"id": 9001, "command": "--help"}' "$work/bad.json")"
+[ "$code" = 400 ] || fail "rcon with leading dash: HTTP $code $(cat "$work/bad.json")"
 code="$(post_status /v1/instances/rcon '{"id": 9001, "command": "list", "shell": true}' "$work/bad.json")"
 [ "$code" = 400 ] || fail "rcon with unknown field: HTTP $code $(cat "$work/bad.json")"
 code="$(post_status /v1/instances/logs '{"id": 9001, "tail": 1001, "since": 0}' "$work/bad.json")"
@@ -229,7 +231,7 @@ code="$(post_status /v1/instances/rcon '{"id": 9002, "command": "list"}' "$work/
 if [ "$code" != 404 ] || ! grep -q '"code":"not_found"' "$work/bad.json"; then
   fail "rcon on unknown instance: HTTP $code $(cat "$work/bad.json")"
 fi
-echo "OK: rcon validation (newline, unknown field -> 400; unknown instance -> 404 not_found; tail 1001 -> 400)"
+echo "OK: rcon validation (newline, leading dash, unknown field -> 400; unknown instance -> 404 not_found; tail 1001 -> 400)"
 
 echo "== console: log stream"
 logs '{"id": 9001, "tail": 1000, "since": 0}' "$work/logs.ndjson" 5
