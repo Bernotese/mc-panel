@@ -3,6 +3,7 @@ package httpx_test
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -293,5 +294,24 @@ func TestUnixConnContextIgnoresTCP(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), req)
 	if got.String() != "198.51.100.1" {
 		t.Fatalf("ClientIP = %s, want the untrusted TCP peer", got)
+	}
+}
+
+func TestBodyLimitExcept(t *testing.T) {
+	read := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.ReadAll(r.Body); err != nil {
+			http.Error(w, "too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	h := httpx.BodyLimitExcept(16, func(r *http.Request) bool { return r.URL.Path == "/upload" })(read)
+	big := strings.Repeat("x", 64)
+	for path, want := range map[string]int{"/upload": http.StatusNoContent, "/other": http.StatusRequestEntityTooLarge} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(big)))
+		if rec.Code != want {
+			t.Errorf("%s: status %d, want %d", path, rec.Code, want)
+		}
 	}
 }

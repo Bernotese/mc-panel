@@ -59,3 +59,16 @@ func BodyLimit(n int64) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// BodyLimitExcept is BodyLimit for every request except those skip accepts. A streaming
+// endpoint (the file upload, spec 3b §5.1) enforces its own limit downstream.
+func BodyLimitExcept(n int64, skip func(*http.Request) bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !skip(r) {
+				r.Body = http.MaxBytesReader(w, r.Body, n)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
