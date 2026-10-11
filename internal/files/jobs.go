@@ -35,6 +35,7 @@ type jobs struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	hook   func(ctx context.Context, id int64, entry string) // tests: runs before each entry
+	scrub  func(string) string                               // job errors without host paths (Service.publicMessage)
 }
 
 func newJobs() *jobs {
@@ -120,6 +121,9 @@ func (j *jobs) finish(id int64, err error, now time.Time) {
 		if err != nil {
 			job.State = jobFailed
 			job.Error = err.Error()
+			if j.scrub != nil {
+				job.Error = j.scrub(job.Error)
+			}
 		} else {
 			job.State = jobDone
 		}

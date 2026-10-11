@@ -376,8 +376,8 @@ func TestDownloadErrors(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || errCode(t, rec) != httpx.CodeNotRegular {
 		t.Fatalf("symlink: %d %s", rec.Code, rec.Body)
 	}
-	if last := e.lastEntry(); last.Action != audit.ActionFileDownload || last.Result != audit.ResultFailure {
-		t.Fatalf("audit = %+v", last)
+	if len(e.rec.Entries) != 0 { // a refused download is a rejection, not audited (review B4)
+		t.Fatalf("audit = %v", e.rec.Actions())
 	}
 }
 

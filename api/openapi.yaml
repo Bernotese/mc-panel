@@ -646,6 +646,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '415': { description: not_text (too large for the editor or not text), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
     put:
       operationId: writeFile
@@ -665,6 +666,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'file_exists (new file) or file_modified (changed since it was opened)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '413': { description: payload_too_large, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
         '507': { $ref: '#/components/responses/InsufficientStorage' }
   /servers/{id}/files/upload:
@@ -705,10 +707,12 @@ paths:
           content:
             application/octet-stream: { schema: { type: string, format: binary } }
             application/zip: { schema: { type: string, format: binary } }
-        '400': { description: 'validation_failed or not_regular (symlink or special file)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '400': { description: 'validation_failed (also a folder whose name cannot be stored in a zip) or not_regular (symlink or special file)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '413': { description: 'payload_too_large (a folder with more entries than max_extract_entries, or a server.properties larger than max_text_bytes that cannot be redacted)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /servers/{id}/files/mkdir:
     post:
@@ -723,12 +727,14 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/FilePathRequest' } } }
       responses:
         '201': { description: Created }
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400': { description: 'validation_failed or not_regular (a parent is not a folder)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: file_exists, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: 'payload_too_large (request exceeds the file service limit)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+        '507': { $ref: '#/components/responses/InsufficientStorage' }
   /servers/{id}/files/rename:
     post:
       operationId: renameFile
@@ -742,12 +748,14 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/RenameFileRequest' } } }
       responses:
         '204': { description: Renamed }
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400': { description: 'validation_failed (e.g. a folder into itself; server.properties cannot be moved) or not_regular (a parent is not a folder)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: file_exists, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: 'payload_too_large (request exceeds the file service limit)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+        '507': { $ref: '#/components/responses/InsufficientStorage' }
   /servers/{id}/files/delete:
     post:
       operationId: deleteFile
@@ -761,10 +769,11 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/FilePathRequest' } } }
       responses:
         '204': { description: Deleted }
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400': { description: 'validation_failed (e.g. the data directory itself) or not_regular (a parent is not a folder)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '413': { description: 'payload_too_large (request exceeds the file service limit)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /servers/{id}/files/extract:
     post:
@@ -787,7 +796,7 @@ paths:
         '409': { description: 'instance_running (server must be stopped) or file_exists (destination not empty)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '413': { description: 'payload_too_large (archive exceeds the size or entry limit)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { $ref: '#/components/responses/TooManyRequests' }
-        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+        '503': { description: 'files_unavailable (file service), agent_unavailable (actual state unknown) or docker_unavailable', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '507': { $ref: '#/components/responses/InsufficientStorage' }
   /servers/{id}/files/jobs:
     get:

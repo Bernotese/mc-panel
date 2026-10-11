@@ -15,13 +15,21 @@ import (
 )
 
 const (
-	// CallTimeout bounds every small call (list, read, write, mkdir, rename, delete, extract, jobs).
+	// CallTimeout bounds every small call (list, read, write, mkdir, rename, jobs).
 	CallTimeout = 10 * time.Second
+	// DeleteTimeout bounds a delete: removing a world folder with many thousand files can take
+	// minutes on a slow disk.
+	DeleteTimeout = 10 * time.Minute
+	// ExtractTimeout bounds the synchronous pre-check of an extract (central directory of up to
+	// max_extract_entries entries); the job itself runs in the background.
+	ExtractTimeout = 5 * time.Minute
 	// HealthTimeout bounds the health check.
 	HealthTimeout = 2 * time.Second
 	// DownloadHeaderTimeout bounds the wait for download headers; the stream itself has no
-	// deadline. Uploads have no header timeout: the service answers after the whole body.
-	DownloadHeaderTimeout = 10 * time.Second
+	// deadline. A folder download counts its entries (up to max_extract_entries) before the
+	// headers, which takes a while on a slow disk. Uploads have no header timeout: the service
+	// answers after the whole body.
+	DownloadHeaderTimeout = 2 * time.Minute
 
 	baseURL          = "http://files"
 	maxResponseBytes = 32 << 20 // a read answer carries up to 5 MiB of escaped text
@@ -31,6 +39,9 @@ const (
 // UnixClient talks to mcpanel-files over its unix socket. Safe for concurrent use.
 type UnixClient struct {
 	hc                    *http.Client
+	callTimeout           time.Duration
+	deleteTimeout         time.Duration
+	extractTimeout        time.Duration
 	downloadHeaderTimeout time.Duration
 }
 
@@ -53,6 +64,9 @@ func NewClient(socketPath string) *UnixClient {
 			Transport:     tr,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
+		callTimeout:           CallTimeout,
+		deleteTimeout:         DeleteTimeout,
+		extractTimeout:        ExtractTimeout,
 		downloadHeaderTimeout: DownloadHeaderTimeout,
 	}
 }
@@ -95,7 +109,7 @@ func (c *UnixClient) List(ctx context.Context, id int64, p string) (ListResponse
 		return ListResponse{}, err
 	}
 	var out ListResponse
-	err := c.call(ctx, CallTimeout, http.MethodPost, PathList, PathRequest{ID: id, Path: p}, &out)
+	err := c.call(ctx, c.callTimeout, http.MethodPost, PathList, PathRequest{ID: id, Path: p}, &out)
 	if out.Entries == nil {
 		out.Entries = []Entry{}
 	}
@@ -107,7 +121,7 @@ func (c *UnixClient) Read(ctx context.Context, id int64, p string) (ReadResponse
 		return ReadResponse{}, err
 	}
 	var out ReadResponse
-	err := c.call(ctx, CallTimeout, http.MethodPost, PathRead, PathRequest{ID: id, Path: p}, &out)
+	err := c.call(ctx, c.callTimeout, http.MethodPost, PathRead, PathRequest{ID: id, Path: p}, &out)
 	return out, err
 }
 
@@ -116,7 +130,7 @@ func (c *UnixClient) Write(ctx context.Context, req WriteRequest) (WriteResponse
 		return WriteResponse{}, err
 	}
 	var out WriteResponse
-	err := c.call(ctx, CallTimeout, http.MethodPost, PathWrite, req, &out)
+	err := c.call(ctx, c.callTimeout, http.MethodPost, PathWrite, req, &out)
 	return out, err
 }
 
@@ -124,21 +138,21 @@ func (c *UnixClient) Mkdir(ctx context.Context, id int64, p string) error {
 	if err := clean(id, &p); err != nil {
 		return err
 	}
-	return c.call(ctx, CallTimeout, http.MethodPost, PathMkdir, PathRequest{ID: id, Path: p}, nil)
+	return c.call(ctx, c.callTimeout, http.MethodPost, PathMkdir, PathRequest{ID: id, Path: p}, nil)
 }
 
 func (c *UnixClient) Rename(ctx context.Context, req RenameRequest) error {
 	if err := clean(req.ID, &req.From, &req.To); err != nil {
 		return err
 	}
-	return c.call(ctx, CallTimeout, http.MethodPost, PathRename, req, nil)
+	return c.call(ctx, c.callTimeout, http.MethodPost, PathRename, req, nil)
 }
 
 func (c *UnixClient) Delete(ctx context.Context, id int64, p string) error {
 	if err := clean(id, &p); err != nil {
 		return err
 	}
-	return c.call(ctx, CallTimeout, http.MethodPost, PathDelete, PathRequest{ID: id, Path: p}, nil)
+	return c.call(ctx, c.deleteTimeout, http.MethodPost, PathDelete, PathRequest{ID: id, Path: p}, nil)
 }
 
 // Extract starts an extract job. The service checks the archive synchronously (central
@@ -150,7 +164,7 @@ func (c *UnixClient) Extract(ctx context.Context, req ExtractRequest) (Job, erro
 		return Job{}, err
 	}
 	var out Job
-	err := c.call(ctx, CallTimeout, http.MethodPost, PathExtract, req, &out)
+	err := c.call(ctx, c.extractTimeout, http.MethodPost, PathExtract, req, &out)
 	return out, err
 }
 
@@ -160,7 +174,7 @@ func (c *UnixClient) Job(ctx context.Context, id int64) (*Job, error) {
 	}
 	var out JobsResponse
 	q := url.Values{"id": {strconv.FormatInt(id, 10)}}
-	if err := c.call(ctx, CallTimeout, http.MethodGet, PathJobs+"?"+q.Encode(), nil, &out); err != nil {
+	if err := c.call(ctx, c.callTimeout, http.MethodGet, PathJobs+"?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Job, nil

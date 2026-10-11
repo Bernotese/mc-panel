@@ -3122,6 +3122,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -3181,6 +3182,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["ServiceUnavailable"];
             507: components["responses"]["InsufficientStorage"];
         };
@@ -3274,7 +3276,7 @@ export interface operations {
                     "application/zip": string;
                 };
             };
-            /** @description validation_failed or not_regular (symlink or special file) */
+            /** @description validation_failed (also a folder whose name cannot be stored in a zip) or not_regular (symlink or special file) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -3286,6 +3288,16 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description payload_too_large (a folder with more entries than max_extract_entries, or a server.properties larger than max_text_bytes that cannot be redacted) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -3313,7 +3325,15 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            /** @description validation_failed or not_regular (a parent is not a folder) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -3326,7 +3346,17 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description payload_too_large (request exceeds the file service limit) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
+            507: components["responses"]["InsufficientStorage"];
         };
     };
     renameFile: {
@@ -3353,7 +3383,15 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            /** @description validation_failed (e.g. a folder into itself; server.properties cannot be moved) or not_regular (a parent is not a folder) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -3366,7 +3404,17 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description payload_too_large (request exceeds the file service limit) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
+            507: components["responses"]["InsufficientStorage"];
         };
     };
     deleteFile: {
@@ -3393,10 +3441,27 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            /** @description validation_failed (e.g. the data directory itself) or not_regular (a parent is not a folder) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description payload_too_large (request exceeds the file service limit) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -3457,7 +3522,15 @@ export interface operations {
                 };
             };
             429: components["responses"]["TooManyRequests"];
-            503: components["responses"]["ServiceUnavailable"];
+            /** @description files_unavailable (file service), agent_unavailable (actual state unknown) or docker_unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             507: components["responses"]["InsufficientStorage"];
         };
     };
