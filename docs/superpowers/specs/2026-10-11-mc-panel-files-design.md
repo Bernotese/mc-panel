@@ -1,7 +1,7 @@
 # mc-panel – Teilprojekt 3b: Dateibrowser (Design-Spec)
 
 - **Datum:** 2026-10-11
-- **Status:** Entwurf
+- **Status:** umgesetzt (PRs #26–#33, 2026-10-11)
 - **Autor:** Jannes (mit Claude)
 - **Baut auf:** `2026-10-08-mc-panel-foundation-design.md` (TP1), `2026-10-10-mc-panel-instances-design.md` (TP2), `2026-10-11-mc-panel-console-players-design.md` (TP3a)
 
