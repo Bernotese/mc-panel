@@ -2,6 +2,7 @@ package files
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -68,5 +69,31 @@ func TestServerOps(t *testing.T) {
 	status, body = postJSON(t, ts, filesapi.PathWrite, filesapi.WriteRequest{ID: 1, Path: "big.txt", Content: strings.Repeat("b", 60<<10)})
 	if status != http.StatusOK {
 		t.Fatalf("large write: %d %s", status, body)
+	}
+}
+
+func TestServerRejectsTrailingData(t *testing.T) {
+	s, data := newService(t)
+	put(t, data, "a.txt", "x")
+	ts := startHTTP(t, NewServer(s, "test", discardLog()))
+	for _, body := range []string{`{"id":1,"path":""}{"id":1}`, `{"id":1,"path":""} x`, `{"id":1,"path":""}]`} {
+		resp, err := http.Post(ts.URL+filesapi.PathList, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest || errCode(t, b) != filesapi.CodeInvalid {
+			t.Errorf("body %q: %d %s", body, resp.StatusCode, b)
+		}
+	}
+	// Trailing white space is fine.
+	resp, err := http.Post(ts.URL+filesapi.PathList, "application/json", strings.NewReader("{\"id\":1,\"path\":\"\"}\n \n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("trailing white space: %d", resp.StatusCode)
 	}
 }
