@@ -385,10 +385,16 @@ grep -qxP 'NoNewPrivs:\t1' "/proc/$files_pid/status" || fail "files service with
 curl -fsS --max-time 5 --unix-socket "$fsock" http://files/v1/health >/dev/null || fail "root was refused by the files service"
 # The CI socket is 0666 (see setup): any local user can connect, so this proves that the
 # peer-UID check, not the file mode, keeps other users out.
-if setpriv --reuid=nobody --regid=nogroup --clear-groups \
-  curl -fsS --max-time 5 --unix-socket "$fsock" http://files/v1/health >/dev/null 2>&1; then
-  fail "user nobody reached the files service"
-fi
+[ -d "$work/mc/router" ] && [ -d "$work/mc/deleted" ] || fail "router/ or deleted/ missing (precondition of the checks below)"
+# curl exit 52 (empty reply) or 56 (reset): the service closed the connection of the wrong peer.
+nobody_rc=0
+setpriv --reuid=nobody --regid=nogroup --clear-groups \
+  curl -fsS --max-time 5 --unix-socket "$fsock" http://files/v1/health >/dev/null 2>&1 || nobody_rc=$?
+case "$nobody_rc" in
+  0) fail "user nobody reached the files service" ;;
+  52 | 56) ;;
+  *) fail "user nobody: curl exit $nobody_rc, expected 52 or 56 (connection refused by the peer check)" ;;
+esac
 if setpriv --reuid=mcpanel-mc --regid=mcpanel-mc --clear-groups touch "$work/mc/router/ci-x" 2>/dev/null; then
   fail "mcpanel-mc can write the router directory"
 fi
@@ -479,12 +485,14 @@ code="$(fpost /v1/rename '{"id": 9001, "from": "ci-new.txt", "to": "ci-dir/moved
 [ "$code" = 204 ] || fail "rename: HTTP $code $(cat "$fo/m.json")"
 [ -f "$data/ci-dir/moved.txt" ] && [ ! -e "$data/ci-new.txt" ] || fail "rename not on disk"
 code="$(fpost /v1/rename '{"id": 9001, "from": "ci-dir", "to": "ci-dir/inner"}' "$fo/m.json")"
-[ "$code" = 400 ] || fail "rename a directory into itself: HTTP $code $(cat "$fo/m.json")"
+is_error "$fo/m.json" "$code" 400 invalid || fail "rename a directory into itself: HTTP $code $(cat "$fo/m.json")"
+[ -d "$data/ci-dir" ] && [ -f "$data/ci-dir/moved.txt" ] || fail "rejected rename changed ci-dir"
 code="$(fpost /v1/delete '{"id": 9001, "path": "ci-dir"}' "$fo/m.json")"
 [ "$code" = 204 ] || fail "delete: HTTP $code $(cat "$fo/m.json")"
 [ ! -e "$data/ci-dir" ] || fail "deleted directory still there"
 code="$(fpost /v1/delete '{"id": 9001, "path": ""}' "$fo/m.json")"
-[ "$code" = 400 ] || fail "delete the root: HTTP $code $(cat "$fo/m.json")"
+is_error "$fo/m.json" "$code" 400 invalid || fail "delete the root: HTTP $code $(cat "$fo/m.json")"
+[ -d "$data" ] && [ -f "$data/server.properties" ] || fail "rejected delete of the root removed data"
 echo "OK: mkdir (201/409), rename (204, not into itself), delete (204, root refused)"
 
 echo "== files: symlinks are never followed, nothing outside the data dir is reachable"
@@ -499,10 +507,10 @@ if t.get("ci-shadow") != "symlink" or t.get("ci-router") != "symlink":
 code="$(fpost /v1/read '{"id": 9001, "path": "ci-shadow"}' "$fo/s.json")"
 is_error "$fo/s.json" "$code" 400 not_regular || fail "read symlink: HTTP $code $(cat "$fo/s.json")"
 code="$(fget ci-shadow "$fo/s.dl")"
-[ "$code" = 400 ] || fail "download symlink: HTTP $code"
+is_error "$fo/s.dl" "$code" 400 not_regular || fail "download symlink: HTTP $code $(cat "$fo/s.dl")"
 if grep -q 'root:' "$fo/s.dl" "$fo/s.json"; then fail "symlink leaked /etc/shadow"; fi
 code="$(fpost /v1/list '{"id": 9001, "path": "ci-router"}' "$fo/s.json")"
-[ "$code" = 400 ] || [ "$code" = 404 ] || fail "list through a symlinked directory: HTTP $code $(cat "$fo/s.json")"
+is_error "$fo/s.json" "$code" 400 not_regular || fail "list through a symlinked directory: HTTP $code $(cat "$fo/s.json")"
 code="$(fput "$work/ci-plugin.jar" ci-router/evil.jar 0 "$fo/s.json")"
 is_error "$fo/s.json" "$code" 400 not_regular || fail "upload through a symlinked directory: HTTP $code $(cat "$fo/s.json")"
 code="$(fpost /v1/write '{"id": 9001, "path": "ci-router/routes.json", "content": "{}", "expected_mtime": null}' "$fo/s.json")"
@@ -532,6 +540,9 @@ props = z.read("server.properties").decode()
 if "rcon.password=********" not in props.splitlines() or sys.argv[2] in props:
     sys.exit("server.properties in the zip is not redacted")' "$fo/root.zip" "$real_pw" || fail "directory zip content"
 rm -f "$data/ci-shadow2" "$data/ci-router"
+# Remove what the files checks planted, so the restart below runs on the original data.
+rm -f "$data/plugins/ci-plugin.jar" "$data/ci-new.txt"
+sed -i '/^# ci-edit$/d' "$data/bukkit.yml"
 echo "OK: directory zip without symlinks, hidden or temp files, server.properties redacted"
 
 echo "== crash: stop the server from inside, Docker must restart it (unless-stopped)"
@@ -638,9 +649,11 @@ for c in "slip 400 invalid" "abs 400 invalid" "link 400 invalid" "hidden 400 inv
   extract_rejected "$z.zip" "evil-$z" "$status" "$ecode" ||
     fail "$z.zip: want $status $ecode without a job and without evil-$z, got $(cat "$fo/extract.json")"
 done
-[ ! -e "$work/mc/instances/evil.txt" ] || fail "zip slip wrote outside the data directory"
+[ ! -e "$work/mc/instances/evil.txt" ] && [ ! -e "$data/evil.txt" ] && [ ! -e "$data/ok.txt" ] ||
+  fail "a refused archive wrote files (instances/evil.txt, evil.txt or ok.txt)"
 [ ! -e /tmp/ci-abs-evil.txt ] || fail "absolute zip path was written"
 no_tmp_left || fail "refused archives left a .mcpanel-tmp-* directory"
+rm -rf "$data"/world-ci "$data"/world-ci.zip "$data"/{slip,abs,link,hidden,many,huge}.zip
 echo "OK: zip slip, absolute path, symlink entry, hidden name -> 400 invalid; 1001 entries, 101 MiB declared -> 413 too_large; no job, nothing written"
 
 echo "== remove"
