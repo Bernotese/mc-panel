@@ -27,7 +27,7 @@ describe('ServerDetailPage', () => {
     await renderWithProviders(<ServerDetailPage serverId={1} />, { path: '/servers/1', me: loginAs('admin') })
 
     expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Übersicht', 'Konsole', 'Spieler', 'Einstellungen', 'Löschen'])
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Übersicht', 'Konsole', 'Spieler', 'Dateien', 'Einstellungen', 'Löschen'])
     const state = screen.getByRole('region', { name: 'Zustand' })
     expect(within(state).getByText('Läuft')).toBeInTheDocument()
     expect(within(state).getByText('survival.mc.example.com')).toBeInTheDocument()
@@ -198,7 +198,13 @@ describe('ServerDetailPage', () => {
   it('lets the tab bar scroll sideways instead of the page on narrow screens', async () => {
     await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
     const tabs = await screen.findByRole('tablist')
-    expect(within(tabs).getAllByRole('tab')).toHaveLength(5)
+    expect(within(tabs).getAllByRole('tab')).toHaveLength(6)
     expect(tabs).toHaveClass('max-w-full', 'justify-start', 'overflow-x-auto')
+  })
+
+  it('shows the files tab only with the files permission', async () => {
+    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+    await screen.findByRole('heading', { name: 'survival', level: 1 })
+    expect(screen.queryByRole('tab', { name: 'Dateien' })).not.toBeInTheDocument()
   })
 })
