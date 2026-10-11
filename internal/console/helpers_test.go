@@ -209,7 +209,11 @@ func (f *fakeAgent) setLogsErr(err error) { f.mu.Lock(); f.logsErr = err; f.mu.U
 
 func (f *fakeAgent) setOutput(cmd, out string) { f.mu.Lock(); f.outputs[cmd] = out; f.mu.Unlock() }
 
-func (f *fakeAgent) setRconErr(cmd string, err error) { f.mu.Lock(); f.rconErrs[cmd] = err; f.mu.Unlock() }
+func (f *fakeAgent) setRconErr(cmd string, err error) {
+	f.mu.Lock()
+	f.rconErrs[cmd] = err
+	f.mu.Unlock()
+}
 
 func (f *fakeAgent) setPlayers(p agentapi.PlayersResponse, err error) {
 	f.mu.Lock()
