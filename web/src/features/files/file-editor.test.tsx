@@ -61,6 +61,23 @@ describe('FileEditor', () => {
     await waitFor(() => expect(screen.queryByText('Ungespeicherte Änderungen')).not.toBeInTheDocument())
   })
 
+  // Review round 2: the panel's editor limits get a file-specific text instead of "too many attempts".
+  it('explains a busy editor when opening and saving', async () => {
+    const busy = () => HttpResponse.json({ error: 'rate_limited', message: 'busy' }, { status: 429 })
+    server.use(http.put('*/api/servers/:id/files/content', busy))
+    const { user, editor } = await openConfig()
+    await user.type(editor, 'x')
+    await user.click(screen.getByRole('button', { name: 'Speichern' }))
+    expect(await screen.findByText('Gerade werden zu viele Dateien gleichzeitig bearbeitet – bitte gleich noch einmal versuchen.')).toBeInTheDocument()
+  })
+
+  it('explains a busy editor when the file cannot be opened', async () => {
+    server.use(http.get('*/api/servers/:id/files/content', () => HttpResponse.json({ error: 'rate_limited', message: 'busy' }, { status: 429 })))
+    const { user, region } = await openFiles()
+    await user.click(await within(region).findByRole('button', { name: 'server.properties' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Gerade werden zu viele Dateien gleichzeitig bearbeitet – bitte gleich noch einmal versuchen.')
+  })
+
   it('offers reload or overwrite after a conflicting save', async () => {
     server.use(
       http.put('*/api/servers/:id/files/content', () => HttpResponse.json({ error: 'file_modified', message: 'modified' }, { status: 409 })),
