@@ -47,6 +47,8 @@ export function PlayersTab({ server, onOpenSettings }: { server: Server; onOpenS
   }
 
   function onlineList() {
+    // Polling stops with the server: names fetched before the stop are no longer true.
+    if (!running) return <Muted>{t('players.online.unavailable')}</Muted>
     if (online.isPending) return <Muted>{t('common.loading')}</Muted>
     if (online.isError)
       return (
@@ -127,6 +129,12 @@ export function PlayersTab({ server, onOpenSettings }: { server: Server; onOpenS
       {!running ? (
         <p role="status" className="rounded-md border p-3 text-sm">
           {t('players.not_running')}
+        </p>
+      ) : null}
+      {server.status.restart_required ? (
+        // Containers from before TP3a restore ops/whitelist from their old settings when they restart in place.
+        <p role="status" className="rounded-md border p-3 text-sm">
+          {t('players.restart_required')}
         </p>
       ) : null}
 
