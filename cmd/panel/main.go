@@ -249,6 +249,9 @@ func serve(args []string) error {
 	go func() { a.Run(bgCtx); close(bgDone) }()
 
 	srv := newHTTPServer(a.Handler)
+	// Console streams never become idle: without this, srv.Shutdown would wait for them until
+	// its 10 s timeout and then close the connections hard.
+	srv.RegisterOnShutdown(a.Shutdown)
 	errCh := make(chan error, 1)
 	go func() {
 		slog.Info("panel listening", "addr", cfg.Listen, "dev", cfg.Dev, "version", version)

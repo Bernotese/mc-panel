@@ -69,11 +69,12 @@ type appDeps struct {
 }
 
 type app struct {
-	Handler http.Handler
-	Mux     *chi.Mux
-	Routes  []rbac.RouteInfo
-	Run     func(ctx context.Context) // background loops; blocks until ctx is done
-	Close   func()                    // releases the GeoIP reader
+	Handler  http.Handler
+	Mux      *chi.Mux
+	Routes   []rbac.RouteInfo
+	Run      func(ctx context.Context) // background loops; blocks until ctx is done
+	Close    func()                    // ends console streams, releases the GeoIP reader
+	Shutdown func()                    // ends open console streams (http.Server.RegisterOnShutdown)
 }
 
 // buildApp wires every stream into one HTTP handler. The middleware order is binding:
@@ -112,7 +113,11 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		DB: db, Clock: d.Clock, Audit: auditRec, Box: box, Instances: d.Instances,
 		Catalog: catalog.New(catalog.Options{Clock: d.Clock, Version: d.Version}),
 	})
-	consoleH := console.NewHandler(console.Deps{DB: db, Clock: d.Clock, Audit: auditRec, Agent: d.Console})
+	checker := rbac.NewDBChecker(db)
+	consoleH := console.NewHandler(console.Deps{
+		DB: db, Clock: d.Clock, Audit: auditRec, Agent: d.Console,
+		Access: console.NewAccess(authH.Sessions(), checker),
+	})
 	auditH := auditapi.NewHandler(db, d.Clock, disp)
 	defenseH := defense.NewHandler(svc)
 	notifyH := notify.NewHandler(notify.HandlerDeps{
@@ -139,7 +144,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		httpx.WriteError(w, r, http.StatusMethodNotAllowed, httpx.CodeBadRequest, "method not allowed")
 	})
 
-	rt := rbac.NewRouter(mux, rbac.NewDBChecker(db), d.Clock)
+	rt := rbac.NewRouter(mux, checker, d.Clock)
 	rt.Route("/api", func(api *rbac.Router) {
 		api.Get("/health", rbac.Public(), func(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -164,10 +169,11 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		wg.Wait()
 	}
 	return &app{
-		Handler: mux,
-		Mux:     mux,
-		Routes:  rt.Routes(),
-		Run:     run,
-		Close:   func() { consoleH.Shutdown(); _ = closeGeo() },
+		Handler:  mux,
+		Mux:      mux,
+		Routes:   rt.Routes(),
+		Run:      run,
+		Close:    func() { consoleH.Shutdown(); _ = closeGeo() },
+		Shutdown: consoleH.Shutdown,
 	}, nil
 }
