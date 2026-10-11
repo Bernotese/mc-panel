@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/page-header'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMe } from '@/features/auth/me'
 import { ConsoleTab } from '@/features/console/console-tab'
+import { leaveTexts, type FilesBusy } from '@/features/files/busy'
 import { FilesTab } from '@/features/files/files-tab'
 import { isExtracting, useFileJob } from '@/features/files/use-file-job'
 import { PlayersTab } from '@/features/players/players-tab'
@@ -37,7 +38,7 @@ function ServerDetail({ serverId }: { serverId: number }) {
     refetchInterval: (q) => detailPollInterval(q.state.data, q.state.error),
   })
   const [tab, setTab] = useState<DetailTab>('overview')
-  const [filesDirty, setFilesDirty] = useState(false)
+  const [filesBusy, setFilesBusy] = useState<FilesBusy | null>(null)
   const [pendingTab, setPendingTab] = useState<DetailTab | null>(null)
   // Users with server.files see the lock; everyone else gets the panel's 409 "extracting" on start.
   const filesAllowed = query.data?.permissions.includes('server.files') === true && query.data.instance !== null
@@ -94,9 +95,11 @@ function ServerDetail({ serverId }: { serverId: number }) {
   // A tab whose permission was revoked while it was open falls back to the overview.
   const active = available.includes(tab) ? tab : 'overview'
 
+  const leave = leaveTexts(filesBusy ?? { unsaved: true, uploads: false }, t)
+
   function changeTab(next: DetailTab) {
-    // Radix unmounts inactive tabs: leaving "files" with unsaved editor changes would silently lose them.
-    if (active === 'files' && next !== 'files' && filesDirty) setPendingTab(next)
+    // Radix unmounts inactive tabs: leaving "files" would silently drop unsaved editor changes and cancel uploads.
+    if (active === 'files' && next !== 'files' && filesBusy) setPendingTab(next)
     else setTab(next)
   }
 
@@ -128,7 +131,7 @@ function ServerDetail({ serverId }: { serverId: number }) {
         ) : null}
         {canFiles ? (
           <TabsContent value="files" className="pt-4">
-            <FilesTab server={server} onDirtyChange={setFilesDirty} onOpenSettings={isAdmin ? () => changeTab('settings') : undefined} />
+            <FilesTab server={server} onBusyChange={setFilesBusy} onOpenSettings={isAdmin ? () => changeTab('settings') : undefined} />
           </TabsContent>
         ) : null}
         {isAdmin ? (
@@ -145,12 +148,12 @@ function ServerDetail({ serverId }: { serverId: number }) {
       <ConfirmDialog
         open={pendingTab !== null}
         onOpenChange={(open) => (open ? undefined : setPendingTab(null))}
-        title={t('files.editor.discard_title')}
-        description={t('files.editor.discard_tab')}
-        confirmLabel={t('files.editor.discard')}
+        title={leave.title}
+        description={leave.description}
+        confirmLabel={leave.confirm}
         destructive
         onConfirm={() => {
-          setFilesDirty(false)
+          setFilesBusy(null)
           if (pendingTab) setTab(pendingTab)
           setPendingTab(null)
         }}

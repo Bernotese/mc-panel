@@ -293,7 +293,8 @@ export const filesOperations: MockOperation[] = [
       if (isHidden(p) || isHidden(dest)) return hidden()
       // Like the panel: without the actual state (agent unreachable) nothing is extracted.
       if (a.server.status.state === 'unknown') return apiError(503, 'agent_unavailable', 'agent not reachable')
-      if (a.server.status.state !== 'stopped') return apiError(409, 'instance_running', 'stop the server first')
+      // A crashed server (state error, container exited) counts as stopped, like the panel's state check.
+      if (a.server.status.state !== 'stopped' && a.server.status.state !== 'error') return apiError(409, 'instance_running', 'stop the server first')
       const zip = lookup(a.root, p)
       if (!zip) return apiError(404, 'not_found', 'no such file')
       if (zip.type !== 'file' || !p.toLowerCase().endsWith('.zip')) return apiError(400, 'not_regular', 'not a zip file')

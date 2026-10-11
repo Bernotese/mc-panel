@@ -10,6 +10,17 @@ export interface UploadOptions {
   onProgress?(loaded: number, total: number): void
 }
 
+/**
+ * The connection broke off before the whole file was sent. Over HTTP/1.1 an early answer of the panel (409 file_exists,
+ * 413, 507) can reach the browser like this, because the server closes the connection while the upload still runs.
+ */
+export class UploadInterruptedError extends Error {
+  constructor() {
+    super('Upload interrupted')
+    this.name = 'UploadInterruptedError'
+  }
+}
+
 function parse(text: string): unknown {
   try {
     return text ? (JSON.parse(text) as unknown) : null
@@ -47,8 +58,11 @@ function send(serverId: number, path: string, file: Blob, options: UploadOptions
     options.signal?.addEventListener('abort', onAbort, { once: true })
     const done = () => options.signal?.removeEventListener('abort', onAbort)
 
+    let sent = 0
     xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) options.onProgress?.(event.loaded, event.total)
+      if (!event.lengthComputable) return
+      sent = event.loaded
+      options.onProgress?.(event.loaded, event.total)
     }
     xhr.onabort = () => {
       done()
@@ -56,7 +70,7 @@ function send(serverId: number, path: string, file: Blob, options: UploadOptions
     }
     xhr.onerror = () => {
       done()
-      reject(new TypeError('Network error'))
+      reject(sent < file.size ? new UploadInterruptedError() : new TypeError('Network error'))
     }
     xhr.onload = () => {
       done()

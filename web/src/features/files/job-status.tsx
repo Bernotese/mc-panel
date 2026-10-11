@@ -8,8 +8,11 @@ export function JobStatus({ job }: { job: FileJob }) {
   const { t } = useTranslation()
   const fmt = useFormat()
   return (
-    <div role="status" className="space-y-2 rounded-md border p-3 text-sm">
-      <p className="font-medium">{t('files.extract.running', { name: baseName(job.path) })}</p>
+    <div className="space-y-2 rounded-md border p-3 text-sm">
+      {/* Only the title is a live region: the counts change with every poll and would be read out every 2 s. */}
+      <p role="status" className="font-medium">
+        {t('files.extract.running', { name: baseName(job.path) })}
+      </p>
       <progress
         className="h-1.5 w-full"
         value={job.bytes}

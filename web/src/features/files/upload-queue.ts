@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { isApiError } from '@/api/errors'
 import { MAX_UPLOAD_BYTES } from './format'
 import { componentProblem, joinPath } from './path'
-import { uploadFile, type UploadTransport } from './upload'
+import { UploadInterruptedError, uploadFile, type UploadTransport } from './upload'
 
 export type UploadStatus = 'queued' | 'uploading' | 'conflict' | 'done' | 'failed' | 'cancelled' | 'skipped'
 
@@ -70,16 +70,24 @@ export function nextToStart(items: UploadItem[]): UploadItem | undefined {
 export interface UploadQueueOptions {
   onUploaded(): void
   transport?: UploadTransport
+  /**
+   * Whether the (cached) listing already shows a file at path: such an upload asks "overwrite?" before a byte is sent.
+   * The panel's own 409 can otherwise arrive as a reset connection while the browser still sends (HTTP/1.1).
+   */
+  exists?(path: string): boolean
 }
 
-export function useUploadQueue(serverId: number, { onUploaded, transport = uploadFile }: UploadQueueOptions) {
+/** Uploads that leaving the files tab would cancel or drop. */
+const PENDING: ReadonlySet<UploadStatus> = new Set<UploadStatus>(['queued', 'uploading', 'conflict'])
+
+export function useUploadQueue(serverId: number, { onUploaded, transport = uploadFile, exists }: UploadQueueOptions) {
   const [items, dispatch] = useReducer(uploadReducer, [])
   const files = useRef(new Map<number, File>())
   const controllers = useRef(new Map<number, AbortController>())
   const seq = useRef(0)
-  const latest = useRef({ onUploaded, transport })
+  const latest = useRef({ onUploaded, transport, exists })
   useEffect(() => {
-    latest.current = { onUploaded, transport }
+    latest.current = { onUploaded, transport, exists }
   })
 
   const next = nextToStart(items)
@@ -91,6 +99,10 @@ export function useUploadQueue(serverId: number, { onUploaded, transport = uploa
     if (nextId === undefined || nextPath === undefined) return
     const file = files.current.get(nextId)
     if (!file) return
+    if (!nextOverwrite && latest.current.exists?.(nextPath)) {
+      dispatch({ type: 'conflict', id: nextId })
+      return
+    }
     const controller = new AbortController()
     controllers.current.set(nextId, controller)
     dispatch({ type: 'start', id: nextId })
@@ -108,6 +120,7 @@ export function useUploadQueue(serverId: number, { onUploaded, transport = uploa
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') dispatch({ type: 'cancel', id: nextId })
         else if (isApiError(err, 'file_exists') && !nextOverwrite) dispatch({ type: 'conflict', id: nextId })
+        else if (err instanceof UploadInterruptedError) dispatch({ type: 'failed', id: nextId, error: 'files.uploads.interrupted' })
         else dispatch({ type: 'failed', id: nextId, error: err })
       })
       .finally(() => controllers.current.delete(nextId))
@@ -159,5 +172,7 @@ export function useUploadQueue(serverId: number, { onUploaded, transport = uploa
   const skip = useCallback((id: number) => dispatch({ type: 'skip', id }), [])
   const clear = useCallback(() => dispatch({ type: 'clear' }), [])
 
-  return { items, add, cancel, overwrite, skip, clear }
+  const active = items.some((i) => PENDING.has(i.status))
+
+  return { items, active, add, cancel, overwrite, skip, clear }
 }

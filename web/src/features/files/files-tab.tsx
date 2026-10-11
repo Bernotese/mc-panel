@@ -1,27 +1,29 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useBlocker } from '@tanstack/react-router'
 import { ArrowDownWideNarrow, ArrowUpNarrowWide, FilePlus, FolderPlus, Upload } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { isApiError } from '@/api/errors'
-import type { FileEntry, Server } from '@/api/types'
+import type { FileEntry, FileList as FileListing, Server } from '@/api/types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { NativeSelect } from '@/components/native-select'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { SectionCard } from '@/features/profile/section-card'
 import { errorMessage, useErrorToast } from '@/lib/error-message'
-import { deleteFile, fileListQueryOptions, fileListsKey, makeDirectory, renameFile, writeFile } from './api'
+import { deleteFile, fileListKey, fileListQueryOptions, fileListsKey, makeDirectory, renameFile, writeFile } from './api'
+import { leaveTexts, type FilesBusy } from './busy'
 import { ExtractDialog } from './extract-dialog'
 import { FileEditor } from './file-editor'
 import { FileList } from './file-list'
-import { sortEntries, type SortKey } from './format'
+import { extractFailureReason, sortEntries, type SortKey } from './format'
 import { JobStatus } from './job-status'
 import { NameDialog } from './name-dialog'
 import { useFileJob } from './use-file-job'
 import { UploadList } from './upload-list'
 import { useUploadQueue } from './upload-queue'
-import { baseName, breadcrumbs, cleanPath, componentProblem, joinPath, targetProblem } from './path'
+import { baseName, breadcrumbs, cleanPath, componentProblem, joinPath, parentPath, targetProblem } from './path'
 
 type DialogState = { kind: 'mkdir' } | { kind: 'newfile' } | { kind: 'rename'; entry: FileEntry } | { kind: 'delete'; entry: FileEntry } | { kind: 'extract'; path: string }
 
@@ -31,11 +33,11 @@ export interface FilesTabProps {
   server: Server
   /** Admins: link from the server.properties hint to the settings tab (Task 15). */
   onOpenSettings?: () => void
-  /** Reports unsaved editor changes to the detail page (Task 15). */
-  onDirtyChange?: (dirty: boolean) => void
+  /** Reports what leaving the tab would lose (unsaved editor changes, pending uploads) to the detail page. */
+  onBusyChange?: (busy: FilesBusy | null) => void
 }
 
-export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProps) {
+export function FilesTab({ server, onOpenSettings, onBusyChange }: FilesTabProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const notifyError = useErrorToast()
@@ -49,7 +51,25 @@ export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProp
   const dirLabel = dir || t('files.root')
 
   const refresh = useCallback(() => queryClient.invalidateQueries({ queryKey: fileListsKey(server.id) }), [queryClient, server.id])
-  const uploads = useUploadQueue(server.id, { onUploaded: () => void refresh() })
+  // A file the cached listing already shows is asked about before it is sent (review F2).
+  const exists = useCallback(
+    (path: string) =>
+      queryClient.getQueryData<FileListing>(fileListKey(server.id, parentPath(path)))?.entries.some((e) => e.name === baseName(path) && e.type === 'file') ??
+      false,
+    [queryClient, server.id],
+  )
+  const uploads = useUploadQueue(server.id, { onUploaded: () => void refresh(), exists })
+  const [editorDirty, setEditorDirty] = useState(false)
+  const unsaved = editorDirty && editing !== null
+  const pendingUploads = uploads.active
+  const busy: FilesBusy | null = unsaved || pendingUploads ? { unsaved, uploads: pendingUploads } : null
+  useEffect(() => {
+    onBusyChange?.(unsaved || pendingUploads ? { unsaved, uploads: pendingUploads } : null)
+  }, [unsaved, pendingUploads, onBusyChange])
+  useEffect(() => () => onBusyChange?.(null), [onBusyChange])
+  // Route changes and reloads; tab switches are asked by the detail page (onBusyChange). Leaving cancels the uploads.
+  const blocker = useBlocker({ shouldBlockFn: () => busy !== null, enableBeforeUnload: () => busy !== null, withResolver: true })
+  const leave = leaveTexts(busy ?? { unsaved: true, uploads: false }, t)
   const jobQuery = useFileJob(server.id, true)
   const job = jobQuery.data?.job ?? null
   const lastState = useRef(job?.state)
@@ -58,7 +78,10 @@ export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProp
     lastState.current = job?.state
     if (previous !== 'running' || !job || job.state === 'running') return
     if (job.state === 'done') toast.success(t('files.extract.done', { name: baseName(job.path), dest: job.dest }))
-    else toast.error(t('files.extract.failed', { name: baseName(job.path), error: job.error }))
+    else {
+      const reason = t(`files.extract.reason.${extractFailureReason(job.error)}`)
+      toast.error(t('files.extract.failed', { name: baseName(job.path), reason }), { description: job.error || undefined })
+    }
     void refresh()
   }, [job, refresh, t])
   const fileInput = useRef<HTMLInputElement>(null)
@@ -80,9 +103,13 @@ export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProp
     }
   }, [])
 
+  // No data directory yet: there is nothing to create files in (review F10).
+  const neverStarted = list.isError && isApiError(list.error, 'not_found') && dir === ''
+
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault()
     setDragging(false)
+    if (neverStarted) return
     // Folders cannot be uploaded (one file per request); name them instead of silently dropping them.
     const dropped: File[] = []
     let folders = 0
@@ -222,96 +249,90 @@ export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProp
 
       {job?.state === 'running' ? <JobStatus job={job} /> : null}
 
-      <SectionCard title={t('files.title')} actions={editing === null ? toolbar : undefined}>
+      <SectionCard title={t('files.title')} actions={editing === null && !neverStarted ? toolbar : undefined}>
         {editing !== null ? (
-          <FileEditor
-            server={server}
-            path={editing}
-            onClose={() => setEditing(null)}
-            onDirtyChange={onDirtyChange}
-            onOpenSettings={onOpenSettings}
-          />
+          <FileEditor server={server} path={editing} onClose={() => setEditing(null)} onDirtyChange={setEditorDirty} onOpenSettings={onOpenSettings} />
         ) : (
-        <div
-          className={dragging ? 'ring-primary relative space-y-3 rounded-md ring-2' : 'relative space-y-3'}
-          onDragOver={(event) => {
-            if (!event.dataTransfer.types.includes('Files')) return
-            event.preventDefault()
-            setDragging(true)
-          }}
-          onDragLeave={(event) => {
-            // Moving over a child fires dragleave on the zone too: only a real exit clears the highlight.
-            if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
-            setDragging(false)
-          }}
-          onDrop={onDrop}
-        >
-          {dragging ? (
-            <p className="bg-background/90 pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md text-sm font-medium">
-              {t('files.toolbar.drop', { dir: dirLabel })}
-            </p>
-          ) : null}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <nav aria-label={t('files.breadcrumbs')} className="min-w-0">
-              <ol className="flex flex-wrap items-center gap-1 text-sm">
-                <li>
-                  {dir === '' ? (
-                    <span aria-current="page" className="font-medium">
-                      {t('files.root')}
-                    </span>
-                  ) : (
-                    <Button type="button" variant="link" className="h-auto p-0" onClick={() => setDir('')}>
-                      {t('files.root')}
-                    </Button>
-                  )}
-                </li>
-                {breadcrumbs(dir).map((crumb, i, all) => (
-                  <li key={crumb.path} className="flex items-center gap-1">
-                    <span aria-hidden="true" className="text-muted-foreground">
-                      /
-                    </span>
-                    {i === all.length - 1 ? (
-                      <span aria-current="page" className="font-medium break-all">
-                        {crumb.name}
+          <div
+            className={dragging ? 'ring-primary relative space-y-3 rounded-md ring-2' : 'relative space-y-3'}
+            onDragOver={(event) => {
+              if (!event.dataTransfer.types.includes('Files') || neverStarted) return
+              event.preventDefault()
+              setDragging(true)
+            }}
+            onDragLeave={(event) => {
+              // Moving over a child fires dragleave on the zone too: only a real exit clears the highlight.
+              if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+              setDragging(false)
+            }}
+            onDrop={onDrop}
+          >
+            {dragging ? (
+              <p className="bg-background/90 pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md text-sm font-medium">
+                {t('files.toolbar.drop', { dir: dirLabel })}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <nav aria-label={t('files.breadcrumbs')} className="min-w-0">
+                <ol className="flex flex-wrap items-center gap-1 text-sm">
+                  <li>
+                    {dir === '' ? (
+                      <span aria-current="page" className="font-medium">
+                        {t('files.root')}
                       </span>
                     ) : (
-                      <Button type="button" variant="link" className="h-auto p-0" onClick={() => setDir(crumb.path)}>
-                        {crumb.name}
+                      <Button type="button" variant="link" className="h-auto p-0" onClick={() => setDir('')}>
+                        {t('files.root')}
                       </Button>
                     )}
                   </li>
-                ))}
-              </ol>
-            </nav>
-            <div className="flex items-center gap-2">
-              <label className="sr-only" htmlFor={`files-sort-${server.id}`}>
-                {t('files.sort.label')}
-              </label>
-              <NativeSelect id={`files-sort-${server.id}`} value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
-                {SORT_KEYS.map((key) => (
-                  <option key={key} value={key}>
-                    {t(`files.sort.${key}`)}
-                  </option>
-                ))}
-              </NativeSelect>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                aria-label={descending ? t('files.sort.descending') : t('files.sort.ascending')}
-                onClick={() => setDescending((d) => !d)}
-              >
-                {descending ? <ArrowDownWideNarrow aria-hidden="true" /> : <ArrowUpNarrowWide aria-hidden="true" />}
-              </Button>
+                  {breadcrumbs(dir).map((crumb, i, all) => (
+                    <li key={crumb.path} className="flex items-center gap-1">
+                      <span aria-hidden="true" className="text-muted-foreground">
+                        /
+                      </span>
+                      {i === all.length - 1 ? (
+                        <span aria-current="page" className="font-medium break-all">
+                          {crumb.name}
+                        </span>
+                      ) : (
+                        <Button type="button" variant="link" className="h-auto p-0" onClick={() => setDir(crumb.path)}>
+                          {crumb.name}
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              </nav>
+              <div className="flex items-center gap-2">
+                <label className="sr-only" htmlFor={`files-sort-${server.id}`}>
+                  {t('files.sort.label')}
+                </label>
+                <NativeSelect id={`files-sort-${server.id}`} value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
+                  {SORT_KEYS.map((key) => (
+                    <option key={key} value={key}>
+                      {t(`files.sort.${key}`)}
+                    </option>
+                  ))}
+                </NativeSelect>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label={descending ? t('files.sort.descending') : t('files.sort.ascending')}
+                  onClick={() => setDescending((d) => !d)}
+                >
+                  {descending ? <ArrowDownWideNarrow aria-hidden="true" /> : <ArrowUpNarrowWide aria-hidden="true" />}
+                </Button>
+              </div>
             </div>
+            {notice ? (
+              <p role="alert" className="text-destructive text-sm">
+                {notice}
+              </p>
+            ) : null}
+            {body()}
           </div>
-          {notice ? (
-            <p role="alert" className="text-destructive text-sm">
-              {notice}
-            </p>
-          ) : null}
-          {body()}
-        </div>
         )}
       </SectionCard>
 
@@ -379,6 +400,15 @@ export function FilesTab({ server, onOpenSettings, onDirtyChange }: FilesTabProp
           onSubmit={(to) => rename(dialog.entry, to)}
         />
       ) : null}
+      <ConfirmDialog
+        open={blocker.status === 'blocked'}
+        onOpenChange={(open) => (open ? undefined : blocker.reset?.())}
+        title={leave.title}
+        description={leave.description}
+        confirmLabel={leave.confirm}
+        destructive
+        onConfirm={() => blocker.proceed?.()}
+      />
       {dialog?.kind === 'delete' ? (
         <ConfirmDialog
           open
