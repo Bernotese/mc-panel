@@ -27,7 +27,7 @@ describe('ServerDetailPage', () => {
     await renderWithProviders(<ServerDetailPage serverId={1} />, { path: '/servers/1', me: loginAs('admin') })
 
     expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Übersicht', 'Konsole', 'Einstellungen', 'Löschen'])
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Übersicht', 'Konsole', 'Spieler', 'Einstellungen', 'Löschen'])
     const state = screen.getByRole('region', { name: 'Zustand' })
     expect(within(state).getByText('Läuft')).toBeInTheDocument()
     expect(within(state).getByText('survival.mc.example.com')).toBeInTheDocument()
@@ -94,6 +94,7 @@ describe('ServerDetailPage', () => {
     db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.console'] }])
     await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
     expect(await screen.findByRole('tab', { name: 'Konsole' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Spieler' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'Einstellungen' })).not.toBeInTheDocument()
   })
 

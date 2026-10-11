@@ -53,6 +53,7 @@ const DYNAMIC_KEYS = [
     (s) => `console.connection.${s}`,
   ),
   ...['empty', 'too_long', 'control'].map((p) => `console.validation.${p}`),
+  ...['name_invalid', 'reason_too_long', 'reason_control'].map((p) => `players.validation.${p}`),
   ...['not_configured', 'unknown', 'creating', 'starting', 'running', 'stopping', 'stopped', 'restarting', 'error'].map(
     (s) => `servers.state.${s}`,
   ),
