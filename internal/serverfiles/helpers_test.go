@@ -312,7 +312,9 @@ func (f *fakeFiles) Download(ctx context.Context, id int64, path string) (filesa
 	if d.Body != nil {
 		// like the real client, the body fails once the request context is done
 		f.dlCtx, f.dlClosed = ctx, make(chan struct{})
-		d.Body = &ctxBody{ctx: ctx, rc: d.Body, closed: f.dlClosed}
+		body := &ctxBody{ctx: ctx, rc: d.Body, closed: f.dlClosed}
+		context.AfterFunc(ctx, func() { _ = body.Close() }) // like the Transport: a read in progress ends
+		d.Body = body
 	}
 	return d, nil
 }

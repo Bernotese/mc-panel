@@ -1,6 +1,7 @@
 package serverfiles
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -58,25 +59,33 @@ func ignoreUnsupported(err error) error {
 var errUploadDone = errors.New("the upload was already answered")
 
 // deadlineReader sets a fresh read deadline before every read of the request body: the
-// server's ReadTimeout only bounds silence, not the length of an upload. At the end of the
-// body it removes the deadline: net/http then watches the connection in a background read
-// with the last deadline and would cancel the request context when it expires, although the
-// service may still be storing the file (a closed connection still cancels it). After finish
-// it never touches the connection again (a late read by a client goroutine fails).
+// server's ReadTimeout only bounds silence, not the length of an upload.
+//
+// Once the body has reported io.EOF it never sets a deadline again. When the body hits EOF,
+// net/http clears the read deadline and starts a background read that watches the connection
+// and cancels the request context if that read fails. The HTTP client of the files service
+// (net/http's Transport) reads once more after the announced length to detect extra data; a
+// deadline set for that read would apply to the background read and cancel the upload while
+// the service is still storing the file. After finish the reader never touches the
+// connection again (a late read by a client goroutine fails).
 type deadlineReader struct {
-	r     io.Reader
-	dl    func() error // sets a fresh read deadline
-	clear func() error // removes the read deadline
+	r  io.Reader
+	dl func() error // sets a fresh read deadline
 
 	mu   sync.Mutex
+	eof  bool
 	done bool
 }
 
 func (d *deadlineReader) Read(p []byte) (int, error) {
 	d.mu.Lock()
-	if d.done {
+	switch {
+	case d.done:
 		d.mu.Unlock()
 		return 0, errUploadDone
+	case d.eof:
+		d.mu.Unlock()
+		return 0, io.EOF
 	}
 	err := d.dl()
 	d.mu.Unlock()
@@ -86,9 +95,7 @@ func (d *deadlineReader) Read(p []byte) (int, error) {
 	n, err := d.r.Read(p)
 	if errors.Is(err, io.EOF) {
 		d.mu.Lock()
-		if !d.done {
-			_ = d.clear() // best effort: on failure the last deadline stays
-		}
+		d.eof = true
 		d.mu.Unlock()
 	}
 	return n, err
@@ -100,6 +107,26 @@ func (d *deadlineReader) finish() {
 	d.done = true
 	d.mu.Unlock()
 }
+
+// idleReader cancels the service's download when a read waits longer than timeout for the
+// next bytes: a stalled service must not hold the browser's connection forever. The timer
+// only runs while the handler waits for the service, not while it writes to the browser
+// (the write deadline bounds that).
+type idleReader struct {
+	r       io.Reader
+	timer   *time.Timer
+	timeout time.Duration
+}
+
+func (i *idleReader) Read(p []byte) (int, error) {
+	i.timer.Reset(i.timeout)
+	n, err := i.r.Read(p)
+	i.timer.Stop()
+	return n, err
+}
+
+// errDownloadIdle is the cancel cause of a download whose service stopped sending.
+var errDownloadIdle = errors.New("the file service sent nothing for too long")
 
 // deadlineWriter sets a fresh write deadline before every write and flushes after it, so the
 // browser receives the download as it arrives (decision 2).
@@ -168,18 +195,12 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 	rc := http.NewResponseController(w)
-	clearRead := func() error { return ignoreUnsupported(rc.SetReadDeadline(time.Time{})) }
-	if r.ContentLength == 0 {
-		// No body to read: net/http's background read already watches the connection with
-		// the request's read deadline (see deadlineReader).
-		if err := clearRead(); err != nil {
-			h.log.DebugContext(ctx, "clear read deadline", "err", err)
-		}
-	}
 	body := &deadlineReader{
-		r:     io.LimitReader(r.Body, r.ContentLength),
-		dl:    func() error { return ignoreUnsupported(rc.SetReadDeadline(h.ioClock.Now().Add(h.ioTimeout))) },
-		clear: clearRead,
+		r:  io.LimitReader(r.Body, r.ContentLength),
+		dl: func() error { return ignoreUnsupported(rc.SetReadDeadline(h.ioClock.Now().Add(h.ioTimeout))) },
+		// An empty body is at its end from the start (net/http already runs the background
+		// read): a read must not arm a deadline.
+		eof: r.ContentLength == 0,
 	}
 	res, err := h.files.Upload(ctx, s.ID, p, overwrite, r.ContentLength, body)
 	body.finish()
@@ -198,9 +219,10 @@ func (h *Handler) handleUpload(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rc := http.NewResponseController(w)
-	// A GET has no body, so net/http's background read watches the connection with the
-	// request's read deadline (ReadTimeout) and would cancel ctx – and the service's download –
-	// when it expires. A closed connection still cancels ctx.
+	// Safeguard: net/http clears the read deadline itself before it runs a handler for a
+	// request without body (its background read then watches the connection, and a closed
+	// connection cancels ctx). Clearing it here keeps a long download independent of the
+	// server's ReadTimeout even if that behaviour changes.
 	if err := ignoreUnsupported(rc.SetReadDeadline(time.Time{})); err != nil {
 		h.log.DebugContext(ctx, "clear read deadline", "err", err)
 	}
@@ -212,7 +234,10 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	d, err := h.files.Download(ctx, s.ID, p)
+	// dctx ends the service's download when the browser leaves (ctx) or the service stalls.
+	dctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	d, err := h.files.Download(dctx, s.ID, p)
 	if err != nil {
 		h.record(ctx, audit.ActionFileDownload, s.ID, audit.ResultFailure, map[string]any{"path": p})
 		h.writeFilesError(w, r, err)
@@ -247,12 +272,23 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	hdr.Set("Content-Disposition", attachment(name))
 	w.WriteHeader(http.StatusOK)
-	res := audit.ResultSuccess
-	if _, err := io.Copy(dw, d.Body); err != nil {
-		res = audit.ResultFailure
+	idle := &idleReader{r: d.Body, timer: time.AfterFunc(h.ioTimeout, func() { cancel(errDownloadIdle) }), timeout: h.ioTimeout}
+	idle.timer.Stop()
+	_, err = io.Copy(dw, idle)
+	if err == nil {
+		h.record(ctx, audit.ActionFileDownload, s.ID, audit.ResultSuccess, map[string]any{"path": p})
+		return
+	}
+	h.record(ctx, audit.ActionFileDownload, s.ID, audit.ResultFailure, map[string]any{"path": p})
+	if errors.Is(context.Cause(dctx), errDownloadIdle) {
+		h.log.WarnContext(ctx, "download aborted, the file service stalled", "server_id", s.ID, "path", p)
+	} else {
 		h.log.DebugContext(ctx, "download aborted", "server_id", s.ID, "path", p, "err", err)
 	}
-	h.record(ctx, audit.ActionFileDownload, s.ID, res, map[string]any{"path": p})
+	// The status line is out: end the response without its regular end (no final chunk of a
+	// zip stream, a short body for a file), so the browser reports a failed download instead
+	// of keeping a truncated file.
+	panic(http.ErrAbortHandler)
 }
 
 // attachment returns a Content-Disposition value with an ASCII fallback name and the exact
