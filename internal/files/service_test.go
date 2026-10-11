@@ -273,3 +273,57 @@ func TestParentOfAndParseID(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenRegularOnlyReads(t *testing.T) {
+	s, data := newService(t)
+	put(t, data, "a.txt", "x")
+	root, err := s.open(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	for _, flag := range []int{os.O_RDWR, os.O_WRONLY, os.O_RDONLY | os.O_TRUNC, os.O_RDONLY | os.O_CREATE} {
+		if f, _, err := openRegular(root, "a.txt", flag); err == nil {
+			_ = f.Close()
+			t.Errorf("flag %#x accepted", flag)
+		}
+	}
+	if v, _ := get(t, data, "a.txt"); v != "x" {
+		t.Fatalf("file changed: %q", v)
+	}
+}
+
+func TestCleanupTempNeverFollowsSymlinks(t *testing.T) {
+	s, data := newService(t)
+	outside := filepath.Join(t.TempDir(), "outside")
+	put(t, outside, ".mcpanel-tmp-foreign", "not ours")
+	put(t, data, "real/.mcpanel-tmp-target/keep", "target of a temp-named link")
+	if err := os.Symlink(outside, filepath.Join(data, "out")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real", filepath.Join(data, "in")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real/.mcpanel-tmp-target", filepath.Join(data, ".mcpanel-tmp-link")); err != nil {
+		t.Fatal(err)
+	}
+	// A data directory with a non-canonical name is not an instance.
+	odd := filepath.Join(s.cfg.InstancesDir, "instances", "01")
+	put(t, odd, ".mcpanel-tmp-odd", "x")
+
+	if n := s.CleanupTemp(); n != 2 { // .mcpanel-tmp-link (the link) and real/.mcpanel-tmp-target
+		t.Fatalf("removed %d entries, want 2", n)
+	}
+	if _, err := os.Lstat(filepath.Join(data, ".mcpanel-tmp-link")); !os.IsNotExist(err) {
+		t.Fatalf("temp-named symlink survived: %v", err)
+	}
+	if _, ok := get(t, outside, ".mcpanel-tmp-foreign"); !ok {
+		t.Fatal("cleanup followed a symlink out of the data directory")
+	}
+	if _, ok := get(t, odd, ".mcpanel-tmp-odd"); !ok {
+		t.Fatal("cleanup touched a directory with a non-canonical id")
+	}
+	if fi, err := os.Lstat(filepath.Join(data, "in")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("symlink to a folder was touched: %v", err)
+	}
+}

@@ -3,7 +3,6 @@ package files
 import (
 	"errors"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -25,36 +24,34 @@ func (s *Service) CleanupTemp() int {
 	removed := 0
 	for _, e := range entries {
 		id, err := strconv.ParseInt(e.Name(), 10, 64)
-		if err != nil || id <= 0 || !e.IsDir() {
-			continue
+		if err != nil || id <= 0 || strconv.FormatInt(id, 10) != e.Name() || !e.IsDir() {
+			continue // only canonical names are data directories (instanceDir)
 		}
 		root, err := s.open(id)
 		if err != nil {
 			s.log.Warn("files: temp cleanup skipped an instance", "id", id, "err", err)
 			continue
 		}
-		removed += cleanupRoot(root, s.log, id)
+		removed += s.cleanupRoot(root, id)
 		_ = root.Close()
 	}
 	return removed
 }
 
-// cleanupRoot walks one data directory without following symlinks (fs.WalkDir only descends
-// into real folders) and removes every temp entry it finds.
-func cleanupRoot(root *os.Root, log *slog.Logger, id int64) int {
+// cleanupRoot walks one data directory without following symlinks (walkTree) and removes
+// every temp entry it finds; a temp-named symlink is removed as a link.
+func (s *Service) cleanupRoot(root *os.Root, id int64) int {
 	var victims []string
-	_ = fs.WalkDir(root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
+	_ = walkTree(root, "", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil //nolint:nilerr // unreadable parts are skipped, the rest is still cleaned up
-		}
-		if p != "." && strings.HasPrefix(d.Name(), tempPrefix) {
-			victims = append(victims, p)
-			if d.IsDir() {
-				return fs.SkipDir
-			}
+			s.log.Debug("files: temp cleanup skipped a folder", "id", id, "path", p, "err", err)
 			return nil
 		}
-		if d.IsDir() && p != "." && strings.Count(p, "/") >= cleanupMaxDepth-1 {
+		if strings.HasPrefix(d.Name(), tempPrefix) {
+			victims = append(victims, p)
+			return fs.SkipDir
+		}
+		if d.IsDir() && strings.Count(p, "/") >= cleanupMaxDepth-1 {
 			return fs.SkipDir
 		}
 		return nil
@@ -62,7 +59,7 @@ func cleanupRoot(root *os.Root, log *slog.Logger, id int64) int {
 	n := 0
 	for _, v := range victims {
 		if err := root.RemoveAll(v); err != nil {
-			log.Warn("files: cannot remove a leftover temp entry", "id", id, "path", v, "err", err)
+			s.log.Warn("files: cannot remove a leftover temp entry", "id", id, "path", v, "err", err)
 			continue
 		}
 		n++
