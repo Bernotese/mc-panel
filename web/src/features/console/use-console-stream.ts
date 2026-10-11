@@ -3,7 +3,16 @@ import { isApiError } from '@/api/errors'
 import { consoleStreamUrl, probeConsoleStream } from './api'
 import { initialLogState, logReducer, parseLineEvent, parseStateEvent, type IncomingLine, type LogEntry } from './log-model'
 
-export type ConnectionState = 'connecting' | 'live' | 'stopped' | 'reconnecting' | 'unavailable' | 'forbidden' | 'not_found' | 'unauthorized'
+export type ConnectionState =
+  | 'connecting'
+  | 'live'
+  | 'stopped'
+  | 'reconnecting'
+  | 'unavailable'
+  | 'too_many'
+  | 'forbidden'
+  | 'not_found'
+  | 'unauthorized'
 
 export interface StreamTiming {
   /** Lines arriving within this window are rendered together. */
@@ -28,8 +37,9 @@ export function classifyProbe(err: unknown, timing: StreamTiming): { state: Conn
     if (err.status === 403) return { state: 'forbidden', retryMs: null }
     if (err.status === 404) return { state: 'not_found', retryMs: null }
     if (err.status === 429) {
+      // The panel's limit of open consoles per user: say so, and try again until one is closed.
       const retryMs = err.retryAfterSeconds !== undefined ? Math.max(err.retryAfterSeconds * 1000, timing.reconnectMs) : timing.retryMs
-      return { state: 'reconnecting', retryMs }
+      return { state: 'too_many', retryMs }
     }
   }
   return { state: 'unavailable', retryMs: timing.retryMs }
