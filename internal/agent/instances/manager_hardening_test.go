@@ -64,9 +64,9 @@ func TestStatusIsBounded(t *testing.T) {
 	}
 }
 
-// TestPrivateDirectoriesAreEnforced: instances/ and deleted/ are 0700 on every
-// ensure/remove, also when they existed with looser modes.
-func TestPrivateDirectoriesAreEnforced(t *testing.T) {
+// TestLayoutModesAreEnforced: instances/ is 0750 (group = mc_user, so mcpanel-files can enter it)
+// and deleted/ stays 0700 on every ensure/remove, also when they existed with other modes.
+func TestLayoutModesAreEnforced(t *testing.T) {
 	e := newEnv(t)
 	for _, d := range []string{"instances", "deleted"} {
 		p := filepath.Join(e.dir, d)
@@ -78,19 +78,21 @@ func TestPrivateDirectoriesAreEnforced(t *testing.T) {
 		}
 	}
 	e.ensure(t, ensureReq(1, "survival", 1))
-	if got := perm(t, filepath.Join(e.dir, "instances")); got != 0o700 {
-		t.Fatalf("instances/ = %v after ensure, want 0700", got)
+	if got := perm(t, filepath.Join(e.dir, "instances")); got != 0o750 {
+		t.Fatalf("instances/ = %v after ensure, want 0750", got)
 	}
 	e.do(t, func(ctx context.Context) error { return e.m.Remove(ctx, 1) })
 	if got := perm(t, filepath.Join(e.dir, "deleted")); got != 0o700 {
 		t.Fatalf("deleted/ = %v after remove, want 0700", got)
 	}
-	if err := os.Chmod(filepath.Join(e.dir, "instances"), 0o777); err != nil {
-		t.Fatal(err)
-	}
-	e.do(t, func(ctx context.Context) error { return e.m.Remove(ctx, 1) })
-	if got := perm(t, filepath.Join(e.dir, "instances")); got != 0o700 {
-		t.Fatalf("instances/ = %v after remove, want 0700", got)
+	for _, mode := range []os.FileMode{0o777, 0o700} {
+		if err := os.Chmod(filepath.Join(e.dir, "instances"), mode); err != nil {
+			t.Fatal(err)
+		}
+		e.do(t, func(ctx context.Context) error { return e.m.Remove(ctx, 1) })
+		if got := perm(t, filepath.Join(e.dir, "instances")); got != 0o750 {
+			t.Fatalf("instances/ = %v after remove (was %v), want 0750", got, mode)
+		}
 	}
 }
 

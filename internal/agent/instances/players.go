@@ -72,7 +72,8 @@ func (m *Manager) Players(_ context.Context, id int64) (agentapi.PlayersResponse
 		return resp, err
 	}
 	defer func() { _ = root.Close() }()
-	// instances/ is root-only, so <id> cannot be swapped after the Lstat; check anyway.
+	// instances/ is not writable by the container user (root:<mc gid> 0750), so <id> cannot be
+	// swapped after the Lstat; check anyway.
 	if opened, err := root.Stat("."); err != nil || !os.SameFile(fi, opened) {
 		return resp, fmt.Errorf("data directory %s changed while it was opened", dir)
 	}

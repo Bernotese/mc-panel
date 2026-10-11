@@ -4,6 +4,7 @@ import type {
   AuditEntry,
   AuditResult,
   Catalog,
+  FileJob,
   InstanceConfig,
   InstanceType,
   IPRule,
@@ -115,6 +116,55 @@ export interface MockServer {
 const MIB = 1024 * 1024
 const GIB = 1024 * MIB
 
+/** A node of a server's mock data directory. Text files carry content; binary files only a size. */
+export interface MockNode {
+  type: 'file' | 'dir' | 'symlink' | 'other'
+  mtime: number
+  size: number
+  content?: string // text files only
+  children?: Record<string, MockNode> // dirs only
+  target?: string // symlinks only
+}
+
+export interface MockFileJob extends FileJob {
+  startedMs: number
+}
+
+function textNode(content: string, mtime: number): MockNode {
+  return { type: 'file', mtime, size: new TextEncoder().encode(content).length, content }
+}
+
+function binNode(size: number, mtime: number): MockNode {
+  return { type: 'file', mtime, size }
+}
+
+function dirNode(mtime: number, children: Record<string, MockNode> = {}): MockNode {
+  return { type: 'dir', mtime, size: 0, children }
+}
+
+/** The data directories of the seeded servers (spec 3b mock V5). */
+export function mockTree(now: number, running: boolean): MockNode {
+  const t = now - 2 * HOUR
+  const props = 'motd=Unser Server\ndifficulty=normal\nrcon.password=********\nenable-rcon=true\n'
+  const tree: Record<string, MockNode> = {
+    'server.properties': textNode(props, t),
+    'ops.json': textNode('[]\n', t),
+    '.rcon-cli.env': textNode('password=secret\n', t), // hidden by the API
+    world: dirNode(t, { 'level.dat': binNode(4096, t) }),
+    logs: dirNode(t, { 'latest.log': textNode('[12:00:00 INFO]: Done (3.2s)! For help, type "help"\n', t) }),
+    'world-backup.zip': binNode(30 * MIB, t - DAY),
+  }
+  if (running) {
+    tree['bukkit.yml'] = textNode('settings:\n  allow-end: true\n', t)
+    tree.plugins = dirNode(t, {
+      'EssentialsX.jar': binNode(2 * MIB, t),
+      Essentials: dirNode(t, { 'config.yml': textNode('ops-name-color: "4"\n', t) }),
+    })
+    tree.current = { type: 'symlink', mtime: t, size: 0, target: 'world' }
+  }
+  return dirNode(t, tree)
+}
+
 /** Every property set: spec §7 defaults (motd = server name) overridden by p. */
 export function resolveProperties(name: string, p: ServerProperties = {}): Required<ServerProperties> {
   return {
@@ -186,6 +236,8 @@ export interface MockDb {
   sessions: MockSession[]
   currentSessionId: number | null
   servers: MockServer[]
+  files: Record<number, MockNode> // data directory per server id (missing = never started)
+  fileJobs: Record<number, MockFileJob>
   serverSettings: MockServerSettings
   catalogs: Partial<Record<InstanceType, Catalog>>
   grants: Map<number, PermissionGrant[]>
@@ -360,6 +412,8 @@ function seed(now: number): MockDb {
       },
       { id: 3, name: 'lobby', instance: null, status: notConfiguredStatus(), revision: 0, runningRevision: 0, players: emptyPlayers() },
     ],
+    files: { 1: mockTree(now, true), 2: mockTree(now, false) },
+    fileJobs: {},
     serverSettings: { base_domain: 'mc.example.com', curseforge_api_key_set: false, docker: 'ok' },
     catalogs: {
       vanilla: {

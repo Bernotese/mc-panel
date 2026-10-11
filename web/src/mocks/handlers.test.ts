@@ -10,12 +10,89 @@ const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../
 describe('mock coverage', () => {
   it('mocks every operationId of api/openapi.yaml exactly once', () => {
     const ids = [...openapiYaml.matchAll(/operationId:\s*(\w+)/g)].map((m) => m[1]).sort()
-    expect(ids).toHaveLength(66)
+    expect(ids).toHaveLength(76)
     expect(operations.map((o) => o.operationId).sort()).toEqual(ids)
   })
 })
 
 describe('mock behaviour', () => {
+  it('lists files without the RCON files and edits with a conflict check', async () => {
+    const me = loginAs('admin')
+    const root = (await callApi('GET', '/servers/1/files')).body as { entries: Array<{ name: string; type: string }> }
+    const names = root.entries.map((e) => e.name)
+    expect(names).toContain('server.properties')
+    expect(names).not.toContain('.rcon-cli.env')
+    expect(root.entries[0].type).toBe('dir') // folders first
+    const read = await callApi('GET', '/servers/1/files/content?path=server.properties')
+    expect(field(read.body, 'content')).toContain('rcon.password=********')
+    const mtime = field(read.body, 'mtime') as number
+    const save = (expected: number | null) =>
+      callApi('PUT', '/servers/1/files/content', { body: { path: 'server.properties', content: 'motd=x\n', expected_mtime: expected }, csrf: me.csrf_token })
+    expect((await save(mtime - 1)).status).toBe(409)
+    expect(field((await save(mtime - 1)).body, 'error')).toBe('file_modified')
+    expect((await save(mtime)).status).toBe(200)
+    expect(field((await save(null)).body, 'error')).toBe('file_exists')
+    expect(db.audit.at(-1)).toMatchObject({ action: 'file.write', details: { path: 'server.properties' } })
+    expect(field((await callApi('GET', '/servers/1/files/content?path=plugins/EssentialsX.jar')).body, 'error')).toBe('not_text')
+    expect((await callApi('GET', '/servers/1/files/content?path=../x')).status).toBe(400)
+  })
+
+  it('uploads, manages and extracts files', async () => {
+    const me = loginAs('admin')
+    const upload = (path: string, overwrite = false) =>
+      fetch(`${window.location.origin}/api/servers/1/files/upload?path=${encodeURIComponent(path)}&overwrite=${overwrite}`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': me.csrf_token, 'Content-Type': 'application/octet-stream' },
+        body: new Uint8Array([1, 2, 3]),
+      })
+    expect((await upload('plugins/new.jar')).status).toBe(201)
+    expect((await upload('plugins/new.jar')).status).toBe(409)
+    expect((await upload('plugins/new.jar', true)).status).toBe(201)
+    const post = (path: string, body: unknown) => callApi('POST', `/servers/1/files/${path}`, { body, csrf: me.csrf_token })
+    expect((await post('mkdir', { path: 'backups' })).status).toBe(201)
+    expect((await post('mkdir', { path: 'backups' })).status).toBe(409)
+    expect((await post('rename', { from: 'backups', to: 'old-backups' })).status).toBe(204)
+    expect((await post('delete', { path: 'old-backups' })).status).toBe(204)
+    expect((await post('delete', { path: '' })).status).toBe(400)
+    // The running server refuses extraction; the stopped one runs a job.
+    expect(field((await post('extract', { path: 'world-backup.zip', dest: 'restored' })).body, 'error')).toBe('instance_running')
+    const job = await callApi('POST', '/servers/2/files/extract', { body: { path: 'world-backup.zip', dest: 'restored' }, csrf: me.csrf_token })
+    expect(job.status).toBe(202)
+    expect(field(job.body, 'state')).toBe('running')
+    const status = await callApi('GET', '/servers/2/files/jobs')
+    expect(field(field(status.body, 'job'), 'dest')).toBe('restored')
+  })
+
+  it('validates file requests like the panel', async () => {
+    const me = loginAs('admin')
+    const put = (body: unknown) => callApi('PUT', '/servers/1/files/content', { body, csrf: me.csrf_token })
+    expect(field((await put({ path: 'server.properties', content: 'x' })).body, 'error')).toBe('validation_failed')
+    // Hidden names answer 404 on every operation, also with different case.
+    expect((await put({ path: '.rcon-cli.env', content: 'x', expected_mtime: null })).status).toBe(404)
+    expect((await callApi('GET', '/servers/1/files/content?path=.RCON-CLI.ENV')).status).toBe(404)
+    const upload = await fetch(`${window.location.origin}/api/servers/1/files/upload?path=.rcon-cli.env&overwrite=true`, {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': me.csrf_token, 'Content-Type': 'application/octet-stream' },
+      body: new Uint8Array([1]),
+    })
+    expect(upload.status).toBe(404)
+    const post = (path: string, body: unknown) => callApi('POST', `/servers/2/files/${path}`, { body, csrf: me.csrf_token })
+    expect((await post('mkdir', { path: '.mcpanel-x' })).status).toBe(404)
+    expect((await post('rename', { from: 'ops.json', to: '.rcon-cli.yaml' })).status).toBe(404)
+    expect((await post('delete', { path: '.rcon-cli.env' })).status).toBe(404)
+    expect((await post('extract', { path: 'world-backup.zip', dest: '.mcpanel-tmp' })).status).toBe(404)
+    // Without a known state (agent unreachable) extraction cannot be checked.
+    db.servers[1].status = { ...db.servers[1].status, state: 'unknown' }
+    const unknown = await post('extract', { path: 'world-backup.zip', dest: 'restored' })
+    expect(unknown.status).toBe(503)
+    expect(field(unknown.body, 'error')).toBe('agent_unavailable')
+  })
+
+  it('requires server.files for the file browser', async () => {
+    loginAs('alice')
+    expect((await callApi('GET', '/servers/1/files')).status).toBe(403)
+  })
+
   it('shows a restricted user only the servers they hold permissions on', async () => {
     loginAs('alice')
     const list = (await callApi('GET', '/servers')).body as Array<{ name: string; permissions: string[] }>

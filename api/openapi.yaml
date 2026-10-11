@@ -14,6 +14,7 @@ tags:
   - { name: users, description: 'User management' }
   - { name: servers, description: 'Servers and power control' }
   - { name: console, description: 'Live console: log stream, RCON commands, players' }
+  - { name: files, description: 'File browser of a server: list, edit, upload, download, manage, extract' }
   - { name: audit, description: 'Audit log' }
   - { name: security, description: 'Security center: attempts, jails, IP rules, settings, notifiers, agent' }
 paths:
@@ -522,7 +523,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: 'conflict (server not configured, or restart of a container that belongs to another server) or base_domain_missing (restart)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'conflict (server not configured, restart of a container that belongs to another server, or an archive is being extracted) or base_domain_missing (restart)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /servers/{id}/console/stream:
@@ -614,6 +615,192 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: instance_not_running, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/files:
+    get:
+      operationId: listFiles
+      tags: [files]
+      summary: List a directory of the server's data
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/FilePathQuery'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/FileList' } } } }
+        '400': { description: 'validation_failed or not_regular (not a directory)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/files/content:
+    get:
+      operationId: readFile
+      tags: [files]
+      summary: Read a text file for the editor (rcon.password redacted)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/FilePathQueryRequired'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/FileContent' } } } }
+        '400': { description: 'validation_failed or not_regular', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '415': { description: not_text (too large for the editor or not text), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    put:
+      operationId: writeFile
+      tags: [files]
+      summary: Save a text file (atomic, with conflict check; audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/WriteFileRequest' } } }
+      responses:
+        '200': { description: Saved, content: { application/json: { schema: { $ref: '#/components/schemas/FileWriteResult' } } } }
+        '400': { description: 'validation_failed or not_regular', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'file_exists (new file) or file_modified (changed since it was opened)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: payload_too_large, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+        '507': { $ref: '#/components/responses/InsufficientStorage' }
+  /servers/{id}/files/upload:
+    post:
+      operationId: uploadFile
+      tags: [files]
+      summary: Upload one file as a raw stream (up to 4 GiB; audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+        - $ref: '#/components/parameters/FilePathQueryRequired'
+        - { name: overwrite, in: query, required: false, schema: { type: boolean, default: false } }
+      requestBody:
+        required: true
+        content: { application/octet-stream: { schema: { type: string, format: binary } } }
+      responses:
+        '201': { description: Uploaded, content: { application/json: { schema: { $ref: '#/components/schemas/UploadResult' } } } }
+        '400': { description: 'validation_failed (also without Content-Length) or not_regular', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: file_exists (without overwrite), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: payload_too_large, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+        '507': { $ref: '#/components/responses/InsufficientStorage' }
+  /servers/{id}/files/download:
+    get:
+      operationId: downloadFile
+      tags: [files]
+      summary: Download a file, or a directory as a zip stream (audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/FilePathQuery'
+      responses:
+        '200':
+          description: File or zip stream with Content-Disposition attachment
+          content:
+            application/octet-stream: { schema: { type: string, format: binary } }
+            application/zip: { schema: { type: string, format: binary } }
+        '400': { description: 'validation_failed or not_regular (symlink or special file)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/files/mkdir:
+    post:
+      operationId: makeDirectory
+      tags: [files]
+      summary: Create a directory (audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/FilePathRequest' } } }
+      responses:
+        '201': { description: Created }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: file_exists, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/files/rename:
+    post:
+      operationId: renameFile
+      tags: [files]
+      summary: Rename or move a file or directory (audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RenameFileRequest' } } }
+      responses:
+        '204': { description: Renamed }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: file_exists, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/files/delete:
+    post:
+      operationId: deleteFile
+      tags: [files]
+      summary: Delete a file or a directory with its content (audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/FilePathRequest' } } }
+      responses:
+        '204': { description: Deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/files/extract:
+    post:
+      operationId: extractArchive
+      tags: [files]
+      summary: Start extracting a zip into a new or empty directory (server must be stopped; audited)
+      description: The archive is checked before the job starts (entry names, symlinks, encryption, compression, total size and entries, destination, free space); a failed check answers 400/409/413/507 and starts no job.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ExtractRequest' } } }
+      responses:
+        '202': { description: Job started, content: { application/json: { schema: { $ref: '#/components/schemas/FileJob' } } } }
+        '400': { description: 'validation_failed or not_regular', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'instance_running (server must be stopped) or file_exists (destination not empty)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: 'payload_too_large (archive exceeds the size or entry limit)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+        '507': { $ref: '#/components/responses/InsufficientStorage' }
+  /servers/{id}/files/jobs:
+    get:
+      operationId: getFileJob
+      tags: [files]
+      summary: The running or last extract job of the server
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/FileJobResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /audit:
     get:
@@ -823,6 +1010,8 @@ components:
     IdPath: { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
     Cursor: { name: cursor, in: query, required: false, schema: { type: string } }
     Limit: { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+    FilePathQuery: { name: path, in: query, required: false, description: 'Relative path in the data directory; empty = root', schema: { type: string, maxLength: 4096, default: '' } }
+    FilePathQueryRequired: { name: path, in: query, required: true, description: 'Relative path in the data directory', schema: { type: string, minLength: 1, maxLength: 4096 } }
   responses:
     BadRequest: { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Unauthorized: { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -830,13 +1019,14 @@ components:
     NotFound: { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Conflict: { description: Conflict, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     TooManyRequests: { description: Rate limited (Retry-After header set), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-    ServiceUnavailable: { description: 'Agent, Docker or RCON not available (agent_unavailable, docker_unavailable, rcon_unavailable)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    ServiceUnavailable: { description: 'Agent, Docker, RCON or the files service not available (agent_unavailable, docker_unavailable, rcon_unavailable, files_unavailable)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    InsufficientStorage: { description: insufficient_storage (less than the reserve would be left), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   schemas:
     Error:
       type: object
       required: [error, message]
       properties:
-        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, internal] }
+        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, files_unavailable, file_exists, file_modified, not_text, not_regular, instance_running, insufficient_storage, internal] }
         message: { type: string }
         request_id: { type: string }
     Role: { type: string, enum: [admin, user] }
@@ -1154,6 +1344,93 @@ components:
         action: { $ref: '#/components/schemas/PlayerAction' }
         name: { type: string, pattern: '^[A-Za-z0-9_]{3,16}$' }
         reason: { type: string, maxLength: 200, description: kick and ban only }
+    FileEntryType: { type: string, enum: [file, dir, symlink, other] }
+    FileEntry:
+      type: object
+      required: [name, type, size, mtime]
+      properties:
+        name: { type: string }
+        type: { $ref: '#/components/schemas/FileEntryType' }
+        size: { type: integer, format: int64 }
+        mtime: { type: integer, format: int64, description: Unix ms }
+    FileList:
+      type: object
+      required: [path, entries, truncated]
+      properties:
+        path: { type: string, description: Cleaned path of the listed directory ('' = root) }
+        entries: { type: array, items: { $ref: '#/components/schemas/FileEntry' } }
+        truncated: { type: boolean, description: More than 10 000 entries; only the first are listed }
+    FileContent:
+      type: object
+      required: [path, content, mtime, size]
+      properties:
+        path: { type: string }
+        content: { type: string }
+        mtime: { type: integer, format: int64 }
+        size: { type: integer, format: int64 }
+    WriteFileRequest:
+      type: object
+      additionalProperties: false
+      required: [path, content, expected_mtime]
+      properties:
+        path: { type: string, minLength: 1, maxLength: 4096 }
+        content: { type: string }
+        expected_mtime: { type: [integer, 'null'], format: int64, description: mtime from readFile; null = create a new file }
+    FileWriteResult:
+      type: object
+      required: [mtime, size]
+      properties:
+        mtime: { type: integer, format: int64 }
+        size: { type: integer, format: int64 }
+    UploadResult:
+      type: object
+      required: [size]
+      properties:
+        size: { type: integer, format: int64 }
+    FilePathRequest:
+      type: object
+      additionalProperties: false
+      required: [path]
+      properties:
+        path: { type: string, minLength: 1, maxLength: 4096 }
+    RenameFileRequest:
+      type: object
+      additionalProperties: false
+      required: [from, to]
+      properties:
+        from: { type: string, minLength: 1, maxLength: 4096 }
+        to: { type: string, minLength: 1, maxLength: 4096 }
+    ExtractRequest:
+      type: object
+      additionalProperties: false
+      required: [path, dest]
+      properties:
+        path: { type: string, minLength: 1, maxLength: 4096, description: A .zip file }
+        dest: { type: string, minLength: 1, maxLength: 4096, description: New or empty directory }
+    FileJobState: { type: string, enum: [running, done, failed] }
+    FileJob:
+      type: object
+      required: [id, state, path, dest, bytes, entries, total_bytes, total_entries, error, started_at, finished_at]
+      properties:
+        id: { type: string }
+        state: { $ref: '#/components/schemas/FileJobState' }
+        path: { type: string }
+        dest: { type: string }
+        bytes: { type: integer, format: int64 }
+        entries: { type: integer, format: int64 }
+        total_bytes: { type: integer, format: int64 }
+        total_entries: { type: integer, format: int64 }
+        error: { type: string }
+        started_at: { type: integer, format: int64 }
+        finished_at: { type: integer, format: int64, description: 0 while running }
+    FileJobResponse:
+      type: object
+      required: [job]
+      properties:
+        job:
+          oneOf:
+            - $ref: '#/components/schemas/FileJob'
+            - type: 'null'
     PermissionGrant:
       type: object
       required: [server_id, permissions]

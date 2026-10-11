@@ -19,10 +19,12 @@ import (
 	"github.com/Bernotese/mc-panel/internal/config"
 	"github.com/Bernotese/mc-panel/internal/console"
 	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/secretbox"
+	"github.com/Bernotese/mc-panel/internal/serverfiles"
 	"github.com/Bernotese/mc-panel/internal/servers"
 	"github.com/Bernotese/mc-panel/internal/servers/catalog"
 	"github.com/Bernotese/mc-panel/internal/users"
@@ -65,6 +67,9 @@ type appDeps struct {
 	// Console is the agent's console API (logs, RCON, player lists; the same *agent.Client);
 	// nil means no agent: console routes answer agent_unavailable.
 	Console agentapi.ConsoleClient
+	// Files is the files service (mcpanel-files); nil means no service: file routes answer
+	// files_unavailable.
+	Files   filesapi.Client
 	Version string // panel version, sent in the User-Agent of catalog requests
 }
 
@@ -78,7 +83,8 @@ type app struct {
 }
 
 // buildApp wires every stream into one HTTP handler. The middleware order is binding:
-// RequestID -> RealIP -> SecurityHeaders -> BodyLimit -> IPFilter -> Sessions -> CSRF -> APIRateLimit.
+// RequestID -> RealIP -> SecurityHeaders -> BodyLimit (except the file upload stream) -> IPFilter ->
+// Sessions -> CSRF -> APIRateLimit.
 func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*app, error) {
 	key, err := secretbox.LoadOrCreateKey(cfg.SecretKeyPath())
 	if err != nil {
@@ -118,6 +124,9 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		DB: db, Clock: d.Clock, Audit: auditRec, Agent: d.Console,
 		Access: console.NewAccess(authH.Sessions(), checker),
 	})
+	filesH := serverfiles.NewHandler(serverfiles.Deps{
+		DB: db, Clock: d.Clock, Audit: auditRec, Files: d.Files, Instances: d.Instances,
+	})
 	auditH := auditapi.NewHandler(db, d.Clock, disp)
 	defenseH := defense.NewHandler(svc)
 	notifyH := notify.NewHandler(notify.HandlerDeps{
@@ -129,7 +138,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		httpx.RequestID,
 		httpx.RealIP(cfg.TrustedPrefixes()),
 		httpx.SecurityHeaders(cfg.Dev),
-		httpx.BodyLimit(1<<20),
+		httpx.BodyLimitExcept(1<<20, serverfiles.UnlimitedBody),
 		svc.IPFilter,
 		authH.Sessions().Middleware,
 		auth.CSRF(cfg.Origin()),
@@ -155,6 +164,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		usersH.Routes(api)
 		serversH.Routes(api)
 		consoleH.Routes(api)
+		filesH.Routes(api)
 		auditH.Routes(api)
 	})
 	mux.Handle("/*", webui.Handler())

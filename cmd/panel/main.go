@@ -21,6 +21,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/config"
 	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/password"
 	"github.com/Bernotese/mc-panel/internal/store"
@@ -237,7 +238,8 @@ func serve(args []string) error {
 	password.Warmup()
 
 	ac := agent.NewClient(cfg.AgentSocket) // firewall and instance API share one client
-	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clock.Real{}, Agent: ac, Instances: ac, Console: ac, Version: version})
+	fc := filesapi.NewClient(cfg.FilesSocket)
+	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clock.Real{}, Agent: ac, Instances: ac, Console: ac, Files: fc, Version: version})
 	if err != nil {
 		return err
 	}
