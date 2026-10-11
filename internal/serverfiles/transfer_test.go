@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
@@ -454,4 +455,135 @@ func TestUploadSlotsArePerUser(t *testing.T) {
 	}
 	close(hold)
 	wg.Wait()
+}
+
+// Review finding C1: a GET has no body, so net/http's background read watches the connection
+// with the request's read deadline and would cancel the download after ReadTimeout.
+func TestDownloadSurvivesServerTimeouts(t *testing.T) {
+	e := newEnv(t)
+	id := createInstance(t, e.db, "survival")
+	srv := e.server(e.admin(), func(s *http.Server) {
+		s.ReadTimeout = 300 * time.Millisecond
+		s.WriteTimeout = 300 * time.Millisecond
+	})
+	pr, pw := io.Pipe()
+	e.files.download = filesapi.Download{Body: pr, Size: 50, Name: "slow.txt"}
+	go func() {
+		for range 5 {
+			if _, err := pw.Write(bytes.Repeat([]byte{'x'}, 10)); err != nil {
+				return
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+		_ = pw.Close()
+	}()
+	resp, err := srv.Client().Get(srv.URL + srvPath(id, "/files/download?path=slow.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || err != nil || len(body) != 50 {
+		t.Fatalf("slow download: %d, %d bytes, %v", resp.StatusCode, len(body), err)
+	}
+	waitAudit(t, e, audit.ActionFileDownload, audit.ResultSuccess)
+}
+
+// Review finding I1: after the last byte the background read keeps the last read deadline; a
+// service that needs longer to store the file must not lose its answer.
+func TestUploadSurvivesSlowServiceAfterBody(t *testing.T) {
+	for _, size := range []int{3, 0} {
+		e := newEnv(t)
+		id := createInstance(t, e.db, "survival")
+		serverfiles.SetIOTimeout(e.h, 150*time.Millisecond)
+		srv := e.server(e.admin(), func(s *http.Server) { s.ReadTimeout = 300 * time.Millisecond })
+		e.files.setUploadHook(func(body io.Reader) (int64, error) {
+			n, err := io.Copy(io.Discard, body)
+			if err != nil {
+				return n, fmt.Errorf("%w: %w", filesapi.ErrUnavailable, err)
+			}
+			time.Sleep(700 * time.Millisecond) // fsync and rename
+			return n, nil
+		})
+		resp, err := srv.Client().Post(srv.URL+srvPath(id, "/files/upload?path=a.jar"), "application/octet-stream", bytes.NewReader(make([]byte, size)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("%d bytes, slow service: %d %s", size, resp.StatusCode, raw)
+		}
+		waitAudit(t, e, audit.ActionFileUpload, audit.ResultSuccess)
+	}
+}
+
+// failingDeadline is a ResponseWriter whose connection refuses write deadlines.
+type failingDeadline struct{ *httptest.ResponseRecorder }
+
+func (failingDeadline) SetWriteDeadline(time.Time) error { return errors.New("connection gone") }
+
+// Review finding M2: if the first write deadline fails, the answer is an error, not a 200
+// with the file's headers and no body.
+func TestDownloadWriteDeadlineFails(t *testing.T) {
+	e := newEnv(t)
+	id := createInstance(t, e.db, "survival")
+	admin := e.admin()
+	e.files.download = filesapi.Download{Body: io.NopCloser(strings.NewReader("hello")), Size: 5, Name: "a.txt"}
+	w := failingDeadline{httptest.NewRecorder()}
+	e.mux.ServeHTTP(w, httptestRequestWithContext(t.Context(), http.MethodGet, srvPath(id, "/files/download?path=a.txt"), admin))
+	h := w.Header()
+	if w.Code != http.StatusInternalServerError || h.Get("Content-Disposition") != "" || h.Get("Content-Length") != "" {
+		t.Fatalf("download: %d %v %q", w.Code, h, w.Body)
+	}
+	if last := e.lastEntry(); last.Action != audit.ActionFileDownload || last.Result != audit.ResultFailure {
+		t.Fatalf("audit = %+v", last)
+	}
+	if _, closed := e.files.lastDownload(); !isClosed(closed) {
+		t.Fatal("the service body was not closed")
+	}
+}
+
+func isClosed(c <-chan struct{}) bool {
+	select {
+	case <-c:
+		return true
+	default:
+		return false
+	}
+}
+
+// Review finding M3: a browser that leaves mid-download ends the service request and closes
+// its body.
+func TestDownloadClientAbortEndsService(t *testing.T) {
+	e := newEnv(t)
+	id := createInstance(t, e.db, "survival")
+	srv := e.server(e.admin(), nil)
+	pr, pw := io.Pipe()
+	e.files.download = filesapi.Download{Body: pr, Size: -1, IsDir: true, Name: "world"}
+	go func() { _, _ = pw.Write([]byte("first")) }()
+	resp, err := srv.Client().Get(srv.URL + srvPath(id, "/files/download?path=world"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(resp.Body, make([]byte, 5)); err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close() // the browser leaves
+	ctx, closed := e.files.lastDownload()
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the service request was not cancelled")
+	}
+	// the handler notices on its next read or write; the service keeps sending meanwhile
+	deadline := time.Now().Add(5 * time.Second)
+	for !isClosed(closed) {
+		if time.Now().After(deadline) {
+			t.Fatal("the service body was never closed")
+		}
+		_, _ = pw.Write([]byte("more"))
+		time.Sleep(10 * time.Millisecond)
+	}
+	waitAudit(t, e, audit.ActionFileDownload, audit.ResultFailure)
 }
