@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import type { InstanceConfig, Server } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { OnlinePlayersCard } from '@/features/players/online-players-card'
 import { SectionCard } from '@/features/profile/section-card'
 import { useFormat } from '@/lib/format'
 import { AddressLine } from './address-line'
@@ -59,6 +60,7 @@ export function ServerOverview({ server, instance }: { server: Server; instance:
           </div>
         ) : null}
       </SectionCard>
+      <OnlinePlayersCard serverId={server.id} />
       <SectionCard title={t('servers.overview.controls')}>
         {canPower ? <PowerButtons server={server} /> : <p className="text-muted-foreground text-sm">{t('servers.no_power')}</p>}
       </SectionCard>

@@ -420,6 +420,10 @@ export const de = {
       none: 'Gerade ist niemand online.',
       unavailable: 'Nicht verfügbar – der Server läuft nicht oder startet noch.',
     },
+    card: {
+      title: 'Online-Spieler',
+      count: '{{online}} / {{max}}',
+    },
     whitelist: {
       title: 'Whitelist',
       empty: 'Niemand steht auf der Whitelist.',
