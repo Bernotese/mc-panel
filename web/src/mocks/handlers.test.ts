@@ -63,6 +63,31 @@ describe('mock behaviour', () => {
     expect(field(field(status.body, 'job'), 'dest')).toBe('restored')
   })
 
+  it('validates file requests like the panel', async () => {
+    const me = loginAs('admin')
+    const put = (body: unknown) => callApi('PUT', '/servers/1/files/content', { body, csrf: me.csrf_token })
+    expect(field((await put({ path: 'server.properties', content: 'x' })).body, 'error')).toBe('validation_failed')
+    // Hidden names answer 404 on every operation, also with different case.
+    expect((await put({ path: '.rcon-cli.env', content: 'x', expected_mtime: null })).status).toBe(404)
+    expect((await callApi('GET', '/servers/1/files/content?path=.RCON-CLI.ENV')).status).toBe(404)
+    const upload = await fetch(`${window.location.origin}/api/servers/1/files/upload?path=.rcon-cli.env&overwrite=true`, {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': me.csrf_token, 'Content-Type': 'application/octet-stream' },
+      body: new Uint8Array([1]),
+    })
+    expect(upload.status).toBe(404)
+    const post = (path: string, body: unknown) => callApi('POST', `/servers/2/files/${path}`, { body, csrf: me.csrf_token })
+    expect((await post('mkdir', { path: '.mcpanel-x' })).status).toBe(404)
+    expect((await post('rename', { from: 'ops.json', to: '.rcon-cli.yaml' })).status).toBe(404)
+    expect((await post('delete', { path: '.rcon-cli.env' })).status).toBe(404)
+    expect((await post('extract', { path: 'world-backup.zip', dest: '.mcpanel-tmp' })).status).toBe(404)
+    // Without a known state (agent unreachable) extraction cannot be checked.
+    db.servers[1].status = { ...db.servers[1].status, state: 'unknown' }
+    const unknown = await post('extract', { path: 'world-backup.zip', dest: 'restored' })
+    expect(unknown.status).toBe(503)
+    expect(field(unknown.body, 'error')).toBe('agent_unavailable')
+  })
+
   it('requires server.files for the file browser', async () => {
     loginAs('alice')
     expect((await callApi('GET', '/servers/1/files')).status).toBe(403)
