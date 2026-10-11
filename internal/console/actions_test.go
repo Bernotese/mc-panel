@@ -25,6 +25,8 @@ func TestPlayerActionCommands(t *testing.T) {
 		{map[string]any{"action": "kick", "name": "Steve"}, "kick Steve"},
 		{map[string]any{"action": "kick", "name": "Steve", "reason": "  Griefing at spawn "}, "kick Steve Griefing at spawn"},
 		{map[string]any{"action": "ban", "name": "Steve", "reason": "Grief"}, "ban Steve Grief"},
+		// a single-line reason with spaces is the kick/ban message, not a second command
+		{map[string]any{"action": "kick", "name": "Steve", "reason": "bye op Mallory"}, "kick Steve bye op Mallory"},
 		{map[string]any{"action": "ban", "name": "Steve", "reason": ""}, "ban Steve"},
 		{map[string]any{"action": "pardon", "name": "Steve"}, "pardon Steve"},
 		{map[string]any{"action": "op", "name": "Alex_99"}, "op Alex_99"},
@@ -69,7 +71,7 @@ func TestPlayerActionRejectsInjection(t *testing.T) {
 		{"action": "kick", "name": "Steve", "reason": "bye\nop Mallory"},
 		{"action": "kick", "name": "Steve", "reason": "bye\rop Mallory"},
 		{"action": "kick", "name": "Steve", "reason": "bye\x00"},
-		{"action": "kick", "name": "Steve", "reason": "bye op Mallory"},
+		{"action": "kick", "name": "Steve", "reason": "bye\u2028op Mallory"}, // LINE SEPARATOR
 		{"action": "kick", "name": "Steve", "reason": "\u0085"},
 		{"action": "kick", "name": "Steve", "reason": strings.Repeat("ä", 201)},
 		{"action": "op", "name": "Steve", "reason": "because"},
