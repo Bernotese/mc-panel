@@ -16,7 +16,8 @@ Entwickelt wird lokal auf macOS; das fertige Produkt wird später per Installer 
 |---|---|---|
 | **1** | **Fundament + Security** (umgesetzt) | **Repo, panel/agent, Auth, 2FA, Sessions, Rechte, Audit, Abwehr, Security Center** |
 | 2 | Instanzen-Lifecycle (umgesetzt, Spec `2026-10-10-mc-panel-instances-design.md`) | Docker + `itzg/minecraft-server`, Versionen/Engines, Ressourcenlimits, Ports/Firewall, Config-Editor, Auto-Restart |
-| 3 | Live-Betrieb | Konsole (xterm.js/WebSocket), Logs, Dateibrowser, Plugins/Mods (Modrinth, Hangar), Spieler-Verwaltung |
+| 3a | Live-Betrieb: Konsole (Spec `2026-10-11-mc-panel-console-players-design.md`) | Konsole (SSE + RCON), Live-Log, Spieler-Verwaltung |
+| 3b | Live-Betrieb: Dateien | Dateibrowser, Plugins/Mods (Modrinth, Hangar) |
 | 4 | Backups | Zeitpläne, Retention, Offsite via restic, konsistente Snapshots, Restore |
 | 5 | Monitoring + Alerts | Spieler, TPS/MSPT, Ressourcen, Historie, Alerts (Discord, ntfy) |
 | 6 | Installer-CLI | `install`/`update`/`doctor`/`uninstall`, Caddy + Let's Encrypt, VPS-Härtung |
