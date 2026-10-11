@@ -79,3 +79,38 @@ test('a restricted user sees only permitted servers and no admin areas', async (
   await expect(page.getByRole('tab', { name: 'Löschen' })).toHaveCount(0)
   await expect(page.getByRole('group', { name: 'Steuerung für survival' })).toBeVisible()
 })
+
+test('admin follows the console, sends a command and kicks a player', async ({ page }) => {
+  await signIn(page, 'admin', true)
+  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await expect(page).toHaveURL(/\/servers\/1$/)
+
+  await page.getByRole('tab', { name: 'Konsole' }).click()
+  const log = page.getByRole('log', { name: 'Server-Log' })
+  await expect(page.getByText('Verbunden')).toBeVisible()
+  await expect(log).toContainText('INFO')
+  await expect(log).not.toContainText('Thread RCON Client')
+
+  const command = page.getByRole('textbox', { name: 'Befehl' })
+  await command.fill('list')
+  await command.press('Enter')
+  await expect(log).toContainText('› list')
+  await expect(log).toContainText('of a max of 20 players online')
+  await expect(command).toHaveValue('')
+
+  await page.getByRole('tab', { name: 'Spieler' }).click()
+  const online = page.getByRole('region', { name: 'Online' })
+  await expect(online.getByText('Steve', { exact: true })).toBeVisible()
+  await online.getByRole('button', { name: 'Steve kicken' }).click()
+  await expect(page.locator('[data-sonner-toast]').first()).toBeVisible()
+  await expect(online.getByText('Steve', { exact: true })).toHaveCount(0)
+})
+
+test('a user without console permission sees online players but no console', async ({ page }) => {
+  await signIn(page, 'alice', false)
+  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await expect(page).toHaveURL(/\/servers\/1$/)
+  await expect(page.getByRole('region', { name: 'Online-Spieler' }).getByText('Alex')).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'Konsole' })).toHaveCount(0)
+  await expect(page.getByRole('tab', { name: 'Spieler' })).toHaveCount(0)
+})

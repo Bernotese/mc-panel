@@ -49,6 +49,11 @@ const DYNAMIC_KEYS = [
   ...['totp', 'webauthn', 'recovery'].map((m) => `second_factor.tab_${m}`),
   ...['dashboard', 'users', 'security', 'audit', 'settings', 'profile'].map((k) => `nav.${k}`),
   ...['ok', 'unavailable', 'unknown'].map((d) => `settings.docker.${d}`),
+  ...['connecting', 'live', 'stopped', 'reconnecting', 'unavailable', 'forbidden', 'not_found', 'unauthorized'].map(
+    (s) => `console.connection.${s}`,
+  ),
+  ...['empty', 'too_long', 'control'].map((p) => `console.validation.${p}`),
+  ...['name_invalid', 'reason_too_long', 'reason_control'].map((p) => `players.validation.${p}`),
   ...['not_configured', 'unknown', 'creating', 'starting', 'running', 'stopping', 'stopped', 'restarting', 'error'].map(
     (s) => `servers.state.${s}`,
   ),
