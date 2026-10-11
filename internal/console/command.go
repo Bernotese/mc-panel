@@ -53,7 +53,7 @@ func (h *Handler) run(w http.ResponseWriter, r *http.Request, serverID int64, cm
 	}
 	h.record(ctx, action, serverTarget(serverID), result, details)
 	if err != nil {
-		writeAgentError(w, r, err)
+		h.writeAgentError(w, r, err)
 		return false
 	}
 	httpx.WriteJSON(w, http.StatusOK, commandResponse{Output: out})

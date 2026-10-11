@@ -24,7 +24,7 @@ func (h *Handler) handlePlayerLists(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, agentapi.ErrNotFound):
 		res = agentapi.PlayersResponse{} // data directory not created yet: nothing stored
 	case err != nil:
-		writeAgentError(w, r, err)
+		h.writeAgentError(w, r, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, normalizeLists(res))
