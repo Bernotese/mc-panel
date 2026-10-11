@@ -104,3 +104,23 @@ func TestOnlinePlayersUnavailable(t *testing.T) {
 		t.Fatalf("no agent: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// The cache is per server: polling two servers asks the agent once for each.
+func TestOnlinePlayersCachePerServer(t *testing.T) {
+	e := newEnv(t)
+	a := createInstance(t, e.db, "alpha")
+	b := createInstance(t, e.db, "beta")
+	e.agent.setOutput("list uuids", "There are 0 of a max of 20 players online: ")
+	admin := e.admin()
+	for range 2 {
+		for _, id := range []int64{a, b} {
+			if rec := e.do(http.MethodGet, srvPath(id, "/players"), nil, &admin); rec.Code != http.StatusOK {
+				t.Fatalf("server %d: %d %s", id, rec.Code, rec.Body)
+			}
+		}
+	}
+	want := []string{fmt.Sprintf("%d list uuids", a), fmt.Sprintf("%d list uuids", b)}
+	if got := e.agent.takeRcons(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("rcon calls = %v, want %v", got, want)
+	}
+}
