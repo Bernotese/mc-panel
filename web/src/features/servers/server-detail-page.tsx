@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/page-header'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMe } from '@/features/auth/me'
 import { ConsoleTab } from '@/features/console/console-tab'
+import { PlayersTab } from '@/features/players/players-tab'
 import { errorMessage } from '@/lib/error-message'
 import { serverQueryOptions } from './api'
 import { DeleteServerSection } from './delete-server-section'
@@ -16,7 +17,7 @@ import { ServerSettingsTab } from './server-settings-tab'
 import { detailPollInterval } from './status'
 import { StatusBadge } from './status-badge'
 
-type DetailTab = 'overview' | 'console' | 'settings' | 'delete'
+type DetailTab = 'overview' | 'console' | 'players' | 'settings' | 'delete'
 
 export function ServerDetailPage({ serverId }: { serverId: number }) {
   const { t } = useTranslation()
@@ -72,7 +73,7 @@ export function ServerDetailPage({ serverId }: { serverId: number }) {
   const instance = server.instance
   const canConsole = server.permissions.includes('server.console')
   const available: DetailTab[] = ['overview']
-  if (canConsole) available.push('console')
+  if (canConsole) available.push('console', 'players')
   if (isAdmin) available.push('settings', 'delete')
   // A tab whose permission was revoked while it was open falls back to the overview.
   const active = available.includes(tab) ? tab : 'overview'
@@ -84,6 +85,7 @@ export function ServerDetailPage({ serverId }: { serverId: number }) {
         <TabsList>
           <TabsTrigger value="overview">{t('servers.detail.tabs.overview')}</TabsTrigger>
           {canConsole ? <TabsTrigger value="console">{t('servers.detail.tabs.console')}</TabsTrigger> : null}
+          {canConsole ? <TabsTrigger value="players">{t('servers.detail.tabs.players')}</TabsTrigger> : null}
           {isAdmin ? <TabsTrigger value="settings">{t('servers.detail.tabs.settings')}</TabsTrigger> : null}
           {isAdmin ? <TabsTrigger value="delete">{t('servers.detail.tabs.delete')}</TabsTrigger> : null}
         </TabsList>
@@ -93,6 +95,11 @@ export function ServerDetailPage({ serverId }: { serverId: number }) {
         {canConsole ? (
           <TabsContent value="console" className="pt-4">
             <ConsoleTab server={server} />
+          </TabsContent>
+        ) : null}
+        {canConsole ? (
+          <TabsContent value="players" className="pt-4">
+            <PlayersTab server={server} onOpenSettings={isAdmin ? () => setTab('settings') : undefined} />
           </TabsContent>
         ) : null}
         {isAdmin ? (
