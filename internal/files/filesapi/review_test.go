@@ -40,3 +40,11 @@ func TestClientLongOperationsHaveTheirOwnTimeout(t *testing.T) {
 		t.Fatalf("long timeouts too short: delete %s, extract %s", filesapi.DeleteTimeout, filesapi.ExtractTimeout)
 	}
 }
+
+// Review round 2: a folder download walks up to max_extract_entries entries before its
+// headers (to answer 413 instead of cutting the zip off); on a slow disk that takes a while.
+func TestDownloadHeaderTimeoutCoversThePreCheck(t *testing.T) {
+	if filesapi.DownloadHeaderTimeout < 2*time.Minute {
+		t.Fatalf("DownloadHeaderTimeout = %s, want at least 2 min", filesapi.DownloadHeaderTimeout)
+	}
+}

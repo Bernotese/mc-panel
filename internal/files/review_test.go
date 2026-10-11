@@ -364,3 +364,42 @@ func TestCleanupTempStopsWithContext(t *testing.T) {
 		t.Fatalf("a cancelled cleanup removed %d entries", n)
 	}
 }
+
+// Review round 2: the folder zip slot is taken only after the pre-check (the walk holds no zip
+// in memory), so a folder over the limit answers 413 even while every zip slot is taken.
+func TestZipSlotIsTakenAfterThePreCheck(t *testing.T) {
+	s, data := newService(t, func(c *Config) { c.Limits.MaxExtractEntries = 5 })
+	for i := range 6 {
+		put(t, data, fmt.Sprintf("many/f%d", i), "x")
+	}
+	put(t, data, "world/level.dat", "lvl")
+	for range maxZipDownloads {
+		s.zipDownloads <- struct{}{}
+	}
+	var d download
+	if err := s.Download(ctx, 1, "many", d.start, &d.body); !errors.Is(err, filesapi.ErrTooLarge) {
+		t.Fatalf("folder over the limit with all zip slots taken: %v, want ErrTooLarge", err)
+	}
+	d = download{}
+	if err := s.Download(ctx, 1, "world", d.start, &d.body); !errors.Is(err, filesapi.ErrBusy) || d.started != 0 {
+		t.Fatalf("zip with all slots taken: %v (started %d), want ErrBusy before the headers", err, d.started)
+	}
+}
+
+// Review round 2: only a path prefix is a host path; a user's name that merely contains the
+// instances_dir string stays as it is.
+func TestPublicMessageOnlyReplacesPathPrefixes(t *testing.T) {
+	s, _ := newService(t)
+	base := s.cfg.InstancesDir
+	for _, msg := range []string{
+		`entry "backup` + base + `/x" is encrypted`,
+		"entry world" + base + "/instances/1/a is invalid",
+	} {
+		if got := s.publicMessage(msg); got != msg {
+			t.Errorf("publicMessage(%q) = %q, want it unchanged", msg, got)
+		}
+	}
+	if got := s.publicMessage(`open "` + base + `/instances/1/a": denied`); got != `open "a": denied` {
+		t.Errorf("quoted host path: %q", got)
+	}
+}
