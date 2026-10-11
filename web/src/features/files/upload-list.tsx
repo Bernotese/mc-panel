@@ -13,6 +13,11 @@ export function UploadList({ items, onCancel, onClear }: { items: UploadItem[]; 
   if (items.length === 0) return null
   const anyFinished = items.some((i) => ['done', 'failed', 'cancelled', 'skipped'].includes(i.status))
 
+  /** Every byte is sent; the panel and the service still store the file (a large file takes a moment). */
+  function processing(item: UploadItem): boolean {
+    return item.status === 'uploading' && item.loaded >= item.size
+  }
+
   function errorText(item: UploadItem): string | null {
     if (item.status !== 'failed') return null
     return typeof item.error === 'string' && item.error.startsWith('files.') ? t(item.error) : errorMessage(item.error, t)
@@ -41,7 +46,7 @@ export function UploadList({ items, onCancel, onClear }: { items: UploadItem[]; 
                 </span>
                 <span className="flex shrink-0 items-center gap-2 text-sm">
                   <span className="text-muted-foreground tabular-nums">{formatBytes(item.size, fmt.locale)}</span>
-                  <span>{t(`files.uploads.status.${item.status}`)}</span>
+                  <span>{processing(item) ? t('files.uploads.processing') : t(`files.uploads.status.${item.status}`)}</span>
                   {active ? (
                     <Button type="button" variant="ghost" size="icon-xs" aria-label={t('files.uploads.cancel', { name: item.name })} onClick={() => onCancel(item.id)}>
                       <X aria-hidden="true" />

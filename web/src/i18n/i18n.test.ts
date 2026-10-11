@@ -67,6 +67,7 @@ const DYNAMIC_KEYS = [
     (p) => `files.validation.${p}`,
   ),
   ...['queued', 'uploading', 'conflict', 'done', 'failed', 'cancelled', 'skipped'].map((s) => `files.uploads.status.${s}`),
+  ...['insufficient_storage', 'exists', 'too_large', 'invalid', 'not_found', 'shutdown', 'other'].map((r) => `files.extract.reason.${r}`),
   ...['not_configured', 'unknown', 'creating', 'starting', 'running', 'stopping', 'stopped', 'restarting', 'error'].map(
     (s) => `servers.state.${s}`,
   ),

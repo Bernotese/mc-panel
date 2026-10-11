@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useBlocker } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { isApiError } from '@/api/errors'
@@ -51,8 +50,7 @@ export function FileEditor({ server, path, onClose, onDirtyChange, onOpenSetting
   }, [dirty, onDirtyChange])
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
 
-  // Route changes and reloads; tab switches are asked by the detail page (onDirtyChange).
-  const blocker = useBlocker({ shouldBlockFn: () => dirty, enableBeforeUnload: () => dirty, withResolver: true })
+  // Route changes, reloads and tab switches are asked by the files tab and the detail page (onDirtyChange).
 
   const save = useMutation({
     mutationFn: ({ content, mtime }: { content: string; mtime: number }) => writeFile(server.id, { path, content, expected_mtime: mtime }),
@@ -69,6 +67,13 @@ export function FileEditor({ server, path, onClose, onDirtyChange, onOpenSetting
   function doSave() {
     if (!file.data || draft === null || !dirty || save.isPending) return
     save.mutate({ content: draft, mtime: file.data.mtime })
+  }
+
+  /** Ctrl/Cmd+S anywhere in the editor area, also while a button has the focus (CodeMirror handles its own). */
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.defaultPrevented || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
+    event.preventDefault()
+    doSave()
   }
 
   async function overwrite() {
@@ -130,7 +135,7 @@ export function FileEditor({ server, path, onClose, onDirtyChange, onOpenSetting
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" onKeyDown={onKeyDown}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Button type="button" variant="outline" size="sm" onClick={() => (dirty ? setConfirmClose(true) : onClose())}>
           <ArrowLeft aria-hidden="true" />
@@ -188,15 +193,6 @@ export function FileEditor({ server, path, onClose, onDirtyChange, onOpenSetting
           setDraft(null)
           onClose()
         }}
-      />
-      <ConfirmDialog
-        open={blocker.status === 'blocked'}
-        onOpenChange={(open) => (open ? undefined : blocker.reset?.())}
-        title={t('files.editor.discard_title')}
-        description={t('files.editor.discard_description', { name })}
-        confirmLabel={t('files.editor.discard')}
-        destructive
-        onConfirm={() => blocker.proceed?.()}
       />
     </div>
   )
