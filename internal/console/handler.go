@@ -159,7 +159,7 @@ func (h *Handler) allow(w http.ResponseWriter, r *http.Request, userID int64) bo
 
 // writeAgentError maps a failed agent call to the API error. The order matters: a 404/409
 // *agent.StatusError also matches instancespec.ErrInvalid, a 503 also agentapi.ErrUnavailable.
-func writeAgentError(w http.ResponseWriter, r *http.Request, err error) {
+func (h *Handler) writeAgentError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, agentapi.ErrNotRunning), errors.Is(err, agentapi.ErrNotFound):
 		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeInstanceNotRunning, "the server is not running")
@@ -175,6 +175,10 @@ func writeAgentError(w http.ResponseWriter, r *http.Request, err error) {
 		writeValidation(w, r, err.Error())
 	case errors.Is(err, agentapi.ErrUnavailable), errors.Is(err, context.DeadlineExceeded):
 		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeAgentUnavailable, "the agent is not reachable")
+	case r.Context().Err() != nil:
+		// The client went away (e.g. context.Canceled from the agent call): nobody reads an
+		// answer, and it is not a server error.
+		h.log.DebugContext(r.Context(), "agent call ended with the request", "err", err)
 	default:
 		httpx.Internal(w, r, err)
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"slices"
 	"strings"
 	"testing"
@@ -200,5 +202,37 @@ func TestCommandRateLimit(t *testing.T) {
 	}
 	if got := len(e.rec.Entries); got != 12 {
 		t.Fatalf("audit entries = %d, want 12 (rate-limited request not audited)", got)
+	}
+}
+
+// cancellingAgent simulates a client that disconnects while the RCON call runs.
+type cancellingAgent struct {
+	*fakeAgent
+	cancel context.CancelFunc
+}
+
+func (a cancellingAgent) Rcon(ctx context.Context, _ int64, _ string) (string, error) {
+	a.cancel()
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+// A client that went away is no server error: no 500, no answer at all (nobody reads it).
+func TestCommandClientGone(t *testing.T) {
+	ag := cancellingAgent{fakeAgent: newFakeAgent()}
+	e := newEnvWith(t, func(d *console.Deps) { d.Agent = &ag })
+	id := createInstance(t, e.db, "survival")
+	base := httpx.WithClientIP(principal.With(context.Background(), e.admin()), netip.MustParseAddr("203.0.113.7"))
+	ctx, cancel := context.WithCancel(base)
+	defer cancel()
+	ag.cancel = cancel
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, srvPath(id, "/console"), strings.NewReader(`{"command":"list"}`))
+	rec := httptest.NewRecorder()
+	e.mux.ServeHTTP(rec, req)
+	if rec.Body.Len() != 0 {
+		t.Fatalf("answer for a gone client: %d %s", rec.Code, rec.Body)
+	}
+	if len(e.rec.Entries) != 1 || e.rec.Entries[0].Result != audit.ResultFailure {
+		t.Fatalf("audit = %+v", e.rec.Entries)
 	}
 }
