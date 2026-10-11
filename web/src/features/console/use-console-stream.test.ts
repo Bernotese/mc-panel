@@ -122,6 +122,60 @@ describe('useConsoleStream', () => {
     expect(es.readyState).toBe(FakeEventSource.CLOSED)
   })
 
+  it('starts over with an empty log when the server changes', async () => {
+    const { result, rerender } = renderHook(({ id }) => useConsoleStream(id, FAST), { initialProps: { id: 1 } })
+    const first = FakeEventSource.latest()
+    act(() => {
+      first.open()
+      first.emit('line', line('from server 1'), '1000')
+    })
+    await waitFor(() => expect(result.current.entries).toHaveLength(1))
+    rerender({ id: 2 })
+    expect(first.readyState).toBe(FakeEventSource.CLOSED)
+    expect(result.current.entries).toEqual([])
+    const second = FakeEventSource.latest()
+    expect(second.url).toBe('/api/servers/2/console/stream')
+    act(() => {
+      second.open()
+      second.emit('line', line('from server 2'), '5')
+    })
+    await waitFor(() => expect(texts(result.current.entries)).toEqual(['from server 2']))
+  })
+
+  it('keeps lines that share an event id', async () => {
+    const { result } = renderHook(() => useConsoleStream(1, FAST))
+    const es = FakeEventSource.latest()
+    act(() => {
+      es.open()
+      es.emit('line', line('a'), '1000')
+      es.emit('line', line('b'), '1000')
+    })
+    await waitFor(() => expect(texts(result.current.entries)).toEqual(['a', 'b']))
+  })
+
+  it('stops after a 401 of the probe without opening another stream', async () => {
+    server.use(http.get(STREAM, () => HttpResponse.json({ error: 'unauthorized', message: 'no' }, { status: 401 })))
+    const { result } = renderHook(() => useConsoleStream(1, FAST))
+    act(() => FakeEventSource.latest().fail(true))
+    await waitFor(() => expect(result.current.connection).toBe('unauthorized'))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(FakeEventSource.instances).toHaveLength(1)
+  })
+
+  it('probes without replaying the log', async () => {
+    let query = ''
+    server.use(
+      http.get(STREAM, ({ request }) => {
+        query = new URL(request.url).search
+        return new HttpResponse(null, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }),
+    )
+    renderHook(() => useConsoleStream(1, FAST))
+    act(() => FakeEventSource.latest().fail(true))
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2))
+    expect(query).toBe('?tail=0')
+  })
+
   it('tracks commands next to the log lines', () => {
     const { result } = renderHook(() => useConsoleStream(1, FAST))
     let id = 0

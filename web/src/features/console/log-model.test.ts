@@ -41,8 +41,17 @@ describe('logReducer', () => {
 
   it('drops lines it has already seen', () => {
     let s = logReducer(initialLogState(), { type: 'lines', lines: [line('1000', 'a'), line('1001', 'b')] })
+    s = logReducer(s, { type: 'connected' })
     s = logReducer(s, { type: 'lines', lines: [line('999', 'old'), line('1000', 'a'), line('1001', 'b'), line('1002', 'c')] })
     expect(texts(s)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('keeps lines that share an event id within one connection', () => {
+    let s = logReducer(initialLogState(), { type: 'connected' })
+    s = logReducer(s, { type: 'lines', lines: [line('1000', 'a'), line('1000', 'b')] })
+    s = logReducer(s, { type: 'lines', lines: [line('1000', 'c'), line('1001', 'd')] })
+    expect(texts(s)).toEqual(['a', 'b', 'c', 'd'])
+    expect(s.lastId).toBe(1001n)
   })
 
   it('accepts lines without a usable event id', () => {
@@ -52,7 +61,8 @@ describe('logReducer', () => {
   })
 
   it('returns the same state when nothing new arrived', () => {
-    const s = logReducer(initialLogState(), { type: 'lines', lines: [line('5', 'a')] })
+    let s = logReducer(initialLogState(), { type: 'lines', lines: [line('5', 'a')] })
+    s = logReducer(s, { type: 'connected' })
     expect(logReducer(s, { type: 'lines', lines: [line('5', 'a')] })).toBe(s)
   })
 

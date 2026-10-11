@@ -40,11 +40,18 @@ export type LogEntry = LineEntry | CommandEntry
 export interface LogState {
   entries: LogEntry[]
   nextKey: number
-  /** Highest event id seen so far; lines with a lower or equal id are duplicates of a reconnect. */
+  /** Highest event id seen so far. */
   lastId: bigint | null
+  /**
+   * lastId at the moment the current connection opened: lines with an id up to this are replays of a reconnect.
+   * Lines of one connection may share an id (equal Docker timestamps), so they are never compared with each other.
+   */
+  baseline: bigint | null
 }
 
 export type LogAction =
+  | { type: 'reset' }
+  | { type: 'connected' }
   | { type: 'lines'; lines: readonly IncomingLine[] }
   | { type: 'command'; id: number; command: string }
   | { type: 'command_done'; id: number; ok: boolean; output: string }
@@ -55,7 +62,7 @@ const WARN_MARK = /[\s/[](?:WARN|WARNING)\]/
 const EVENT_ID = /^\d{1,20}$/
 
 export function initialLogState(): LogState {
-  return { entries: [], nextKey: 0, lastId: null }
+  return { entries: [], nextKey: 0, lastId: null, baseline: null }
 }
 
 /** The two lines every RCON call leaves in the server log (spec §3.3). */
@@ -116,18 +123,23 @@ function trim(entries: LogEntry[]): LogEntry[] {
 
 export function logReducer(state: LogState, action: LogAction): LogState {
   switch (action.type) {
+    case 'reset':
+      return initialLogState()
+    case 'connected':
+      return state.baseline === state.lastId ? state : { ...state, baseline: state.lastId }
     case 'lines': {
+      const { baseline } = state
       let { nextKey, lastId } = state
       const added: LogEntry[] = []
       for (const incoming of action.lines) {
         const id = eventId(incoming.id)
-        if (id !== null && lastId !== null && id <= lastId) continue
-        if (id !== null) lastId = id
+        if (id !== null && baseline !== null && id <= baseline) continue
+        if (id !== null && (lastId === null || id > lastId)) lastId = id
         added.push(makeLine(incoming, `l${nextKey}`))
         nextKey += 1
       }
       if (added.length === 0) return state
-      return { entries: trim([...state.entries, ...added]), nextKey, lastId }
+      return { entries: trim([...state.entries, ...added]), nextKey, lastId, baseline }
     }
     case 'command': {
       const entry: CommandEntry = {

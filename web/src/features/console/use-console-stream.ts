@@ -19,6 +19,8 @@ export const DEFAULT_TIMING: StreamTiming = { flushMs: 50, reconnectMs: 3_000, r
 /** EventSource.CLOSED; a constant so that tests can replace the global EventSource. */
 const EVENT_SOURCE_CLOSED = 2
 
+const MAX_BACKOFF_MS = 60_000
+
 export function classifyProbe(err: unknown, timing: StreamTiming): { state: ConnectionState; retryMs: number | null } {
   if (err === null) return { state: 'reconnecting', retryMs: timing.reconnectMs }
   if (isApiError(err)) {
@@ -54,6 +56,7 @@ export function useConsoleStream(serverId: number, timing: StreamTiming = DEFAUL
     let retryTimer: ReturnType<typeof setTimeout> | undefined
     let flushTimer: ReturnType<typeof setTimeout> | undefined
     let pending: IncomingLine[] = []
+    let inconclusive = 0 // consecutive probes that found the stream fine again
 
     function flush() {
       flushTimer = undefined
@@ -67,7 +70,12 @@ export function useConsoleStream(serverId: number, timing: StreamTiming = DEFAUL
       if (disposed) return
       const es = new EventSource(consoleStreamUrl(serverId))
       source = es
-      es.onopen = () => setConnection((prev) => (prev === 'stopped' ? prev : 'live'))
+      es.onopen = () => {
+        inconclusive = 0
+        flush() // lines of the previous connection first, then take the replay baseline
+        dispatch({ type: 'connected' })
+        setConnection((prev) => (prev === 'stopped' ? prev : 'live'))
+      }
       es.addEventListener('line', (event: Event) => {
         const message = event as MessageEvent<string>
         const line = parseLineEvent(message.data, message.lastEventId)
@@ -90,7 +98,12 @@ export function useConsoleStream(serverId: number, timing: StreamTiming = DEFAUL
           if (disposed) return
           const next = classifyProbe(err, current)
           setConnection(next.state)
-          if (next.retryMs !== null) retryTimer = setTimeout(connect, next.retryMs)
+          if (next.retryMs !== null) {
+            // A stream that ends right after opening would otherwise be probed every few seconds: back off.
+            const delay = err === null ? Math.min(next.retryMs * 2 ** inconclusive, MAX_BACKOFF_MS) : next.retryMs
+            if (err === null) inconclusive += 1
+            retryTimer = setTimeout(connect, delay)
+          }
         })
       }
     }
@@ -101,6 +114,9 @@ export function useConsoleStream(serverId: number, timing: StreamTiming = DEFAUL
       source?.close()
       clearTimeout(retryTimer)
       clearTimeout(flushTimer)
+      // Another server (or timing) must not inherit this log.
+      dispatch({ type: 'reset' })
+      setConnection('connecting')
     }
   }, [serverId, flushMs, reconnectMs, retryMs])
 
