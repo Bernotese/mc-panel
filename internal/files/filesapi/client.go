@@ -26,8 +26,10 @@ const (
 	// HealthTimeout bounds the health check.
 	HealthTimeout = 2 * time.Second
 	// DownloadHeaderTimeout bounds the wait for download headers; the stream itself has no
-	// deadline. Uploads have no header timeout: the service answers after the whole body.
-	DownloadHeaderTimeout = 10 * time.Second
+	// deadline. A folder download counts its entries (up to max_extract_entries) before the
+	// headers, which takes a while on a slow disk. Uploads have no header timeout: the service
+	// answers after the whole body.
+	DownloadHeaderTimeout = 2 * time.Minute
 
 	baseURL          = "http://files"
 	maxResponseBytes = 32 << 20 // a read answer carries up to 5 MiB of escaped text

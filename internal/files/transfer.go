@@ -150,15 +150,16 @@ func (s *Service) Download(ctx context.Context, id int64, p string, start func(i
 	}
 	switch {
 	case fi.IsDir():
+		// Refused up front rather than cut off mid-stream (the browser would keep a broken zip).
+		// The counting walk holds no zip in memory, so the zip slot is taken only afterwards.
+		if err := checkDirZip(ctx, root, clean, s.cfg.Limits); err != nil {
+			return err
+		}
 		release, err := slot(s.zipDownloads, "folder downloads")
 		if err != nil {
 			return err
 		}
 		defer release()
-		// Refused up front rather than cut off mid-stream (the browser would keep a broken zip).
-		if err := checkDirZip(ctx, root, clean, s.cfg.Limits); err != nil {
-			return err
-		}
 		start(true, -1)
 		return writeDirZip(ctx, root, clean, w, s.cfg.Limits)
 	case !fi.Mode().IsRegular():
