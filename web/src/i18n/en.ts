@@ -599,6 +599,7 @@ export const en: Messages = {
       overwrite: 'Overwrite',
       discard_title: 'Discard unsaved changes?',
       discard_description: 'Your changes to {{name}} will be lost.',
+      busy: 'Too many files are being opened or saved right now – please try again in a moment.',
       discard_tab: 'Your unsaved changes in the editor will be lost.',
       discard: 'Discard',
     },
