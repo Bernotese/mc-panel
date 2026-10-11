@@ -103,4 +103,40 @@ describe('PlayersTab', () => {
     expect(await screen.findByText('Die Whitelist ist aus: Einträge wirken erst, wenn ein Admin sie einschaltet.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Zu den Einstellungen' })).not.toBeInTheDocument()
   })
+
+  it('shows no online players while the server is stopped', async () => {
+    // e.g. names cached from before the stop: they must not look current
+    server.use(http.get('*/api/servers/:id/players', () => HttpResponse.json({ available: true, online: [{ name: 'Ghost', uuid: null }], max: 20 })))
+    await openPlayers(2)
+    const online = await screen.findByRole('region', { name: 'Online' })
+    expect(await within(online).findByText('Nicht verfügbar – der Server läuft nicht oder startet noch.')).toBeInTheDocument()
+    expect(within(online).queryByText('Ghost')).not.toBeInTheDocument()
+  })
+
+  it('keeps the visible text in the accessible name of every player button', async () => {
+    await openPlayers()
+    const online = await screen.findByRole('region', { name: 'Online' })
+    expect(await within(online).findByRole('button', { name: 'Op entziehen: Alex' })).toBeInTheDocument()
+    expect(within(online).getByRole('button', { name: 'Op geben: Steve' })).toBeInTheDocument()
+    for (const button of screen.getAllByRole('button')) {
+      const label = button.getAttribute('aria-label')
+      if (label) expect(label.toLowerCase()).toContain((button.textContent ?? '').trim().toLowerCase())
+    }
+  })
+
+  it('warns that list changes can revert until a pending restart', async () => {
+    const survival = db.servers.find((s) => s.id === 1)
+    if (!survival) throw new Error('mock server 1 missing')
+    survival.status = { ...survival.status, restart_required: true }
+    await openPlayers()
+    expect(
+      await screen.findByText('Neustart nötig: bis zum Neustart können Änderungen an Ops/Whitelist nach einem Absturz zurückgesetzt werden.'),
+    ).toBeInTheDocument()
+  })
+
+  it('shows no restart warning without a pending restart', async () => {
+    await openPlayers()
+    await screen.findByRole('region', { name: 'Online' })
+    expect(screen.queryByText(/^Neustart nötig/)).not.toBeInTheDocument()
+  })
 })
