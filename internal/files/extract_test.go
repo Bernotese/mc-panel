@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"hash/crc32"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -207,9 +209,15 @@ func TestExtractRejectsArchives(t *testing.T) {
 		t.Fatal("a rejected archive started a job")
 	}
 	noTemp(t, data)
-	if _, err := os.Stat(filepath.Join(filepath.Dir(filepath.Dir(data)), "evil.txt")); !os.IsNotExist(err) {
-		t.Fatal("zip slip wrote outside")
-	}
+	// "../evil.txt" relative to the destination "out" would land in data itself, deeper
+	// traversals further up: nothing named evil* may exist anywhere below the instances_dir.
+	base := filepath.Dir(filepath.Dir(data))
+	_ = filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && strings.HasPrefix(d.Name(), "evil") {
+			t.Errorf("zip slip wrote %s", p)
+		}
+		return nil
+	})
 }
 
 func TestExtractDetectsLyingSizes(t *testing.T) {
@@ -332,5 +340,153 @@ func TestServerExtract(t *testing.T) {
 	status, body = postJSON(t, ts, filesapi.PathExtract, filesapi.ExtractRequest{ID: 1, Path: "../x.zip", Dest: "o"})
 	if status != http.StatusBadRequest || errCode(t, body) != filesapi.CodeInvalid {
 		t.Fatalf("invalid path: %d %s", status, body)
+	}
+}
+
+// cdBomb is a "zip" that is nothing but n minimal central-directory headers and an end
+// record: archive/zip would allocate a File for every header before any limit applies.
+func cdBomb(n int) []byte {
+	var buf bytes.Buffer
+	hdr := make([]byte, 46)
+	binary.LittleEndian.PutUint32(hdr, 0x02014b50)
+	for range n {
+		buf.Write(hdr)
+	}
+	end := make([]byte, 22)
+	binary.LittleEndian.PutUint32(end, 0x06054b50)
+	binary.LittleEndian.PutUint16(end[8:], uint16(n))
+	binary.LittleEndian.PutUint16(end[10:], uint16(n))
+	binary.LittleEndian.PutUint32(end[12:], uint32(46*n))
+	buf.Write(end)
+	return buf.Bytes()
+}
+
+func TestExtractRefusesHugeCentralDirectoryCheaply(t *testing.T) {
+	s, data := newService(t) // max_extract_entries = 100
+	putBytes(t, data, "cd.zip", cdBomb(300_000))
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err := s.Extract(ctx, filesapi.ExtractRequest{ID: 1, Path: "cd.zip", Dest: "out"})
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, filesapi.ErrTooLarge) {
+		t.Fatalf("300 000 headers: %v, want ErrTooLarge", err)
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 8<<20 {
+		t.Fatalf("the pre-check allocated %d MiB", grew>>20)
+	}
+	// The declared count alone is enough to refuse (archive/zip preallocates by it).
+	declared := cdBomb(10)
+	binary.LittleEndian.PutUint16(declared[len(declared)-22+10:], 5000)
+	putBytes(t, data, "declared.zip", declared)
+	if _, err := s.Extract(ctx, filesapi.ExtractRequest{ID: 1, Path: "declared.zip", Dest: "out"}); !errors.Is(err, filesapi.ErrTooLarge) {
+		t.Fatalf("declared 5000 entries: %v, want ErrTooLarge", err)
+	}
+	if s.Job(1) != nil {
+		t.Fatal("a refused archive started a job")
+	}
+}
+
+// Symlinks are refused by the type bits of the external attributes, whatever system the
+// archive claims to come from (archive/zip only reads them for Unix creators).
+func TestExtractRefusesSymlinkFromAnyCreator(t *testing.T) {
+	s, data := newService(t)
+	for _, creator := range []uint16{0, 0x0a00, 0x0b00, 0x1300} { // FAT, NTFS, VFAT, OS X
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: "link", Method: zip.Store, CreatorVersion: creator, ExternalAttrs: 0o120777 << 16})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte("/etc/shadow"))
+		_ = zw.Close()
+		putBytes(t, data, "l.zip", buf.Bytes())
+		if _, err := s.Extract(ctx, filesapi.ExtractRequest{ID: 1, Path: "l.zip", Dest: "out"}); !errors.Is(err, filesapi.ErrInvalid) {
+			t.Errorf("creator %#x: %v, want ErrInvalid", creator, err)
+		}
+	}
+}
+
+func TestExtractSetsFolderTimes(t *testing.T) {
+	s, data := newService(t)
+	putBytes(t, data, "a.zip", makeZip(t,
+		zipEntry{name: "w/"},
+		zipEntry{name: "w/r/"},
+		zipEntry{name: "w/r/x.mca", body: "x"},
+		zipEntry{name: "w/level.dat", body: "l"},
+	))
+	if _, err := s.Extract(ctx, filesapi.ExtractRequest{ID: 1, Path: "a.zip", Dest: "out"}); err != nil {
+		t.Fatal(err)
+	}
+	if j := waitJob(t, s, 1); j.State != jobDone {
+		t.Fatalf("job: %+v", j)
+	}
+	for _, d := range []string{"out/w", "out/w/r"} {
+		fi, err := os.Stat(filepath.Join(data, filepath.FromSlash(d)))
+		if err != nil || !fi.ModTime().Equal(time.Unix(1_700_000_000, 0)) {
+			t.Errorf("%s: mtime %v %v, want the zip's", d, fi.ModTime(), err)
+		}
+	}
+}
+
+// A destination that gets content while the job runs is never replaced or merged into.
+func TestExtractDestinationFilledMeanwhile(t *testing.T) {
+	s, data := newService(t)
+	if err := os.Mkdir(filepath.Join(data, "out"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs.hook = func(context.Context, int64, string) { put(t, data, "out/mine.txt", "keep") }
+	putBytes(t, data, "a.zip", makeZip(t, zipEntry{name: "f.txt", body: "x"}))
+	if _, err := s.Extract(ctx, filesapi.ExtractRequest{ID: 1, Path: "a.zip", Dest: "out"}); err != nil {
+		t.Fatal(err)
+	}
+	j := waitJob(t, s, 1)
+	if j.State != jobFailed || !strings.Contains(j.Error, filesapi.CodeExists) {
+		t.Fatalf("job: %+v", j)
+	}
+	if got := names(t, filepath.Join(data, "out")); len(got) != 1 || got[0] != "mine.txt" {
+		t.Fatalf("destination changed: %v", got)
+	}
+	noTemp(t, data)
+}
+
+// A cancelled job stops inside a large entry, not only between entries.
+func TestExtractFileStopsOnCancel(t *testing.T) {
+	s, data := newService(t)
+	putBytes(t, data, "big.zip", rawZip(t, "big.bin", bytes.Repeat([]byte{0}, 4<<20), 4<<20, zip.Deflate, 0))
+	root, err := s.open(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	f, st, err := openRegular(root, "big.zip", os.O_RDONLY)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	zr, err := zip.NewReader(f, st.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	n, err := extractFile(cctx, root, zr.File[0], "big.bin", 1<<30)
+	if err == nil || n != 0 {
+		t.Fatalf("cancelled extract wrote %d bytes: %v", n, err)
+	}
+}
+
+func TestExtractAfterClose(t *testing.T) {
+	s, data := newService(t)
+	putBytes(t, data, "a.zip", makeZip(t, zipEntry{name: "f.txt", body: "x"}))
+	s.Close()
+	if _, err := s.Extract(ctx, filesapi.ExtractRequest{ID: 1, Path: "a.zip", Dest: "out"}); err == nil {
+		t.Fatal("extract accepted after Close")
+	}
+	if s.Job(1) != nil {
+		t.Fatal("job registered after Close")
+	}
+	if _, err := os.Stat(filepath.Join(data, "out")); !os.IsNotExist(err) {
+		t.Fatal("output after Close")
 	}
 }
