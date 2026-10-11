@@ -158,6 +158,11 @@ func (h *Handler) ReconcileOnce(ctx context.Context) {
 			}
 			continue
 		}
+		if act == actStart && h.extract.ExtractRunning(ctx, in.ServerID) {
+			// An archive is being extracted into the data directory: the wish to run stays and
+			// is applied on the first pass after the job (files spec §5.1); no backoff.
+			continue
+		}
 		if !rs.allow(in, act, now) {
 			continue
 		}

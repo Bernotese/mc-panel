@@ -341,6 +341,7 @@ func (f *fakeFiles) Job(ctx context.Context, id int64) (*filesapi.Job, error) {
 // fakeAgent is an in-memory agentapi.InstancesClient for the extract state check.
 type fakeAgent struct {
 	mu     sync.Mutex
+	onCall func() // runs at the start of Instances (outside the lock)
 	err    error
 	docker string
 	inst   map[int64]agentapi.InstanceStatus
@@ -353,6 +354,12 @@ func newFakeAgent() *fakeAgent {
 func (f *fakeAgent) set(st agentapi.InstanceStatus) { f.mu.Lock(); f.inst[st.ID] = st; f.mu.Unlock() }
 
 func (f *fakeAgent) Instances(context.Context) (agentapi.InstancesResponse, error) {
+	f.mu.Lock()
+	hook := f.onCall
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
