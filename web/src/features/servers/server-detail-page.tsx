@@ -12,6 +12,8 @@ import { leaveTexts, type FilesBusy } from '@/features/files/busy'
 import { FilesTab } from '@/features/files/files-tab'
 import { isExtracting, useFileJob } from '@/features/files/use-file-job'
 import { PlayersTab } from '@/features/players/players-tab'
+import { pluginKindOf } from '@/features/plugins/model'
+import { PluginsTab } from '@/features/plugins/plugins-tab'
 import { errorMessage } from '@/lib/error-message'
 import { serverQueryOptions } from './api'
 import { DeleteServerSection } from './delete-server-section'
@@ -21,7 +23,7 @@ import { ServerSettingsTab } from './server-settings-tab'
 import { detailPollInterval } from './status'
 import { StatusBadge } from './status-badge'
 
-type DetailTab = 'overview' | 'console' | 'players' | 'files' | 'settings' | 'delete'
+type DetailTab = 'overview' | 'console' | 'players' | 'files' | 'plugins' | 'settings' | 'delete'
 
 /** Keyed by id: the router reuses the component when only the :id parameter changes, but tab and console must reset. */
 export function ServerDetailPage({ serverId }: { serverId: number }) {
@@ -88,9 +90,13 @@ function ServerDetail({ serverId }: { serverId: number }) {
   const instance = server.instance
   const canConsole = server.permissions.includes('server.console')
   const canFiles = server.permissions.includes('server.files')
+  // Spec §7.1: paper/purpur → "Plugins", fabric/neoforge → "Mods"; vanilla and modpacks get no tab, so the UI never
+  // meets 409 plugins_unsupported. null = no tab (type without plugins/mods or no server.plugins).
+  const pluginsKind = server.permissions.includes('server.plugins') ? pluginKindOf(instance.type) : null
   const available: DetailTab[] = ['overview']
   if (canConsole) available.push('console', 'players')
   if (canFiles) available.push('files')
+  if (pluginsKind) available.push('plugins')
   if (isAdmin) available.push('settings', 'delete')
   // A tab whose permission was revoked while it was open falls back to the overview.
   const active = available.includes(tab) ? tab : 'overview'
@@ -107,12 +113,15 @@ function ServerDetail({ serverId }: { serverId: number }) {
     <>
       {header}
       <Tabs value={active} onValueChange={(value) => changeTab(value as DetailTab)}>
-        {/* Five tabs are wider than a phone: the bar scrolls, not the page. */}
+        {/* Up to seven tabs are wider than a phone: the bar scrolls, not the page. */}
         <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="overview">{t('servers.detail.tabs.overview')}</TabsTrigger>
           {canConsole ? <TabsTrigger value="console">{t('servers.detail.tabs.console')}</TabsTrigger> : null}
           {canConsole ? <TabsTrigger value="players">{t('servers.detail.tabs.players')}</TabsTrigger> : null}
           {canFiles ? <TabsTrigger value="files">{t('servers.detail.tabs.files')}</TabsTrigger> : null}
+          {pluginsKind ? (
+            <TabsTrigger value="plugins">{pluginsKind === 'mod' ? t('servers.detail.tabs.mods') : t('servers.detail.tabs.plugins')}</TabsTrigger>
+          ) : null}
           {isAdmin ? <TabsTrigger value="settings">{t('servers.detail.tabs.settings')}</TabsTrigger> : null}
           {isAdmin ? <TabsTrigger value="delete">{t('servers.detail.tabs.delete')}</TabsTrigger> : null}
         </TabsList>
@@ -132,6 +141,11 @@ function ServerDetail({ serverId }: { serverId: number }) {
         {canFiles ? (
           <TabsContent value="files" className="pt-4">
             <FilesTab server={server} onBusyChange={setFilesBusy} onOpenSettings={isAdmin ? () => changeTab('settings') : undefined} />
+          </TabsContent>
+        ) : null}
+        {pluginsKind ? (
+          <TabsContent value="plugins" className="pt-4">
+            <PluginsTab server={server} kind={pluginsKind} />
           </TabsContent>
         ) : null}
         {isAdmin ? (

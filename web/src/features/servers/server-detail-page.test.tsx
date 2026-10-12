@@ -29,7 +29,15 @@ describe('ServerDetailPage', () => {
     await renderWithProviders(<ServerDetailPage serverId={1} />, { path: '/servers/1', me: loginAs('admin') })
 
     expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Übersicht', 'Konsole', 'Spieler', 'Dateien', 'Einstellungen', 'Löschen'])
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      'Übersicht',
+      'Konsole',
+      'Spieler',
+      'Dateien',
+      'Plugins',
+      'Einstellungen',
+      'Löschen',
+    ])
     const state = screen.getByRole('region', { name: 'Zustand' })
     expect(within(state).getByText('Läuft')).toBeInTheDocument()
     expect(within(state).getByText('survival.mc.example.com')).toBeInTheDocument()
@@ -200,7 +208,7 @@ describe('ServerDetailPage', () => {
   it('lets the tab bar scroll sideways instead of the page on narrow screens', async () => {
     await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
     const tabs = await screen.findByRole('tablist')
-    expect(within(tabs).getAllByRole('tab')).toHaveLength(6)
+    expect(within(tabs).getAllByRole('tab')).toHaveLength(7)
     expect(tabs).toHaveClass('max-w-full', 'justify-start', 'overflow-x-auto')
   })
 
@@ -232,6 +240,32 @@ describe('ServerDetailPage', () => {
     await user.click(within(group).getByRole('button', { name: 'Starten' }))
     expect(await screen.findByText('Entpacken läuft – Starten ist erst danach möglich.')).toBeInTheDocument()
     expect(screen.queryByText('Konflikt mit dem aktuellen Zustand')).not.toBeInTheDocument()
+  })
+
+  it('names the plugins tab after the server type', async () => {
+    await renderWithProviders(<ServerDetailPage serverId={4} />, { me: loginAs('admin') })
+    expect(await screen.findByRole('tab', { name: 'Mods' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Plugins' })).not.toBeInTheDocument()
+  })
+
+  it('shows no plugins tab on vanilla servers', async () => {
+    await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('admin') })
+    expect(await screen.findByRole('heading', { name: 'creative', level: 1 })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Plugins' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Mods' })).not.toBeInTheDocument()
+  })
+
+  it('shows the plugins tab only with the plugins permission', async () => {
+    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+    await screen.findByRole('heading', { name: 'survival', level: 1 })
+    expect(screen.queryByRole('tab', { name: 'Plugins' })).not.toBeInTheDocument()
+  })
+
+  it('shows the plugins tab to a user with the plugins permission', async () => {
+    db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.plugins'] }])
+    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+    expect(await screen.findByRole('tab', { name: 'Plugins' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Dateien' })).not.toBeInTheDocument()
   })
 
   describe('when the job finishes', () => {
