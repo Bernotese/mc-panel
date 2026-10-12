@@ -22,6 +22,8 @@ import (
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/plugins"
+	"github.com/Bernotese/mc-panel/internal/plugins/upstream"
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/secretbox"
 	"github.com/Bernotese/mc-panel/internal/serverfiles"
@@ -69,8 +71,11 @@ type appDeps struct {
 	Console agentapi.ConsoleClient
 	// Files is the files service (mcpanel-files); nil means no service: file routes answer
 	// files_unavailable.
-	Files   filesapi.Client
-	Version string // panel version, sent in the User-Agent of catalog requests
+	Files filesapi.Client
+	// Upstream talks to Modrinth and Hangar; nil means upstream.New with the default bases (the
+	// real services). Tests inject httptest servers.
+	Upstream *upstream.Client
+	Version  string // panel version, sent in the User-Agent of catalog and plugin requests
 }
 
 type app struct {
@@ -120,10 +125,16 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 	filesH := serverfiles.NewHandler(serverfiles.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Files: d.Files, Instances: d.Instances,
 	})
+	// One version catalog for the create form and for resolving LATEST in the plugin search.
+	cat := catalog.New(catalog.Options{Clock: d.Clock, Version: d.Version})
 	serversH := servers.NewHandler(servers.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Box: box, Instances: d.Instances,
-		Catalog: catalog.New(catalog.Options{Clock: d.Clock, Version: d.Version}),
+		Catalog: cat,
 		Extract: filesH,
+	})
+	pluginsH := plugins.NewHandler(plugins.Deps{
+		DB: db, Clock: d.Clock, Audit: auditRec, Files: d.Files, Instances: d.Instances,
+		Catalog: cat, Upstream: d.Upstream, Version: d.Version,
 	})
 	checker := rbac.NewDBChecker(db)
 	consoleH := console.NewHandler(console.Deps{
@@ -168,16 +179,18 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		serversH.Routes(api)
 		consoleH.Routes(api)
 		filesH.Routes(api)
+		pluginsH.Routes(api)
 		auditH.Routes(api)
 	})
 	mux.Handle("/*", webui.Handler())
 
 	run := func(ctx context.Context) {
 		var wg sync.WaitGroup
-		wg.Add(4)
+		wg.Add(5)
 		go func() { defer wg.Done(); disp.Run(ctx) }()
 		go func() { defer wg.Done(); svc.Run(ctx) }()
 		go func() { defer wg.Done(); serversH.Run(ctx) }()
+		go func() { defer wg.Done(); pluginsH.Run(ctx) }()
 		go func() { defer wg.Done(); pruneSessionsLoop(ctx, authH.PruneSessions, sessionPruneInterval) }()
 		wg.Wait()
 	}

@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import type { PluginInventory, PluginJob, PluginResolution, PluginSearchResult, PluginUpdates, PluginVersionList } from '@/api/types'
 import { callApi, field } from '@/test/call-api'
 import { db, loginAs } from './db'
 import { operations } from './handlers'
@@ -10,7 +11,7 @@ const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../
 describe('mock coverage', () => {
   it('mocks every operationId of api/openapi.yaml exactly once', () => {
     const ids = [...openapiYaml.matchAll(/operationId:\s*(\w+)/g)].map((m) => m[1]).sort()
-    expect(ids).toHaveLength(76)
+    expect(ids).toHaveLength(87)
     expect(operations.map((o) => o.operationId).sort()).toEqual(ids)
   })
 })
@@ -86,6 +87,153 @@ describe('mock behaviour', () => {
     const unknown = await post('extract', { path: 'world-backup.zip', dest: 'restored' })
     expect(unknown.status).toBe(503)
     expect(field(unknown.body, 'error')).toBe('agent_unavailable')
+  })
+
+  it('lists the plugin inventory per server type', async () => {
+    loginAs('admin')
+    const inv = (await callApi('GET', '/servers/1/plugins')).body as PluginInventory
+    expect(inv).toMatchObject({ kind: 'plugin', dir: 'plugins', game_version: '1.21.11', sources: ['modrinth', 'hangar'], truncated: false, restart_needed: false, source_errors: [] })
+    expect(inv.jars.map((j) => j.file)).toEqual(['Disabled.jar.disabled', 'LuckPerms-Bukkit-5.5.71.jar', 'OldTool.jar', 'ViaVersion-5.5.1.jar'])
+    expect(inv.jars.find((j) => j.file === 'OldTool.jar')).toMatchObject({ source: 'manual', project: null, version: null, meta: { name: 'OldTool', version: '1.0' }, installed_by_panel: false })
+    expect(inv.jars.find((j) => j.file === 'Disabled.jar.disabled')).toMatchObject({ enabled: false, source: 'modrinth', installed_by_panel: false })
+    expect(inv.jars.map((j) => j.project?.title)).toEqual(['BlueMap', 'LuckPerms', undefined, 'ViaVersion'])
+    expect(inv.jars[1].project?.icon_url).toMatch(/^\/api\/servers\/1\/plugins\/icon\?url=https%3A%2F%2Fcdn\.modrinth\.com%2F/)
+    const mods = (await callApi('GET', '/servers/4/plugins')).body as PluginInventory
+    expect(mods).toMatchObject({ kind: 'mod', dir: 'mods', sources: ['modrinth'] })
+    expect(mods.jars.map((j) => j.file)).toEqual(['fabric-api-0.110.0.jar'])
+    expect(field((await callApi('GET', '/servers/2/plugins')).body, 'error')).toBe('plugins_unsupported')
+    expect((await callApi('GET', '/servers/3/plugins')).status).toBe(404)
+  })
+
+  it('searches compatible projects per source and kind', async () => {
+    loginAs('admin')
+    const search = async (id: number, query: string) => (await callApi('GET', `/servers/${id}/plugins/search?${query}`)).body as PluginSearchResult
+    const modrinth = await search(1, 'source=modrinth')
+    expect(modrinth.hits.map((h) => h.slug).sort()).toEqual(['bluemap', 'chunky', 'chunkyborder', 'luckperms'])
+    expect(modrinth.total).toBe(4)
+    expect(modrinth.hits.find((h) => h.slug === 'luckperms')?.installed).toBe(true)
+    expect(modrinth.hits.find((h) => h.slug === 'chunky')?.installed).toBe(false)
+    expect((await search(1, 'source=modrinth&offset=2')).hits).toHaveLength(2)
+    const via = await search(1, 'source=hangar&q=ViaBack')
+    expect(via.hits.map((h) => h.title)).toEqual(['ViaBackwards'])
+    expect(via.hits[0]).toMatchObject({ installed: false, page_url: 'https://hangar.papermc.io/ViaVersion/ViaBackwards' })
+    const mods = await search(4, 'source=modrinth')
+    expect(mods.hits.map((h) => h.slug).sort()).toEqual(['fabric-api', 'lithium', 'servercore']) // sodium-extra is client-only
+    expect(field((await callApi('GET', '/servers/4/plugins/search?source=hangar')).body, 'error')).toBe('validation_failed')
+    expect((await callApi('GET', '/servers/1/plugins/search?source=modrinth&offset=1001')).status).toBe(400)
+    expect((await callApi('GET', `/servers/1/plugins/search?source=modrinth&q=${'x'.repeat(101)}`)).status).toBe(400)
+  })
+
+  it('resolves dependencies and refuses versions that are only available externally', async () => {
+    loginAs('admin')
+    const resolve = (id: number, query: string) => callApi('GET', `/servers/${id}/plugins/resolve?${query}`)
+    const viaBackwards = (await resolve(1, 'source=hangar&project=ViaBackwards')).body as PluginResolution
+    expect(viaBackwards.install.map((e) => e.title)).toEqual(['ViaBackwards'])
+    expect(viaBackwards.already).toEqual([{ source: 'hangar', project_id: '2', title: 'ViaVersion', file: 'ViaVersion-5.5.1.jar' }])
+    const border = (await resolve(1, 'source=modrinth&project=chunkyborder')).body as PluginResolution
+    expect(border.install.map((e) => [e.title, e.required_by])).toEqual([
+      ['Chunky', 'ChunkyBorder'],
+      ['ChunkyBorder', null],
+    ])
+    expect(border.incompatible).toEqual([])
+    // project accepts the slug and the project id; the same installed version is "already", another one is installed
+    expect(((await resolve(1, 'source=modrinth&project=Vebnzrzj&version=lp5571')).body as PluginResolution).already.map((a) => a.file)).toEqual(['LuckPerms-Bukkit-5.5.71.jar'])
+    expect(((await resolve(1, 'source=modrinth&project=luckperms&version=lp5572')).body as PluginResolution).install.map((e) => e.filename)).toEqual(['LuckPerms-Bukkit-5.5.72.jar'])
+    expect(field((await resolve(1, 'source=hangar&project=Essentials')).body, 'error')).toBe('plugin_not_downloadable')
+    const essentials = (await callApi('GET', '/servers/1/plugins/versions?source=hangar&project=Essentials')).body as PluginVersionList
+    expect(essentials.versions.length).toBeGreaterThan(0)
+    expect(essentials.versions.every((x) => !x.downloadable && x.external_url !== null)).toBe(true)
+    const lp = (await callApi('GET', '/servers/1/plugins/versions?source=modrinth&project=luckperms')).body as PluginVersionList
+    expect(lp.versions.map((x) => x.channel)).toEqual(['beta', 'release', 'release'])
+    expect(field((await resolve(4, 'source=modrinth&project=sodium-extra')).body, 'error')).toBe('plugin_incompatible')
+    expect(((await resolve(4, 'source=modrinth&project=servercore')).body as PluginResolution).already.map((a) => a.title)).toEqual(['Fabric API'])
+    expect((await resolve(1, 'source=modrinth&project=../x')).status).toBe(400)
+  })
+
+  it('installs with a job, one job per server', async () => {
+    const me = loginAs('admin')
+    const install = (body: object) => callApi('POST', '/servers/1/plugins/install', { body, csrf: me.csrf_token })
+    const started = await install({ source: 'modrinth', project: 'chunkyborder' })
+    expect(started.status).toBe(202)
+    const job = started.body as PluginJob
+    expect(job).toMatchObject({ kind: 'install', state: 'running', finished_at: 0 })
+    expect(job.steps.map((s) => [s.file, s.state])).toEqual([
+      ['Chunky-Bukkit-1.4.40.jar', 'downloading'],
+      ['ChunkyBorder-Bukkit-1.2.23.jar', 'pending'],
+    ])
+    expect(field((await install({ source: 'hangar', project: 'ViaBackwards' })).body, 'error')).toBe('conflict')
+    expect(field((await install({ source: 'modrinth', project: 'luckperms', extra: 1 })).body, 'error')).toBe('validation_failed')
+    db.pluginJobs[1].startedMs -= 60_000
+    const done = field((await callApi('GET', '/servers/1/plugins/jobs')).body, 'job') as PluginJob
+    expect(done.state).toBe('done')
+    expect(done.steps.every((s) => s.state === 'done')).toBe(true)
+    const inv = (await callApi('GET', '/servers/1/plugins')).body as PluginInventory
+    expect(inv.jars.map((j) => j.file)).toEqual(expect.arrayContaining(['Chunky-Bukkit-1.4.40.jar', 'ChunkyBorder-Bukkit-1.2.23.jar']))
+    expect(inv.restart_needed).toBe(true) // survival runs and the panel changed its plugins
+    expect(db.audit.at(-1)).toMatchObject({ action: 'plugin.install', target: 'server:1', details: { project: 's86X568j', version: 'cb1223', file: 'ChunkyBorder-Bukkit-1.2.23.jar' } })
+    const via = await install({ source: 'hangar', project: 'ViaBackwards' })
+    expect((via.body as PluginJob).steps.map((s) => s.title)).toEqual(['ViaBackwards'])
+    db.pluginJobs[1].startedMs -= 60_000
+    // nothing to do: the requested project is installed (no version, or the installed one) -> 409 conflict
+    expect(field((await install({ source: 'modrinth', project: 'chunkyborder' })).body, 'error')).toBe('conflict')
+    expect(((await callApi('GET', '/servers/1/plugins/resolve?source=modrinth&project=luckperms')).body as PluginResolution).already.map((a) => a.file)).toEqual(['LuckPerms-Bukkit-5.5.71.jar'])
+  })
+
+  it('updates, toggles and removes jars', async () => {
+    const me = loginAs('admin')
+    const post = (path: string, body: unknown) => callApi('POST', `/servers/1/plugins/${path}`, { body, csrf: me.csrf_token })
+    const updates = (await callApi('GET', '/servers/1/plugins/updates')).body as PluginUpdates
+    expect(updates.updates).toEqual([
+      { file: 'LuckPerms-Bukkit-5.5.71.jar', from: { id: 'lp5571', name: '5.5.71', channel: 'release' }, to: { id: 'lp5572', name: '5.5.72', channel: 'release' } },
+    ])
+    for (const refresh of ['true', '1']) {
+      const refreshed = (await callApi('GET', `/servers/1/plugins/updates?refresh=${refresh}`)).body as PluginUpdates
+      expect(refreshed.checked_at).toBeGreaterThan(updates.checked_at)
+    }
+    expect(field((await post('update', { files: ['OldTool.jar'] })).body, 'error')).toBe('validation_failed') // no update for a manual jar
+    expect((await post('update', { files: [] })).status).toBe(202)
+    expect(field((await post('toggle', { file: 'OldTool.jar', enabled: false })).body, 'error')).toBe('conflict')
+    db.pluginJobs[1].startedMs -= 60_000
+    let inv = (await callApi('GET', '/servers/1/plugins')).body as PluginInventory
+    expect(inv.jars.find((j) => j.project?.slug === 'luckperms')).toMatchObject({ file: 'LuckPerms-Bukkit-5.5.72.jar', version: { name: '5.5.72' } })
+    expect(inv.jars.map((j) => j.file)).not.toContain('LuckPerms-Bukkit-5.5.71.jar')
+    expect(((await callApi('GET', '/servers/1/plugins/updates')).body as PluginUpdates).updates).toEqual([])
+    expect(db.audit.at(-1)).toMatchObject({ action: 'plugin.update', details: { file: 'LuckPerms-Bukkit-5.5.72.jar', from: '5.5.71', to: '5.5.72' } })
+
+    expect((await post('toggle', { file: 'OldTool.jar', enabled: false })).status).toBe(204)
+    inv = (await callApi('GET', '/servers/1/plugins')).body as PluginInventory
+    const old = inv.jars.find((j) => j.file === 'OldTool.jar.disabled')
+    expect(old).toMatchObject({ enabled: false, meta: { name: 'OldTool' } })
+    expect(db.audit.at(-1)).toMatchObject({ action: 'plugin.toggle', details: { file: 'OldTool.jar', enabled: false } })
+    expect((await post('toggle', { file: 'OldTool.jar', enabled: true })).status).toBe(404)
+    expect((await post('toggle', { file: '../x.jar', enabled: true })).status).toBe(400)
+    expect((await post('toggle', { file: 'server.properties', enabled: true })).status).toBe(400)
+    // Enabling must not overwrite another jar with the target name (case-insensitive).
+    if (!old) throw new Error('OldTool.jar.disabled missing')
+    db.plugins[1].jars.push({ ...old, file: 'oldtool.JAR', enabled: true })
+    expect(field((await post('toggle', { file: 'OldTool.jar.disabled', enabled: true })).body, 'error')).toBe('file_exists')
+
+    expect((await post('delete', { file: 'OldTool.jar.disabled' })).status).toBe(204)
+    expect(db.audit.at(-1)).toMatchObject({ action: 'plugin.remove', details: { file: 'OldTool.jar.disabled' } })
+    inv = (await callApi('GET', '/servers/1/plugins')).body as PluginInventory
+    expect(inv.jars.map((j) => j.file)).not.toContain('OldTool.jar.disabled')
+    expect(inv.restart_needed).toBe(true)
+    expect((await post('delete', { file: 'OldTool.jar.disabled' })).status).toBe(404)
+  })
+
+  it('requires server.plugins and serves icons only from the CDNs', async () => {
+    loginAs('alice')
+    expect((await callApi('GET', '/servers/1/plugins')).status).toBe(403)
+    expect((await callApi('GET', `/servers/1/plugins/icon?url=${encodeURIComponent('https://cdn.modrinth.com/x.png')}`)).status).toBe(403)
+    loginAs('admin')
+    const icon = await fetch(`${window.location.origin}/api/servers/1/plugins/icon?url=${encodeURIComponent('https://cdn.modrinth.com/data/Vebnzrzj/icon.png')}`)
+    expect(icon.status).toBe(200)
+    expect(icon.headers.get('Content-Type')).toBe('image/png')
+    expect([...new Uint8Array(await icon.arrayBuffer()).slice(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47])
+    expect((await callApi('GET', `/servers/1/plugins/icon?url=${encodeURIComponent('https://evil.example/x.png')}`)).status).toBe(400)
+    expect((await callApi('GET', `/servers/1/plugins/icon?url=${encodeURIComponent('http://cdn.modrinth.com/x.png')}`)).status).toBe(400)
+    // The icon route has no plugins_unsupported check (V3).
+    expect((await fetch(`${window.location.origin}/api/servers/2/plugins/icon?url=${encodeURIComponent('https://cdn.modrinth.com/x.png')}`)).status).toBe(200)
   })
 
   it('requires server.files for the file browser', async () => {
