@@ -137,8 +137,12 @@ type Job struct {
 	Snapshot     string   `json:"snapshot"` // backup: the new snapshot once done; restore: its source; else ""
 	Skipped      int64    `json:"skipped"`  // entries a backup left out (symlinks, special files, hidden or invalid names)
 	Error        string   `json:"error"`
-	StartedAt    int64    `json:"started_at"`  // Unix ms
-	FinishedAt   int64    `json:"finished_at"` // 0 while running
+	// Code is the wire code of a failed job's error (CodeTooLarge, CodeInsufficientStorage,
+	// CodeBusy, CodeUnavailable, ...; "" for other errors and for jobs that did not fail). The
+	// service sets it from sub-project 4 on (phase B1); ErrorFromCode maps it to the sentinel.
+	Code       string `json:"code"`
+	StartedAt  int64  `json:"started_at"`  // Unix ms
+	FinishedAt int64  `json:"finished_at"` // 0 while running
 }
 
 type JobsResponse struct {

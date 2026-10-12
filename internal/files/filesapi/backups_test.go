@@ -150,7 +150,7 @@ func TestJobCarriesKindSnapshotAndSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"kind":"backup"`, `"snapshot":"` + snapA + `"`, `"skipped":2`} {
+	for _, want := range []string{`"kind":"backup"`, `"snapshot":"` + snapA + `"`, `"skipped":2`, `"code":""`} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("%s lacks %s", b, want)
 		}
@@ -158,6 +158,11 @@ func TestJobCarriesKindSnapshotAndSkipped(t *testing.T) {
 	var old filesapi.Job // an extract job of a service before sub-project 4
 	if err := json.Unmarshal([]byte(`{"id":"j","state":"running","path":"w.zip","dest":"w"}`), &old); err != nil || old.Kind != "" {
 		t.Fatalf("old job = %+v, %v", old, err)
+	}
+	var failed filesapi.Job // the wire code of a failed job maps to its sentinel
+	if err := json.Unmarshal([]byte(`{"id":"j","kind":"backup","state":"failed","error":"disk full","code":"insufficient_storage"}`), &failed); err != nil ||
+		!errors.Is(filesapi.ErrorFromCode(failed.Code), filesapi.ErrInsufficientStorage) {
+		t.Fatalf("failed job = %+v, %v", failed, err)
 	}
 }
 
