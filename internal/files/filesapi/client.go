@@ -23,6 +23,9 @@ const (
 	// ExtractTimeout bounds the synchronous pre-check of an extract (central directory of up to
 	// max_extract_entries entries); the job itself runs in the background.
 	ExtractTimeout = 5 * time.Minute
+	// JarsTimeout bounds a jars listing: on a cache miss the service hashes up to MaxJars jars
+	// (each up to MaxJarHashBytes, two at a time).
+	JarsTimeout = 2 * time.Minute
 	// HealthTimeout bounds the health check.
 	HealthTimeout = 2 * time.Second
 	// DownloadHeaderTimeout bounds the wait for download headers; the stream itself has no
@@ -42,6 +45,7 @@ type UnixClient struct {
 	callTimeout           time.Duration
 	deleteTimeout         time.Duration
 	extractTimeout        time.Duration
+	jarsTimeout           time.Duration
 	downloadHeaderTimeout time.Duration
 }
 
@@ -67,6 +71,7 @@ func NewClient(socketPath string) *UnixClient {
 		callTimeout:           CallTimeout,
 		deleteTimeout:         DeleteTimeout,
 		extractTimeout:        ExtractTimeout,
+		jarsTimeout:           JarsTimeout,
 		downloadHeaderTimeout: DownloadHeaderTimeout,
 	}
 }
@@ -180,9 +185,40 @@ func (c *UnixClient) Job(ctx context.Context, id int64) (*Job, error) {
 	return out.Job, nil
 }
 
+// Jars lists DirPlugins or DirMods of a server with checksums and metadata (sub-project 3c
+// §5.1). Any other dir fails with ErrInvalid before anything is sent.
+func (c *UnixClient) Jars(ctx context.Context, id int64, dir string) (JarsResponse, error) {
+	if err := checkID(id); err != nil {
+		return JarsResponse{}, err
+	}
+	if !ValidJarDir(dir) {
+		return JarsResponse{}, fmt.Errorf("%w: jar directory must be %q or %q", ErrInvalid, DirPlugins, DirMods)
+	}
+	var out JarsResponse
+	err := c.call(ctx, c.jarsTimeout, http.MethodPost, PathJars, JarsRequest{ID: id, Dir: dir}, &out)
+	if out.Jars == nil {
+		out.Jars = []Jar{}
+	}
+	return out, err
+}
+
 // Upload streams body (exactly size bytes) to path. There is no timeout besides ctx: the
 // service answers only after the whole body arrived (spec §4, up to 4 GiB).
 func (c *UnixClient) Upload(ctx context.Context, id int64, p string, overwrite bool, size int64, body io.Reader) (UploadResponse, error) {
+	return c.upload(ctx, id, p, overwrite, size, nil, body)
+}
+
+// UploadChecked is Upload with an expected digest (sub-project 3c §5.2): the service computes
+// sha256 and sha512 while writing and refuses a mismatch with hash_mismatch before the file is
+// renamed into place. An invalid sum fails with ErrInvalid before anything is sent.
+func (c *UnixClient) UploadChecked(ctx context.Context, id int64, p string, overwrite bool, size int64, sum Checksum, body io.Reader) (UploadResponse, error) {
+	if err := sum.Validate(); err != nil {
+		return UploadResponse{}, err
+	}
+	return c.upload(ctx, id, p, overwrite, size, &sum, body)
+}
+
+func (c *UnixClient) upload(ctx context.Context, id int64, p string, overwrite bool, size int64, sum *Checksum, body io.Reader) (UploadResponse, error) {
 	if err := clean(id, &p); err != nil {
 		return UploadResponse{}, err
 	}
@@ -194,6 +230,9 @@ func (c *UnixClient) Upload(ctx context.Context, id int64, p string, overwrite b
 		ow = "1"
 	}
 	q := url.Values{"id": {strconv.FormatInt(id, 10)}, "path": {p}, "overwrite": {ow}}
+	if sum != nil {
+		q.Set(sum.Algo, sum.Hex) // QuerySHA256 / QuerySHA512 equal the algorithm names
+	}
 	// An empty file goes out as http.NoBody: net/http would otherwise probe the reader and could
 	// fall back to chunked encoding, which the service refuses (Content-Length is required).
 	var rb io.Reader = http.NoBody

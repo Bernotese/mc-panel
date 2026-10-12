@@ -15,6 +15,7 @@ const (
 	CodeInsufficientStorage = "insufficient_storage" // 507
 	CodeBusy                = "busy"                 // 429
 	CodeInvalid             = "invalid"              // 400
+	CodeHashMismatch        = "hash_mismatch"        // 400
 )
 
 var (
@@ -27,6 +28,7 @@ var (
 	ErrInsufficientStorage = errors.New(CodeInsufficientStorage)
 	ErrBusy                = errors.New(CodeBusy)
 	ErrInvalid             = errors.New(CodeInvalid)
+	ErrHashMismatch        = errors.New(CodeHashMismatch)
 	// ErrUnavailable: the service is unreachable, broke the protocol or failed internally.
 	ErrUnavailable = errors.New("files service unavailable")
 )
@@ -50,6 +52,7 @@ var codes = []struct {
 	{CodeInsufficientStorage, codeInfo{ErrInsufficientStorage, http.StatusInsufficientStorage}},
 	{CodeBusy, codeInfo{ErrBusy, http.StatusTooManyRequests}},
 	{CodeInvalid, codeInfo{ErrInvalid, http.StatusBadRequest}},
+	{CodeHashMismatch, codeInfo{ErrHashMismatch, http.StatusBadRequest}},
 }
 
 // ErrorFromCode returns the sentinel of a wire code (nil for unknown codes).

@@ -3,12 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"path"
 	"sort"
 	"strings"
 	"sync"
+	"testing"
 
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 )
@@ -128,4 +133,96 @@ func (f *fakeFiles) Job(context.Context, int64) (*filesapi.Job, error) {
 	}
 	j := *f.job
 	return &j, nil
+}
+
+// UploadChecked stores the upload only if the digest really matches; without overwrite an
+// existing file is ErrExists (like the service).
+func (f *fakeFiles) UploadChecked(_ context.Context, id int64, p string, overwrite bool, size int64, sum filesapi.Checksum, body io.Reader) (filesapi.UploadResponse, error) {
+	if err := sum.Validate(); err != nil {
+		return filesapi.UploadResponse{}, err
+	}
+	b, err := io.ReadAll(body)
+	if err != nil {
+		return filesapi.UploadResponse{}, fmt.Errorf("%w: %w", filesapi.ErrUnavailable, err)
+	}
+	if int64(len(b)) != size {
+		return filesapi.UploadResponse{}, filesapi.ErrInvalid
+	}
+	h256, h512 := digests(b)
+	if !sum.Matches(h256, h512) {
+		return filesapi.UploadResponse{}, filesapi.ErrHashMismatch
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.files[key(id, p)]; ok && !overwrite {
+		return filesapi.UploadResponse{}, filesapi.ErrExists
+	}
+	f.files[key(id, p)] = b
+	return filesapi.UploadResponse{Size: size, SHA256: h256, SHA512: h512}, nil
+}
+
+// Jars lists the files directly in <dir> whose names are jars, with real digests and without
+// metadata, sorted by name.
+func (f *fakeFiles) Jars(_ context.Context, id int64, dir string) (filesapi.JarsResponse, error) {
+	if !filesapi.ValidJarDir(dir) {
+		return filesapi.JarsResponse{}, filesapi.ErrInvalid
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []filesapi.Jar{}
+	for k, b := range f.files {
+		name, ok := strings.CutPrefix(k, key(id, dir+"/"))
+		if !ok || strings.Contains(name, "/") {
+			continue
+		}
+		enabled, isJar := filesapi.IsJarName(name)
+		if !isJar {
+			continue
+		}
+		h256, h512 := digests(b)
+		out = append(out, filesapi.Jar{Name: name, Enabled: enabled, Size: int64(len(b)), MTime: f.mtime, SHA256: h256, SHA512: h512})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return filesapi.JarsResponse{Jars: out}, nil
+}
+
+// digests returns the lowercase hex sha256 and sha512 of b.
+func digests(b []byte) (sha256Hex, sha512Hex string) {
+	s256, s512 := sha256.Sum256(b), sha512.Sum512(b)
+	return hex.EncodeToString(s256[:]), hex.EncodeToString(s512[:])
+}
+
+// The fake behaves like the service for what phase B2 relies on: real digests, a refused
+// mismatch leaves nothing behind, only top-level jars are listed.
+func TestFakeFilesJarsAndChecksums(t *testing.T) {
+	f := newFakeFiles()
+	ctx := t.Context()
+	data := []byte("jar bytes")
+	h256, h512 := digests(data)
+	wrong := filesapi.Checksum{Algo: filesapi.AlgoSHA512, Hex: strings.Repeat("0", 128)}
+	if _, err := f.UploadChecked(ctx, 1, "plugins/a.jar", false, int64(len(data)), wrong, bytes.NewReader(data)); !errors.Is(err, filesapi.ErrHashMismatch) {
+		t.Fatalf("wrong digest: %v", err)
+	}
+	if _, ok := f.files[key(1, "plugins/a.jar")]; ok {
+		t.Fatal("a mismatching upload was stored")
+	}
+	got, err := f.UploadChecked(ctx, 1, "plugins/a.jar", false, int64(len(data)), filesapi.Checksum{Algo: filesapi.AlgoSHA256, Hex: h256}, bytes.NewReader(data))
+	if err != nil || got.SHA512 != h512 || got.SHA256 != h256 || got.Size != int64(len(data)) {
+		t.Fatalf("UploadChecked = %+v, %v", got, err)
+	}
+	if _, err := f.UploadChecked(ctx, 1, "plugins/a.jar", false, int64(len(data)), filesapi.Checksum{Algo: filesapi.AlgoSHA512, Hex: h512}, bytes.NewReader(data)); !errors.Is(err, filesapi.ErrExists) {
+		t.Fatalf("existing without overwrite: %v", err)
+	}
+	f.files[key(1, "plugins/B.jar.disabled")] = []byte("b")
+	f.files[key(1, "plugins/readme.txt")] = []byte("x")
+	f.files[key(1, "plugins/LuckPerms/config.yml")] = []byte("x")
+	f.files[key(2, "plugins/other.jar")] = []byte("x")
+	list, err := f.Jars(ctx, 1, filesapi.DirPlugins)
+	if err != nil || len(list.Jars) != 2 || list.Jars[0].Name != "B.jar.disabled" || list.Jars[0].Enabled ||
+		list.Jars[1].Name != "a.jar" || !list.Jars[1].Enabled || list.Jars[1].SHA512 != h512 {
+		t.Fatalf("Jars = %+v, %v", list, err)
+	}
+	if _, err := f.Jars(ctx, 1, "world"); !errors.Is(err, filesapi.ErrInvalid) {
+		t.Fatalf("bad dir: %v", err)
+	}
 }
