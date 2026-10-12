@@ -8,14 +8,16 @@ import (
 )
 
 // jarKey identifies the content of a jar without reading it (spec 3c §5.1): device and inode
-// (fileKeyOf, per platform), size and mtime in nanoseconds. A replaced jar (new upload,
-// rename over it) or one changed in place (new size or mtime) gets a new key; a renamed one
-// (toggle) keeps its key.
+// (fileKeyOf, per platform), size, mtime and ctime in nanoseconds. A replaced jar (new
+// upload, rename over it) or one changed in place (new size, mtime or ctime; the ctime also
+// moves when the mtime is set back) gets a new key. Renaming (toggle) moves the ctime as well
+// on Linux, so a toggled jar is computed once more.
 type jarKey struct {
 	dev   devID
 	ino   uint64
 	size  int64
 	mtime int64
+	ctime int64
 }
 
 // jarInfo is what the service computes per jar.

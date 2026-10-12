@@ -9,6 +9,8 @@ import { isJobRunning } from './model'
 /**
  * The server's plugin job (spec §6.4/§7.1): polled every 2 s while it runs, otherwise not at all. When a job this tab
  * saw running ends, inventory, updates, "installiert" badges and previews are reloaded and a toast reports the result.
+ * The disk may also have changed when a running job vanishes (panel restart) or another job shows up that this tab
+ * did not see start; then everything is reloaded too, without a toast about a result the tab does not know.
  */
 export function usePluginJob(serverId: number): { job: PluginJob | null; running: boolean } {
   const { t } = useTranslation()
@@ -17,15 +19,27 @@ export function usePluginJob(serverId: number): { job: PluginJob | null; running
     ...pluginJobQueryOptions(serverId),
     refetchInterval: (q) => (isJobRunning(q.state.data) ? JOB_POLL_MS : false),
   })
-  const job = query.data?.job ?? null
-  const lastState = useRef(job?.state)
+  const data = query.data
+  // undefined = no answer yet: the first answer only tells what was there before the tab looked.
+  const last = useRef<PluginJob | null | undefined>(undefined)
   useEffect(() => {
-    const previous = lastState.current
-    lastState.current = job?.state
-    if (previous !== 'running' || !job || job.state === 'running') return
-    if (job.state === 'done') toast.success(t('plugins.job.toast_done'))
-    else toast.error(t('plugins.job.toast_failed'))
-    void refreshPluginState(queryClient, serverId)
-  }, [job, queryClient, serverId, t])
+    if (data === undefined) return
+    const job = data.job
+    const previous = last.current
+    last.current = job
+    if (previous === undefined) return
+    if (previous?.state === 'running' && job?.id === previous.id) {
+      if (job.state === 'running') return
+      if (job.state === 'done') toast.success(t('plugins.job.toast_done'))
+      else toast.error(t('plugins.job.toast_failed'))
+      void refreshPluginState(queryClient, serverId)
+      return
+    }
+    const vanished = previous?.state === 'running' && job === null
+    // A new job this tab started itself (still running) is reloaded for when it ends; any other new id changed the disk.
+    const replaced = job !== null && job.id !== previous?.id && (previous?.state === 'running' || job.state !== 'running')
+    if (vanished || replaced) void refreshPluginState(queryClient, serverId)
+  }, [data, queryClient, serverId, t])
+  const job = data?.job ?? null
   return { job, running: job?.state === 'running' }
 }
