@@ -271,12 +271,12 @@ p_restarted() {
 # p_restart <why>: restarts the plugins server through the panel (server.power) and waits until
 # RCON answers again; p_started is the new start time (Unix ms) for the log check.
 p_restart() {
-  p_before="$(inst_field "$psrv" 'i["started_at"]')"
+  p_before="$(inst_field "$psrv" 'i["started_at"]')" || fail "restart ($1): agent instance list"
   papi POST "/servers/$psrv/power" "$po/power.json" '{"action": "restart"}'
   [ "$pcode" = 202 ] || fail "restart ($1): HTTP $pcode $(cat "$po/power.json")"
   pwait_for 240 "restart ($1)" p_restarted
   pwait_for 240 "rcon after restart ($1)" p_rcon_ready
-  p_started="$(inst_field "$psrv" 'i["started_at"]')"
+  p_started="$(inst_field "$psrv" 'i["started_at"]')" || fail "restart ($1): agent instance list"
 }
 
 # check_plugins <listed names, comma-separated> <absent names, comma-separated>: runs "plugins"
@@ -435,7 +435,8 @@ socket_mode = "0666"
 panel_uid = $(id -u mcpanel)
 instances_dir = "$work/mc"
 [limits]
-max_upload_bytes = 10485760
+# 64 MiB: headroom for real plugin jars (ViaVersion is about 6.5 MB); the 413 check uploads 65 MiB.
+max_upload_bytes = 67108864
 max_extract_bytes = 104857600
 max_extract_entries = 1000
 reserve_bytes = 1048576
@@ -638,7 +639,7 @@ code="$(fput "$work/ci-plugin.jar" plugins/ci-plugin.jar 0 "$fo/up.json")"
 is_error "$fo/up.json" "$code" 409 exists || fail "upload without overwrite: HTTP $code $(cat "$fo/up.json")"
 code="$(fput "$work/ci-plugin.jar" plugins/ci-plugin.jar 1 "$fo/up.json")"
 [ "$code" = 201 ] || fail "upload with overwrite: HTTP $code $(cat "$fo/up.json")"
-head -c $((11 * 1024 * 1024)) /dev/zero >"$work/big.bin"
+head -c $((65 * 1024 * 1024)) /dev/zero >"$work/big.bin"
 chmod 0644 "$work/big.bin"
 code="$(fput "$work/big.bin" big.bin 0 "$fo/up.json")"
 is_error "$fo/up.json" "$code" 413 too_large || fail "upload over max_upload_bytes: HTTP $code $(cat "$fo/up.json")"
@@ -957,7 +958,8 @@ jcheck "$po/inv.json" "empty inventory of a fresh Paper server" '
   and sorted(d["sources"]) == ["hangar", "modrinth"] and d["jars"] == [] and not d["truncated"]'
 code="$(curl -sS --max-time 10 -o "$po/csrf.json" -w '%{http_code}' -X POST -H "Origin: $porigin" \
   -H 'Sec-Fetch-Site: same-origin' -H "Cookie: __Host-sid=$psid" -H 'Content-Type: application/json' \
-  --data-binary '{"source": "modrinth", "project": "fALzjamp"}' "$pbase/api/servers/$psrv/plugins/install")"
+  --data-binary '{"source": "modrinth", "project": "fALzjamp"}' "$pbase/api/servers/$psrv/plugins/install")" ||
+  fail "install without CSRF token: curl exit $?"
 is_perror "$po/csrf.json" "$code" 403 csrf_invalid || fail "install without CSRF token: HTTP $code $(cat "$po/csrf.json")"
 papi GET "/servers/$psrv/plugins/jobs" "$po/job.json"
 jcheck "$po/job.json" "a refused install must not start a job" 'd["job"] is None'
@@ -989,7 +991,7 @@ p_viaback="$(jget "$po/search-h.json" 'next(h["project_id"] for h in d["hits"] i
 echo "OK: search hits chunky ($p_chunky, Modrinth) and ViaBackwards ($p_viaback, Hangar) with page and proxied icon URLs"
 
 echo "== plugins: icon proxy delivers the Chunky icon"
-papi GET "${icon_chunky#/api}" "$po/icon.bin"
+papi_up GET "${icon_chunky#/api}" "$po/icon.bin"
 [ "$pcode" = 200 ] || fail "icon proxy (Chunky): HTTP $pcode $(head -c 300 "$po/icon.bin")"
 tr -d '\r' <"$po/icon.bin.headers" >"$po/icon.h"
 grep -qiE '^content-type: image/(png|jpeg|webp|gif)$' "$po/icon.h" || fail "icon content type: $(cat "$po/icon.h")"
