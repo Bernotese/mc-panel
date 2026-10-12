@@ -27,6 +27,9 @@ func (h *Handler) retrySaveOn(ctx context.Context) {
 // tick runs once per tickEvery (and once when Run starts): pending save-on, a changed time
 // zone, then the due schedules.
 func (h *Handler) tick(ctx context.Context) {
+	if ctx.Err() != nil { // shutting down: every query would fail
+		return
+	}
 	h.tickMu.Lock()
 	defer h.tickMu.Unlock()
 	now := h.clock.Now()
