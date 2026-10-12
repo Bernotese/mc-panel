@@ -36,6 +36,15 @@
 - **Fertig:** Eine Aufgabe ist fertig, wenn VM-Lauf und CI ihres Commits grün sind (`gh pr checks <pr> --watch --interval 30`, Fehler über `gh run view <id> --log-failed`). Danach meldet der Teammate dem Lead den PR. Der Nutzer mergt, erst dann starten B1, B2 und B3.
 - **Dateien:** Phase A ändert ausschließlich die in den „Files“-Blöcken genannten Dateien.
 
+## Nachträge des Leads (nach dem Schnittstellen-Review, dem Teammate per Nachricht geschickt)
+
+Diese Punkte gehen den Code-Schnipseln unten vor (die Übersicht ist nachgezogen):
+
+1. `filesapi.Job` bekommt zusätzlich `Code string \`json:"code"\`` – Wire-Code des Fehlers eines `failed`-Jobs ("" sonst); der Dienst füllt ihn ab Phase B1 (V1).
+2. `DELETE /servers/{id}?purge_backups=1`: Purge nach dem Commit mit `context.WithoutCancel(r.Context())` und Frist `filesapi.DeleteTimeout + time.Minute`; vorher Schreibfrist per `http.NewResponseController(w).SetWriteDeadline(now + Frist + 10 s)`; Test dafür (V2).
+3. OpenAPI `createBackup` `409 conflict` = „server has no instance yet“.
+4. Mock: `interval`-`next_run_at` wie das panel (`last_run_at + N h`, sonst `jetzt + N h`); Zip-Dateiname in der panel-Zeitzone; Audit-Details wie das panel (create `{note, snapshot}`, restore `{snapshot, time, kind}`, pin/unpin `{snapshot, new_snapshot}`, schedule_update `{from, to}`) (V6).
+
 ## Abweichungen von der Übersicht (bewusst, vom Lead zu bestätigen)
 
 1. **`servers.DataGate` schon in Aufgabe 1** (V2 ordnet es Aufgabe 2 zu). `serverfiles.Handler` implementiert die Sperre über seine Methode, und `cmd/panel/app.go` übergibt `filesH` als Sperre. Methode und Interface müssen deshalb im selben Commit umbenannt werden. `BackupPurger` und `purge_backups` bleiben in Aufgabe 2.

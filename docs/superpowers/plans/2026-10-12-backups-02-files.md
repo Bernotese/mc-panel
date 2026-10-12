@@ -42,7 +42,8 @@ func (k SnapshotKind) Valid() bool
 type Snapshot struct{ ID, ShortID string; Time int64; Kind SnapshotKind; Pinned bool; Note string; Bytes int64 }
 type BackupsStatus struct{ Available bool; Version, Reason string }
 type IDRequest struct{ ID int64 }
-type CreateBackupRequest struct{ ID int64; Kind SnapshotKind; Note string }
+type CreateBackupRequest struct{ ID int64; Kind SnapshotKind; Note, Timezone string }
+func (r CreateBackupRequest) Validate() error // ID, Art, Notiz, Zeitzone (ValidTimezone) – ErrInvalid
 type SnapshotRequest struct{ ID int64; Snapshot string }
 type ForgetPolicy struct{ KeepLast, KeepDaily, KeepWeekly, KeepMonthly int }
 func (p ForgetPolicy) Validate() error
@@ -53,7 +54,7 @@ type SnapshotsResponse struct{ Snapshots []Snapshot }
 type SnapshotResponse struct{ Snapshot Snapshot }
 func ValidSnapshotID(s string) bool
 func ValidNote(s string) bool
-// Job (types.go) hat zusätzlich: Kind JobKind, Snapshot string, Skipped int64.
+// Job (types.go) hat zusätzlich: Kind JobKind, Snapshot string, Skipped int64, Code string.
 // (*UnixClient) implementiert BackupClient (in den e2e-Tests dieser Phase benutzt).
 ```
 
@@ -66,7 +67,7 @@ Vorausgesetzt (Phase A): `ForgetPolicy.Validate`, `ForgetRequest.Validate` und `
 | `files.toml` | `restic_binary` (Default `/usr/bin/restic`, Dev `restic`); `[limits]` `max_backup_bytes = 68719476736`, `max_backup_entries = 1000000`, `max_backup_jobs = 1`; Prüfung: `restic_binary` ohne Dev eine saubere absolute Pfadangabe, mit Dev nicht leer (ohne `/` → `exec.LookPath`, sonst sauber absolut); `max_backup_bytes`/`max_backup_entries` > 0, `max_backup_jobs` 1–8 |
 | Layout | `<instances_dir>/backups` `mcpanel-mc` (UID/GID aus `instances.Config`) `0700` vom agent (`ensureLayout`, `ensureOwnedDir` über `O_NOFOLLOW`-Descriptor, Symlink → Fehler); Dev-Dienst legt `backups/` selbst an (`0700`); `repos/`, `keys/` legt der Dienst an (`0700`, `Lstat`-Prüfung: echter Ordner, kein Symlink) |
 | Schlüssel | `backups/keys/<id>`: 32 Zufallsbytes, `base64.StdEncoding`, ohne Zeilenumbruch, `O_WRONLY\|O_CREATE\|O_EXCL\|O_NOFOLLOW`, `0600`; vorhandener Schlüssel wird nie überschrieben; Repo vorhanden, Schlüssel fehlt → Job `failed` „the key of this server's backup repository is missing (keys/<id>)“ |
-| restic-Umgebung | genau `HOME=<backups>`, `RESTIC_PROGRESS_FPS=1`, mit Server zusätzlich `RESTIC_REPOSITORY=<backups>/repos/<id>`, `RESTIC_PASSWORD_FILE=<backups>/keys/<id>`; `TZ=<zone>` nur bei `forget` mit Policy; `cmd.Dir = "/"`; keine geerbten Variablen |
+| restic-Umgebung | genau `HOME=<backups>`, `RESTIC_PROGRESS_FPS=1`, mit Server zusätzlich `RESTIC_REPOSITORY=<backups>/repos/<id>`, `RESTIC_PASSWORD_FILE=<backups>/keys/<id>`; `TZ=<zone>` bei `backup` (aus `CreateBackupRequest.Timezone`, wenn gesetzt) und bei `forget` mit Policy; `cmd.Dir = "/"`; keine geerbten Variablen |
 | restic-argv | immer `--no-cache` vorn; `version`; `init`; `unlock`; `--json backup --stdin --stdin-filename data.tar --host mcpanel --tag mcpanel --tag kind=<kind> [--tag note=<base64url ohne Padding>]`; `--json --no-lock snapshots --host mcpanel --tag mcpanel`; `dump <id> /data.tar`; `--json tag --add pinned <id>` bzw. `--remove pinned`; `forget --prune --max-unused 10% <ids…>` bzw. `forget --prune --max-unused 10% --host mcpanel --tag kind=scheduled --keep-tag pinned --group-by host [--keep-last N] [--keep-daily N] [--keep-weekly N] [--keep-monthly N]` (Werte 0 weggelassen) |
 | restic-Prozess | Abbruch über `ctx` → `SIGINT`, nach `resticGrace = 10 s` `SIGKILL` (`cmd.Cancel`, `cmd.WaitDelay`); stderr: letzte 4 KiB (`tailBuffer`); stdout kleiner Aufrufe ≤ 16 MiB; Version: `restic version` mit Frist 10 s, Regex `^restic (\d+)\.(\d+)\.(\d+)`, ≥ `filesapi.MinResticVersion` |
 | Exit-Codes | 10 → `ErrNotFound` („backup repository does not exist“), 11 → `ErrBusy` („the backup repository is locked“), 12 → interner Fehler „the key does not match the backup repository“, sonst „restic <op> failed: <letzte stderr-Zeile>“ (≤ 300 Bytes, `message` aus einer JSON-Zeile, durch `publicMessage`); volles stderr ins Log (`Warn`) |
@@ -77,7 +78,7 @@ Vorausgesetzt (Phase A): `ForgetPolicy.Validate`, `ForgetRequest.Validate` und `
 | Jobs | ein Job (oder Vorprüfung oder Sperre) pro Instanz über alle Arten, `429 busy`; Entpacken ≤ `maxJobsTotal = 2`, restic-Jobs ≤ `max_backup_jobs`; `forget` ist abgelehnt, solange ein Backup-Download der Instanz läuft, und ein Download, solange ein `forget` läuft (`429 busy`); `pin`/`purge` brauchen eine Instanz ohne Job und ohne Download |
 | Abbrechen | `POST /v1/jobs/cancel {id}`: kein laufender Job → `204`; Extract → `400 invalid`; Backup/Forget → Kontext abgebrochen; Restore nur bis `beginCommit`; Fehlertext eines abgebrochenen Jobs „the job was canceled“, beim Beenden des Dienstes „the files service is shutting down“ |
 | Download | Vorprüfungen (Snapshot, Download-Sperre, einer der 4 Zip-Plätze) vor dem ersten Byte; `start` erst beim ersten tar-Eintrag (ein sofort scheiterndes `dump` wird noch als JSON beantwortet); Zip mit denselben Namensregeln wie der Ordner-Download (`zipSafeName` je Komponente), ausgelassene Ordner samt Inhalt; Grenzen `max_backup_entries` / 16 MiB Namen / `max_backup_bytes` |
-| HTTP | alle Bodies ≤ `filesapi.MaxSmallJSONBytes`, `DisallowUnknownFields`; `list`, `restore`, `forget`, `pin`, `purge` laufen über `longOp` (restic liest den Index); `status` immer, alle anderen `/v1/backups/*` ohne restic `503 unavailable` |
+| HTTP | alle Bodies ≤ `filesapi.MaxSmallJSONBytes`, `DisallowUnknownFields`; `list`, `restore`, `forget`, `pin`, `purge` laufen über `longOp` (restic liest den Index); `status` und `purge` immer, alle anderen `/v1/backups/*` ohne restic `503 unavailable` |
 
 ## Review Focus (aus der Übersicht, in dieser Phase)
 
@@ -89,8 +90,10 @@ Vorausgesetzt (Phase A): `ForgetPolicy.Validate`, `ForgetRequest.Validate` und `
 ## Abweichungen und Präzisierungen
 
 - **Zeitzone der Retention (Vertragsproblem, dem Lead gemeldet):** restic ordnet Snapshots für `--keep-daily/weekly/monthly` nach `Time.Year()/Month()/Day()` der *gespeicherten* Snapshot-Zeit ein (`internal/data/snapshot_policy.go`, restic 0.19.1); die gespeicherte Zeit trägt die Zeitzone des **Backup**-Prozesses. `TZ` beim `forget` (V1, Spec §3.3) ändert die Tagesgrenzen daher nicht. Richtig wäre `TZ` auch beim `backup` — dafür fehlt in V1 `CreateBackupRequest.Timezone`. **Vom Lead entschieden:** V1 hat jetzt `CreateBackupRequest.Timezone`; der Dienst setzt `TZ` per `tzEnv` beim `backup` (Aufgabe 5) und beim `forget` (Aufgabe 7). Aufgabe 8 prüft im Integrationstest, dass die Snapshot-Zeit die Zone trägt (`restic snapshots --json` → `time` mit dem Offset der Zone).
-- **`ForgetBackups` mit IDs liest vorab die Snapshot-Liste** (unbekannte ID → `404`, V5). Das dauert bei großen Repos länger als `CallTimeout` (10 s), den V1 für `ForgetBackups` vorsieht; der Handler läuft trotzdem über `longOp`. Empfehlung an den Lead: `ForgetBackups` im Client mit `BackupCallTimeout`.
-- **`purge` ohne restic → `503 unavailable`** wie alle anderen `/v1/backups/*` (Spec §3.2), obwohl Purge restic nicht bräuchte.
+- **`ForgetBackups` mit IDs liest vorab die Snapshot-Liste** (unbekannte ID → `404`, V5); der Handler läuft über `longOp`, und Phase A gibt `ForgetBackups` im Client `BackupCallTimeout` (Abweichung 3 von Plan 01).
+- **`purge` braucht restic nicht** (Lead-Entscheidung, V5/Spec §3.2): es löscht `repos/<id>` und `keys/<id>` über ein `os.Root` auf `backups/` auch ohne restic; alle anderen `/v1/backups/*` außer `status` antworten ohne restic `503 unavailable` (`TestPurgeBackupsWithoutRestic`).
+- **`job.Code`** (V1, von Phase A angelegt): `jobs.finish` setzt bei `failed` den Wire-Code über `filesapi.CodeOf(err)` (`too_large`, `insufficient_storage`, `busy`, `unavailable`, …), "" bei Fehlern ohne Sentinel; das panel bildet ihn ab (`TestBackupTooLargeLeavesNoSnapshot`, `TestBackupResticFailureIsReported`).
+- **`CreateBackup` prüft mit `req.Validate()`** (ID, Art, Notiz, Zeitzone; V1), statt die Regeln selbst zu wiederholen (`TestCreateBackupValidation` mit ungültiger Zone).
 - **Verborgene Einträge zählen in `skipped`** (Spec §4.2 nennt sie in derselben Liste); `.rcon-cli.env` ist daher fast immer dabei.
 - **Sortierte Tiefensuche statt `walkTree`:** `walkTree` liefert die Verzeichnisreihenfolge; Spec §4.2 verlangt eine feste, sortierte Reihenfolge (stabile tar-Streams deduplizieren besser). `readDirSorted` liest einen Ordner vollständig (höchstens `max_backup_entries + 1` Namen), schließt ihn und steigt dann ab – wie `walkTree` ist höchstens ein Ordner offen.
 - **Pin liest die neue ID aus der JSON-Ausgabe von `restic tag`** (`message_type: changed`, `new_snapshot_id`, restic 0.19.1 `cmd_tag.go`); nur ohne diese Zeile (ältere restic-Version) sucht es wie in Spec §3.3 über gleiche Zeit und Art. Ist der Tag schon im gewünschten Zustand, ruft der Dienst restic gar nicht auf und die ID bleibt.
@@ -2204,6 +2207,9 @@ func (j *jobs) finish(id int64, err error, now time.Time) {
 			if j.scrub != nil {
 				job.Error = j.scrub(job.Error)
 			}
+			// the wire code of the error (too_large, insufficient_storage, busy, unavailable, …)
+			// so the panel can map it (V1/V5); "" for errors without a sentinel
+			job.Code, _ = filesapi.CodeOf(err)
 		} else {
 			job.State = jobDone
 		}
@@ -2799,7 +2805,7 @@ func TestCreateBackupRunsResticWithTheStream(t *testing.T) {
 	s, data, f := newBackupService(t)
 	put(t, data, "world/level.dat", "level")
 	put(t, data, "server.properties", "rcon.password=s3cret\n")
-	job, err := s.CreateBackup(ctx, filesapi.CreateBackupRequest{ID: 1, Kind: filesapi.SnapshotManual, Note: "vor Update"})
+	job, err := s.CreateBackup(ctx, filesapi.CreateBackupRequest{ID: 1, Kind: filesapi.SnapshotManual, Note: "vor Update", Timezone: "Europe/Berlin"})
 	if err != nil || job.Kind != filesapi.JobBackup || job.State != jobRunning {
 		t.Fatalf("create = %+v %v", job, err)
 	}
@@ -2815,6 +2821,9 @@ func TestCreateBackupRunsResticWithTheStream(t *testing.T) {
 		"--tag", "mcpanel", "--tag", "kind=manual", "--tag", noteTag("vor Update")}
 	if !slices.Equal(backups[0].Args, want) {
 		t.Fatalf("args = %q\nwant   %q", backups[0].Args, want)
+	}
+	if tz := envOf(backups[0].Env, "TZ"); tz != "Europe/Berlin" { // restic stores the snapshot time in this zone
+		t.Fatalf("backup TZ = %q", tz)
 	}
 	if len(f.callsOf("init")) != 1 || len(f.callsOf("unlock")) != 1 {
 		t.Fatalf("init %d, unlock %d", len(f.callsOf("init")), len(f.callsOf("unlock")))
@@ -2850,6 +2859,8 @@ func TestCreateBackupValidation(t *testing.T) {
 		{ID: 1, Kind: filesapi.SnapshotManual, Note: "bad\nnote"},
 		{ID: 1, Kind: filesapi.SnapshotManual, Note: strings.Repeat("ä", 65)},
 		{ID: 0, Kind: filesapi.SnapshotManual},
+		{ID: 1, Kind: filesapi.SnapshotScheduled, Timezone: "Mars/Olympus"},
+		{ID: 1, Kind: filesapi.SnapshotScheduled, Timezone: "Europe/Berlin\nTZ=UTC"},
 	} {
 		if _, err := s.CreateBackup(ctx, req); !errors.Is(err, filesapi.ErrInvalid) {
 			t.Errorf("%+v: %v, want invalid", req, err)
@@ -2883,8 +2894,8 @@ func TestBackupTooLargeLeavesNoSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	job := waitJob(t, s, 1)
-	if job.State != jobFailed || !strings.Contains(job.Error, "more than 4 bytes") {
-		t.Fatalf("job = %+v", job)
+	if job.State != jobFailed || !strings.Contains(job.Error, "more than 4 bytes") || job.Code != filesapi.CodeTooLarge {
+		t.Fatalf("job = %+v (want code %s)", job, filesapi.CodeTooLarge)
 	}
 	if len(f.snaps(s.repoDir(1))) != 0 || len(f.sawEOF) != 1 || f.sawEOF[0] {
 		t.Fatalf("snapshots %d, sawEOF %v: restic must be killed before the stream ends", len(f.snaps(s.repoDir(1))), f.sawEOF)
@@ -2898,8 +2909,8 @@ func TestBackupResticFailureIsReported(t *testing.T) {
 		t.Fatal(err)
 	}
 	job := waitJob(t, s, 1)
-	if job.State != jobFailed || !strings.Contains(job.Error, "restic backup failed") || strings.Contains(job.Error, s.cfg.InstancesDir) {
-		t.Fatalf("job = %+v", job)
+	if job.State != jobFailed || !strings.Contains(job.Error, "restic backup failed") || strings.Contains(job.Error, s.cfg.InstancesDir) || job.Code != "" {
+		t.Fatalf("job = %+v (an error without sentinel has no code)", job)
 	}
 }
 
@@ -3069,13 +3080,9 @@ func tzEnv(zone string) []string {
 
 // CreateBackup checks the request and the free space and starts a backup job (spec 4 §4.2).
 func (s *Service) CreateBackup(ctx context.Context, req filesapi.CreateBackupRequest) (filesapi.Job, error) {
-	switch {
-	case !req.Kind.Valid():
-		return filesapi.Job{}, fmt.Errorf("%w: unknown snapshot kind %q", filesapi.ErrInvalid, req.Kind)
-	case req.Note != "" && req.Kind != filesapi.SnapshotManual:
-		return filesapi.Job{}, fmt.Errorf("%w: only manual backups carry a note", filesapi.ErrInvalid)
-	case !filesapi.ValidNote(req.Note):
-		return filesapi.Job{}, fmt.Errorf("%w: the note must be at most %d characters without control characters", filesapi.ErrInvalid, filesapi.MaxNoteRunes)
+	// ID, kind, note and time zone (TZ of restic) with the shared rules of filesapi (V1)
+	if err := req.Validate(); err != nil {
+		return filesapi.Job{}, err
 	}
 	if err := s.requireBackups(req.ID); err != nil {
 		return filesapi.Job{}, err
@@ -4271,6 +4278,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -4435,6 +4443,52 @@ func TestPurgeBackups(t *testing.T) {
 		if _, err := os.Lstat(p); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists: %v", p, err)
 		}
+	}
+}
+
+// Purge needs no restic (V5): a server can be deleted with its backups on a host without it,
+// and a symlinked repos/ entry is removed as a link, never followed.
+func TestPurgeBackupsWithoutRestic(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newService(t, func(c *Config) { c.ResticBinary = "/nonexistent/restic" }) // restic is unavailable
+	s.InitBackups(ctx)
+	if st := s.BackupsStatus(); st.Available {
+		t.Fatalf("status = %+v", st)
+	}
+	if err := s.PurgeBackups(ctx, 1); err != nil {
+		t.Fatalf("purge without backups/: %v", err)
+	}
+	for _, d := range []string{"repos/1", "keys"} {
+		if err := os.MkdirAll(filepath.Join(s.backupsDir(), d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(s.backupsDir(), "repos", "1", "config"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.backupsDir(), "keys", "1"), []byte("k"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "keep"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(s.backupsDir(), "repos", "2")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PurgeBackups(ctx, 1); err != nil {
+		t.Fatalf("purge without restic: %v", err)
+	}
+	if err := s.PurgeBackups(ctx, 2); err != nil {
+		t.Fatalf("purge of a symlinked repo: %v", err)
+	}
+	for _, p := range []string{"repos/1", "keys/1", "repos/2"} {
+		if _, err := os.Lstat(filepath.Join(s.backupsDir(), p)); !os.IsNotExist(err) {
+			t.Fatalf("%s still exists: %v", p, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(outside, "keep")); err != nil {
+		t.Fatalf("purge followed the symlink: %v", err)
 	}
 }
 
@@ -4660,6 +4714,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"strconv"
 
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
@@ -4814,10 +4869,12 @@ func changedSnapshotID(out []byte, old string) string {
 }
 
 // PurgeBackups removes the repository and the key of server id (spec 4 §5.6); nothing there is
-// fine. backups/ is only writable by the service's user and invisible to containers.
+// fine. It needs no restic (only folders are removed), so a server can be deleted with its
+// backups also on a host without restic (V5). Everything goes through an os.Root on backups/:
+// a symlink planted in repos/ or keys/ never leads the removal elsewhere.
 func (s *Service) PurgeBackups(ctx context.Context, id int64) error {
-	if err := s.requireBackups(id); err != nil {
-		return err
+	if id <= 0 {
+		return fmt.Errorf("%w: id must be > 0", filesapi.ErrInvalid)
 	}
 	release, err := s.jobs.lock(id)
 	if err != nil {
@@ -4827,10 +4884,19 @@ func (s *Service) PurgeBackups(ctx context.Context, id int64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(s.repoDir(id)); err != nil {
+	root, err := os.OpenRoot(s.backupsDir())
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil // backups/ was never created: nothing to purge
+	}
+	if err != nil {
+		return fmt.Errorf("open the backup directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	name := strconv.FormatInt(id, 10)
+	if err := root.RemoveAll(path.Join("repos", name)); err != nil {
 		return fmt.Errorf("remove the backup repository: %w", err)
 	}
-	if err := os.Remove(s.keyFile(id)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := root.Remove(path.Join("keys", name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("remove the repository key: %w", err)
 	}
 	return nil

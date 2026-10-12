@@ -604,7 +604,8 @@ In `web/src/i18n/de.ts` einfügen:
     },
     error: {
       job_running: 'Für diesen Server läuft oder wartet bereits ein Backup-Auftrag.',
-      conflict: 'Das geht gerade nicht: Der Server hat noch keine Daten, oder ein Dateiauftrag läuft.',
+      conflict: 'Das geht noch nicht: Der Server hat noch keine Instanz.',
+      files_busy: 'Der Dateidienst ist für diesen Server gerade beschäftigt (Download oder Entpacken). Bitte gleich erneut versuchen.',
     },
     schedule: {
       title: 'Zeitplan',
@@ -775,7 +776,8 @@ In `web/src/i18n/en.ts` an denselben Stellen:
     },
     error: {
       job_running: 'A backup job for this server is already running or waiting.',
-      conflict: 'Not possible right now: the server has no data yet, or a file job is running.',
+      conflict: 'Not possible yet: the server has no instance.',
+      files_busy: 'The file service is busy with this server (download or extract). Try again in a moment.',
     },
     schedule: {
       title: 'Schedule',
@@ -1849,6 +1851,20 @@ describe('snapshot actions', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Anpinnen' }))
     await waitFor(() => expect(calls).toBeGreaterThan(1))
   })
+
+  it('names the busy file service when a pin is refused without a running job', async () => {
+    server.use(
+      http.get('*/api/servers/:id/backups', () => HttpResponse.json(overview({ snapshots: [snapshot(1)] }))),
+      http.post('*/api/servers/:id/backups/:snapshot/pin', () =>
+        HttpResponse.json({ error: 'backup_running', message: 'the file service is busy with this server (download or extract); try again later' }, { status: 409 }),
+      ),
+    )
+    const { user } = await openBackups()
+    await openMenu(user)
+    await user.click(await screen.findByRole('menuitem', { name: 'Anpinnen' }))
+    expect(await screen.findByText(/Dateidienst ist für diesen Server gerade beschäftigt/)).toBeInTheDocument()
+    expect(screen.queryByText(/läuft oder wartet bereits ein Backup-Auftrag/)).not.toBeInTheDocument()
+  })
 })
 ```
 
@@ -1934,7 +1950,7 @@ import type { BackupSnapshot } from '@/api/types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { isApiError } from '@/api/errors'
 import { useFormat } from '@/lib/format'
-import { deleteBackup, pinBackup, refreshBackups, replaceSnapshot, restoreBackup } from './api'
+import { deleteBackup, pinBackup, refreshBackups, refreshJobOnConflict, replaceSnapshot, restoreBackup } from './api'
 import { RestoreDialog } from './restore-dialog'
 
 // im Komponentenrumpf nach `create`
@@ -1951,6 +1967,13 @@ import { RestoreDialog } from './restore-dialog'
     onError: (err) => {
       // not_found: the snapshot changed meanwhile (another tab pinned it, retention removed it) – the repo is the truth.
       if (isApiError(err, 'not_found')) void refreshBackups(queryClient, server.id)
+      // 409 backup_running while this tab knows no running job: the file service refused the pin
+      // (a download or an extract runs, panel plan 03 errFilesBusy) – say so instead of "a job runs".
+      if (isApiError(err, 'backup_running') && !active) {
+        refreshJobOnConflict(queryClient, server.id, err)
+        toast.error(t('backups.error.files_busy'))
+        return
+      }
       notifyError(err)
     },
   })
