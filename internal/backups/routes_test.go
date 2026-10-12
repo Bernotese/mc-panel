@@ -89,8 +89,6 @@ func TestRoutesCheckPermissionAndSudo(t *testing.T) {
 // removes its routes, task 13 deletes the list and this test.
 var stubbed = []struct{ method, path string }{
 	{http.MethodGet, "/backups"},
-	{http.MethodPost, "/backups"},
-	{http.MethodGet, "/backups/job"},
 	{http.MethodPost, "/backups/" + strings.Repeat("a", 64) + "/pin"},
 	{http.MethodPost, "/backups/" + strings.Repeat("a", 64) + "/restore"},
 	{http.MethodDelete, "/backups/" + strings.Repeat("a", 64)},

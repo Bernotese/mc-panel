@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -61,6 +62,8 @@ type Handler struct {
 	console   agentapi.ConsoleClient
 	reconcile func()
 	log       *slog.Logger
+	queue     *queue
+	tickMu    sync.Mutex // serialises ticks (Run and tests)
 
 	tickEvery, pollEvery, rconTimeout, stopTimeout, shutdownWait, ioTimeout time.Duration
 	ioClock                                                                 clock.Clock // wall clock for I/O deadlines (always clock.Real)
@@ -83,12 +86,14 @@ func NewHandler(d Deps) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Handler{
+	h := &Handler{
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, notifier: n, files: d.Files, inst: d.Instances,
-		console: con, reconcile: rf, log: log,
+		console: con, reconcile: rf, log: log, queue: newQueue(d.Clock),
 		tickEvery: tickEvery, pollEvery: pollEvery, rconTimeout: rconTimeout, stopTimeout: stopTimeout,
 		shutdownWait: shutdownWait, ioTimeout: ioTimeout, ioClock: clock.Real{},
 	}
+	h.queue.gone = h.serverGone
+	return h
 }
 
 // Routes registers the backup routes (paths relative to /api, contract V3).
@@ -96,8 +101,8 @@ func (h *Handler) Routes(api *rbac.Router) {
 	rule := rbac.Server(rbac.PermServerBackups, "id")
 	sudo := rule.WithSudo()
 	api.Get("/servers/{id}/backups", rule, h.notImplemented)
-	api.Post("/servers/{id}/backups", rule, h.notImplemented)
-	api.Get("/servers/{id}/backups/job", rule, h.notImplemented)
+	api.Post("/servers/{id}/backups", rule, h.handleCreate)
+	api.Get("/servers/{id}/backups/job", rule, h.handleJob)
 	api.Put("/servers/{id}/backups/schedule", rule, h.handleUpdateSchedule)
 	api.Post("/servers/{id}/backups/{snapshot}/pin", rule, h.notImplemented)
 	api.Post("/servers/{id}/backups/{snapshot}/restore", sudo, h.notImplemented)
@@ -105,8 +110,35 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Get("/servers/{id}/backups/{snapshot}/download", rule, h.notImplemented)
 }
 
-// Run blocks until ctx is done (task 10 adds recovery, the worker and the ticker).
-func (h *Handler) Run(ctx context.Context) { <-ctx.Done() }
+// Run blocks until ctx is done: recovery first, then the worker and the ticker. On ctx.Done it
+// refuses new jobs, cancels the running one (which cancels its service job and sends save-on)
+// and waits up to shutdownWait for it.
+func (h *Handler) Run(ctx context.Context) {
+	h.recover(ctx)
+	workDone := make(chan struct{})
+	go func() {
+		defer close(workDone)
+		h.queue.work(ctx)
+	}()
+	t := time.NewTicker(h.tickEvery)
+	defer t.Stop()
+	for {
+		h.tick(ctx)
+		select {
+		case <-ctx.Done():
+			h.queue.close()
+			wait := time.NewTimer(h.shutdownWait)
+			defer wait.Stop()
+			select {
+			case <-workDone:
+			case <-wait.C:
+				h.log.Warn("backups: the running job did not end within the shutdown wait")
+			}
+			return
+		case <-t.C:
+		}
+	}
+}
 
 // DataJobRunning is true while the panel holds a restore job for the server (task 12).
 func (h *Handler) DataJobRunning(context.Context, int64) bool { return false }
