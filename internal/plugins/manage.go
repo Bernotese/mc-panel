@@ -27,26 +27,31 @@ func (h *Handler) changed(serverID int64) {
 	h.updates.Delete(updatesKey(serverID))
 }
 
-// findJar lists the jars and returns the one named file (known false if the listing is
-// truncated and does not show it; the service decides then). A different jar named like
-// target in any case is errFileExists (Review Focus #2); a missing file is filesapi.ErrNotFound.
-func (h *Handler) findJar(ctx context.Context, srv server, file, target string) (jar filesapi.Jar, known bool, err error) {
+// findJar lists the jars and returns the one named file. A name the listing does not show is
+// filesapi.ErrNotFound, also when the listing is truncated: it may be a directory (the service
+// deletes those recursively) or anything else that is no jar. A different jar named like
+// target in any case is errFileExists (Review Focus #2).
+func (h *Handler) findJar(ctx context.Context, srv server, file, target string) (filesapi.Jar, error) {
 	list, err := h.listJars(ctx, srv)
 	if err != nil {
-		return filesapi.Jar{}, false, err
+		return filesapi.Jar{}, err
 	}
+	var (
+		jar   filesapi.Jar
+		found bool
+	)
 	for _, j := range list.Jars {
 		switch {
 		case j.Name == file:
-			jar, known = j, true
+			jar, found = j, true
 		case target != "" && strings.EqualFold(j.Name, target):
-			return filesapi.Jar{}, false, fmt.Errorf("%w: %s", errFileExists, j.Name)
+			return filesapi.Jar{}, fmt.Errorf("%w: %s", errFileExists, j.Name)
 		}
 	}
-	if !known && !list.Truncated {
-		return filesapi.Jar{}, false, fmt.Errorf("%w: %s", filesapi.ErrNotFound, file)
+	if !found {
+		return filesapi.Jar{}, fmt.Errorf("%w: %s", filesapi.ErrNotFound, file)
 	}
-	return jar, known, nil
+	return jar, nil
 }
 
 func (h *Handler) handleToggle(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +81,7 @@ func (h *Handler) handleToggle(w http.ResponseWriter, r *http.Request) {
 	if !*req.Enabled {
 		target = base + disabledSuffix
 	}
-	if _, _, err := h.findJar(ctx, srv, req.File, target); err != nil {
+	if _, err := h.findJar(ctx, srv, req.File, target); err != nil {
 		h.writeError(w, r, err)
 		return
 	}
@@ -111,14 +116,14 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, errJobRunning)
 		return
 	}
-	jar, known, err := h.findJar(ctx, srv, req.File, "")
+	jar, err := h.findJar(ctx, srv, req.File, "")
 	if err != nil {
 		h.writeError(w, r, err)
 		return
 	}
 	dctx := context.WithoutCancel(ctx)
 	err = h.files.Delete(dctx, srv.ID, filesapi.Join(srv.Kind.Dir, req.File))
-	if err == nil && known {
+	if err == nil {
 		h.dropRow(dctx, srv.ID, base, jar.SHA512)
 	}
 	h.record(ctx, audit.ActionPluginRemove, srv.ID, result(err), map[string]any{"file": req.File})

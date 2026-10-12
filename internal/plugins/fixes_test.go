@@ -3,6 +3,7 @@ package plugins_test
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Bernotese/mc-panel/internal/httpx"
@@ -111,5 +112,52 @@ func TestDotRefsRefused(t *testing.T) {
 	}
 	if n := e.up.apiTotal(); n != 0 {
 		t.Fatalf("dot refs reached the upstream %d times", n)
+	}
+}
+
+// S5: a check that is not served from the cache counts against the lookup limit, so
+// toggling (which drops the cache) cannot be used to query the upstream without limit.
+func TestUpdatesCacheMissIsLimited(t *testing.T) {
+	e := newEnv(t)
+	id := e.paper("survival")
+	lpWorld(e, id, "LP-old.jar")
+	a := e.admin()
+	for range 20 {
+		e.updates(id, "?refresh=1")
+	}
+	if rec := e.do(http.MethodGet, srvPath(id, "/updates"), nil, &a); rec.Code != http.StatusOK {
+		t.Fatalf("cached check: %d", rec.Code)
+	}
+	if code, errc := e.toggle(id, "LP-old.jar", false); code != http.StatusNoContent {
+		t.Fatalf("toggle: %d %s", code, errc)
+	}
+	rec := e.do(http.MethodGet, srvPath(id, "/updates"), nil, &a)
+	if rec.Code != http.StatusTooManyRequests || errCode(t, rec) != httpx.CodeRateLimited {
+		t.Fatalf("uncached check beyond the limit: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.post(id, "/update", map[string]any{"files": []string{}}); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("update with an uncached check beyond the limit: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// S6: with a truncated listing a name that is not listed is not passed to the service (its
+// delete removes directories recursively).
+func TestManageTruncatedUnlisted(t *testing.T) {
+	e := newEnv(t)
+	id := e.paper("survival")
+	e.files.put(id, "plugins/data.jar/config.yml", "a directory named like a jar")
+	e.files.setTruncated(true)
+	e.files.takeCalls()
+	rec := e.post(id, "/delete", map[string]any{"file": "data.jar"})
+	if rec.Code != http.StatusNotFound || errCode(t, rec) != httpx.CodeNotFound {
+		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
+	}
+	if code, errc := e.toggle(id, "data.jar", false); code != http.StatusNotFound {
+		t.Fatalf("toggle: %d %s", code, errc)
+	}
+	for _, c := range e.files.takeCalls() {
+		if !strings.HasPrefix(c, "jars ") {
+			t.Fatalf("service call %q for an unlisted name", c)
+		}
 	}
 }
