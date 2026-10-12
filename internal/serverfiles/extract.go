@@ -13,7 +13,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/httpx"
 )
 
-// gateTimeout bounds the job query of ExtractRunning: power actions and the reconcile loop
+// gateTimeout bounds the job query of DataJobRunning: power actions and the reconcile loop
 // must not hang on an unreachable service.
 const gateTimeout = 2 * time.Second
 
@@ -24,8 +24,39 @@ type extractRequest struct {
 
 // jobsJSON is the OpenAPI schema FileJobResponse.
 type jobsJSON struct {
-	Job *filesapi.Job `json:"job"`
+	Job *fileJobJSON `json:"job"`
 }
+
+// fileJobJSON is the OpenAPI schema FileJob: an extract job of the file browser. Backup,
+// restore and forget jobs of the same service slot are not shown here (backups spec §4.1).
+type fileJobJSON struct {
+	ID           string            `json:"id"`
+	State        filesapi.JobState `json:"state"`
+	Path         string            `json:"path"`
+	Dest         string            `json:"dest"`
+	Bytes        int64             `json:"bytes"`
+	Entries      int64             `json:"entries"`
+	TotalBytes   int64             `json:"total_bytes"`
+	TotalEntries int64             `json:"total_entries"`
+	Error        string            `json:"error"`
+	StartedAt    int64             `json:"started_at"`
+	FinishedAt   int64             `json:"finished_at"`
+}
+
+func toFileJob(j filesapi.Job) fileJobJSON {
+	return fileJobJSON{
+		ID: j.ID, State: j.State, Path: j.Path, Dest: j.Dest, Bytes: j.Bytes, Entries: j.Entries,
+		TotalBytes: j.TotalBytes, TotalEntries: j.TotalEntries, Error: j.Error,
+		StartedAt: j.StartedAt, FinishedAt: j.FinishedAt,
+	}
+}
+
+// isExtract: "" is an extract job of a service before sub-project 4.
+func isExtract(k filesapi.JobKind) bool { return k == "" || k == filesapi.JobExtract }
+
+// rewritesData reports whether a job of this kind writes into the data directory: an extract
+// or a restore. A backup only reads it, a forget never touches it.
+func rewritesData(k filesapi.JobKind) bool { return isExtract(k) || k == filesapi.JobRestore }
 
 var errRunning = errors.New("the server is running")
 
@@ -62,7 +93,7 @@ func (h *Handler) handleExtract(w http.ResponseWriter, r *http.Request) {
 		h.writeFilesError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusAccepted, job)
+	httpx.WriteJSON(w, http.StatusAccepted, toFileJob(job))
 }
 
 func (h *Handler) handleJobs(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +106,12 @@ func (h *Handler) handleJobs(w http.ResponseWriter, r *http.Request) {
 		h.writeFilesError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, jobsJSON{Job: job})
+	var out jobsJSON
+	if job != nil && isExtract(job.Kind) {
+		fj := toFileJob(*job)
+		out.Job = &fj
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // checkStopped asks the agent for the actual state (spec §5.1): only a server whose container
@@ -147,10 +183,11 @@ func (p *pendingExtracts) has(id int64) bool {
 	return p.n[id] > 0
 }
 
-// ExtractRunning reports whether an extract job runs for the server, or an extract request is
-// between its state check and the service's answer. An unreachable service counts as "no job"
-// (spec §5.1). It implements servers.ExtractGate.
-func (h *Handler) ExtractRunning(ctx context.Context, serverID int64) bool {
+// DataJobRunning reports whether a job that rewrites the data directory runs for the server (an
+// extract, files spec §5.1, or a restore, backups spec §5.5; a backup does not count), or an
+// extract request is between its state check and the service's answer. An unreachable service
+// counts as "no job". It implements servers.DataGate.
+func (h *Handler) DataJobRunning(ctx context.Context, serverID int64) bool {
 	if h.pending.has(serverID) {
 		return true
 	}
@@ -158,9 +195,9 @@ func (h *Handler) ExtractRunning(ctx context.Context, serverID int64) bool {
 	defer cancel()
 	job, err := h.files.Job(ctx, serverID)
 	if err != nil {
-		h.log.WarnContext(ctx, "files: extract gate open, job state unknown (file service unreachable)",
+		h.log.WarnContext(ctx, "files: data gate open, job state unknown (file service unreachable)",
 			"server_id", serverID, "err", err)
 		return false
 	}
-	return job != nil && job.State == filesapi.JobRunning
+	return job != nil && job.State == filesapi.JobRunning && rewritesData(job.Kind)
 }

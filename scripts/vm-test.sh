@@ -70,6 +70,14 @@ need_golangci() {
   rm -rf "${tmp}"
 }
 
+# restic for the backup integration tests of the files service (sub-project 4); they skip
+# without MCPANEL_TEST_RESTIC. The shared script pins the version and keeps an installed binary
+# of that version (idempotent).
+need_restic() {
+  sudo bash scripts/install-restic.sh
+  export MCPANEL_TEST_RESTIC=/usr/local/bin/restic
+}
+
 need_playwright() {
   local version marker
   version="$(node -p "require('./web/node_modules/@playwright/test/package.json').version")"
@@ -84,7 +92,8 @@ need_playwright() {
 
 suite_go() {
   need_go
-  log "go test -race ./..."
+  need_restic
+  log "go test -race ./... (MCPANEL_TEST_RESTIC=${MCPANEL_TEST_RESTIC})"
   CGO_ENABLED=1 go test -race -count=1 ./...
 }
 

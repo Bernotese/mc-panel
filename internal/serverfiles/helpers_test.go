@@ -413,7 +413,7 @@ func (f *fakeFiles) Extract(ctx context.Context, req filesapi.ExtractRequest) (f
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.extracts = append(f.extracts, req)
-	j := filesapi.Job{ID: "j1", State: "running", Path: req.Path, Dest: req.Dest, StartedAt: t0.UnixMilli()}
+	j := filesapi.Job{ID: "j1", Kind: filesapi.JobExtract, State: "running", Path: req.Path, Dest: req.Dest, StartedAt: t0.UnixMilli()}
 	f.job = &j
 	return j, nil
 }

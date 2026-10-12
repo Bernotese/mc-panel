@@ -46,6 +46,7 @@ type UnixClient struct {
 	deleteTimeout         time.Duration
 	extractTimeout        time.Duration
 	jarsTimeout           time.Duration
+	backupTimeout         time.Duration
 	downloadHeaderTimeout time.Duration
 }
 
@@ -72,6 +73,7 @@ func NewClient(socketPath string) *UnixClient {
 		deleteTimeout:         DeleteTimeout,
 		extractTimeout:        ExtractTimeout,
 		jarsTimeout:           JarsTimeout,
+		backupTimeout:         BackupCallTimeout,
 		downloadHeaderTimeout: DownloadHeaderTimeout,
 	}
 }
@@ -272,9 +274,22 @@ func (c *UnixClient) Download(ctx context.Context, id int64, p string) (Download
 	if err := clean(id, &p); err != nil {
 		return Download{}, err
 	}
-	ctx, cancel := context.WithCancel(ctx)
 	q := url.Values{"id": {strconv.FormatInt(id, 10)}, "path": {p}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+PathDownload+"?"+q.Encode(), nil)
+	d, err := c.openDownload(ctx, PathDownload+"?"+q.Encode())
+	if err != nil {
+		return Download{}, err
+	}
+	if p != "" {
+		d.Name = path.Base(p)
+	}
+	return d, nil
+}
+
+// openDownload sends GET target and returns the stream of a 200 answer with a known kind (file
+// or dir); every other answer is an error. Headers must arrive within DownloadHeaderTimeout.
+func (c *UnixClient) openDownload(ctx context.Context, target string) (Download, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+target, nil)
 	if err != nil {
 		cancel()
 		return Download{}, fmt.Errorf("files: build request: %w", err)
@@ -306,9 +321,6 @@ func (c *UnixClient) Download(ctx context.Context, id int64, p string) (Download
 	d := Download{Body: &cancelBody{ReadCloser: resp.Body, cancel: cancel}, Size: resp.ContentLength}
 	if kind == "dir" {
 		d.IsDir, d.Size = true, -1
-	}
-	if p != "" {
-		d.Name = path.Base(p)
 	}
 	return d, nil
 }

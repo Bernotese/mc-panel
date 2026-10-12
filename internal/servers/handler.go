@@ -32,20 +32,25 @@ type Deps struct {
 	Instances agentapi.InstancesClient
 	Log       *slog.Logger  // nil = slog.Default()
 	Catalog   CatalogSource // nil = catalog.New with the default upstreams
-	// Extract holds starts while an archive is extracted into a server (files spec §5.1);
+	// Gate holds starts while a job rewrites a server's data directory (extract, restore);
 	// nil = never blocked.
-	Extract ExtractGate
+	Gate DataGate
+	// Backups deletes a server's backups on DELETE /servers/{id}?purge_backups=1; nil = nothing
+	// to delete.
+	Backups BackupPurger
 }
 
 type Handler struct {
 	db      *sql.DB
 	q       *store.Queries
 	clock   clock.Clock
+	ioClock clock.Clock // wall clock for I/O deadlines (always clock.Real)
 	rec     audit.Recorder
 	box     *secretbox.Box
 	inst    agentapi.InstancesClient
 	catalog CatalogSource
-	extract ExtractGate
+	gate    DataGate
+	backups BackupPurger
 	log     *slog.Logger
 	power   *powerLimiter
 	kick    chan struct{} // Trigger -> reconcile loop (buffer 1, never blocks)
@@ -67,14 +72,18 @@ func NewHandler(d Deps) *Handler {
 	if cat == nil {
 		cat = catalog.New(catalog.Options{Clock: d.Clock})
 	}
-	gate := d.Extract
+	gate := d.Gate
 	if gate == nil {
 		gate = noGate{}
 	}
+	purger := d.Backups
+	if purger == nil {
+		purger = noPurger{}
+	}
 	return &Handler{
 		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst, catalog: cat, log: log,
-		extract: gate,
-		power:   newPowerLimiter(), kick: make(chan struct{}, 1),
+		gate: gate, backups: purger, ioClock: clock.Real{},
+		power: newPowerLimiter(), kick: make(chan struct{}, 1),
 		reconcile: reconcileState{attempts: map[int64]attempt{}, warned: map[int64]bool{}, foreign: map[int64]bool{}},
 	}
 }

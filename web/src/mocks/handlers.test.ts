@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import type { BackupJob, BackupOverview, BackupSnapshot } from '@/api/types'
 import type { PluginInventory, PluginJob, PluginResolution, PluginSearchResult, PluginUpdates, PluginVersionList } from '@/api/types'
 import { callApi, field } from '@/test/call-api'
 import { db, loginAs } from './db'
@@ -11,7 +12,7 @@ const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../
 describe('mock coverage', () => {
   it('mocks every operationId of api/openapi.yaml exactly once', () => {
     const ids = [...openapiYaml.matchAll(/operationId:\s*(\w+)/g)].map((m) => m[1]).sort()
-    expect(ids).toHaveLength(87)
+    expect(ids).toHaveLength(95)
     expect(operations.map((o) => o.operationId).sort()).toEqual(ids)
   })
 })
@@ -299,7 +300,7 @@ describe('mock behaviour', () => {
   it('keeps server settings: absent stays, null removes, the key is write-only', async () => {
     const me = loginAs('admin', { sudo: true })
     const get = async () => (await callApi('GET', '/servers/settings')).body
-    expect(await get()).toEqual({ base_domain: 'mc.example.com', curseforge_api_key_set: false, docker: 'ok', unknown_containers: [] })
+    expect(await get()).toEqual({ base_domain: 'mc.example.com', curseforge_api_key_set: false, backup_timezone: 'Europe/Berlin', docker: 'ok', unknown_containers: [] })
     await callApi('PUT', '/servers/settings', { body: { curseforge_api_key: 'abc$123' }, csrf: me.csrf_token })
     expect(field(await get(), 'curseforge_api_key_set')).toBe(true)
     expect(JSON.stringify(await get())).not.toContain('abc$123')
@@ -309,6 +310,12 @@ describe('mock behaviour', () => {
     expect(await get()).toMatchObject({ base_domain: null, curseforge_api_key_set: false })
     const bad = await callApi('PUT', '/servers/settings', { body: { base_domain: 'localhost' }, csrf: me.csrf_token })
     expect(field(bad.body, 'error')).toBe('validation_failed')
+    await callApi('PUT', '/servers/settings', { body: { backup_timezone: 'America/New_York' }, csrf: me.csrf_token })
+    expect(field(await get(), 'backup_timezone')).toBe('America/New_York')
+    for (const tz of [null, '', 'Mars/Olympus', 'Local', '+01:00', 'europe/berlin']) {
+      const res = await callApi('PUT', '/servers/settings', { body: { backup_timezone: tz }, csrf: me.csrf_token })
+      expect(field(res.body, 'error')).toBe('validation_failed')
+    }
   })
 
   it('creates a server that is running on the next read', async () => {
@@ -434,5 +441,146 @@ describe('mock behaviour', () => {
     expect(running).toMatch(/id: \d{16,}\nevent: line\ndata: \{"ts":\d+,"stream":"out","line":"\[\d\d:\d\d:\d\d INFO\]: Starting minecraft server/)
     expect(running).toContain('Thread RCON Client /127.0.0.1 started')
     expect(await read(2, 'running')).toContain('event: state\ndata: {"running":false}')
+  })
+
+  it('lists backups and runs a manual backup as a job, one per server', async () => {
+    const me = loginAs('admin')
+    const overview = (await callApi('GET', '/servers/1/backups')).body as BackupOverview
+    expect(overview.available).toBe(true)
+    expect(overview.snapshots.map((s) => s.kind)).toEqual(['scheduled', 'manual', 'scheduled', 'pre-restore', 'scheduled', 'scheduled'])
+    expect(overview.snapshots.filter((s) => s.pinned)).toHaveLength(1)
+    expect(overview.snapshots[1].note).toBe('vor Update auf 1.21.11')
+    expect(overview.schedule).toMatchObject({ mode: 'daily', time_of_day: 240, keep_last: 24, timezone: 'Europe/Berlin', last_status: 'ok' })
+    expect(overview.job).toBeNull()
+
+    const create = (body: unknown) => callApi('POST', '/servers/1/backups', { body, csrf: me.csrf_token })
+    const started = await create({ note: 'vor dem Umbau' })
+    expect(started.status).toBe(202)
+    expect(field(started.body, 'job')).toMatchObject({ kind: 'backup', trigger: 'manual', state: 'queued', step: 'queued', queue_position: 1 })
+    expect(field((await create({})).body, 'error')).toBe('backup_running')
+    db.backupJobs[1].startedMs -= 60_000
+    const job = field((await callApi('GET', '/servers/1/backups/job')).body, 'job') as BackupJob
+    expect(job).toMatchObject({ state: 'done', step: 'done', queue_position: 0 })
+    const after = (await callApi('GET', '/servers/1/backups')).body as BackupOverview
+    expect(after.snapshots[0]).toMatchObject({ kind: 'manual', note: 'vor dem Umbau', id: job.snapshot })
+    expect(db.audit.at(-1)).toMatchObject({ action: 'backup.create', target: 'server:1', details: { note: 'vor dem Umbau', snapshot: job.snapshot } })
+
+    expect(field((await create({ note: 'a\nb' })).body, 'error')).toBe('validation_failed')
+    expect(field((await create({ note: 'x'.repeat(65) })).body, 'error')).toBe('validation_failed')
+    expect(field((await create({ extra: 1 })).body, 'error')).toBe('bad_request')
+  })
+
+  it('pins scheduled snapshots only and restores or deletes with sudo', async () => {
+    let me = loginAs('admin')
+    const list = async () => ((await callApi('GET', '/servers/1/backups')).body as BackupOverview).snapshots
+    const [scheduled, manual] = await list()
+    const pin = await callApi('POST', `/servers/1/backups/${scheduled.id}/pin`, { body: { pinned: true }, csrf: me.csrf_token })
+    const pinned = field(pin.body, 'snapshot') as BackupSnapshot
+    expect(pinned.pinned).toBe(true)
+    expect(pinned.id).not.toBe(scheduled.id)
+    expect(pinned.id).toMatch(/^[0-9a-f]{64}$/)
+    expect((await list())[0].id).toBe(pinned.id)
+    expect(db.audit.at(-1)).toMatchObject({ action: 'backup.pin', details: { snapshot: scheduled.id, new_snapshot: pinned.id } })
+    const pinManual = await callApi('POST', `/servers/1/backups/${manual.id}/pin`, { body: { pinned: true }, csrf: me.csrf_token })
+    expect(field(pinManual.body, 'error')).toBe('validation_failed')
+    expect((await callApi('POST', `/servers/1/backups/${'0'.repeat(64)}/pin`, { body: { pinned: true }, csrf: me.csrf_token })).status).toBe(404)
+    expect((await callApi('POST', '/servers/1/backups/nope/pin', { body: { pinned: true }, csrf: me.csrf_token })).status).toBe(400)
+
+    const restore = (id: string) => callApi('POST', `/servers/1/backups/${id}/restore`, { csrf: me.csrf_token })
+    expect(field((await restore(manual.id)).body, 'error')).toBe('sudo_required')
+    me = loginAs('admin', { sudo: true })
+    const started = await restore(manual.id)
+    expect(started.status).toBe(202)
+    expect(field(started.body, 'job')).toMatchObject({ kind: 'restore', snapshot: manual.id })
+    db.backupJobs[1].startedMs -= 60_000
+    expect(field((await callApi('GET', '/servers/1/backups/job')).body, 'job')).toMatchObject({ state: 'done' })
+    expect((await list())[0].kind).toBe('pre-restore')
+    expect(db.audit.at(-1)).toMatchObject({ action: 'backup.restore', details: { snapshot: manual.id, time: manual.time, kind: 'manual' } })
+
+    const del = await callApi('DELETE', `/servers/1/backups/${manual.id}`, { csrf: me.csrf_token })
+    expect(del.status).toBe(202)
+    db.backupJobs[1].startedMs -= 60_000
+    await callApi('GET', '/servers/1/backups/job')
+    expect((await list()).some((s) => s.id === manual.id)).toBe(false)
+  })
+
+  it('validates schedules, reports unavailable backups and downloads a zip', async () => {
+    const me = loginAs('admin')
+    const put = (id: number, body: unknown) => callApi('PUT', `/servers/${id}/backups/schedule`, { body, csrf: me.csrf_token })
+    const weekly = { mode: 'weekly', interval_hours: 24, time_of_day: 600, weekday: 6, keep_last: 0, keep_daily: 0, keep_weekly: 8, keep_monthly: 0 }
+    const ok = await put(2, weekly)
+    expect(ok.status).toBe(200)
+    const schedule = field(ok.body, 'schedule') as BackupOverview['schedule']
+    expect(schedule).toMatchObject({ mode: 'weekly', weekday: 6, keep_weekly: 8 })
+    expect(schedule.next_run_at).toBeGreaterThan(Date.now())
+    expect(field((await put(2, { ...weekly, keep_weekly: 0 })).body, 'error')).toBe('validation_failed')
+    expect(field((await put(2, { ...weekly, time_of_day: 1440 })).body, 'error')).toBe('validation_failed')
+    expect(field((await put(2, { ...weekly, mode: 'hourly' })).body, 'error')).toBe('validation_failed')
+    expect(field((await put(2, { ...weekly, extra: true })).body, 'error')).toBe('bad_request')
+    expect(field((await put(2, { ...weekly, mode: 'off', keep_weekly: 0 })).body, 'schedule')).toMatchObject({ mode: 'off', next_run_at: null })
+    expect(db.audit.at(-1)).toMatchObject({
+      action: 'backup.schedule_update',
+      target: 'server:2',
+      details: { from: { mode: 'weekly', keep_weekly: 8 }, to: { mode: 'off', keep_weekly: 0 } },
+    })
+    // interval: N hours after the last run (two days ago for creative), else N hours from now
+    const interval = field((await put(2, { ...weekly, mode: 'interval', interval_hours: 6 })).body, 'schedule') as BackupOverview['schedule']
+    expect(interval.next_run_at).toBeGreaterThan(Date.now() + 5.9 * 3_600_000)
+    expect(interval.next_run_at).toBeLessThan(Date.now() + 6.1 * 3_600_000)
+
+    // daily/weekly in the panel time zone, not the browser's: Kathmandu is UTC+05:45 all year
+    expect(Intl.DateTimeFormat().resolvedOptions().timeZone).not.toBe('Asia/Kathmandu')
+    db.serverSettings.backup_timezone = 'Asia/Kathmandu'
+    const offset = (5 * 60 + 45) * 60_000
+    const daily = field((await put(2, { ...weekly, mode: 'daily', time_of_day: 240 })).body, 'schedule') as BackupOverview['schedule']
+    expect(daily.timezone).toBe('Asia/Kathmandu')
+    const nextDaily = daily.next_run_at ?? 0
+    expect(nextDaily).toBeGreaterThan(Date.now())
+    expect(nextDaily).toBeLessThanOrEqual(Date.now() + 86_400_000)
+    expect((nextDaily + offset) % 86_400_000).toBe(240 * 60_000) // 04:00 in Kathmandu
+    const wk = field((await put(2, { ...weekly, time_of_day: 600, weekday: 3 })).body, 'schedule') as BackupOverview['schedule']
+    const nextWeekly = wk.next_run_at ?? 0
+    expect(nextWeekly).toBeGreaterThan(Date.now())
+    expect(nextWeekly).toBeLessThanOrEqual(Date.now() + 7 * 86_400_000)
+    expect((nextWeekly + offset) % 86_400_000).toBe(600 * 60_000) // 10:00 in Kathmandu
+    expect(new Date(nextWeekly + offset).getUTCDay()).toBe(3) // a Wednesday there
+    db.serverSettings.backup_timezone = 'Europe/Berlin'
+
+    expect(((await callApi('GET', '/servers/4/backups')).body as BackupOverview).available).toBe(false)
+    expect(field((await callApi('POST', '/servers/4/backups', { body: {}, csrf: me.csrf_token })).body, 'error')).toBe('backups_unavailable')
+    expect(field((await callApi('POST', '/servers/3/backups', { body: {}, csrf: me.csrf_token })).body, 'error')).toBe('conflict')
+    expect(((await callApi('GET', '/servers/3/backups')).body as BackupOverview).snapshots).toEqual([])
+
+    const snap = ((await callApi('GET', '/servers/1/backups')).body as BackupOverview).snapshots[0]
+    const res = await fetch(`${window.location.origin}/api/servers/1/backups/${snap.id}/download`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Content-Type')).toBe('application/zip')
+    expect(res.headers.get('Content-Disposition')).toMatch(/^attachment; filename="survival-\d{8}-\d{6}\.zip"$/)
+    expect(db.audit.at(-1)).toMatchObject({ action: 'backup.download', details: { snapshot: snap.id } })
+    // the file name uses the panel time zone: 02:30 UTC is 04:30 in Berlin (CEST)
+    db.backups[1].snapshots[0].time = Date.UTC(2026, 9, 12, 2, 30, 0)
+    const named = await fetch(`${window.location.origin}/api/servers/1/backups/${snap.id}/download`)
+    expect(named.headers.get('Content-Disposition')).toBe('attachment; filename="survival-20261012-043000.zip"')
+  })
+
+  it('requires server.backups and purges backups with the deleted server', async () => {
+    loginAs('bob')
+    expect((await callApi('GET', '/servers/1/backups')).status).toBe(403)
+    const me = loginAs('admin', { sudo: true })
+    expect(db.backups[1]).toBeDefined()
+    expect((await callApi('DELETE', '/servers/1?purge_backups=yes', { csrf: me.csrf_token })).status).toBe(400)
+    // a restore holds the server: no delete until it is done
+    const snap = ((await callApi('GET', '/servers/1/backups')).body as BackupOverview).snapshots[0]
+    expect((await callApi('POST', `/servers/1/backups/${snap.id}/restore`, { csrf: me.csrf_token })).status).toBe(202)
+    const held = await callApi('DELETE', '/servers/1?purge_backups=1', { csrf: me.csrf_token })
+    expect(held.status).toBe(409)
+    expect(field(held.body, 'error')).toBe('conflict')
+    db.backupJobs[1].startedMs -= 60_000
+    // an empty value means no purge (like the panel)
+    expect((await callApi('DELETE', '/servers/2?purge_backups=', { csrf: me.csrf_token })).status).toBe(204)
+    expect(db.backups[2]).toBeDefined()
+    expect((await callApi('DELETE', '/servers/1?purge_backups=1', { csrf: me.csrf_token })).status).toBe(204)
+    expect(db.backups[1]).toBeUndefined()
+    expect(db.audit.at(-1)).toMatchObject({ action: 'server.delete', details: { backups_purged: true } })
   })
 })

@@ -21,6 +21,7 @@ func TestCodesRoundTrip(t *testing.T) {
 		filesapi.CodeBusy:                http.StatusTooManyRequests,
 		filesapi.CodeInvalid:             http.StatusBadRequest,
 		filesapi.CodeHashMismatch:        http.StatusBadRequest,
+		filesapi.CodeUnavailable:         http.StatusServiceUnavailable,
 	} {
 		err := filesapi.ErrorFromCode(code)
 		if err == nil {
@@ -50,6 +51,7 @@ func TestStatusErrorIs(t *testing.T) {
 		{&filesapi.StatusError{Status: 500}, filesapi.ErrUnavailable},
 		{&filesapi.StatusError{Status: 418, Code: "teapot"}, filesapi.ErrUnavailable},
 		{&filesapi.StatusError{Status: 400, Code: "hash_mismatch"}, filesapi.ErrHashMismatch},
+		{&filesapi.StatusError{Status: 503, Code: "unavailable"}, filesapi.ErrBackupsUnavailable},
 	}
 	for _, c := range cases {
 		if !errors.Is(c.err, c.want) {
@@ -65,6 +67,14 @@ func TestStatusErrorIs(t *testing.T) {
 	}
 	if errors.Is(&filesapi.StatusError{Status: 400, Code: "invalid"}, filesapi.ErrHashMismatch) {
 		t.Fatal("invalid must not match ErrHashMismatch")
+	}
+	// "restic is missing" is not "the service is unreachable": the panel answers
+	// backups_unavailable for the first and files_unavailable for the second.
+	if errors.Is(&filesapi.StatusError{Status: 503, Code: "unavailable"}, filesapi.ErrUnavailable) {
+		t.Fatal("code unavailable must not match ErrUnavailable")
+	}
+	if errors.Is(&filesapi.StatusError{Status: 503}, filesapi.ErrBackupsUnavailable) {
+		t.Fatal("a 503 without code must not match ErrBackupsUnavailable")
 	}
 }
 

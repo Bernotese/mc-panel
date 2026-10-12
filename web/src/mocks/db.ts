@@ -3,6 +3,10 @@ import type {
   AttemptStage,
   AuditEntry,
   AuditResult,
+  BackupJob,
+  BackupJobStep,
+  BackupSchedule,
+  BackupSnapshot,
   Catalog,
   FileJob,
   InstalledJar,
@@ -192,6 +196,72 @@ export interface MockPluginJob {
   changes: Array<MockPluginChange | null> // per step; null = skipped or failed at the start
 }
 
+/** Backups of one server (V6): restic availability, snapshots (newest first) and the stored schedule. */
+export interface MockBackups {
+  available: boolean
+  snapshots: BackupSnapshot[]
+  schedule: Omit<BackupSchedule, 'timezone'> // timezone comes from serverSettings on every read
+}
+
+/** What a finished mock job changes. */
+export type MockBackupResult =
+  | { kind: 'create'; snapshot: BackupSnapshot }
+  | { kind: 'restore'; preRestore: BackupSnapshot }
+  | { kind: 'delete'; id: string }
+
+export interface MockBackupJob {
+  job: BackupJob
+  phases: BackupJobStep[] // starts with 'queued'; each phase lasts BACKUP_JOB_MS / phases.length
+  startedMs: number
+  result: MockBackupResult
+  /** Like the panel, the audit entry is written when the job ends. */
+  actorId: number
+  audit: { action: string; details: Record<string, unknown> }
+}
+
+/** A deterministic 64-hex snapshot ID. */
+export function mockSnapshotId(n: number): string {
+  return ((n * 2654435761) >>> 0).toString(16).padStart(8, '0').repeat(8)
+}
+
+export function defaultBackupSchedule(): MockBackups['schedule'] {
+  return {
+    mode: 'off', interval_hours: 24, time_of_day: 240, weekday: 0,
+    keep_last: 24, keep_daily: 7, keep_weekly: 4, keep_monthly: 6,
+    next_run_at: null, last_run_at: null, last_status: null, last_error: null, last_snapshot_id: null,
+  }
+}
+
+function snapshot(n: number, time: number, kind: BackupSnapshot['kind'], opts: { pinned?: boolean; note?: string; gib?: number } = {}): BackupSnapshot {
+  const id = mockSnapshotId(n)
+  return { id, short_id: id.slice(0, 8), time, kind, pinned: opts.pinned ?? false, note: opts.note ?? null, bytes: Math.round((opts.gib ?? 1.2) * GIB) }
+}
+
+/** survival: six snapshots, daily at 04:00; creative: none, last run failed; modded: restic missing. */
+function seedBackups(now: number): Record<number, MockBackups> {
+  const survival = [
+    snapshot(1, now - 8 * HOUR, 'scheduled'),
+    snapshot(2, now - DAY - 3 * HOUR, 'manual', { note: 'vor Update auf 1.21.11' }),
+    snapshot(3, now - DAY - 8 * HOUR, 'scheduled'),
+    snapshot(4, now - 2 * DAY, 'pre-restore'),
+    snapshot(5, now - 3 * DAY - 8 * HOUR, 'scheduled', { pinned: true, gib: 1.1 }),
+    snapshot(6, now - 9 * DAY - 8 * HOUR, 'scheduled', { gib: 0.9 }),
+  ]
+  return {
+    1: {
+      available: true,
+      snapshots: survival,
+      schedule: { ...defaultBackupSchedule(), mode: 'daily', next_run_at: now + 16 * HOUR, last_run_at: now - 8 * HOUR, last_status: 'ok', last_snapshot_id: survival[0].id },
+    },
+    2: {
+      available: true,
+      snapshots: [],
+      schedule: { ...defaultBackupSchedule(), last_run_at: now - 2 * DAY, last_status: 'failed', last_error: 'RCON nicht erreichbar' },
+    },
+    4: { available: false, snapshots: [], schedule: defaultBackupSchedule() },
+  }
+}
+
 /** icon_url as the panel sends it: the icon proxy with the CDN URL as query parameter. */
 export function pluginIconUrl(serverId: number, cdnUrl: string | null): string | null {
   return cdnUrl === null ? null : `/api/servers/${serverId}/plugins/icon?url=${encodeURIComponent(cdnUrl)}`
@@ -346,6 +416,7 @@ export function notConfiguredStatus(): ServerStatus {
 export interface MockServerSettings {
   base_domain: string | null
   curseforge_api_key_set: boolean
+  backup_timezone: string
   docker: 'ok' | 'unavailable' | 'unknown'
 }
 
@@ -358,6 +429,8 @@ export interface MockDb {
   fileJobs: Record<number, MockFileJob>
   plugins: Record<number, MockPluginInventory> // plugins/mods per server id (created on first access)
   pluginJobs: Record<number, MockPluginJob> // running or last plugin job per server id
+  backups: Record<number, MockBackups> // per server id (created on first access)
+  backupJobs: Record<number, MockBackupJob> // queued, running or last job per server id
   serverSettings: MockServerSettings
   catalogs: Partial<Record<InstanceType, Catalog>>
   grants: Map<number, PermissionGrant[]>
@@ -545,7 +618,9 @@ function seed(now: number): MockDb {
     fileJobs: {},
     plugins: seedPlugins(now),
     pluginJobs: {},
-    serverSettings: { base_domain: 'mc.example.com', curseforge_api_key_set: false, docker: 'ok' },
+    backups: seedBackups(now),
+    backupJobs: {},
+    serverSettings: { base_domain: 'mc.example.com', curseforge_api_key_set: false, backup_timezone: 'Europe/Berlin', docker: 'ok' },
     catalogs: {
       vanilla: {
         versions: [
