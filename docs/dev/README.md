@@ -13,9 +13,9 @@ brew install go node sqlc goose golangci-lint goreleaser jq shellcheck
 |---|---|---|
 | Go | laut `go.mod` | CI liest dieselbe Datei (`go-version-file`) |
 | Node.js | 24 (Active LTS) | CI pinnt die Hauptversion `24`; Node 26 wird erst am 2026-10-28 LTS. Beim Wechsel auf die nächste LTS-Linie alle `node-version`-Einträge in `.github/workflows/*.yml` gemeinsam anheben |
-| golangci-lint | v2.14.0 | CI-Version; exakt dieselbe lokal: `GOBIN="$PWD/.dev/tools" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0` |
+| golangci-lint | v2.14.0 | CI-Version; `scripts/vm-test.sh` installiert genau diese auf der Test-VM (Release-Archiv mit Prüfsumme) |
 | GoReleaser | v2.18.2 (CI), lokal ≥ v2.8 | `make release` nutzt das lokal installierte `goreleaser` |
-| sqlc | Version im Header von `internal/store/db.go` | CI installiert genau diese Version; wer mit einer neueren Version generiert, committet den geänderten Header mit |
+| sqlc | Version im Header von `internal/store/db.go` | CI lädt genau diese Version als Release-Binary; wer mit einer neueren Version generiert, committet den geänderten Header mit |
 | govulncheck | v1.8.0 | `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...` |
 | Redocly CLI | 2.54.2 | `npx --yes @redocly/cli@2.54.2 lint api/openapi.yaml --extends=minimal` |
 | actionlint | v1.7.12 | `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12` (nutzt `shellcheck`, falls installiert) |
@@ -107,6 +107,25 @@ make deploy-testvm TESTVM=user@andere-vm   # andere VM
 - Logs: `ssh claude@192.168.1.117 journalctl -u mcpanel-agent -u mcpanel-files -u mcpanel-panel -f`. Konfiguration: `/etc/mc-panel/{panel,agent}.toml` und `/etc/mc-panel-files/files.toml`; Änderungen dort überschreibt der nächste Deploy, also im Skript ändern.
 - Das panel lauscht auf der VM auf `127.0.0.1:8080` (wie in `docs/dev/acceptance-tp2.md`), nicht auf dem Unix-Socket aus dem Produktionsprofil; die endgültigen Units liefert der Installer (Teilprojekt 6).
 
+## Tests auf der Test-VM
+
+Der Mac bleibt sauber (dort nur `make check`); Tests laufen vor jedem Push auf der Test-VM:
+
+```bash
+make test-vm                 # alle Suites: lint, go, web, e2e
+make test-vm SUITE=go        # go test -race ./... (CGO_ENABLED=1)
+make test-vm SUITE=lint      # golangci-lint v2.14.0 (Linux, also auch die _linux-Dateien), eslint, tsc
+make test-vm SUITE=web       # Vitest
+make test-vm SUITE=e2e       # Playwright: echtes Backend (Dev-Modus) und Mock
+```
+
+- `scripts/test-vm.sh` kopiert den Arbeitsstand per `rsync --delete` nach `~/mc-panel-test/<Name des Checkouts>/` auf der VM: getrackte und neue Dateien, ohne `.git` und ohne das, was `.gitignore` ausschließt (die Ausschlüsse stehen im Skript). Ein Push ist nicht nötig. Jeder Checkout bzw. Worktree bekommt sein eigenes Verzeichnis; Teammates können parallel testen. `node_modules` und Build-Ausgaben bleiben zwischen Läufen erhalten.
+- Dann läuft dort `scripts/vm-test.sh <suite>` als normaler Benutzer `claude`. Beim ersten Bedarf richtet es ein: golangci-lint (Release-Archiv mit Prüfsumme nach `~/.local/bin`), `npm ci` (erneut nur, wenn sich `package-lock.json` ändert) und Playwright-Chromium samt Systempaketen (`sudo`, einmal pro Playwright-Version). Go und Node kommen aus `make deploy-testvm`; passt die Go-Version nicht zu `go.mod`, bricht das Skript mit einem Hinweis ab.
+- `e2e` baut UI und Binaries, startet agent, `files -dev` und `panel serve -dev` mit eigener Konfiguration (`.dev/panel-vm.toml`: Port 18080, das panel liefert die gebaute UI selbst aus), legt `e2e-admin` an und führt `npm run e2e:real` und `npm run e2e` (Mock, Port 5174) aus. E2E-Läufe aller Checkouts auf der VM sind per `flock` serialisiert. Das deployte panel (`127.0.0.1:8080`, systemd) bleibt unberührt.
+- Einzelne Tests nach einem `make test-vm`: `ssh claude@192.168.1.117 'cd ~/mc-panel-test/<dir> && PATH=/usr/local/go/bin:$PATH go test ./internal/rbac -run TestName'` bzw. im Unterordner `web` mit `PATH=/usr/local/lib/nodejs/bin:$PATH npx vitest run <datei>`.
+- SSH zur VM braucht in Claude Code eine Bash ohne Sandbox.
+- Was nur in der CI läuft: die Root-Abnahmen (`nftables`, `instances`; sie verändern den Host), `govulncheck`, `npm audit`, die sqlc- und `gen:api`-Aktualitätsprüfungen, OpenAPI-Lint und der GoReleaser-Snapshot.
+
 ## End-to-End-Tests (Playwright)
 
 Einmalig den Browser installieren: `cd web && npx playwright install chromium`.
@@ -126,7 +145,7 @@ cd web && E2E_BASE_URL=http://localhost:5173 E2E_ADMIN_USER=e2e-admin E2E_ADMIN_
 
 Ein zweiter Lauf braucht einen neuen Admin (anderer Benutzername) oder ein frisches `.dev/` (`make clean`).
 
-In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er baut die Binaries, startet agent, `files -dev`, `panel serve -dev` und Vite, legt `e2e-admin` an, führt `npm run e2e:real` (ohne Retries) und danach `npm run e2e` aus und lädt bei einem Fehlschlag die Logs sowie `test-results`/`playwright-report` als Artefakt hoch.
+In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) parallel zu den übrigen Jobs: er baut die Binaries, startet agent, `files -dev`, `panel serve -dev` und Vite, legt `e2e-admin` an, führt `npm run e2e:real` (ohne Retries) und danach `npm run e2e` aus und lädt bei einem Fehlschlag die Logs sowie `test-results`/`playwright-report` als Artefakt hoch.
 
 ## Produktion: Listen-Adresse und Reverse Proxy
 
@@ -156,7 +175,7 @@ In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er 
 
 | Target | Wirkung |
 |---|---|
-| `make check` | einziger lokaler Check auf dem Mac (~10 s): gofmt, `go vet` + `go build` für macOS und Linux (inkl. Integrationstest-Dateien), `tsc`. Tests, Race, Lint und E2E laufen in der CI |
+| `make check` | einziger lokaler Check auf dem Mac (~10 s): gofmt, `go vet` + `go build` für macOS und Linux (inkl. Integrationstest-Dateien), `tsc`. Tests, Race, Lint und E2E laufen auf der Test-VM (`make test-vm`) und in der CI |
 | `make dev` | baut agent, files und panel, startet agent + `files -dev` + `panel serve -dev` + Vite-Dev-Server, alles unter `./.dev/`; endet ein Prozess, stoppt das Skript alle |
 | `make test` | Go-Tests (`test-go`) und Frontend-Tests (`test-web`) |
 | `make test-race` | Go-Tests mit Race-Detector (`CGO_ENABLED=1`) |
@@ -165,13 +184,30 @@ In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er 
 | `make build` | Frontend bauen, dann `bin/panel`, `bin/agent` und `bin/files` für das Host-System |
 | `make release` | GoReleaser-Snapshot nach `dist/`: Archive für linux/amd64 und linux/arm64 plus `checksums.txt` |
 | `make deploy-testvm` | baut `REF` (Standard `main`) auf der Test-VM aus GitHub und deployt ihn dort (siehe „Test-VM“) |
+| `make test-vm` | kopiert den Arbeitsstand auf die Test-VM und führt dort Tests aus, `SUITE=all\|go\|lint\|web\|e2e` (siehe „Tests auf der Test-VM“) |
 | `make clean` | entfernt `bin/`, `dist/`, `.dev/` und das gebaute Frontend |
 
-## CI lokal nachstellen
+## CI
 
-| CI-Job | Lokal |
+Ein Pull Request führt nur die Jobs aus, die seine geänderten Dateien brauchen; der erste Job `changes` vergleicht dafür mit `git diff` gegen die Merge-Basis. Pushes auf `main`, der wöchentliche Lauf und manuelle Starts führen immer alles aus, ebenso jede Änderung an `.github/workflows/ci.yml`. Der Job `CI OK` fasst zusammen (grün, wenn jeder Job bestanden hat oder nicht nötig war); auf ihn wartet `gh pr checks <n> --watch`. Die Jobs laufen parallel, keiner wartet auf einen anderen.
+
+| CI-Job | Läuft im PR bei Änderungen an | Auf der Test-VM bzw. von Hand |
+|---|---|---|
+| `go` | `cmd/`, `internal/`, `api/`, `go.mod`/`go.sum`, `sqlc.yaml`, `.golangci.yml`, `Makefile` | `make test-vm SUITE=go` und `SUITE=lint`; nur CI: `go mod verify && go mod tidy -diff`, sqlc-Aktualität (Release-Binary der Version aus dem Header von `internal/store/db.go`), `govulncheck` |
+| `web` | `web/`, `api/` (Preview-Image nur bei `web/Dockerfile.preview`, `compose.preview.yaml`, `web/package*.json`, `web/vite.config.ts`) | `make test-vm SUITE=web` und `SUITE=lint`; nur CI: Build, `gen:api`-Aktualität, `npm audit`, Preview-Image |
+| `openapi` | `api/` | `npx --yes @redocly/cli@2.54.2 lint api/openapi.yaml --extends=minimal` |
+| `e2e` | `cmd/`, `internal/`, `api/`, `web/`, `go.mod`/`go.sum` | `make test-vm SUITE=e2e` |
+| `nftables` | `internal/agent/`, `internal/defense/`, `internal/auth/`, `cmd/agent/`, `cmd/panel/`, `scripts/ci-acceptance.sh`, `go.mod`/`go.sum` | nur CI (siehe unten) |
+| `instances` | `internal/agent/`, `internal/files/`, `internal/plugins/`, `internal/serverfiles/`, `internal/console/`, `internal/servers/`, `cmd/`, `scripts/ci-instances.sh`, `scripts/mc-status.py`, `go.mod`/`go.sum` | nur CI (siehe unten) |
+| `build` | `cmd/`, `internal/webui/`, `.goreleaser.yaml`, `Makefile`, `web/package*.json`, `web/vite.config.ts`, `go.mod`/`go.sum` | `make build`, `make release` |
+
+Der Job `go` führt die Tests nur mit Race-Detector aus (`make test-race` deckt alle Tests ab); der Release-Workflow führt weiterhin `make test` und `make test-race` aus.
+
+Details der CI-Jobs:
+
+| CI-Job | Inhalt |
 |---|---|
-| `go` | `go mod verify && go mod tidy -diff`, `sqlc generate && git status --porcelain internal/store`, `make test-go`, `make test-race`, `.dev/tools/golangci-lint run ./...`, `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...` |
+| `go` | `go mod verify && go mod tidy -diff`, `sqlc generate && git status --porcelain internal/store`, `make test-race`, golangci-lint v2.14.0, `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...` |
 | `web` | `cd web && npm ci && npm run lint && npm run typecheck && npm test && npm run build && npm run gen:api && git status --porcelain . && npm audit --audit-level=high` |
 | `openapi` | `npx --yes @redocly/cli@2.54.2 lint api/openapi.yaml --extends=minimal` |
 | `nftables` | nur in der CI (Linux, root): `go test -tags nftintegration -exec sudo ./internal/agent/...` und der Abnahmetest `sudo scripts/ci-acceptance.sh bin/panel bin/agent` (5 Fehlversuche → IP im nftables-Jail). Das Skript verändert den Host (Benutzer, Netz-Namespace, nftables) und ist nur für Wegwerf-Runner gedacht. |
@@ -179,7 +215,7 @@ In CI läuft der Job `e2e` (`.github/workflows/ci.yml`) nach `go` und `web`: er 
 | `instances` | nur in der CI: `sudo scripts/ci-instances.sh bin/agent bin/files` (echter agent + Docker + Paper-Server: Routing, Härtung, Konsole mit RCON, Log-Stream und Spielerlisten, präparierte Spielerdateien, Absturz-Neustart, Löschen; Dateidienst als `mcpanel-mc`: Peer-UID (panel-Benutzer und root erlaubt, `nobody` abgewiesen), Upload, Schwärzen, Editor-Sperre, Symlinks, Ordner-Zip, Welt entpacken, bösartige Archive; verändert den Host) |
 | `build` | `make build`, `make release`, dann `file dist/*/panel dist/*/agent dist/*/files` |
 
-Linux-spezifische Dateien lokal linten: `GOOS=linux .dev/tools/golangci-lint run ./...`.
+Linux-spezifische Dateien lintet `make test-vm SUITE=lint` (golangci-lint läuft dort auf Linux).
 
 ## Lint-Konventionen
 
@@ -196,7 +232,7 @@ Linux-spezifische Dateien lokal linten: `GOOS=linux .dev/tools/golangci-lint run
 
 ```bash
 git switch main && git pull --ff-only
-make test && make lint
+make test-vm                    # alle Suites auf der Test-VM
 git tag -a v0.1.0 -m "mc-panel v0.1.0"
 git push origin v0.1.0
 ```

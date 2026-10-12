@@ -12,11 +12,13 @@ mc-panel is a self-hosted Minecraft server panel: a Go backend with an embedded 
 
 ## Working rules
 
-- **Checks on the Mac:** only `make check` (gofmt, `go vet` and `go build` for macOS and Linux incl. the root-only integration test files, TypeScript types; ~10 s). Do not run `make test`, `make test-race`, `make lint`, Playwright or `make release` locally unless the user asks: CI runs all of them on every PR. After pushing, wait for CI with `gh pr checks <n> --watch` and fix failures from the CI logs (`gh run view <id> --log-failed`).
+- **Checks on the Mac:** only `make check` (gofmt, `go vet` and `go build` for macOS and Linux incl. the root-only integration test files, TypeScript types; ~10 s). Never run `make test`, `make test-race`, `make lint`, Playwright or `make release` on the Mac: the Mac stays clean.
+- **Tests on the test VM before every push:** `make test-vm [SUITE=all|go|lint|web|e2e]` copies the working tree (tracked and new files, no push needed) to its own directory on the test VM and runs the suites there as an ordinary user (race tests, golangci-lint + eslint + tsc, Vitest, Playwright against the mock and the real dev backend; the deployed panel is untouched). Run at least the suites your change touches; `all` before a PR is marked ready. SSH to the VM needs the Bash sandbox disabled. The root-only acceptance (nftables, Docker, instances) runs only in CI.
+- **CI is the gate before merging:** a pull request runs only the jobs its changed files need (job `changes`), pushes to `main` and the weekly run run everything. After pushing, wait for the summary check with `gh pr checks <n> --watch` (job `CI OK`) and fix failures from the CI logs (`gh run view <id> --log-failed`).
 - **Nothing system-level on the Mac without asking:** never install or uninstall software (brew, npm -g), create VMs or Docker containers/images, use `sudo`, or change system settings automatically. Propose the command and let the user run it (`! <command>`). Scripts that change the host (`scripts/ci-acceptance.sh`) are for CI runners only.
 - **Test VM:** `claude@192.168.1.117` is an internal Ubuntu 26.04 VM for manual testing (passwordless sudo, outbound internet only). Unlike the Mac, Claude may install and change anything there. `make deploy-testvm [REF=<pushed branch, tag or sha>]` builds that ref on the VM from GitHub and redeploys it; the UI is at `https://panel.192-168-1-117.sslip.io/` (Caddy `tls internal`). Details in `docs/dev/README.md` ("Test-VM").
 - **Git and GitHub:** the repo is `Bernotese/mc-panel`; use `gh`. Never commit to or push `main`. Every change goes on a branch (`feat/…`, `fix/…`, `docs/…`, `chore/…`) and into a PR whose CI must be green. Merging PRs, deleting remote branches and pushing tags (a `v*` tag publishes a GitHub release) only after the user says so.
-- **Implementation with agent teams:** plan tasks (`docs/superpowers/plans/`; a sub-project's plans are deleted once it is merged, its spec stays) are implemented by Claude Code agent teams (enabled in `.claude/settings.json`). The lead splits the work into tasks with disjoint file sets and integrates; teammates load this file but not the lead's conversation, so each spawn prompt names the plan file, the task numbers and the branch. Each teammate works in its own git worktree on its own branch (`git worktree add ../mc-panel-wt/<branch> -b <branch> origin/main`), runs `make check` before reporting a task done, and never edits files assigned to another teammate. Keep teams small (3–5 teammates) and shut teammates down when their work is merged.
+- **Implementation with agent teams:** plan tasks (`docs/superpowers/plans/`; a sub-project's plans are deleted once it is merged, its spec stays) are implemented by Claude Code agent teams (enabled in `.claude/settings.json`). The lead splits the work into tasks with disjoint file sets and integrates; teammates load this file but not the lead's conversation, so each spawn prompt names the plan file, the task numbers and the branch. Each teammate works in its own git worktree on its own branch (`git worktree add ../mc-panel-wt/<branch> -b <branch> origin/main`), runs `make check` and `make test-vm` before reporting a task done, and never edits files assigned to another teammate. Keep teams small (3–5 teammates) and shut teammates down when their work is merged.
 
 ## Commands
 
@@ -29,21 +31,24 @@ make check                  # the local check (format, vet, build for macOS + Li
 make preview                # UI preview in Docker at http://localhost:5180 (mock API); the user starts it, never Claude
 make generate               # sqlc generate + regenerate web/src/api/schema.d.ts from api/openapi.yaml
 
-# CI runs these on every PR; locally only on request:
+make test-vm [SUITE=…]       # tests on the test VM (all|go|lint|web|e2e); the Mac never runs them
+
+# CI and the test VM (via make test-vm) run these; never on the Mac:
 make test                   # go test ./... + vitest
 make test-race              # needs CGO_ENABLED=1 (Makefile sets it)
 make lint                   # golangci-lint + eslint + tsc
+
 make build                  # web build, then bin/panel, bin/agent and bin/files
 make clean                  # also wipes .dev/ (resets the dev DB)
 
-go test ./internal/rbac -run TestName                 # single Go test
-cd web && npx vitest run src/lib/theme.test.ts        # single frontend test file
-cd web && npm run dev:mock                            # frontend against the MSW mock API, no Go needed
-cd web && npm run e2e                                 # Playwright against the mock (port 5174)
-GOOS=linux golangci-lint run ./...                    # lint Linux-only files from macOS
+# A single test on the VM, after make test-vm has copied the tree (dir = basename of the checkout):
+ssh claude@192.168.1.117 'cd ~/mc-panel-test/<dir> && PATH=/usr/local/go/bin:$PATH go test ./internal/rbac -run TestName'
+ssh claude@192.168.1.117 'cd ~/mc-panel-test/<dir>/web && PATH=/usr/local/lib/nodejs/bin:$PATH npx vitest run src/lib/theme.test.ts'
+
+cd web && npm run dev:mock  # frontend against the MSW mock API, no Go needed
 ```
 
-CI uses golangci-lint v2.14.0 (`docs/dev/README.md` describes an exact local install). nftables integration tests and the end-to-end jail check (`scripts/ci-acceptance.sh`) run only in CI on Linux as root.
+CI and the test VM use golangci-lint v2.14.0 (`scripts/vm-test.sh` installs it on the VM; Linux-only files are linted there). nftables integration tests and the end-to-end jail check (`scripts/ci-acceptance.sh`) run only in CI on Linux as root.
 
 CI fails if generated code is out of date. Commit regenerated files after you change SQL queries (`internal/store/*.sql.go`) or `api/openapi.yaml` (`web/src/api/schema.d.ts`).
 

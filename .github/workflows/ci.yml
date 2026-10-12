@@ -25,8 +25,68 @@ defaults:
     shell: bash
 
 jobs:
+  # Decides which jobs a pull request needs (git diff against the merge base, no third-party
+  # action). Pushes to main, the weekly run and manual runs always run everything, as does any
+  # change to this workflow.
+  changes:
+    name: Changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.diff.outputs.go }}
+      web: ${{ steps.diff.outputs.web }}
+      preview: ${{ steps.diff.outputs.preview }}
+      openapi: ${{ steps.diff.outputs.openapi }}
+      e2e: ${{ steps.diff.outputs.e2e }}
+      nftables: ${{ steps.diff.outputs.nftables }}
+      instances: ${{ steps.diff.outputs.instances }}
+      release: ${{ steps.diff.outputs.release }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify changed files
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          all=false
+          files=""
+          if [ "${EVENT}" != pull_request ]; then
+            all=true
+          else
+            files="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")"
+            printf '%s\n' "${files}"
+            if grep -qE '^\.github/workflows/ci\.yml$' <<<"${files}"; then
+              all=true
+            fi
+          fi
+          out() { # out <name> <regex>
+            local v=false
+            if [ "${all}" = true ] || grep -qE "$2" <<<"${files}"; then v=true; fi
+            echo "$1=${v}" >> "${GITHUB_OUTPUT}"
+            echo "$1=${v}"
+          }
+          gomod='^go\.(mod|sum)$'
+          out go "^(cmd|internal|api)/|${gomod}|^sqlc\.yaml$|^\.golangci\.yml$|^Makefile$"
+          out web '^web/|^api/'
+          out preview '^web/Dockerfile\.preview$|^compose\.preview\.yaml$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$'
+          out openapi '^api/'
+          out e2e "^(cmd|internal|api|web)/|${gomod}"
+          out nftables "^internal/(agent|defense|auth)/|^cmd/(agent|panel)/|^scripts/ci-acceptance\.sh$|${gomod}"
+          out instances "^internal/(agent|files|plugins|serverfiles|console|servers)/|^cmd/|^scripts/(ci-instances\.sh|mc-status\.py)$|${gomod}"
+          out release "^cmd/|^internal/webui/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
+
   go:
-    name: Go (tests, race, lint, vulns)
+    name: Go (race tests, lint, vulns)
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -46,7 +106,11 @@ jobs:
           go mod verify
           go mod tidy -diff
 
+      # The release binary instead of "go install" (which compiles sqlc with cgo, ~100 s); its
+      # SHA-256 comes from the GitHub release API (asset digest).
       - name: Check sqlc output is up to date
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           version="$(grep -m1 -oE 'sqlc v[0-9]+\.[0-9]+\.[0-9]+' internal/store/db.go | cut -d' ' -f2 || true)"
@@ -55,8 +119,17 @@ jobs:
             exit 1
           fi
           echo "Using sqlc ${version} (taken from the generated header)"
-          CGO_ENABLED=1 go install "github.com/sqlc-dev/sqlc/cmd/sqlc@${version}"
-          "$(go env GOPATH)/bin/sqlc" generate
+          asset="sqlc_${version#v}_linux_amd64.tar.gz"
+          digest="$(gh api "repos/sqlc-dev/sqlc/releases/tags/${version}" --jq ".assets[] | select(.name == \"${asset}\") | .digest")"
+          case "${digest}" in
+            sha256:*) ;;
+            *) echo "::error::no sha256 digest for ${asset}"; exit 1 ;;
+          esac
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/${asset}" "https://github.com/sqlc-dev/sqlc/releases/download/${version}/${asset}"
+          echo "${digest#sha256:}  ${tmp}/${asset}" | sha256sum -c -
+          tar -xzf "${tmp}/${asset}" -C "${tmp}" sqlc
+          "${tmp}/sqlc" generate
           if [ -n "$(git status --porcelain -- internal/store)" ]; then
             git status --porcelain -- internal/store
             git --no-pager diff -- internal/store
@@ -64,10 +137,9 @@ jobs:
             exit 1
           fi
 
-      - name: Unit tests
-        run: make test-go
-
-      - name: Race tests
+      # The race run executes every test, so a separate run without -race would only repeat it
+      # (the release workflow still runs both).
+      - name: Tests (race detector)
         run: make test-race
 
       - name: golangci-lint (incl. gosec, gofmt, goimports)
@@ -80,6 +152,8 @@ jobs:
 
   web:
     name: Web (lint, typecheck, test, build, audit)
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
@@ -129,10 +203,13 @@ jobs:
 
       # The UI preview image (make preview) must keep building; it is never started in CI.
       - name: Build UI preview image
+        if: needs.changes.outputs.preview == 'true'
         run: docker build --file Dockerfile.preview --tag mcpanel-preview:ci .
 
   openapi:
     name: OpenAPI lint
+    needs: changes
+    if: needs.changes.outputs.openapi == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -151,9 +228,8 @@ jobs:
 
   e2e:
     name: E2E (Playwright, real backend)
-    needs:
-      - go
-      - web
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -235,6 +311,8 @@ jobs:
 
   nftables:
     name: nftables integration (root)
+    needs: changes
+    if: needs.changes.outputs.nftables == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -280,6 +358,8 @@ jobs:
 
   instances:
     name: Instance acceptance (Docker, root)
+    needs: changes
+    if: needs.changes.outputs.instances == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -308,9 +388,8 @@ jobs:
 
   build:
     name: Build & release snapshot
-    needs:
-      - go
-      - web
+    needs: changes
+    if: needs.changes.outputs.release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -418,3 +497,28 @@ jobs:
             fi
           done
           (cd dist && sha256sum -c checksums.txt)
+
+  # The one result to wait for (gh pr checks): green when every job either passed or was not
+  # needed for this change.
+  ci-ok:
+    name: CI OK
+    if: always()
+    needs:
+      - changes
+      - go
+      - web
+      - openapi
+      - e2e
+      - nftables
+      - instances
+      - build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: All needed jobs passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"${NEEDS}"
+          jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<<"${NEEDS}" > /dev/null
