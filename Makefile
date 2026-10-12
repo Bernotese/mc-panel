@@ -2,7 +2,7 @@ SHELL := /bin/bash
 GO ?= go
 export CGO_ENABLED ?= 0
 
-.PHONY: generate check test test-go test-race test-web lint dev preview preview-logs preview-down web-build build release deploy-testvm clean
+.PHONY: generate check test test-go test-race test-web lint dev preview preview-logs preview-down web-build build release deploy-testvm test-vm clean
 
 generate:
 	sqlc generate
@@ -10,7 +10,7 @@ generate:
 
 # check is the only verification meant for the Mac: formatting, vet and compile (macOS and
 # Linux, including the root-only integration test files) and TypeScript types. Unit, race,
-# lint and end-to-end tests run in CI.
+# lint and end-to-end tests run on the test VM (make test-vm) and in CI.
 check:
 	@files="$$(gofmt -l $$(git ls-files '*.go'))"; if [ -n "$$files" ]; then echo "gofmt needed:"; echo "$$files"; exit 1; fi
 	$(GO) vet ./...
@@ -65,6 +65,13 @@ REF ?= main
 
 deploy-testvm:
 	ssh $(TESTVM) 'bash -s -- $(REF)' < scripts/testvm-deploy.sh
+
+# Copies the working tree to the test VM and runs the test suites there (docs/dev/README.md,
+# "Tests auf der Test-VM"): SUITE=all|go|lint|web|e2e.
+SUITE ?= all
+
+test-vm:
+	TESTVM=$(TESTVM) ./scripts/test-vm.sh $(SUITE)
 
 clean:
 	rm -rf bin dist .dev
