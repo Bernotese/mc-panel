@@ -58,6 +58,7 @@ func NewServer(svc *Service, version string, log *slog.Logger) *Server {
 		filesapi.PathDownload: {method: http.MethodGet, handler: s.download},
 		filesapi.PathExtract:  {method: http.MethodPost, handler: s.extract},
 		filesapi.PathJobs:     {method: http.MethodGet, handler: s.jobs},
+		filesapi.PathJars:     {method: http.MethodPost, handler: s.jars},
 	}
 	s.srv = &http.Server{
 		Handler:           s,
@@ -289,8 +290,9 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// upload: PUT ?id=&path=&overwrite=0|1, body = file. The server-wide deadlines do not apply;
-// every read gets ioTimeout.
+// upload: PUT ?id=&path=&overwrite=0|1[&sha256=<hex>|&sha512=<hex>], body = file. The
+// server-wide deadlines do not apply; every read gets ioTimeout. A checksum mismatch is only
+// known after the whole body: it is answered like any late error (400 hash_mismatch).
 func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 	// Full duplex: an error found before the body has been read completely (409, 413, 429, 507,
@@ -320,8 +322,15 @@ func (s *Server) receive(r *http.Request, rc *http.ResponseController, body io.R
 	if ow != "" && ow != "0" && ow != "1" {
 		return filesapi.UploadResponse{}, fmt.Errorf("%w: overwrite must be 0 or 1", filesapi.ErrInvalid)
 	}
+	sum, ok, err := filesapi.ChecksumFromQuery(q)
+	if err != nil {
+		return filesapi.UploadResponse{}, err
+	}
+	if !ok {
+		sum = filesapi.Checksum{}
+	}
 	_ = rc.SetWriteDeadline(time.Time{})
-	return s.svc.Upload(r.Context(), id, q.Get("path"), ow == "1", r.ContentLength, body)
+	return s.svc.UploadChecked(r.Context(), id, q.Get("path"), ow == "1", r.ContentLength, sum, body)
 }
 
 // failEarly answers an upload error while the client may still be sending the body. The
@@ -442,4 +451,24 @@ func (s *Server) jobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, filesapi.JobsResponse{Job: s.svc.Job(id)})
+}
+
+// jars lists the plugin or mod jars of a server. Hashing up to filesapi.MaxJars jars can take
+// longer than the server's WriteTimeout (the client waits filesapi.JarsTimeout): longOp.
+func (s *Server) jars(w http.ResponseWriter, r *http.Request) {
+	var req filesapi.JarsRequest
+	if !s.decode(w, r, &req, filesapi.MaxSmallJSONBytes) {
+		return
+	}
+	var res filesapi.JarsResponse
+	err := s.longOp(w, "jars", func() error {
+		var err error
+		res, err = s.svc.Jars(r.Context(), req.ID, req.Dir)
+		return err
+	})
+	if err != nil {
+		s.fail(w, r, "jars", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
