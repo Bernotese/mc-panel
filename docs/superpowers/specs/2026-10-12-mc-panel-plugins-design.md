@@ -1,7 +1,7 @@
 # mc-panel – Teilprojekt 3c: Plugins und Mods (Design-Spec)
 
 - **Datum:** 2026-10-12
-- **Status:** entworfen
+- **Status:** umgesetzt (PRs #36–#46, 2026-10-12)
 - **Autor:** Jannes (mit Claude)
 - **Baut auf:** `2026-10-08-mc-panel-foundation-design.md` (TP1), `2026-10-10-mc-panel-instances-design.md` (TP2), `2026-10-11-mc-panel-console-players-design.md` (TP3a), `2026-10-11-mc-panel-files-design.md` (TP3b)
 
@@ -100,8 +100,8 @@ Feste Basis-URLs (in Tests überschreibbar), geprüft gegen die Live-Dienste am 
 Body `{id, dir}`, `dir` ∈ `plugins|mods`. Antwort `{jars: [{name, enabled, size, mtime, sha256, sha512, meta}], truncated}`.
 
 - Listet reguläre Dateien der obersten Ebene von `dir` mit Endung `.jar` (`enabled: true`) oder `.jar.disabled` (`enabled: false`), Groß-/Kleinschreibung egal; Symlinks, Ordner und Sonderdateien werden ausgelassen (Regeln aus TP3b §3.2: `Lstat`, `O_NOFOLLOW|O_NONBLOCK`, `os.SameFile`). Höchstens 500 Jars (`truncated: true`). Fehlt `dir` oder ist es kein Ordner → leere Liste.
-- **Prüfsummen** sha256 und sha512 in einem Durchlauf; Jars > 256 MiB ohne Prüfsummen (`""`). Cache im Speicher nach (Gerät, Inode, Größe, mtime), höchstens 4096 Einträge. Höchstens 2 gleichzeitige Hash-Durchläufe im Dienst (sonst wartet die Anfrage); Client-Frist 2 min.
-- **Metadaten** (`meta`, best-effort, sonst `null`): Der Dienst öffnet das Jar als Zip (Zentralverzeichnis ≤ 100 000 Einträge) und liest höchstens eine Datei ≤ 64 KiB, in dieser Reihenfolge:
+- **Prüfsummen** sha256 und sha512 in einem Durchlauf; ohne Prüfsummen (`""`) bleiben Jars > 256 MiB, Sparse-Dateien (belegte Blöcke < Größe) und alles, was über das Budget von 2 GiB gelesener Bytes pro Anfrage hinausgeht (Cache-Treffer kosten kein Budget; Jars ohne Prüfsumme kommen nicht in den Cache). Cache im Speicher nach (Gerät, Inode, Größe, mtime, ctime) – die ctime kann der Container nicht zurücksetzen –, höchstens 4096 Einträge; ändert sich eine Datei während des Lesens, gibt es weder Prüfsummen noch Cache-Eintrag. Höchstens ein Hash-Durchlauf pro Instanz und 2 im Dienst (sonst wartet die Anfrage); Client-Frist 2 min.
+- **Metadaten** (`meta`, best-effort, sonst `null`): Der Dienst öffnet das Jar als Zip (Zentralverzeichnis ≤ 100 000 Einträge und ≤ 16 MiB; das Entpacken behält 64 MiB) und liest höchstens eine Datei ≤ 64 KiB, in dieser Reihenfolge:
 
 | Datei | `kind` | Felder |
 |---|---|---|
@@ -154,7 +154,7 @@ Ist Modrinth nicht erreichbar, bleiben die betroffenen Jars `manual` und die Ant
 
 `resolve` und jeder Job bauen denselben Plan aus Projekt und gewünschter Version (fehlt sie: neueste kompatible `release`, sonst die neueste kompatible überhaupt):
 
-- Pflicht-Abhängigkeiten rekursiv bis Tiefe 5, höchstens 20 Pakete im Plan; Zyklen werden erkannt. Modrinth-Abhängigkeit mit `version_id` → genau diese Version (muss kompatibel sein), sonst neueste kompatible `release`. Hangar-Abhängigkeit mit `projectId` → neueste kompatible Version im Kanal `Release`, sonst die neueste.
+- Pflicht-Abhängigkeiten rekursiv bis Tiefe 5, höchstens 20 Pakete im Plan; Zyklen werden erkannt. Tiefe, Plan-Größe und bereits gesehene Projekte werden vor jedem Upstream-Aufruf geprüft; je Version zählen höchstens 50 Pflicht-Abhängigkeiten (der Rest wird ein Eintrag `incompatible` mit `too_many`), eine Auflösung macht höchstens 80 Upstream-Aufrufe. Modrinth-Abhängigkeit mit `version_id` → genau diese Version (muss kompatibel sein), sonst neueste kompatible `release`. Hangar-Abhängigkeit mit `projectId` → neueste kompatible Version im Kanal `Release`, sonst die neueste.
 - Bereits installiert ist ein Projekt, wenn das Inventar ein Jar mit derselben Quelle und Projekt-ID hat (aktiv oder deaktiviert) → `already`, wird nicht angefasst. Abhängigkeiten über Quellen hinweg werden nicht abgeglichen. Für das **angefragte** Projekt gilt: ohne `version` oder mit der installierten Version → `already`; mit einer anderen `version` → Plan-Eintrag, der das vorhandene Jar ersetzt (Versionswechsel, Ablauf wie ein Update in §6.4).
 - Extern verlinkte Abhängigkeit (Hangar `externalUrl`) → `external` mit Name und Link. Abhängigkeit ohne kompatible herunterladbare Version → `incompatible`; dann ist der Plan nicht ausführbar (`409 plugin_incompatible`). Gewünschte Version nur extern → `409 plugin_not_downloadable`.
 - Plan-Eintrag: `{source, project_id, slug, title, version_id, version_name, channel, filename, size, required_by}`.
@@ -162,8 +162,8 @@ Ist Modrinth nicht erreichbar, bleiben die betroffenen Jars `manual` und die Ant
 ### 6.4 Jobs
 
 - Im Speicher, höchstens einer pro Server (sonst `409 conflict`) und vier im panel (sonst `429 rate_limited`); das letzte Ergebnis bleibt bis zum nächsten Job oder Neustart des panels. Ein Neustart des panels bricht laufende Jobs ab; Temp-Dateien räumt der Dienst ohnehin auf.
-- **install:** Plan neu berechnen (der Vorschau wird nicht vertraut), Zielordner bei Bedarf per `mkdir` anlegen, dann je Plan-Eintrag (Abhängigkeiten zuerst): herunterladen → `PUT /v1/upload` mit Prüfsumme (Modrinth `sha512`, Hangar `sha256`) → DB-Eintrag mit der sha512 aus der Antwort. Existiert der Dateiname schon (mit oder ohne `.disabled`) und gehört zu einem anderen Projekt oder ist manuell → Schritt-Fehler `file_exists`, der Job bricht ab. Bereits installierte Schritte bleiben installiert.
-- **update:** pro gewähltem Jar (leer = alle mit Update): neue Version herunterladen, unter neuem Namen hochladen (gleicher Name → `overwrite=1`), deaktivierte Jars bleiben deaktiviert (Upload als `<name>.jar.disabled`), danach altes Jar löschen und DB-Eintrag ersetzen. Neue Pflicht-Abhängigkeiten der neuen Version werden wie bei `install` mitinstalliert. Ein Fehler betrifft nur den Schritt; der Job läuft weiter und endet `failed`, wenn ein Schritt fehlschlug.
+- **install:** Plan neu berechnen (der Vorschau wird nicht vertraut), Zielordner bei Bedarf per `mkdir` anlegen, dann je Plan-Eintrag (Abhängigkeiten zuerst): herunterladen → `PUT /v1/upload` mit Prüfsumme (Modrinth `sha512`, Hangar `sha256`) → DB-Eintrag mit der sha512 aus der Antwort. Existiert der Dateiname schon (mit oder ohne `.disabled`) und gehört zu einem anderen Projekt oder ist manuell → Schritt-Fehler `file_exists`, der Job bricht ab. Bereits installierte Schritte bleiben installiert. Ist der Dienst ausgelastet (`busy`), wiederholt ein Schritt Download und Upload bis zu dreimal (Wartezeit ab 2 s, verdoppelt).
+- **update:** pro gewähltem Jar (leer = alle mit Update): neue Version herunterladen, unter neuem Namen hochladen (gleicher Name → `overwrite=1`), deaktivierte Jars bleiben deaktiviert (Upload als `<name>.jar.disabled`), danach altes Jar löschen und DB-Eintrag ersetzen. Vor dem Download prüft der Schritt die sha512 des zu ersetzenden Jars (ist es seit dem Updatecheck geändert → `file_exists`, Updates-Cache verworfen); lässt sich das alte Jar nicht löschen, nimmt er das neue zurück (scheitert auch das, nennt die Meldung beide Namen). Neue Pflicht-Abhängigkeiten der neuen Version werden wie bei `install` mitinstalliert; jede Update-Gruppe wird für sich aufgelöst, ein Projekt, das derselbe Job schon installiert hat, wird nicht ein zweites Mal geladen. Doppelte Namen in `files` zählen einmal. Ein Fehler betrifft nur den Schritt; der Job läuft weiter und endet `failed`, wenn ein Schritt fehlschlug.
 - Zustände: Job `running|done|failed`, Schritt `pending|downloading|done|failed|skipped`; Schritt-Fehler als Code (`download_failed`, `hash_mismatch`, `file_exists`, `insufficient_storage`, `files_unavailable`, `source_unavailable`) plus Text ohne Host-Pfade.
 
 ### 6.5 Updates
@@ -188,11 +188,11 @@ Alle Routen über `*rbac.Router` mit `rbac.Server(rbac.PermServerPlugins, "id")`
 | `GET /servers/{id}/plugins/jobs` | `{job: null \| {id, kind: install\|update, state, steps: [{title, file, state, error_code, error}], started_at, finished_at}}` |
 | `GET /servers/{id}/plugins/icon?url=` | Bild (§6.8) |
 
-- `source` ∈ `modrinth|hangar` (`hangar` nur bei Plugins, sonst `400 validation_failed`); `project`/`version` ≤ 128 Zeichen, `^[A-Za-z0-9._+-]+$`. `file` ist ein reiner Dateiname ohne `/`, endet auf `.jar` oder `.jar.disabled` und besteht `filesapi.CleanPath`; der Pfad im Dienst ist immer `<dir>/<file>`.
+- `source` ∈ `modrinth|hangar` (`hangar` nur bei Plugins, sonst `400 validation_failed`); `project`/`version` ≤ 128 Zeichen, `^[A-Za-z0-9._+-]+$`. `file` ist ein reiner Dateiname ohne `/`, endet auf `.jar` oder `.jar.disabled` und besteht `filesapi.CleanPath`; der Pfad im Dienst ist immer `<dir>/<file>`. `toggle` und `delete` wirken nur auf Namen, die `/v1/jars` listet (sonst `404`, auch bei abgeschnittener Liste); Werte für `project`/`version`, die nur aus `.` bestehen, sind ungültig.
 - `icon_url` und `project.icon_url` in Antworten zeigen bereits auf den Icon-Proxy (`/api/servers/{id}/plugins/icon?url=…`), `page_url` auf die Projektseite (`https://modrinth.com/<plugin|mod>/<slug>` bzw. `https://hangar.papermc.io/<owner>/<slug>`).
-- **CSRF** gilt für alle `POST`. **Rate-Limit** pro Konto über `search`, `versions`, `resolve`, `updates` mit `refresh`: Token-Bucket mit 1 Aufruf/s und Spitze 20, also etwa 60 pro Minute (sonst `429 rate_limited` mit `Retry-After`).
+- **CSRF** gilt für alle `POST`. **Rate-Limit** pro Konto über `search`, `versions`, `resolve`, `updates` mit `refresh`: Token-Bucket mit 1 Aufruf/s und Spitze 20, also etwa 60 pro Minute (sonst `429 rate_limited` mit `Retry-After`); ein Updatecheck, der nicht aus dem Cache kommt, zählt ebenfalls (auch bei `POST …/update`).
 - Unbekanntes Projekt oder unbekannte Version beim Upstream → `404 not_found` (als Abhängigkeit: `incompatible`). Externe Links (`external_url`, `external[].url`) gibt das panel nur bei `http`/`https` weiter.
-- **Fehler-Mapping** des Dienstes wie TP3b §5.1 (`files_unavailable`, `file_exists`, `not_found`, `insufficient_storage` …).
+- **Fehler-Mapping** des Dienstes: `exists` → `409 file_exists`, `not_found` → `404 not_found`, `not_regular`/`invalid` → `400 validation_failed`, alles Übrige (auch `busy`, `insufficient_storage`, `too_large`, `hash_mismatch`, ein alter Dienst ohne `/v1/jars`) → `503 files_unavailable`; in Jobs erscheinen sie als Schritt-Fehler.
 
 ### 6.7 Fehlercodes
 
@@ -215,7 +215,7 @@ Vorhanden und genutzt: `conflict` (Job läuft), `catalog_unavailable` (`LATEST` 
 
 ### 6.9 Audit
 
-Neue Aktionen in `internal/audit/types.go`: `plugin.install` `{source, project, version, file}`, `plugin.update` `{file, from, to}`, `plugin.remove` `{file}`, `plugin.toggle` `{file, enabled}`. Ziel `server:<id>`, Ergebnis `success`/`failure`, ein Eintrag pro Jar (auch für Abhängigkeiten); Akteur ist der Nutzer, der den Job gestartet hat. Inventar, Suche, Versionen, Auflösen, Updatecheck und Icons werden nicht auditiert, ebenso Ablehnungen durch Rechte, Validierung und Rate-Limit (wie TP1–3b).
+Neue Aktionen in `internal/audit/types.go`: `plugin.install` `{source, project, version, file}`, `plugin.update` `{file: neuer Name, from, to: Versionsnamen}` (ebenso ein Versionswechsel über `install`, dann `plugin.install` mit `from`), `plugin.remove` `{file}`, `plugin.toggle` `{file, enabled}`. Ziel `server:<id>`, Ergebnis `success`/`failure`, ein Eintrag pro Jar (auch für Abhängigkeiten); Akteur ist der Nutzer, der den Job gestartet hat. Inventar, Suche, Versionen, Auflösen, Updatecheck und Icons werden nicht auditiert, ebenso Ablehnungen durch Rechte, Validierung und Rate-Limit (wie TP1–3b).
 
 ## 7. Frontend
 
