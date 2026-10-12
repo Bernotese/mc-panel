@@ -15,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata" // backup schedules and their time zone on hosts without zoneinfo
 
 	"github.com/Bernotese/mc-panel/internal/agent"
 	"github.com/Bernotese/mc-panel/internal/audit"
@@ -239,7 +240,7 @@ func serve(args []string) error {
 
 	ac := agent.NewClient(cfg.AgentSocket) // firewall and instance API share one client
 	fc := filesapi.NewClient(cfg.FilesSocket)
-	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clock.Real{}, Agent: ac, Instances: ac, Console: ac, Files: fc, Version: version})
+	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clock.Real{}, Agent: ac, Instances: ac, Console: ac, Files: fc, Backups: fc, Version: version})
 	if err != nil {
 		return err
 	}

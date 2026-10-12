@@ -249,7 +249,8 @@ export const serverOperations: MockOperation[] = [
       for (const [userId, grants] of db.grants) db.grants.set(userId, grants.filter((gr) => gr.server_id !== id))
       const details: Record<string, unknown> = { name: server.name }
       if (purge) {
-        // Task 3 adds db.backups/db.backupJobs; until then there is nothing to purge.
+        delete db.backups[id]
+        delete db.backupJobs[id]
         details.backups_purged = true
       }
       recordAudit(g.user, 'server.delete', `server:${server.id}`, 'success', details)

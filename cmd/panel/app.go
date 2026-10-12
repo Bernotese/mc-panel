@@ -15,6 +15,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/audit/auditapi"
 	"github.com/Bernotese/mc-panel/internal/auth"
+	"github.com/Bernotese/mc-panel/internal/backups"
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/config"
 	"github.com/Bernotese/mc-panel/internal/console"
@@ -72,6 +73,9 @@ type appDeps struct {
 	// Files is the files service (mcpanel-files); nil means no service: file routes answer
 	// files_unavailable.
 	Files filesapi.Client
+	// Backups is the backup API of the files service (in production the same *filesapi.UnixClient
+	// as Files); nil means no service: the backups tab reports "not available".
+	Backups filesapi.BackupClient
 	// Upstream talks to Modrinth and Hangar; nil means upstream.New with the default bases (the
 	// real services). Tests inject httptest servers.
 	Upstream *upstream.Client
@@ -127,10 +131,20 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 	})
 	// One version catalog for the create form and for resolving LATEST in the plugin search.
 	cat := catalog.New(catalog.Options{Clock: d.Clock, Version: d.Version})
-	serversH := servers.NewHandler(servers.Deps{
+	// The backups handler needs servers for an immediate reconcile pass after a restore, the
+	// servers handler needs backups as data gate and purger: serversH is assigned right below.
+	var serversH *servers.Handler
+	backupsH := backups.NewHandler(backups.Deps{
+		DB: db, Clock: d.Clock, Audit: auditRec, Notifier: disp, Files: d.Backups,
+		Instances: d.Instances, Console: d.Console,
+		Reconcile: func() { serversH.Trigger() },
+	})
+	serversH = servers.NewHandler(servers.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Box: box, Instances: d.Instances,
 		Catalog: cat,
-		Gate:    filesH,
+		// The panel's own restore hold first (a map lookup), then the file service's jobs.
+		Gate:    servers.AnyGate(backupsH, filesH),
+		Backups: backupsH,
 	})
 	pluginsH := plugins.NewHandler(plugins.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Files: d.Files, Instances: d.Instances,
@@ -180,17 +194,19 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		consoleH.Routes(api)
 		filesH.Routes(api)
 		pluginsH.Routes(api)
+		backupsH.Routes(api)
 		auditH.Routes(api)
 	})
 	mux.Handle("/*", webui.Handler())
 
 	run := func(ctx context.Context) {
 		var wg sync.WaitGroup
-		wg.Add(5)
+		wg.Add(6)
 		go func() { defer wg.Done(); disp.Run(ctx) }()
 		go func() { defer wg.Done(); svc.Run(ctx) }()
 		go func() { defer wg.Done(); serversH.Run(ctx) }()
 		go func() { defer wg.Done(); pluginsH.Run(ctx) }()
+		go func() { defer wg.Done(); backupsH.Run(ctx) }()
 		go func() { defer wg.Done(); pruneSessionsLoop(ctx, authH.PruneSessions, sessionPruneInterval) }()
 		wg.Wait()
 	}

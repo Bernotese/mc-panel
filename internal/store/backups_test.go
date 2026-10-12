@@ -148,6 +148,7 @@ func TestBackupScheduleChecksAndCascade(t *testing.T) {
 			ON CONFLICT (server_id) DO NOTHING`, id); err != nil {
 			t.Fatal(err)
 		}
+		//nolint:gosec // G202: col comes from the fixed list above, never from input
 		if _, err := db.ExecContext(ctx, `UPDATE backup_schedules SET `+col+` WHERE server_id = ?`, id); err == nil {
 			t.Errorf("%s accepted", col)
 		}
