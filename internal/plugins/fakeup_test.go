@@ -237,6 +237,19 @@ func (f *fakeUp) setBlock(ch chan struct{}) { f.mu.Lock(); f.block = ch; f.mu.Un
 
 func (f *fakeUp) count(key string) int { f.mu.Lock(); defer f.mu.Unlock(); return f.hits[key] }
 
+// apiTotal counts all API requests so far (CDN requests excluded).
+func (f *fakeUp) apiTotal() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for k, v := range f.hits {
+		if !strings.HasPrefix(k, "CDN ") {
+			n += v
+		}
+	}
+	return n
+}
+
 func (f *fakeUp) query() url.Values { f.mu.Lock(); defer f.mu.Unlock(); return f.lastQuery }
 
 func (f *fakeUp) types() [][]string {

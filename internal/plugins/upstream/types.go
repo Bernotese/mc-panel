@@ -3,6 +3,7 @@ package upstream
 import (
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -83,7 +84,9 @@ type Icon struct {
 // refRe bounds every project, version and hash reference before it becomes part of a URL.
 var refRe = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,128}$`)
 
-func validRef(s string) bool { return refRe.MatchString(s) }
+// validRef also refuses references made only of dots ("." and ".." are path segments in an
+// upstream URL).
+func validRef(s string) bool { return refRe.MatchString(s) && strings.Trim(s, ".") != "" }
 
 func sortNewestFirst(vs []Version) {
 	slices.SortStableFunc(vs, func(a, b Version) int { return b.PublishedAt.Compare(a.PublishedAt) })
