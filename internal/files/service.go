@@ -93,7 +93,7 @@ type Service struct {
 
 func New(cfg Config) *Service {
 	s := &Service{
-		cfg: cfg, clock: cfg.Clock, log: cfg.Log, disk: cfg.Disk, jobs: newJobs(),
+		cfg: cfg, clock: cfg.Clock, log: cfg.Log, disk: cfg.Disk, jobs: newJobs(cfg.Limits.MaxBackupJobs),
 		uploads:       make(chan struct{}, maxUploads),
 		zipDownloads:  make(chan struct{}, maxZipDownloads),
 		fileDownloads: make(chan struct{}, maxFileDownloads),
