@@ -161,3 +161,24 @@ func TestManageTruncatedUnlisted(t *testing.T) {
 		}
 	}
 }
+
+// K8: with Modrinth down the inventory gives up on it after the first failures instead of
+// waiting for every project lookup.
+func TestInventoryStopsAskingDownSource(t *testing.T) {
+	e := newEnv(t)
+	id := e.paper("survival")
+	for i := range 20 {
+		name := fmt.Sprintf("J%02d.jar", i)
+		e.files.put(id, "plugins/"+name, name)
+		e.seedRow(id, name, name, "modrinth", fmt.Sprintf("PRJ%02d", i), "s", "T", "v", "v", "release")
+	}
+	e.up.setDown(true)
+	before := e.up.apiTotal()
+	inv := e.inventory(id)
+	if len(inv.SourceErrors) != 1 || inv.SourceErrors[0] != "modrinth" {
+		t.Fatalf("source_errors = %v", inv.SourceErrors)
+	}
+	if n := e.up.apiTotal() - before; n > 8 {
+		t.Fatalf("%d project lookups against a source that is down", n)
+	}
+}
