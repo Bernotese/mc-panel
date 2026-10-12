@@ -150,3 +150,46 @@ func TestCheckInstancesDirAcceptsGroupReadable(t *testing.T) {
 		t.Fatalf("strict check of a group-writable instances_dir = %v, want %q named as writable by group", err, dir)
 	}
 }
+
+// TestInitCreatesBackupsDir: backups/ belongs to the container user (the files service runs as
+// that user and owns the restic repositories) with 0700; a loosened mode is repaired, and a
+// symlink in its place is refused, never followed (spec 4 §3.1).
+func TestInitCreatesBackupsDir(t *testing.T) {
+	e := newEnv(t)
+	if err := e.m.Init(); err != nil {
+		t.Fatal(err)
+	}
+	dir := instances.BackupsDir(e.dir)
+	if dir != filepath.Join(e.dir, "backups") {
+		t.Fatalf("BackupsDir = %s", dir)
+	}
+	if uid, gid, mode := owner(t, dir); uid != os.Getuid() || gid != os.Getgid() || mode != 0o700 {
+		t.Fatalf("backups/ = %d:%d %v, want %d:%d 0700", uid, gid, mode, os.Getuid(), os.Getgid())
+	}
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.m.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if got := perm(t, dir); got != 0o700 {
+		t.Fatalf("backups/ after repair = %v, want 0700", got)
+	}
+}
+
+func TestInitRefusesSymlinkedBackupsDir(t *testing.T) {
+	e := newEnv(t)
+	target := t.TempDir()
+	if err := os.Chmod(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, instances.BackupsDir(e.dir)); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.m.Init(); err == nil {
+		t.Fatal("Init followed a symlinked backups/")
+	}
+	if got := perm(t, target); got != 0o755 {
+		t.Fatalf("symlink target mode changed to %v", got)
+	}
+}

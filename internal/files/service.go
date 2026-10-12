@@ -51,6 +51,8 @@ type Config struct {
 	Clock        clock.Clock        // nil = clock.Real{}
 	Log          *slog.Logger       // nil = slog.Default()
 	Disk         DiskSpace          // nil = statfs
+	ResticBinary string             // spec 4 §3.2; "" = backups unavailable. A bare name is looked up in PATH (dev).
+	runner       resticRunner       // tests: replaces the restic binary
 }
 
 // Service performs the file operations of all instances.
@@ -70,6 +72,14 @@ type Service struct {
 	jarHashBudget int64             // bytes one listing may hash (maxHashBytesPerRequest; tests lower it)
 	instMu        sync.Mutex
 	instHash      map[int64]*instSlot // one jar pass per instance at a time, on top of hashSlots
+	runner        resticRunner        // nil = no usable binary (runnerWhy says why)
+	runnerWhy     string
+	backupMu      sync.Mutex
+	backupStat    filesapi.BackupsStatus // set by InitBackups
+	// backupHook runs before every entry of a backup stream; swapHook before every rename of
+	// a restore swap (tests: swap folders, fail a step).
+	backupHook func(p string)
+	swapHook   func(step int) error
 	// tempToken is part of every temp name this process creates, so CleanupTemp, which runs
 	// while the service already serves, removes only the leftovers of earlier runs.
 	tempToken string
@@ -110,6 +120,11 @@ func New(cfg Config) *Service {
 	if s.disk == nil {
 		s.disk = statfsDisk{}
 	}
+	s.runner, s.runnerWhy = cfg.runner, ""
+	if s.runner == nil {
+		s.runner, s.runnerWhy = newExecRunner(cfg.ResticBinary)
+	}
+	s.backupStat = filesapi.BackupsStatus{Reason: "the restic check has not run yet"}
 	return s
 }
 
@@ -328,7 +343,7 @@ func fsErr(err error) error {
 	case errors.Is(err, filesapi.ErrNotFound), errors.Is(err, filesapi.ErrExists), errors.Is(err, filesapi.ErrModified),
 		errors.Is(err, filesapi.ErrNotRegular), errors.Is(err, filesapi.ErrNotText), errors.Is(err, filesapi.ErrTooLarge),
 		errors.Is(err, filesapi.ErrInsufficientStorage), errors.Is(err, filesapi.ErrBusy), errors.Is(err, filesapi.ErrInvalid),
-		errors.Is(err, filesapi.ErrHashMismatch):
+		errors.Is(err, filesapi.ErrHashMismatch), errors.Is(err, filesapi.ErrBackupsUnavailable):
 		return err
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
 		return fmt.Errorf("%w: %w", filesapi.ErrNotFound, err)
