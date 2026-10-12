@@ -79,7 +79,7 @@ func (s *Service) Extract(ctx context.Context, req filesapi.ExtractRequest) (fil
 			_ = f.Close()
 		}
 	}()
-	if err := checkCentralDirectory(f, st.Size(), s.cfg.Limits.MaxExtractEntries); err != nil {
+	if err := checkCentralDirectory(f, st.Size(), s.cfg.Limits.MaxExtractEntries, maxCentralDirBytes); err != nil {
 		return filesapi.Job{}, err
 	}
 	zr, err := zip.NewReader(f, st.Size())

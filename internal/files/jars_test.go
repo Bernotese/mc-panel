@@ -235,13 +235,14 @@ func TestJarsCachesByFileIdentity(t *testing.T) {
 		t.Fatalf("changed jar: %+v, computed %d times", jarByName(t, third, "a.jar"), h.count("a.jar"))
 	}
 
-	// Toggling renames the jar: same inode, size and mtime, so the cache still applies.
+	// Toggling renames the jar: same inode, size and mtime, but rename moves the ctime (part of
+	// the key), so it is computed at most once more, with the same result.
 	if err := os.Rename(filepath.Join(data, "plugins", "b.jar"), filepath.Join(data, "plugins", "b.jar.disabled")); err != nil {
 		t.Fatal(err)
 	}
 	fourth := listJars(t, s, filesapi.DirPlugins)
 	off := jarByName(t, fourth, "b.jar.disabled")
-	if b256, _ := sums("bbbb"); off.SHA256 != b256 || off.Enabled || h.count("b.jar.disabled") != 0 {
+	if b256, _ := sums("bbbb"); off.SHA256 != b256 || off.Enabled || h.count("b.jar.disabled") > 1 {
 		t.Fatalf("renamed jar: %+v, computed %d times", off, h.count("b.jar.disabled"))
 	}
 	if n := s.jarCache.size(); n > hashCacheSize {

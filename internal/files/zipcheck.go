@@ -13,7 +13,7 @@ import (
 
 const (
 	// maxCentralDirBytes bounds the central directory archive/zip reads into memory (names,
-	// extra fields and comments of every entry).
+	// extra fields and comments of every entry) when it extracts an archive.
 	maxCentralDirBytes = 64 << 20
 
 	cdHeaderSig    = 0x02014b50
@@ -30,10 +30,11 @@ const (
 // checkCentralDirectory bounds what zip.NewReader would allocate, before it runs: archive/zip
 // reads every central-directory header into a *zip.File (and may preallocate by the declared
 // count) before any limit of ours applies. This walks the directory the same way, but only
-// counts: more than maxEntries headers (declared or present) or more than maxCentralDirBytes
-// of directory are ErrTooLarge. It reads a few KiB at a time; anything it cannot make sense of
+// counts: more than maxEntries headers (declared or present) or more than maxBytes of
+// directory (maxCentralDirBytes for extraction, maxJarCentralDirBytes for jar metadata) are
+// ErrTooLarge. It reads a few KiB at a time; anything it cannot make sense of
 // is left to zip.NewReader, which then fails with ErrInvalid.
-func checkCentralDirectory(r io.ReaderAt, size, maxEntries int64) error {
+func checkCentralDirectory(r io.ReaderAt, size, maxEntries, maxBytes int64) error {
 	end, endOff, ok := findDirectoryEnd(r, size)
 	if !ok {
 		return nil // not a zip: zip.NewReader reports it
@@ -58,7 +59,7 @@ func checkCentralDirectory(r io.ReaderAt, size, maxEntries int64) error {
 		if start < 0 || start >= size {
 			continue
 		}
-		if err := countHeaders(io.NewSectionReader(r, start, size-start), maxEntries); err != nil {
+		if err := countHeaders(io.NewSectionReader(r, start, size-start), maxEntries, maxBytes); err != nil {
 			return err
 		}
 	}
@@ -115,7 +116,7 @@ func readZip64End(r io.ReaderAt, endOff int64) (records, cdSize, cdOff uint64, o
 
 // countHeaders counts consecutive central-directory headers (fixed part plus name, extra and
 // comment) until something else follows, as archive/zip reads them.
-func countHeaders(r io.Reader, maxEntries int64) error {
+func countHeaders(r io.Reader, maxEntries, maxBytes int64) error {
 	br := bufio.NewReader(r)
 	var n, total int64
 	for {
@@ -128,8 +129,8 @@ func countHeaders(r io.Reader, maxEntries int64) error {
 		switch {
 		case n > maxEntries:
 			return fmt.Errorf("%w: the archive has more than %d entries", filesapi.ErrTooLarge, maxEntries)
-		case total > maxCentralDirBytes:
-			return fmt.Errorf("%w: the archive's central directory exceeds %d bytes", filesapi.ErrTooLarge, maxCentralDirBytes)
+		case total > maxBytes:
+			return fmt.Errorf("%w: the archive's central directory exceeds %d bytes", filesapi.ErrTooLarge, maxBytes)
 		}
 	}
 }
