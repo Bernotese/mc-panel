@@ -5,6 +5,7 @@ import type {
   AuditResult,
   Catalog,
   FileJob,
+  InstalledJar,
   InstanceConfig,
   InstanceType,
   IPRule,
@@ -20,6 +21,8 @@ import type {
   PlayerBan,
   PlayerEntry,
   PlayerOp,
+  PluginJob,
+  PluginKind,
   Role,
   SecondFactor,
   SecuritySettings,
@@ -165,6 +168,121 @@ export function mockTree(now: number, running: boolean): MockNode {
   return dirNode(t, tree)
 }
 
+/** Plugins or mods of a mock server: the jars "on disk" plus what the panel remembers about them. */
+export interface MockPluginInventory {
+  kind: PluginKind
+  dir: 'plugins' | 'mods'
+  jars: InstalledJar[]
+  changedAt: number // last plugin change by the panel (Unix ms, 0 = none); restart_needed compares it with started_at
+  checkedAt: number // last update check (Unix ms, 0 = never)
+}
+
+/** What a finished job step does: remove the old jar (if any), add the new one, write its audit entry. */
+export interface MockPluginChange {
+  remove: string | null
+  add: InstalledJar
+  action: 'plugin.install' | 'plugin.update'
+  details: Record<string, unknown>
+}
+
+export interface MockPluginJob {
+  job: PluginJob
+  actorId: number
+  startedMs: number
+  changes: Array<MockPluginChange | null> // per step; null = skipped or failed at the start
+}
+
+/** icon_url as the panel sends it: the icon proxy with the CDN URL as query parameter. */
+export function pluginIconUrl(serverId: number, cdnUrl: string | null): string | null {
+  return cdnUrl === null ? null : `/api/servers/${serverId}/plugins/icon?url=${encodeURIComponent(cdnUrl)}`
+}
+
+/** Inventories of the seeded servers (V5): survival (paper) and modded (fabric). */
+function seedPlugins(now: number): Record<number, MockPluginInventory> {
+  const t = now - 3 * DAY
+  const modrinthIcon = (serverId: number, projectId: string) => pluginIconUrl(serverId, `https://cdn.modrinth.com/data/${projectId}/icon.png`)
+  return {
+    1: {
+      kind: 'plugin',
+      dir: 'plugins',
+      changedAt: 0,
+      checkedAt: now - 10 * MINUTE,
+      jars: [
+        {
+          file: 'Disabled.jar.disabled',
+          enabled: false,
+          size: 3 * MIB,
+          mtime: t,
+          source: 'modrinth',
+          project: { id: 'swbUV1cr', slug: 'bluemap', title: 'BlueMap', page_url: 'https://modrinth.com/plugin/bluemap', icon_url: modrinthIcon(1, 'swbUV1cr') },
+          version: { id: 'bm57', name: '5.7', channel: 'release' },
+          meta: { kind: 'plugin', id: '', name: 'BlueMap', version: '5.7' },
+          installed_by_panel: false, // matched by its hash
+        },
+        {
+          file: 'LuckPerms-Bukkit-5.5.71.jar',
+          enabled: true,
+          size: 2 * MIB,
+          mtime: t,
+          source: 'modrinth',
+          project: { id: 'Vebnzrzj', slug: 'luckperms', title: 'LuckPerms', page_url: 'https://modrinth.com/plugin/luckperms', icon_url: modrinthIcon(1, 'Vebnzrzj') },
+          version: { id: 'lp5571', name: '5.5.71', channel: 'release' },
+          meta: { kind: 'plugin', id: '', name: 'LuckPerms', version: '5.5.71' },
+          installed_by_panel: true,
+        },
+        {
+          file: 'OldTool.jar',
+          enabled: true,
+          size: 48 * 1024,
+          mtime: t - 30 * DAY,
+          source: 'manual',
+          project: null,
+          version: null,
+          meta: { kind: 'plugin', id: '', name: 'OldTool', version: '1.0' },
+          installed_by_panel: false,
+        },
+        {
+          file: 'ViaVersion-5.5.1.jar',
+          enabled: true,
+          size: 5 * MIB,
+          mtime: t,
+          source: 'hangar',
+          project: {
+            id: '2',
+            slug: 'ViaVersion',
+            title: 'ViaVersion',
+            page_url: 'https://hangar.papermc.io/ViaVersion/ViaVersion',
+            icon_url: pluginIconUrl(1, 'https://hangarcdn.papermc.io/avatars/project/2.webp'),
+          },
+          version: { id: '5.5.1', name: '5.5.1', channel: 'release' },
+          meta: { kind: 'plugin', id: '', name: 'ViaVersion', version: '5.5.1' },
+          installed_by_panel: true,
+        },
+      ],
+    },
+    4: {
+      kind: 'mod',
+      dir: 'mods',
+      changedAt: 0,
+      checkedAt: now - 10 * MINUTE,
+      jars: [
+        {
+          file: 'fabric-api-0.110.0.jar',
+          enabled: true,
+          size: 2 * MIB,
+          mtime: t,
+          source: 'modrinth',
+          project: { id: 'P7dR8mSH', slug: 'fabric-api', title: 'Fabric API', page_url: 'https://modrinth.com/mod/fabric-api', icon_url: modrinthIcon(4, 'P7dR8mSH') },
+          version: { id: 'fapi0110', name: '0.110.0+1.21.11', channel: 'release' },
+          meta: { kind: 'mod', id: 'fabric-api', name: 'Fabric API', version: '0.110.0+1.21.11' },
+          installed_by_panel: false, // matched by its hash
+        },
+      ],
+    },
+  }
+}
+
+
 /** Every property set: spec §7 defaults (motd = server name) overridden by p. */
 export function resolveProperties(name: string, p: ServerProperties = {}): Required<ServerProperties> {
   return {
@@ -238,6 +356,8 @@ export interface MockDb {
   servers: MockServer[]
   files: Record<number, MockNode> // data directory per server id (missing = never started)
   fileJobs: Record<number, MockFileJob>
+  plugins: Record<number, MockPluginInventory> // plugins/mods per server id (created on first access)
+  pluginJobs: Record<number, MockPluginJob> // running or last plugin job per server id
   serverSettings: MockServerSettings
   catalogs: Partial<Record<InstanceType, Catalog>>
   grants: Map<number, PermissionGrant[]>
@@ -411,9 +531,20 @@ function seed(now: number): MockDb {
         players: emptyPlayers(),
       },
       { id: 3, name: 'lobby', instance: null, status: notConfiguredStatus(), revision: 0, runningRevision: 0, players: emptyPlayers() },
+      {
+        id: 4,
+        name: 'modded',
+        instance: { type: 'fabric', version: '1.21.11', loader_version: null, modpack: null, java: 'java21', memory_mib: 4096, properties: resolveProperties('modded') },
+        status: stoppedStatus(),
+        revision: 1,
+        runningRevision: 1,
+        players: emptyPlayers(),
+      },
     ],
     files: { 1: mockTree(now, true), 2: mockTree(now, false) },
     fileJobs: {},
+    plugins: seedPlugins(now),
+    pluginJobs: {},
     serverSettings: { base_domain: 'mc.example.com', curseforge_api_key_set: false, docker: 'ok' },
     catalogs: {
       vanilla: {

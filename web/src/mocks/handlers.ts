@@ -6,6 +6,7 @@ import { authOperations } from './handlers/auth'
 import { consoleOperations } from './handlers/console'
 import { filesOperations } from './handlers/files'
 import { meOperations } from './handlers/me'
+import { pluginsOperations } from './handlers/plugins'
 import { securityOperations } from './handlers/security'
 import { serverOperations } from './handlers/servers'
 import { userOperations } from './handlers/users'
@@ -19,6 +20,7 @@ export const operations: MockOperation[] = [
   ...serverOperations,
   ...consoleOperations,
   ...filesOperations,
+  ...pluginsOperations,
   ...auditOperations,
   ...securityOperations,
 ]
