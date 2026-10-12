@@ -68,3 +68,23 @@ func TestDownloadRedirectRejectsUnicodeFolding(t *testing.T) {
 		t.Fatalf("redirect: %v", err)
 	}
 }
+
+// S7: references made only of dots never become part of an upstream URL.
+func TestDotRefsNeverSent(t *testing.T) {
+	api := newAPI(t, func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
+	c := newClient(t, api, nil, clock.NewFake(t0))
+	for _, ref := range []string{".", "..", "..."} {
+		if _, err := c.Project(bg, upstream.Modrinth, ref); !errors.Is(err, upstream.ErrNotFound) {
+			t.Errorf("project %q: %v", ref, err)
+		}
+		if _, err := c.Version(bg, upstream.Hangar, "x", ref); !errors.Is(err, upstream.ErrNotFound) {
+			t.Errorf("hangar version %q: %v", ref, err)
+		}
+		if _, err := c.Versions(bg, upstream.Hangar, ref, upstream.VersionFilter{}); !errors.Is(err, upstream.ErrNotFound) {
+			t.Errorf("hangar versions %q: %v", ref, err)
+		}
+	}
+	if n := api.total(); n != 0 {
+		t.Fatalf("dot refs reached the upstream %d times", n)
+	}
+}
