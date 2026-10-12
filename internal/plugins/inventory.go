@@ -91,7 +91,10 @@ func (h *Handler) inventory(ctx context.Context, srv server) (inventory, error) 
 		Kind: srv.Kind.Kind, Dir: srv.Kind.Dir, Sources: srv.Kind.Sources,
 		Jars: []installedJar{}, SourceErrors: []upstream.Source{},
 	}
-	// Rows first: a row a running job writes after this read is never taken for an orphan.
+	// Rows first: a row a running job writes after this read is never taken for an orphan. A
+	// job that started (and maybe ended) since then also forbids the cleanup: the listing may
+	// show the jar it wrote under a planned row's name.
+	gen := h.jobs.generation(srv.ID)
 	rows, err := h.q.PluginsListInstalls(ctx, srv.ID)
 	if err != nil {
 		return inventory{}, err
@@ -126,7 +129,7 @@ func (h *Handler) inventory(ctx context.Context, srv server) (inventory, error) 
 		}
 		inv.Jars = append(inv.Jars, it)
 	}
-	if !inv.Truncated && !h.jobRunning(srv.ID) {
+	if !inv.Truncated && !h.jobRunning(srv.ID) && h.jobs.generation(srv.ID) == gen {
 		for _, r := range rows {
 			if used[r.Filename] {
 				continue
@@ -206,6 +209,9 @@ func (h *Handler) enrichProjects(ctx context.Context, srv server, inv *inventory
 			p, err := h.up.Project(ctx, k.src, k.id)
 			mu.Lock()
 			defer mu.Unlock()
+			if errors.Is(err, upstream.ErrNotFound) {
+				return // removed upstream: the jar keeps what the DB or hash lookup knows
+			}
 			if err != nil {
 				failed[k.src] = true
 				return

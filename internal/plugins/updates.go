@@ -33,7 +33,11 @@ type updateEntry struct {
 type updatesResult struct {
 	Updates   []updateEntry `json:"updates"`
 	CheckedAt int64         `json:"checked_at"`
+
+	scope string // server type and game version the check was made for
 }
+
+func updatesScope(srv server, gv string) string { return string(srv.Type) + "/" + gv }
 
 func updatesKey(serverID int64) string { return strconv.FormatInt(serverID, 10) }
 
@@ -52,7 +56,8 @@ func channelsUpTo(c upstream.Channel) []upstream.Channel {
 // checkUpdates returns the updates of the server, cached for an hour (refresh drops the cache).
 func (h *Handler) checkUpdates(ctx context.Context, srv server, gv string, refresh bool) (updatesResult, error) {
 	key := updatesKey(srv.ID)
-	if refresh {
+	// A check for another type or game version (the server was changed) is stale.
+	if v, ok := h.updates.Peek(key); refresh || (ok && v.scope != updatesScope(srv, gv)) {
 		h.updates.Delete(key)
 	}
 	return h.updates.Get(ctx, key, func(ctx context.Context) (updatesResult, error) { return h.findUpdates(ctx, srv, gv) })
@@ -66,7 +71,7 @@ func (h *Handler) findUpdates(ctx context.Context, srv server, gv string) (updat
 	if slices.Contains(inv.SourceErrors, upstream.Modrinth) {
 		return updatesResult{}, fmt.Errorf("%w: modrinth hash lookup failed", upstream.ErrUnavailable)
 	}
-	out := updatesResult{Updates: []updateEntry{}, CheckedAt: h.clock.Now().UnixMilli()}
+	out := updatesResult{Updates: []updateEntry{}, CheckedAt: h.clock.Now().UnixMilli(), scope: updatesScope(srv, gv)}
 	byChannel := map[upstream.Channel][]installedJar{}
 	var hangar []installedJar
 	for _, j := range inv.Jars {
@@ -120,6 +125,9 @@ func (h *Handler) findUpdates(ctx context.Context, srv server, gv string) (updat
 func (h *Handler) hangarUpdate(ctx context.Context, srv server, gv string, j installedJar) (updateEntry, bool, error) {
 	release := j.Version.Channel == upstream.Release
 	vs, err := h.up.Versions(ctx, upstream.Hangar, j.Project.ID, upstream.VersionFilter{GameVersion: gv, ReleaseOnly: release})
+	if errors.Is(err, upstream.ErrNotFound) {
+		return updateEntry{}, false, nil // the project was removed upstream: no updates
+	}
 	if err != nil {
 		return updateEntry{}, false, err
 	}
@@ -267,7 +275,7 @@ func (h *Handler) planUpdate(ctx context.Context, p *planner, u updateEntry) (pl
 	fallback := planEntry{
 		Source: u.source, ProjectID: u.jar.Project.ID, Slug: u.jar.Project.Slug, Title: cmp.Or(u.jar.Project.Title, u.File),
 		VersionID: u.To.ID, VersionName: u.To.Name, Channel: u.To.Channel, Filename: u.jar.base,
-		replaces: u.File, replacesEnabled: u.jar.Enabled,
+		replaces: u.File, replacesEnabled: u.jar.Enabled, replacesSHA512: u.jar.sha512,
 	}
 	fail := func(err error) (planEntry, []planEntry, *taskError) {
 		code, msg := stepError(err)
@@ -285,7 +293,7 @@ func (h *Handler) planUpdate(ctx context.Context, p *planner, u updateEntry) (pl
 		return fail(errNotDownloadable)
 	}
 	root := p.entry(proj, v, nil)
-	root.replaces, root.replacesEnabled = u.File, u.jar.Enabled
+	root.replaces, root.replacesEnabled, root.replacesSHA512 = u.File, u.jar.Enabled, u.jar.sha512
 	p.seen[projectKey(u.source, proj.ID)] = true
 	res := newResolution()
 	deps, err := p.dependencies(ctx, &res, v, u.source, proj.Title)

@@ -61,9 +61,10 @@ type jobView struct {
 }
 
 type job struct {
-	reg    *jobRegistry
-	view   jobView // guarded by reg.mu
-	cancel context.CancelFunc
+	reg      *jobRegistry
+	serverID int64
+	view     jobView // guarded by reg.mu
+	cancel   context.CancelFunc
 }
 
 // jobRegistry keeps the newest job per server in memory: at most one running per server and
@@ -73,13 +74,14 @@ type jobRegistry struct {
 	max    int
 	mu     sync.Mutex
 	jobs   map[int64]*job
+	gen    map[int64]uint64 // per server: bumped when a job starts and when it ends
 	active int
 	closed bool
 	wg     sync.WaitGroup
 }
 
 func newJobRegistry(clk clock.Clock, maxJobs int) *jobRegistry {
-	return &jobRegistry{clock: clk, max: maxJobs, jobs: map[int64]*job{}}
+	return &jobRegistry{clock: clk, max: maxJobs, jobs: map[int64]*job{}, gen: map[int64]uint64{}}
 }
 
 func newJobID() string {
@@ -110,10 +112,11 @@ func (r *jobRegistry) start(base context.Context, serverID int64, kind string, s
 		steps = []jobStep{}
 	}
 	ctx, cancel := context.WithCancel(context.WithoutCancel(base))
-	j := &job{reg: r, cancel: cancel, view: jobView{
+	j := &job{reg: r, serverID: serverID, cancel: cancel, view: jobView{
 		ID: newJobID(), Kind: kind, State: jobStateRunning, Steps: steps, StartedAt: r.clock.Now().UnixMilli(),
 	}}
 	r.jobs[serverID] = j
+	r.gen[serverID]++
 	r.active++
 	r.wg.Add(1)
 	go func() {
@@ -139,6 +142,7 @@ func (r *jobRegistry) finish(j *job) {
 		}
 	}
 	j.view.FinishedAt = r.clock.Now().UnixMilli()
+	r.gen[j.serverID]++
 	r.active--
 }
 
@@ -151,6 +155,13 @@ func (r *jobRegistry) get(serverID int64) *jobView {
 	}
 	v := j.view.clone()
 	return &v
+}
+
+// generation changes whenever a job of the server starts or ends.
+func (r *jobRegistry) generation(serverID int64) uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.gen[serverID]
 }
 
 func (r *jobRegistry) running(serverID int64) bool {

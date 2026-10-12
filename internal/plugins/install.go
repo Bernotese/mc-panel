@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -208,8 +209,20 @@ func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err e
 	if err != nil {
 		return err
 	}
+	// The replaced jar must still be the planned one: a jar the user swapped in meanwhile is
+	// neither overwritten nor deleted; one that is gone leaves nothing to replace.
+	replaces := e.replaces
+	if replaces != "" {
+		i := slices.IndexFunc(list.Jars, func(j filesapi.Jar) bool { return j.Name == replaces })
+		switch {
+		case i < 0:
+			replaces = ""
+		case e.replacesSHA512 != "" && list.Jars[i].SHA512 != e.replacesSHA512:
+			return fmt.Errorf("%w: %s was changed since the job started", errFileExists, replaces)
+		}
+	}
 	for _, jar := range list.Jars {
-		if jar.Name != e.replaces && strings.EqualFold(baseOf(jar.Name), e.Filename) {
+		if jar.Name != replaces && strings.EqualFold(baseOf(jar.Name), e.Filename) {
 			return fmt.Errorf("%w: %s", errFileExists, jar.Name)
 		}
 	}
@@ -218,7 +231,7 @@ func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err e
 		return err
 	}
 	tr := &trackReader{r: body}
-	resp, err := h.files.UploadChecked(ctx, srv.ID, filesapi.Join(srv.Kind.Dir, target), e.replaces == target, e.Size, sum, tr)
+	resp, err := h.files.UploadChecked(ctx, srv.ID, filesapi.Join(srv.Kind.Dir, target), replaces == target, e.Size, sum, tr)
 	_ = body.Close()
 	if err != nil {
 		if rerr := tr.failure(); rerr != nil {
@@ -231,8 +244,8 @@ func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err e
 	}
 	// The jar is on disk: record it even if the job is being cancelled right now.
 	ctx = context.WithoutCancel(ctx)
-	if e.replaces != "" && e.replaces != target {
-		if err := h.files.Delete(ctx, srv.ID, filesapi.Join(srv.Kind.Dir, e.replaces)); err != nil && !errors.Is(err, filesapi.ErrNotFound) {
+	if replaces != "" && replaces != target {
+		if err := h.files.Delete(ctx, srv.ID, filesapi.Join(srv.Kind.Dir, replaces)); err != nil && !errors.Is(err, filesapi.ErrNotFound) {
 			return err
 		}
 	}
