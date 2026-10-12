@@ -399,9 +399,10 @@ func (a *fakeAgent) Remove(context.Context, int64) error { return nil }
 
 // fakeConsole records RCON commands as "<id> <command>"; errs[command] is used up one per call.
 type fakeConsole struct {
-	mu   sync.Mutex
-	cmds []string
-	errs map[string][]error
+	mu    sync.Mutex
+	cmds  []string
+	errs  map[string][]error
+	onCmd func(cmd string) // called before the answer, without mu (set before the job starts)
 }
 
 func newFakeConsole() *fakeConsole { return &fakeConsole{errs: map[string][]error{}} }
@@ -419,6 +420,9 @@ func (c *fakeConsole) sent() []string {
 }
 
 func (c *fakeConsole) Rcon(_ context.Context, id int64, cmd string) (string, error) {
+	if c.onCmd != nil {
+		c.onCmd(cmd)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cmds = append(c.cmds, fmt.Sprintf("%d %s", id, cmd))

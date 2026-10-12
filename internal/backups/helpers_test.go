@@ -253,3 +253,8 @@ func storeUser(t *testing.T, e *env, name string) int64 {
 	t.Helper()
 	return storetest.CreateUser(t, e.db, name, "user")
 }
+
+func storeServer(t *testing.T, e *env, name string) int64 {
+	t.Helper()
+	return storetest.CreateServer(t, e.db, name)
+}
