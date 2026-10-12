@@ -299,7 +299,7 @@ describe('mock behaviour', () => {
   it('keeps server settings: absent stays, null removes, the key is write-only', async () => {
     const me = loginAs('admin', { sudo: true })
     const get = async () => (await callApi('GET', '/servers/settings')).body
-    expect(await get()).toEqual({ base_domain: 'mc.example.com', curseforge_api_key_set: false, docker: 'ok', unknown_containers: [] })
+    expect(await get()).toEqual({ base_domain: 'mc.example.com', curseforge_api_key_set: false, backup_timezone: 'Europe/Berlin', docker: 'ok', unknown_containers: [] })
     await callApi('PUT', '/servers/settings', { body: { curseforge_api_key: 'abc$123' }, csrf: me.csrf_token })
     expect(field(await get(), 'curseforge_api_key_set')).toBe(true)
     expect(JSON.stringify(await get())).not.toContain('abc$123')
@@ -309,6 +309,12 @@ describe('mock behaviour', () => {
     expect(await get()).toMatchObject({ base_domain: null, curseforge_api_key_set: false })
     const bad = await callApi('PUT', '/servers/settings', { body: { base_domain: 'localhost' }, csrf: me.csrf_token })
     expect(field(bad.body, 'error')).toBe('validation_failed')
+    await callApi('PUT', '/servers/settings', { body: { backup_timezone: 'America/New_York' }, csrf: me.csrf_token })
+    expect(field(await get(), 'backup_timezone')).toBe('America/New_York')
+    for (const tz of [null, '', 'Mars/Olympus']) {
+      const res = await callApi('PUT', '/servers/settings', { body: { backup_timezone: tz }, csrf: me.csrf_token })
+      expect(field(res.body, 'error')).toBe('validation_failed')
+    }
   })
 
   it('creates a server that is running on the next read', async () => {

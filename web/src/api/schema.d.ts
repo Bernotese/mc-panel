@@ -1229,7 +1229,7 @@ export interface components {
     schemas: {
         Error: {
             /** @enum {string} */
-            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "files_unavailable" | "file_exists" | "file_modified" | "not_text" | "not_regular" | "instance_running" | "insufficient_storage" | "plugins_unsupported" | "plugin_source_unavailable" | "plugin_not_downloadable" | "plugin_incompatible" | "internal";
+            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "files_unavailable" | "file_exists" | "file_modified" | "not_text" | "not_regular" | "instance_running" | "insufficient_storage" | "plugins_unsupported" | "plugin_source_unavailable" | "plugin_not_downloadable" | "plugin_incompatible" | "backups_unavailable" | "backup_running" | "internal";
             message: string;
             request_id?: string;
         };
@@ -1497,14 +1497,18 @@ export interface components {
         ServerSettings: {
             base_domain: string | null;
             curseforge_api_key_set: boolean;
+            /** @description IANA time zone of all backup schedules (default Europe/Berlin) */
+            backup_timezone: string;
             /** @enum {string} */
             docker: "ok" | "unavailable" | "unknown";
             unknown_containers: components["schemas"]["UnknownContainer"][];
         };
-        /** @description Omitted fields stay unchanged; null removes the value. */
+        /** @description Omitted fields stay unchanged; null removes the value (not allowed for backup_timezone). */
         UpdateServerSettingsRequest: {
             base_domain?: string | null;
             curseforge_api_key?: string | null;
+            /** @description IANA time zone such as Europe/Berlin */
+            backup_timezone?: string;
         };
         ConsoleCommandRequest: {
             /** @description Minecraft command; one leading "/" is stripped. 1..1000 bytes, no control characters. */
@@ -3201,7 +3205,10 @@ export interface operations {
     };
     deleteServer: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description true or 1: also delete the restic repository and key of the server (default false: they stay on the host) */
+                purge_backups?: boolean;
+            };
             header: {
                 "X-CSRF-Token": components["parameters"]["CSRF"];
             };
@@ -3219,6 +3226,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

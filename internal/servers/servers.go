@@ -363,33 +363,74 @@ func (h *Handler) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
+// purgeBackupsParam parses ?purge_backups: absent, "0" and "false" = no; "1" and "true" = yes.
+func purgeBackupsParam(r *http.Request) (purge, ok bool) {
+	switch r.URL.Query().Get("purge_backups") {
+	case "", "0", "false":
+		return false, true
+	case "1", "true":
+		return true, true
+	}
+	return false, false
+}
+
 // handleDeleteServer deletes the rows in a transaction and asks the agent to remove the
 // container (data goes to deleted/ on the host) while it is open: the rows are committed away
 // only once the agent accepted the remove, and a remove is only sent for rows that are gone.
 // Without the agent a configured server cannot be deleted, so no container is orphaned; a
 // server without instance needs no agent. A container of another server is never removed.
+// With ?purge_backups=1 the server's backups are deleted after the commit (backups spec §5.6).
 func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	purge, ok := purgeBackupsParam(r)
+	if !ok {
+		writeValidation(w, r, "purge_backups must be true, false, 1 or 0")
+		return
+	}
 	s, ok := h.loadServer(w, r)
 	if !ok {
 		return
 	}
+	configured, ok := h.deleteServerRows(w, r, s)
+	if !ok {
+		return
+	}
+	details := map[string]any{"name": s.Name, "configured": configured}
+	if purge {
+		// After the commit and outside the reconcile lock: deleting a large repository can take
+		// minutes. A failure leaves an orphaned repository (as without the option); the server
+		// stays deleted. A client that goes away must not cut the purge short.
+		if err := h.backups.PurgeBackups(context.WithoutCancel(ctx), s.ID); err != nil {
+			h.log.Error("servers: delete: purging the backups failed", "server_id", s.ID, "err", err)
+			details["backups_purged"] = false
+		} else {
+			details["backups_purged"] = true
+		}
+	}
+	h.record(ctx, audit.ActionServerDelete, serverTarget(s.ID), audit.ResultSuccess, details)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteServerRows deletes the rows of s and (if configured and not foreign) its container under
+// the reconcile lock. On failure it has written the error answer and returns ok = false.
+func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s store.Server) (configured, ok bool) {
+	ctx := r.Context()
 	// Exclude a concurrent reconcile pass or restart: one that read this server before the
 	// delete would otherwise recreate the container after the remove (orphan container).
 	h.reconcile.mu.Lock()
 	defer h.reconcile.mu.Unlock()
 	_, err := h.q.ServersGetInstance(ctx, s.ID)
-	configured := err == nil
+	configured = err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		httpx.Internal(w, r, err)
-		return
+		return false, false
 	}
 	remove := configured
 	if configured {
 		foreign, err := h.isForeign(ctx, s)
 		if err != nil {
 			writeAgentError(w, r, err)
-			return
+			return false, false
 		}
 		if foreign {
 			h.log.Warn("servers: delete leaves the container of another server alone", "server_id", s.ID, "name", s.Name)
@@ -399,35 +440,33 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		httpx.Internal(w, r, err)
-		return
+		return false, false
 	}
 	defer func() { _ = tx.Rollback() }()
 	n, err := h.q.WithTx(tx).RbacDeleteServer(ctx, s.ID)
 	if err != nil {
 		httpx.Internal(w, r, err)
-		return
+		return false, false
 	}
 	if n == 0 { // deleted concurrently between lookup and delete
 		writeNotFound(w, r)
-		return
+		return false, false
 	}
 	if remove {
 		if err := h.inst.Remove(ctx, s.ID); err != nil {
 			writeAgentError(w, r, err) // the rollback keeps the rows
-			return
+			return false, false
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		h.log.Error("servers: delete: commit failed after the agent accepted the remove", "server_id", s.ID, "err", err)
 		httpx.Internal(w, r, err)
-		return
+		return false, false
 	}
 	delete(h.reconcile.attempts, s.ID)
 	delete(h.reconcile.foreign, s.ID)
 	h.setPanelError(s.ID, "")
-	h.record(ctx, audit.ActionServerDelete, serverTarget(s.ID), audit.ResultSuccess,
-		map[string]any{"name": s.Name, "configured": configured})
-	w.WriteHeader(http.StatusNoContent)
+	return configured, true
 }
 
 // isForeign asks the agent whether the container with the server's ID belongs to another

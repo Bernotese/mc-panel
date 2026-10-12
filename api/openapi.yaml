@@ -500,9 +500,11 @@ paths:
       tags: [servers]
       parameters:
         - $ref: '#/components/parameters/IdPath'
+        - { name: purge_backups, in: query, required: false, description: 'true or 1: also delete the restic repository and key of the server (default false: they stay on the host)', schema: { type: boolean } }
         - $ref: '#/components/parameters/CSRF'
       responses:
         '204': { description: No content }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -1246,7 +1248,7 @@ components:
       type: object
       required: [error, message]
       properties:
-        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, files_unavailable, file_exists, file_modified, not_text, not_regular, instance_running, insufficient_storage, plugins_unsupported, plugin_source_unavailable, plugin_not_downloadable, plugin_incompatible, internal] }
+        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, files_unavailable, file_exists, file_modified, not_text, not_regular, instance_running, insufficient_storage, plugins_unsupported, plugin_source_unavailable, plugin_not_downloadable, plugin_incompatible, backups_unavailable, backup_running, internal] }
         message: { type: string }
         request_id: { type: string }
     Role: { type: string, enum: [admin, user] }
@@ -1492,19 +1494,21 @@ components:
           description: "Server name from the mcpanel.name label of the container, not the container name mcpanel-mc-<id>"
     ServerSettings:
       type: object
-      required: [base_domain, curseforge_api_key_set, docker, unknown_containers]
+      required: [base_domain, curseforge_api_key_set, backup_timezone, docker, unknown_containers]
       properties:
         base_domain: { type: [string, 'null'] }
         curseforge_api_key_set: { type: boolean }
+        backup_timezone: { type: string, description: 'IANA time zone of all backup schedules (default Europe/Berlin)' }
         docker: { type: string, enum: [ok, unavailable, unknown] }
         unknown_containers: { type: array, items: { $ref: '#/components/schemas/UnknownContainer' } }
     UpdateServerSettingsRequest:
       type: object
       additionalProperties: false
-      description: Omitted fields stay unchanged; null removes the value.
+      description: 'Omitted fields stay unchanged; null removes the value (not allowed for backup_timezone).'
       properties:
         base_domain: { type: [string, 'null'] }
         curseforge_api_key: { type: [string, 'null'] }
+        backup_timezone: { type: string, minLength: 1, maxLength: 64, description: 'IANA time zone such as Europe/Berlin' }
     ConsoleCommandRequest:
       type: object
       additionalProperties: false
