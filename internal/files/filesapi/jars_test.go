@@ -291,3 +291,24 @@ func TestClientJarsHasItsOwnTimeout(t *testing.T) {
 		t.Fatalf("JarsTimeout = %s, want 2m", filesapi.JarsTimeout)
 	}
 }
+
+// A files service that does not know the checksum parameter (an older version) answers 201
+// without digests; UploadChecked must not report that as a verified upload.
+func TestClientUploadCheckedRequiresVerifiedDigests(t *testing.T) {
+	for name, answer := range map[string]string{
+		"no digests":    `{"size":3}`,
+		"other digest":  `{"size":3,"sha256":"` + strings.Repeat("00", 32) + `","sha512":"` + strings.Repeat("00", 64) + `"}`,
+		"malformed hex": `{"size":3,"sha256":"` + hex64 + `","sha512":"xyz"}`,
+	} {
+		c := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(201)
+			_, _ = w.Write([]byte(answer))
+		}))
+		sum := filesapi.Checksum{Algo: filesapi.AlgoSHA256, Hex: hex64}
+		if _, err := c.UploadChecked(context.Background(), 1, "plugins/x.jar", false, 3, sum, strings.NewReader("abc")); !errors.Is(err, filesapi.ErrUnavailable) {
+			t.Errorf("%s: err = %v, want ErrUnavailable", name, err)
+		}
+	}
+}
