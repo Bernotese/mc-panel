@@ -10,11 +10,6 @@ func notYet(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, r, http.StatusBadGateway, httpx.CodePluginSourceUnavailable, "plugins not implemented yet")
 }
 
-// task 10
-func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request)   { notYet(w, r) }
-func (h *Handler) handleVersions(w http.ResponseWriter, r *http.Request) { notYet(w, r) }
-func (h *Handler) handleResolve(w http.ResponseWriter, r *http.Request)  { notYet(w, r) }
-
 // task 11
 func (h *Handler) handleInstall(w http.ResponseWriter, r *http.Request) { notYet(w, r) }
 func (h *Handler) handleUpdates(w http.ResponseWriter, r *http.Request) { notYet(w, r) }

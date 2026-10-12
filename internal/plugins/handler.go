@@ -57,6 +57,7 @@ type Handler struct {
 	up      *upstream.Client
 	log     *slog.Logger
 	restart *restartTracker
+	limit   *userLimiter
 }
 
 func NewHandler(d Deps) *Handler {
@@ -82,7 +83,7 @@ func NewHandler(d Deps) *Handler {
 	}
 	return &Handler{
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, files: fc, inst: inst, catalog: cat, up: up, log: log,
-		restart: newRestartTracker(),
+		restart: newRestartTracker(), limit: newUserLimiter(),
 	}
 }
 
