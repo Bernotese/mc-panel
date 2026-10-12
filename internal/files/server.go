@@ -58,6 +58,7 @@ func NewServer(svc *Service, version string, log *slog.Logger) *Server {
 		filesapi.PathDownload: {method: http.MethodGet, handler: s.download},
 		filesapi.PathExtract:  {method: http.MethodPost, handler: s.extract},
 		filesapi.PathJobs:     {method: http.MethodGet, handler: s.jobs},
+		filesapi.PathJars:     {method: http.MethodPost, handler: s.jars},
 	}
 	s.srv = &http.Server{
 		Handler:           s,
@@ -450,4 +451,24 @@ func (s *Server) jobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, filesapi.JobsResponse{Job: s.svc.Job(id)})
+}
+
+// jars lists the plugin or mod jars of a server. Hashing up to filesapi.MaxJars jars can take
+// longer than the server's WriteTimeout (the client waits filesapi.JarsTimeout): longOp.
+func (s *Server) jars(w http.ResponseWriter, r *http.Request) {
+	var req filesapi.JarsRequest
+	if !s.decode(w, r, &req, filesapi.MaxSmallJSONBytes) {
+		return
+	}
+	var res filesapi.JarsResponse
+	err := s.longOp(w, "jars", func() error {
+		var err error
+		res, err = s.svc.Jars(r.Context(), req.ID, req.Dir)
+		return err
+	})
+	if err != nil {
+		s.fail(w, r, "jars", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }

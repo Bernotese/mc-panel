@@ -36,3 +36,31 @@ func TestUploadCheckedEndToEnd(t *testing.T) {
 	}
 	noTemp(t, data)
 }
+
+// Jars over the socket: the client gets the service's list (V1 wire types).
+func TestJarsEndToEnd(t *testing.T) {
+	c, data := startUnix(t, uint32(os.Getuid()))
+	bg := context.Background()
+	put(t, data, "plugins/A.jar", "a")
+	put(t, data, "plugins/B.jar.disabled", "b")
+	res, err := c.Jars(bg, 1, filesapi.DirPlugins)
+	if err != nil {
+		t.Fatalf("jars: %v", err)
+	}
+	if len(res.Jars) != 2 || res.Truncated {
+		t.Fatalf("jars: %+v", res)
+	}
+	_, a512 := sums("a")
+	_, b512 := sums("b")
+	if a, b := res.Jars[0], res.Jars[1]; a.Name != "A.jar" || !a.Enabled || a.SHA512 != a512 ||
+		b.Name != "B.jar.disabled" || b.Enabled || b.SHA512 != b512 {
+		t.Fatalf("jars: %+v", res.Jars)
+	}
+	empty, err := c.Jars(bg, 1, filesapi.DirMods)
+	if err != nil || empty.Jars == nil || len(empty.Jars) != 0 {
+		t.Fatalf("empty mods: %+v %v", empty, err)
+	}
+	if _, err := c.Jars(bg, 1, "world"); !errors.Is(err, filesapi.ErrInvalid) {
+		t.Fatalf("bad dir: %v, want ErrInvalid", err)
+	}
+}
