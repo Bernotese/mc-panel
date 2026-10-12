@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+	_ "time/tzdata" // time zones of the backup retention on hosts without zoneinfo (spec 4)
 
 	"github.com/Bernotese/mc-panel/internal/agent/peercred"
 	"github.com/Bernotese/mc-panel/internal/clock"
@@ -84,7 +85,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, geteuid f
 		return err
 	}
 
-	svc := files.New(files.Config{InstancesDir: cfg.InstancesDir, Limits: cfg.Limits, Dev: cfg.Dev, Clock: clock.Real{}, Log: log})
+	svc := files.New(files.Config{InstancesDir: cfg.InstancesDir, Limits: cfg.Limits, Dev: cfg.Dev, Clock: clock.Real{}, Log: log,
+		ResticBinary: cfg.ResticBinary})
+	// Spec 4 §3.2: one restic check at start; without restic the backup endpoints answer 503
+	// and everything else works.
+	svc.InitBackups(ctx)
 	// The temp cleanup walks every data directory; it runs while the service already answers,
 	// so a large instances_dir never delays the panel's calls (it leaves the temp entries of
 	// this process alone).
@@ -107,7 +112,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, geteuid f
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(peercred.Wrap(l, peercred.AllowUIDs(uid, 0), log)) }() // the panel and root, like the agent
 	log.Info("files started", "version", version, "socket", cfg.Socket, "socket_activation", activated,
-		"panel_uid", uid, "instances_dir", cfg.InstancesDir, "dev", cfg.Dev, "uid", os.Getuid())
+		"panel_uid", uid, "instances_dir", cfg.InstancesDir, "dev", cfg.Dev, "uid", os.Getuid(), "restic_binary", cfg.ResticBinary)
 
 	select {
 	case err := <-errc:

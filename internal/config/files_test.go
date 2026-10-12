@@ -131,3 +131,64 @@ func TestFilesTextLimitFitsJSON(t *testing.T) {
 		t.Fatal("text limit above (MaxJSONBytes-MaxSmallJSONBytes)/6 accepted")
 	}
 }
+
+func TestFilesBackupDefaults(t *testing.T) {
+	f := config.DefaultFiles()
+	if f.ResticBinary != "/usr/bin/restic" {
+		t.Fatalf("restic_binary = %q", f.ResticBinary)
+	}
+	l := f.Limits
+	if l.MaxBackupBytes != 64<<30 || l.MaxBackupEntries != 1_000_000 || l.MaxBackupJobs != 1 {
+		t.Fatalf("backup limits = %+v", l)
+	}
+	if d := config.DevFiles(t.TempDir()); d.ResticBinary != "restic" {
+		t.Fatalf("dev restic_binary = %q", d.ResticBinary)
+	}
+}
+
+func TestFilesBackupValidation(t *testing.T) {
+	ok := config.DefaultFiles()
+	ok.PanelUID = 998
+	for _, c := range []struct {
+		name string
+		mod  func(*config.Files)
+		want string // "" = valid
+	}{
+		{"defaults", func(*config.Files) {}, ""},
+		{"relative binary", func(f *config.Files) { f.ResticBinary = "restic" }, "restic_binary"},
+		{"unclean binary", func(f *config.Files) { f.ResticBinary = "/usr/bin/../bin/restic" }, "restic_binary"},
+		{"empty binary", func(f *config.Files) { f.ResticBinary = "" }, "restic_binary"},
+		{"dev name", func(f *config.Files) { f.Dev = true; f.ResticBinary = "restic" }, ""},
+		{"dev empty", func(f *config.Files) { f.Dev = true; f.ResticBinary = "" }, "restic_binary"},
+		{"dev relative path", func(f *config.Files) { f.Dev = true; f.ResticBinary = "bin/restic" }, "restic_binary"},
+		{"bytes", func(f *config.Files) { f.Limits.MaxBackupBytes = 0 }, "max_backup_bytes"},
+		{"entries", func(f *config.Files) { f.Limits.MaxBackupEntries = -1 }, "max_backup_entries"},
+		{"jobs low", func(f *config.Files) { f.Limits.MaxBackupJobs = 0 }, "max_backup_jobs"},
+		{"jobs high", func(f *config.Files) { f.Limits.MaxBackupJobs = 9 }, "max_backup_jobs"},
+	} {
+		f := ok
+		c.mod(&f)
+		err := f.Validate()
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: %v", c.name, err)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%s: %v, want an error about %s", c.name, err, c.want)
+		}
+	}
+}
+
+func TestLoadFilesBackupKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "files.toml")
+	src := "panel_uid = 998\nrestic_binary = \"/usr/local/bin/restic\"\n[limits]\nmax_backup_jobs = 2\n"
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := config.LoadFiles(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.ResticBinary != "/usr/local/bin/restic" || f.Limits.MaxBackupJobs != 2 || f.Limits.MaxBackupEntries != 1_000_000 {
+		t.Fatalf("loaded = %+v", f)
+	}
+}
