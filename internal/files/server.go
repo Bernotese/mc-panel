@@ -289,8 +289,9 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// upload: PUT ?id=&path=&overwrite=0|1, body = file. The server-wide deadlines do not apply;
-// every read gets ioTimeout.
+// upload: PUT ?id=&path=&overwrite=0|1[&sha256=<hex>|&sha512=<hex>], body = file. The
+// server-wide deadlines do not apply; every read gets ioTimeout. A checksum mismatch is only
+// known after the whole body: it is answered like any late error (400 hash_mismatch).
 func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 	// Full duplex: an error found before the body has been read completely (409, 413, 429, 507,
@@ -320,8 +321,15 @@ func (s *Server) receive(r *http.Request, rc *http.ResponseController, body io.R
 	if ow != "" && ow != "0" && ow != "1" {
 		return filesapi.UploadResponse{}, fmt.Errorf("%w: overwrite must be 0 or 1", filesapi.ErrInvalid)
 	}
+	sum, ok, err := filesapi.ChecksumFromQuery(q)
+	if err != nil {
+		return filesapi.UploadResponse{}, err
+	}
+	if !ok {
+		sum = filesapi.Checksum{}
+	}
 	_ = rc.SetWriteDeadline(time.Time{})
-	return s.svc.Upload(r.Context(), id, q.Get("path"), ow == "1", r.ContentLength, body)
+	return s.svc.UploadChecked(r.Context(), id, q.Get("path"), ow == "1", r.ContentLength, sum, body)
 }
 
 // failEarly answers an upload error while the client may still be sending the body. The
