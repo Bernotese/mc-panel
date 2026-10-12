@@ -25,9 +25,10 @@
 
 Es gelten die Arbeitsregeln aus `CLAUDE.md`:
 
-- **Lokal nur `make check`** (und `make generate`, wo der Plan es sagt). Tests, Lint, Playwright nur in der CI; „Expected: PASS“ wird in den CI-Logs geprüft. Neue, noch ungetrackte Dateien vor `make check` mit `git add -N` vormerken (sonst prüft gofmt sie nicht).
-- **TDD:** Test zuerst; „rot“ = `make check`-Kompilierfehler bzw. CI, „grün“ = CI.
-- **Nichts Systemnahes auf dem Mac.** Keine neuen npm-Pakete nötig. Zum Debuggen von CI-Fehlern darf die Test-VM `claude@192.168.1.117` genutzt werden (Kopie in ein Scratch-Verzeichnis, nie dort deployen).
+- **Auf dem Mac nur `make check`** (und `make generate`, wo der Plan es sagt). Neue, noch ungetrackte Dateien vor `make check` mit `git add -N` vormerken (sonst prüft gofmt sie nicht).
+- **Tests auf der Test-VM** (gilt ab PR „chore/ci-speed“; ersetzt „Tests nur in der CI“ in den Phasen-Plänen): „Run: go test …“ / „npx vitest …“ / Playwright heißt `make test-vm SUITE=go|web|e2e` (einzelne Tests per `ssh claude@192.168.1.117 'cd ~/mc-panel-test/<worktree-name> && …'`, siehe `docs/dev/README.md`, „Tests auf der Test-VM“). Vor jedem Push mindestens die betroffenen Suites, vor „ready for review“ `make test-vm` (alle). SSH braucht eine Bash ohne Sandbox. Die Root-Abnahmen (`nftables`, `instances`) laufen nur in der CI.
+- **TDD:** Test zuerst; „rot“ = `make check`-Kompilierfehler bzw. roter VM-Lauf, „grün“ = grüner VM-Lauf. Die CI (`gh pr checks <n> --watch`, Job `CI OK`) ist das Gate vor dem Merge.
+- **Nichts Systemnahes auf dem Mac.** Keine neuen npm-Pakete nötig. Auf der Test-VM nie deployen (`make deploy-testvm` macht nur der Lead).
 - **Upstreams beim Planen/Implementieren:** Lesende `curl`-Abfragen gegen `api.modrinth.com` und `hangar.papermc.io` mit User-Agent `mc-panel/dev (https://github.com/Bernotese/mc-panel)` sind erlaubt, um `testdata/` mit echten, gekürzten Antworten zu füllen.
 - **Git:** nie auf `main`; je Phase ein Branch und Draft-PR; jeder Teammate in eigenem Worktree (`git worktree add ../mc-panel-wt/<branch> -b <branch> origin/main`). Mergen nur durch den Nutzer.
 
