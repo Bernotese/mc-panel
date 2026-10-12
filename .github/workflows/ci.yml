@@ -80,7 +80,7 @@ jobs:
           out openapi '^api/'
           out e2e "^(cmd|internal|api|web)/|${gomod}"
           out nftables "^internal/(agent|defense|auth)/|^cmd/(agent|panel)/|^scripts/ci-acceptance\.sh$|${gomod}"
-          out instances "^internal/(agent|files|plugins|serverfiles|console|servers)/|^cmd/|^scripts/(ci-instances\.sh|mc-status\.py)$|${gomod}"
+          out instances "^internal/(agent|files|plugins|serverfiles|console|servers|auth|audit|rbac|httpx|store|config)/|^cmd/|^scripts/(ci-instances\.sh|mc-status\.py)$|${gomod}"
           out release "^cmd/|^internal/webui/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
 
   go:
@@ -361,7 +361,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.instances == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -374,17 +374,23 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build agent and files service
+      # The panel is built without the web build (internal/webui/dist only holds .gitkeep, as in
+      # the nftables job): the acceptance uses /api only.
+      - name: Build agent, files service and panel
         run: |
           go build -o bin/agent ./cmd/agent
           go build -o bin/files ./cmd/files
+          go build -o bin/panel ./cmd/panel
 
       # Real agent + Docker + itzg Paper server: routing by hostname, hardening, console
       # (rcon, log stream, player lists, planted player files), automatic restart after a
-      # crash, removal; plus the files service as mcpanel-mc (peer UID, os.Root limits,
-      # redaction, upload/download, extract incl. zip slip).
+      # crash, removal; the files service as mcpanel-mc (peer UID, os.Root limits,
+      # redaction, upload/download, extract incl. zip slip); and the plugins path: the panel
+      # in production mode (TOTP sign-in, sudo, CSRF) installs Chunky from Modrinth and
+      # ViaBackwards with its dependency ViaVersion from Hangar (real upstreams, one retry),
+      # the server loads them after a restart, a disabled jar is not loaded.
       - name: Instance acceptance
-        run: sudo scripts/ci-instances.sh bin/agent bin/files
+        run: sudo scripts/ci-instances.sh bin/agent bin/files bin/panel
 
   build:
     name: Build & release snapshot
