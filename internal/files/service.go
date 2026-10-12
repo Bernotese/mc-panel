@@ -34,9 +34,13 @@ const (
 	cleanupMaxDepth  = 64
 	maxHashRuns      = 2    // concurrent jar checksum and metadata passes (spec 3c §5.1)
 	hashCacheSize    = 4096 // cached jars (spec 3c §5.1)
-	fileMode         = 0o644
-	dirMode          = 0o755
-	serverProps      = "server.properties"
+	// maxHashBytesPerRequest bounds the bytes one jar listing hashes; further jars come without
+	// checksums (and uncached) until a later listing, so one server cannot hold the service-wide
+	// hash slots for long.
+	maxHashBytesPerRequest = 2 << 30
+	fileMode               = 0o644
+	dirMode                = 0o755
+	serverProps            = "server.properties"
 )
 
 // Config configures a Service.
@@ -63,6 +67,9 @@ type Service struct {
 	jarCache      *hashCache        // checksums and metadata by file identity
 	jarHashMax    int64             // larger jars get no checksums (filesapi.MaxJarHashBytes; tests lower it)
 	jarHook       func(name string) // tests: runs before every jar that is computed, not cached
+	jarHashBudget int64             // bytes one listing may hash (maxHashBytesPerRequest; tests lower it)
+	instMu        sync.Mutex
+	instHash      map[int64]*instSlot // one jar pass per instance at a time, on top of hashSlots
 	// tempToken is part of every temp name this process creates, so CleanupTemp, which runs
 	// while the service already serves, removes only the leftovers of earlier runs.
 	tempToken string
@@ -83,6 +90,8 @@ func New(cfg Config) *Service {
 		hashSlots:     make(chan struct{}, maxHashRuns),
 		jarCache:      newHashCache(hashCacheSize),
 		jarHashMax:    filesapi.MaxJarHashBytes,
+		jarHashBudget: maxHashBytesPerRequest,
+		instHash:      map[int64]*instSlot{},
 		tempToken:     randomHex(4),
 	}
 	instances := regexp.QuoteMeta(filepath.Join(cfg.InstancesDir, "instances") + string(filepath.Separator))
