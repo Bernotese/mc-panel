@@ -14,6 +14,13 @@ import (
 const (
 	maxDepth    = 5  // dependency levels below the requested project
 	maxPackages = 20 // packages in a plan, the requested one included
+	// maxVersionDeps caps the required dependencies of one version that are looked at; the
+	// rest is one too_many entry.
+	maxVersionDeps = 50
+	// maxUpstreamCalls bounds the upstream requests of one resolution (cached ones included):
+	// a full plan needs at most three per package; fixed versions that do not exist cost a
+	// call each without filling the plan.
+	maxUpstreamCalls = 80
 
 	reasonNoVersion       = "no_compatible_version"
 	reasonClientOnly      = "client_only"
@@ -39,6 +46,7 @@ type planEntry struct {
 	replaces        string // installed jar this entry replaces (version change, update)
 	replacesEnabled bool
 	replacesSHA512  string // its sha512 when planned: a jar changed since then is not touched
+	replacesVersion string // its version name (audit "from" of a version change)
 }
 
 type alreadyEntry struct {
@@ -82,6 +90,16 @@ type planner struct {
 	gv        string
 	installed map[string]installedJar // projectKey -> jar
 	seen      map[string]bool         // projectKey of every project already looked at
+	calls     int                     // upstream requests so far (maxUpstreamCalls)
+}
+
+// spend books one upstream request; false once the budget of the resolution is used up.
+func (p *planner) spend() bool {
+	if p.calls >= maxUpstreamCalls {
+		return false
+	}
+	p.calls++
+	return true
 }
 
 func newPlanner(h *Handler, srv server, gv string, installed map[string]installedJar, seen map[string]bool) *planner {
@@ -106,6 +124,7 @@ func safeLink(raw string) string {
 func (h *Handler) resolve(ctx context.Context, srv server, gv string, inv inventory, req resolveRequest) (resolution, error) {
 	p := newPlanner(h, srv, gv, installedByProject(inv), nil)
 	res := newResolution()
+	p.spend() // the first request of the resolution always fits the budget
 	proj, err := p.up.Project(ctx, req.Source, req.Project)
 	if err != nil {
 		return resolution{}, err
@@ -113,19 +132,29 @@ func (h *Handler) resolve(ctx context.Context, srv server, gv string, inv invent
 	if p.kind.isMod() && proj.ClientOnly() {
 		return resolution{}, fmt.Errorf("%w: %s only runs on the client", errIncompatible, proj.Title)
 	}
+	key := projectKey(proj.Source, proj.ID)
+	j, installed := p.installed[key]
+	already := func() (resolution, error) {
+		res.Already = append(res.Already, alreadyEntry{Source: proj.Source, ProjectID: proj.ID, Title: proj.Title, File: j.File})
+		return res, nil
+	}
+	if installed && req.Version == "" {
+		return already() // whether or not a version still fits (spec §6.3)
+	}
 	v, err := p.rootVersion(ctx, proj, req.Version)
 	if err != nil {
 		return resolution{}, err
 	}
-	key := projectKey(proj.Source, proj.ID)
 	p.seen[key] = true
 	root := p.entry(proj, v, nil)
-	if j, ok := p.installed[key]; ok {
-		if req.Version == "" || (j.Version != nil && j.Version.ID == v.ID) {
-			res.Already = append(res.Already, alreadyEntry{Source: proj.Source, ProjectID: proj.ID, Title: proj.Title, File: j.File})
-			return res, nil
+	if installed {
+		if j.Version != nil && j.Version.ID == v.ID {
+			return already()
 		}
 		root.replaces, root.replacesEnabled, root.replacesSHA512 = j.File, j.Enabled, j.sha512
+		if j.Version != nil {
+			root.replacesVersion = j.Version.Name
+		}
 	}
 	deps, err := p.dependencies(ctx, &res, v, proj.Source, proj.Title)
 	if err != nil {
@@ -168,6 +197,9 @@ func (p *planner) rootVersion(ctx context.Context, proj upstream.Project, want s
 func (p *planner) pick(ctx context.Context, src upstream.Source, projectID string) (upstream.Version, string, error) {
 	external := false
 	for _, releaseOnly := range []bool{true, false} {
+		if !p.spend() {
+			return upstream.Version{}, reasonTooMany, nil
+		}
 		vs, err := p.up.Versions(ctx, src, projectID, upstream.VersionFilter{Loaders: p.kind.Loaders, GameVersion: p.gv, ReleaseOnly: releaseOnly})
 		if err != nil {
 			return upstream.Version{}, "", err
@@ -207,10 +239,19 @@ func (p *planner) dependencies(ctx context.Context, res *resolution, v upstream.
 		parent string
 		depth  int
 	}
-	queue := make([]item, 0, len(v.Dependencies))
-	for _, d := range v.Dependencies {
-		queue = append(queue, item{d, parent, 1})
+	var queue []item
+	enqueue := func(deps []upstream.Dependency, parent string, depth int) {
+		if len(deps) > maxVersionDeps {
+			res.Incompatible = append(res.Incompatible, incompatibleEntry{
+				Title: fmt.Sprintf("%d more dependencies of %s", len(deps)-maxVersionDeps, parent), Reason: reasonTooMany,
+			})
+			deps = deps[:maxVersionDeps]
+		}
+		for _, d := range deps {
+			queue = append(queue, item{d, parent, depth})
+		}
 	}
+	enqueue(v.Dependencies, parent, 1)
 	var planned []planEntry
 	for len(queue) > 0 {
 		it := queue[0]
@@ -223,9 +264,7 @@ func (p *planner) dependencies(ctx context.Context, res *resolution, v upstream.
 			continue
 		}
 		planned = append(planned, *e)
-		for _, d := range next {
-			queue = append(queue, item{d, e.Title, it.depth + 1})
-		}
+		enqueue(next, e.Title, it.depth+1)
 	}
 	slices.Reverse(planned)
 	return planned, nil
@@ -243,8 +282,22 @@ func (p *planner) dependency(ctx context.Context, res *resolution, d upstream.De
 		res.External = append(res.External, externalEntry{Name: cmp.Or(d.Name, "unknown"), URL: safeLink(d.ExternalURL)})
 		return nil, nil, nil
 	}
+	// Limits and what is known locally first: no upstream call for a dependency that cannot be
+	// planned anyway.
+	switch {
+	case depth > maxDepth:
+		return incompatible(name, reasonTooDeep)
+	case planned >= maxPackages:
+		return incompatible(name, reasonTooMany)
+	}
+	if d.ProjectID != "" && p.seen[projectKey(src, d.ProjectID)] {
+		return nil, nil, nil
+	}
 	var fixed *upstream.Version
 	if d.VersionID != "" {
+		if !p.spend() {
+			return incompatible(name, reasonTooMany)
+		}
 		v, err := p.up.Version(ctx, src, d.ProjectID, d.VersionID)
 		switch {
 		case errors.Is(err, upstream.ErrNotFound):
@@ -268,6 +321,9 @@ func (p *planner) dependency(ctx context.Context, res *resolution, d upstream.De
 		res.Already = append(res.Already, alreadyEntry{Source: src, ProjectID: d.ProjectID, Title: title, File: j.File})
 		return nil, nil, nil
 	}
+	if !p.spend() {
+		return incompatible(name, reasonTooMany)
+	}
 	proj, err := p.up.Project(ctx, src, d.ProjectID)
 	switch {
 	case errors.Is(err, upstream.ErrNotFound):
@@ -275,12 +331,7 @@ func (p *planner) dependency(ctx context.Context, res *resolution, d upstream.De
 	case err != nil:
 		return nil, nil, err
 	}
-	switch {
-	case depth > maxDepth:
-		return incompatible(proj.Title, reasonTooDeep)
-	case planned >= maxPackages:
-		return incompatible(proj.Title, reasonTooMany)
-	case p.kind.isMod() && proj.ClientOnly():
+	if p.kind.isMod() && proj.ClientOnly() {
 		return incompatible(proj.Title, reasonClientOnly)
 	}
 	var v upstream.Version

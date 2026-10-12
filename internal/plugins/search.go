@@ -19,7 +19,9 @@ const (
 // refRe bounds project and version parameters (spec §6.6).
 var refRe = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,128}$`)
 
-func validRef(s string) bool { return refRe.MatchString(s) }
+// validRef also refuses references made only of dots ("." and ".." are path segments in an
+// upstream URL).
+func validRef(s string) bool { return refRe.MatchString(s) && strings.Trim(s, ".") != "" }
 
 // sourceParam validates source for the server's kind (hangar only for plugins).
 func sourceParam(w http.ResponseWriter, r *http.Request, srv server, raw string) (upstream.Source, bool) {
