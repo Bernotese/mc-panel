@@ -17,10 +17,14 @@ import (
 )
 
 const (
-	maxJarEntries = 100_000  // central directory of a jar (spec 3c §5.1)
-	maxMetaBytes  = 64 << 10 // one metadata file, uncompressed
-	maxMetaValue  = 128      // characters per value
-	jarVersionVar = "${file.jarVersion}"
+	maxJarEntries = 100_000 // central directory of a jar (spec 3c §5.1)
+	// maxJarCentralDirBytes bounds the central directory of a jar (real jars with 100 000
+	// entries stay well below it); with two hash passes at a time it keeps a hostile jar from
+	// costing the service hundreds of MB. Extraction keeps maxCentralDirBytes.
+	maxJarCentralDirBytes = 16 << 20
+	maxMetaBytes          = 64 << 10 // one metadata file, uncompressed
+	maxMetaValue          = 128      // characters per value
+	jarVersionVar         = "${file.jarVersion}"
 
 	paperPluginYML = "paper-plugin.yml"
 	pluginYML      = "plugin.yml"
@@ -38,7 +42,7 @@ var errMetaTooLarge = errors.New("metadata file too large")
 // every file is read with a hard limit of maxMetaBytes whatever its header claims. Anything it
 // cannot read is nil, never an error.
 func readJarMeta(r io.ReaderAt, size, maxEntries int64) *filesapi.JarMeta {
-	if err := checkCentralDirectory(r, size, maxEntries); err != nil {
+	if err := checkCentralDirectory(r, size, maxEntries, maxJarCentralDirBytes); err != nil {
 		return nil
 	}
 	zr, err := zip.NewReader(r, size)
