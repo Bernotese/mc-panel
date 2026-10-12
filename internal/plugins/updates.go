@@ -63,6 +63,13 @@ func (h *Handler) checkUpdates(ctx context.Context, srv server, gv string, refre
 	return h.updates.Get(ctx, key, func(ctx context.Context) (updatesResult, error) { return h.findUpdates(ctx, srv, gv) })
 }
 
+// updatesCached reports whether checkUpdates would answer from the cache: a check that asks the
+// upstream counts against the lookup limit (jobs, toggling and deleting drop the cache).
+func (h *Handler) updatesCached(srv server, gv string) bool {
+	v, ok := h.updates.Peek(updatesKey(srv.ID))
+	return ok && v.scope == updatesScope(srv, gv)
+}
+
 func (h *Handler) findUpdates(ctx context.Context, srv server, gv string) (updatesResult, error) {
 	inv, err := h.inventory(ctx, srv)
 	if err != nil {
@@ -162,12 +169,12 @@ func (h *Handler) handleUpdates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	refresh := parseRefresh(r.URL.Query().Get("refresh"))
-	if refresh && !h.allow(w, r) {
-		return
-	}
 	gv, err := h.gameVersion(ctx, srv)
 	if err != nil {
 		h.writeError(w, r, err)
+		return
+	}
+	if (refresh || !h.updatesCached(srv, gv)) && !h.allow(w, r) {
 		return
 	}
 	res, err := h.checkUpdates(ctx, srv, gv, refresh)
@@ -209,6 +216,9 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	gv, err := h.gameVersion(ctx, srv)
 	if err != nil {
 		h.writeError(w, r, err)
+		return
+	}
+	if !h.updatesCached(srv, gv) && !h.allow(w, r) {
 		return
 	}
 	upd, err := h.checkUpdates(ctx, srv, gv, false)

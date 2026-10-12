@@ -115,9 +115,10 @@ func TestUpdatesCacheAndRefresh(t *testing.T) {
 	if n := e.up.count(key); n != 4 {
 		t.Fatalf("checks = %d after an hour", n)
 	}
-	// refresh counts against the lookup limit (the hour refilled the 20 tokens), the plain check does not
+	// refresh counts against the lookup limit (the hour refilled the 20 tokens, the uncached
+	// check after it took one), a plain check served from the cache does not
 	a := e.admin()
-	for range 20 {
+	for range 19 {
 		e.updates(id, "?refresh=1")
 	}
 	if rec := e.do(http.MethodGet, srvPath(id, "/updates?refresh=1"), nil, &a); rec.Code != http.StatusTooManyRequests {
