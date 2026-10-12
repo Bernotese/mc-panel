@@ -100,7 +100,7 @@ max_backup_jobs    = 1              # gleichzeitige restic-Jobs im Dienst (backu
 
 ### 3.3 restic-Aufrufe
 
-- Feste argv ohne Shell, über ein Interface (`resticRunner`), das die Tests durch einen Fake ersetzen. Umgebung ist **leer** bis auf `RESTIC_REPOSITORY=<backups>/repos/<id>`, `RESTIC_PASSWORD_FILE=<backups>/keys/<id>`, `HOME=<backups>`, `TZ=<zone>` (nur `forget`, §5.4) und `RESTIC_PROGRESS_FPS=1`. Jeder Aufruf mit `--no-cache` (lokales Repo) und `--json` wo verfügbar.
+- Feste argv ohne Shell, über ein Interface (`resticRunner`), das die Tests durch einen Fake ersetzen. Umgebung ist **leer** bis auf `RESTIC_REPOSITORY=<backups>/repos/<id>`, `RESTIC_PASSWORD_FILE=<backups>/keys/<id>`, `HOME=<backups>`, `TZ=<backup_timezone>` (bei `backup` und `forget`: restic speichert die Snapshot-Zeit in der Zone des Backup-Prozesses und bildet daraus die Tages-/Wochen-/Monatsgruppen von `forget`, §5.4) und `RESTIC_PROGRESS_FPS=1`. Jeder Aufruf mit `--no-cache` (lokales Repo) und `--json` wo verfügbar.
 - Vor jedem Job `restic unlock` (entfernt nur verwaiste Sperren eines abgestürzten Laufs). Lesen der Snapshot-Liste mit `--no-lock`, damit sie auch während eines Prune funktioniert.
 - `backup --stdin --stdin-filename data.tar --host mcpanel --tag mcpanel --tag kind=<kind> [--tag note=<base64url>]`; das Ergebnis (`snapshot_id`, `total_bytes_processed`) kommt aus der JSON-Zusammenfassung.
 - `snapshots --json --no-lock --host mcpanel`; nur Snapshots mit Tag `mcpanel` zählen.
@@ -120,7 +120,7 @@ Wie bisher feste Pfade, `DisallowUnknownFields`, Fehler `{error, code}`.
 |---|---|---|
 | `GET /v1/backups/status` | – | `{available, version, reason}` |
 | `POST /v1/backups/list` | `{id}` | `{snapshots: [{id, short_id, time, kind, pinned, note, bytes}]}`; neueste zuerst; ohne Repo `[]` |
-| `POST /v1/backups/create` | `{id, kind, note}`; `kind` ∈ `manual\|scheduled\|pre-restore` | `202 {job}` |
+| `POST /v1/backups/create` | `{id, kind, note, timezone}`; `kind` ∈ `manual\|scheduled\|pre-restore` | `202 {job}` |
 | `POST /v1/backups/restore` | `{id, snapshot}` | Vorprüfung synchron (Snapshot vorhanden, Platz §4.3), dann `202 {job}` |
 | `POST /v1/backups/forget` | `{id, snapshots}` **oder** `{id, policy: {keep_last, keep_daily, keep_weekly, keep_monthly}, timezone}` | `202 {job}` |
 | `POST /v1/backups/pin` | `{id, snapshot, pinned}` | `{snapshot}` (mit neuer ID); nur `kind=scheduled`, sonst `400 invalid` |
