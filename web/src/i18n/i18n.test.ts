@@ -72,6 +72,13 @@ const DYNAMIC_KEYS = [
   ),
   ...['queued', 'uploading', 'conflict', 'done', 'failed', 'cancelled', 'skipped'].map((s) => `files.uploads.status.${s}`),
   ...['insufficient_storage', 'exists', 'too_large', 'invalid', 'not_found', 'shutdown', 'other'].map((r) => `files.extract.reason.${r}`),
+  ...['modrinth', 'hangar', 'manual'].map((s) => `plugins.source.${s}`),
+  ...['release', 'beta', 'alpha'].map((c) => `plugins.channel.${c}`),
+  ...['pending', 'downloading', 'done', 'failed', 'skipped'].map((s) => `plugins.step.state.${s}`),
+  ...['download_failed', 'hash_mismatch', 'file_exists', 'insufficient_storage', 'files_unavailable', 'source_unavailable'].map(
+    (c) => `plugins.step.error.${c}`,
+  ),
+  ...['no_compatible_version', 'client_only', 'not_downloadable', 'too_deep', 'too_many'].map((r) => `plugins.incompatible_reason.${r}`),
   ...['not_configured', 'unknown', 'creating', 'starting', 'running', 'stopping', 'stopped', 'restarting', 'error'].map(
     (s) => `servers.state.${s}`,
   ),
