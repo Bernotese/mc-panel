@@ -75,6 +75,8 @@ export function UserPermissionsPage({ userId }: { userId: number }) {
   ]
 
   const filesWarning = !targetIsAdmin && saved !== null && newlyGranted(current, saved, 'server.files').length > 0
+  // Spec §7.2: a plugin runs code in the container – same trust as server.files.
+  const pluginsWarning = !targetIsAdmin && saved !== null && newlyGranted(current, saved, 'server.plugins').length > 0
 
   return (
     <>
@@ -101,6 +103,11 @@ export function UserPermissionsPage({ userId }: { userId: number }) {
       {filesWarning ? (
         <p role="status" className="border-destructive/50 mb-4 rounded-md border p-3 text-sm">
           {t('permissions.files_warning')}
+        </p>
+      ) : null}
+      {pluginsWarning ? (
+        <p role="status" className="border-destructive/50 mb-4 rounded-md border p-3 text-sm">
+          {t('permissions.plugins_warning')}
         </p>
       ) : null}
       <DataList items={servers.data} columns={columns} rowKey={(s) => s.id} caption={t('permissions.caption')} empty={t('permissions.no_servers')} />

@@ -41,6 +41,16 @@ describe('UserPermissionsPage', () => {
     expect(screen.getByText(/„Dateien“ erlaubt Code-Ausführung im Minecraft-Server/)).toBeInTheDocument()
   })
 
+  it('warns before granting plugin access', async () => {
+    const user = userEvent.setup()
+    await renderWithProviders(<UserPermissionsPage userId={2} />, { me: loginAs('admin', { sudo: true }) })
+    await screen.findByRole('heading', { name: 'Rechte von alice' })
+    expect(screen.queryByText(/erlaubt Code-Ausführung/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: 'survival: Plugins/Mods' }))
+    expect(screen.getByText(/„Plugins\/Mods“ erlaubt Code-Ausführung im Minecraft-Server/)).toBeInTheDocument()
+    expect(screen.queryByText(/„Dateien“ erlaubt/)).not.toBeInTheDocument()
+  })
+
   it('does not warn for access that is already saved', async () => {
     db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.files'] }])
     const user = userEvent.setup()
