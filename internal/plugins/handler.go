@@ -60,6 +60,7 @@ type Handler struct {
 	limit   *userLimiter
 	jobs    *jobRegistry
 	updates *upstream.Cache[updatesResult]
+	icons   *iconCache
 }
 
 func NewHandler(d Deps) *Handler {
@@ -87,6 +88,7 @@ func NewHandler(d Deps) *Handler {
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, files: fc, inst: inst, catalog: cat, up: up, log: log,
 		restart: newRestartTracker(), limit: newUserLimiter(), jobs: newJobRegistry(d.Clock, maxJobs),
 		updates: upstream.NewCache[updatesResult](d.Clock, updatesTTL, upstream.MaxCacheEntries),
+		icons:   newIconCache(d.Clock, up),
 	}
 }
 

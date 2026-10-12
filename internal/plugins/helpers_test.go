@@ -41,8 +41,6 @@ import (
 
 var t0 = time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
 
-var bg = context.Background()
-
 // env is a real database plus the plugins handler on a real rbac.Router, a fake file service,
 // a fake agent, a fake catalog and a fake Modrinth/Hangar/CDN (fakeup_test.go). Run runs in
 // the background until the test ends (or stop is called).

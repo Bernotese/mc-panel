@@ -113,9 +113,34 @@ func (f *fakeFiles) Download(_ context.Context, id int64, p string) (filesapi.Do
 	return filesapi.Download{Body: io.NopCloser(bytes.NewReader(b)), Size: int64(len(b)), Name: path.Base(p)}, nil
 }
 
-func (f *fakeFiles) Mkdir(context.Context, int64, string) error           { return nil }
-func (f *fakeFiles) Rename(context.Context, filesapi.RenameRequest) error { return nil }
-func (f *fakeFiles) Delete(context.Context, int64, string) error          { return nil }
+// Mkdir succeeds: directories exist implicitly in the flat map.
+func (f *fakeFiles) Mkdir(context.Context, int64, string) error { return nil }
+
+func (f *fakeFiles) Rename(_ context.Context, req filesapi.RenameRequest) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	from, to := key(req.ID, req.From), key(req.ID, req.To)
+	b, ok := f.files[from]
+	if !ok {
+		return filesapi.ErrNotFound
+	}
+	if _, exists := f.files[to]; exists {
+		return filesapi.ErrExists
+	}
+	delete(f.files, from)
+	f.files[to] = b
+	return nil
+}
+
+func (f *fakeFiles) Delete(_ context.Context, id int64, p string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.files[key(id, p)]; !ok {
+		return filesapi.ErrNotFound
+	}
+	delete(f.files, key(id, p))
+	return nil
+}
 
 func (f *fakeFiles) Extract(_ context.Context, req filesapi.ExtractRequest) (filesapi.Job, error) {
 	f.mu.Lock()
