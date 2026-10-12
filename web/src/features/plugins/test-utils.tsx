@@ -124,16 +124,16 @@ export function update(file: string, from: string, to: string): PluginUpdate {
 
 export async function openPlugins(serverId = 1, username = 'admin', tab: 'Plugins' | 'Mods' = 'Plugins') {
   const user = userEvent.setup()
-  await renderWithProviders(<ServerDetailPage serverId={serverId} />, { me: loginAs(username) })
+  const { queryClient } = await renderWithProviders(<ServerDetailPage serverId={serverId} />, { me: loginAs(username) })
   await user.click(await screen.findByRole('tab', { name: tab }))
   const region = await screen.findByRole('region', { name: tab === 'Plugins' ? 'Installierte Plugins' : 'Installierte Mods' })
-  return { user, region }
+  return { user, region, queryClient }
 }
 
 /** Task 14: the "Entdecken" view of the tab. */
 export async function openDiscover(serverId = 1, username = 'admin', tab: 'Plugins' | 'Mods' = 'Plugins') {
-  const { user } = await openPlugins(serverId, username, tab)
+  const { user, queryClient } = await openPlugins(serverId, username, tab)
   await user.click(screen.getByRole('tab', { name: 'Entdecken' }))
   const region = await screen.findByRole('region', { name: 'Entdecken' })
-  return { user, region }
+  return { user, region, queryClient }
 }

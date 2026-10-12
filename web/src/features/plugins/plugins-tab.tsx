@@ -16,6 +16,8 @@ import {
   checkUpdates,
   deletePlugin,
   inventoryQueryOptions,
+  inventoryKey,
+  refreshInventory,
   refreshJobOnConflict,
   refreshPluginState,
   startJob,
@@ -50,6 +52,11 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
     refreshJobOnConflict(queryClient, server.id, err)
     notifyToast(err)
   }
+  // A failed toggle or removal (not_found, file_exists, conflict) may mean the list is stale: the disk is the truth.
+  const notifyFileError = (err: unknown) => {
+    void queryClient.invalidateQueries({ queryKey: inventoryKey(server.id) })
+    notifyError(err)
+  }
   const [view, setView] = useState<View>('installed')
   const [installing, setInstalling] = useState<InstallTarget | null>(null)
   const [removing, setRemoving] = useState<InstalledJar | null>(null)
@@ -72,9 +79,10 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
     onSuccess: (_data, { jar, enabled }) => {
       const name = jarName(jar)
       toast.success(enabled ? t('plugins.installed.enabled_done', { name }) : t('plugins.installed.disabled_done', { name }))
-      void refreshPluginState(queryClient, server.id)
+      // Returned: the switch stays locked until the new list is there, instead of flipping back for a moment.
+      return refreshInventory(queryClient, server.id)
     },
-    onError: notifyError,
+    onError: notifyFileError,
   })
 
   const remove = useMutation({
@@ -82,9 +90,9 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
     onSuccess: (_data, jar) => {
       toast.success(t('plugins.installed.removed', { name: jarName(jar) }))
       setRemoving(null)
-      void refreshPluginState(queryClient, server.id)
+      return refreshPluginState(queryClient, server.id)
     },
-    onError: notifyError,
+    onError: notifyFileError,
   })
 
   const check = useMutation({
@@ -230,7 +238,7 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
           description={t('plugins.installed.remove_description', { file: removing.file, dir })}
           confirmLabel={t('plugins.installed.remove_submit')}
           destructive
-          pending={remove.isPending}
+          pending={remove.isPending || busy}
           onConfirm={() => remove.mutate(removing)}
         />
       ) : null}

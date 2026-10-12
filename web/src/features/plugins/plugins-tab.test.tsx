@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest'
 import { db } from '@/mocks/db'
 import { server } from '@/mocks/node'
 import { setViewport } from '@/test/media'
-import { hangarJar, inventory, jar, mockInventory, modrinthJar, openPlugins, planEntry, version } from './test-utils'
+import { searchKey } from './api'
+import { hangarJar, hit, inventory, jar, mockInventory, modrinthJar, openPlugins, planEntry, version } from './test-utils'
 
 const OLDTOOL_META = { kind: 'plugin' as const, id: '', name: 'OldTool', version: '1.0' }
 
@@ -175,5 +176,65 @@ describe('PluginsTab – views', () => {
     expect(await screen.findByText('Die Suche ist gerade nicht möglich.')).toBeInTheDocument()
     await user.click(screen.getByRole('tab', { name: 'Installiert' }))
     expect(await screen.findByRole('switch', { name: 'OldTool aktiv' })).toBeEnabled()
+  })
+})
+
+describe('PluginsTab – after switching', () => {
+  const X_META = { kind: 'plugin' as const, id: '', name: 'X', version: '1' }
+
+  it('keeps the switch locked until the reloaded list arrives', async () => {
+    let disabled = false
+    let release = () => {}
+    const reloaded = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    server.use(
+      http.get('*/api/servers/:id/plugins', async () => {
+        if (!disabled) return HttpResponse.json(inventory({ jars: [jar('X.jar', { meta: X_META })] }))
+        await reloaded
+        return HttpResponse.json(inventory({ jars: [jar('X.jar.disabled', { meta: X_META })] }))
+      }),
+      http.get('*/api/servers/:id/plugins/updates', () => HttpResponse.json({ updates: [], checked_at: Date.now() })),
+      http.post('*/api/servers/:id/plugins/toggle', () => {
+        disabled = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const { user, region } = await openPlugins()
+    await user.click(await within(region).findByRole('switch', { name: 'X aktiv' }))
+    expect(await screen.findByText('„X“ deaktiviert.')).toBeInTheDocument()
+    // The old list is still shown: the switch must not be usable (or flip back) before the new one arrives.
+    expect(within(region).getByRole('switch', { name: 'X aktiv' })).toBeDisabled()
+    release()
+    await waitFor(() => expect(within(region).getByRole('switch', { name: 'X aktiv' })).not.toBeChecked())
+    expect(within(region).getByRole('switch', { name: 'X aktiv' })).toBeEnabled()
+  })
+
+  it('reloads the list when switching fails because the jar is gone', async () => {
+    let reads = 0
+    server.use(
+      http.get('*/api/servers/:id/plugins', () => {
+        reads += 1
+        return HttpResponse.json(inventory({ jars: reads === 1 ? [jar('X.jar', { meta: X_META })] : [] }))
+      }),
+      http.get('*/api/servers/:id/plugins/updates', () => HttpResponse.json({ updates: [], checked_at: Date.now() })),
+      http.post('*/api/servers/:id/plugins/toggle', () => HttpResponse.json({ error: 'not_found', message: 'jar not found' }, { status: 404 })),
+    )
+    const { user, region } = await openPlugins()
+    await user.click(await within(region).findByRole('switch', { name: 'X aktiv' }))
+    await waitFor(() => expect(within(region).queryByRole('switch', { name: 'X aktiv' })).not.toBeInTheDocument())
+    expect(within(region).getByText('In plugins/ liegen noch keine Jars.')).toBeInTheDocument()
+  })
+
+  it('leaves the search results alone when a jar is switched', async () => {
+    server.use(http.get('*/api/servers/:id/plugins/search', () => HttpResponse.json({ hits: [hit('Chunky')], total: 1, offset: 0 })))
+    const { user, queryClient } = await openPlugins() // mock inventory V5
+    await user.click(screen.getByRole('tab', { name: 'Entdecken' }))
+    expect(await screen.findByRole('heading', { name: 'Chunky' })).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Installiert' }))
+    await user.click(await screen.findByRole('switch', { name: 'OldTool aktiv' }))
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'OldTool aktiv' })).not.toBeChecked())
+    // Disabled jars still count as installed (spec §6.3): searching again would only cost upstream calls.
+    expect(queryClient.getQueryState(searchKey(1, 'modrinth', ''))?.isInvalidated).toBe(false)
   })
 })
