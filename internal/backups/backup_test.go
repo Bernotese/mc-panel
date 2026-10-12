@@ -363,8 +363,10 @@ func TestRecoverAfterCrash(t *testing.T) {
 	e := newEnvNoRun(t, nil)
 	id := e.instance("survival")
 	e.agent.set(id, agentapi.StateRunning)
+	// next_run_at lies ahead: the first tick must not start a new run that would set the row
+	// to running again (a missed run is caught up, TestMissedRunRunsOnce)
 	mustExec(t, e.db, `INSERT INTO backup_schedules (server_id, mode, next_run_at, last_status, saveoff_since, updated_at)
-		VALUES (?, 'daily', ?, 'running', ?, 0)`, id, t0.Add(-time.Hour).UnixMilli(), t0.Add(-10*time.Minute).UnixMilli())
+		VALUES (?, 'daily', ?, 'running', ?, 0)`, id, t0.Add(time.Hour).UnixMilli(), t0.Add(-10*time.Minute).UnixMilli())
 	release := e.files.holdPlan("scheduled")
 	defer release()
 	e.files.runningJob(id, filesapi.JobBackup, "scheduled") // the backup the crashed panel started
