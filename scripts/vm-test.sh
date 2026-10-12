@@ -126,20 +126,17 @@ listen = "127.0.0.1:${E2E_PORT}"
 public_url = "http://localhost:${E2E_PORT}"
 EOF
 
-  local pids=()
-  stop_stack() {
-    local p
-    for p in "${pids[@]}"; do kill "${p}" 2> /dev/null || true; done
-    wait 2> /dev/null || true
-  }
+  # stack_pids is global: the EXIT trap runs after this function has returned, when a local
+  # array would already be gone (and a bare "wait" would then wait for the servers forever).
+  stack_pids=()
   trap stop_stack EXIT
   .dev/bin/agent -dev > .dev/agent.log 2>&1 &
-  pids+=("$!")
+  stack_pids+=("$!")
   .dev/bin/files -dev > .dev/files.log 2>&1 &
-  pids+=("$!")
+  stack_pids+=("$!")
   sleep 1
   .dev/bin/panel serve -dev -config .dev/panel-vm.toml > .dev/panel.log 2>&1 &
-  pids+=("$!")
+  stack_pids+=("$!")
   local ok=""
   for _ in $(seq 1 30); do
     if curl -sf "http://127.0.0.1:${E2E_PORT}/api/health" > /dev/null; then
@@ -162,8 +159,27 @@ EOF
   (cd web && npm run e2e) || rc=1
   if [ "${rc}" -ne 0 ]; then
     tail -n 50 .dev/agent.log .dev/files.log .dev/panel.log
-    die "e2e failed"
   fi
+  stop_stack
+  trap - EXIT
+  [ "${rc}" -eq 0 ] || die "e2e failed"
+}
+
+# stop_stack ends the dev servers of suite_e2e and waits only for them.
+stack_pids=()
+stop_stack() {
+  [ "${#stack_pids[@]}" -gt 0 ] || return 0
+  kill "${stack_pids[@]}" 2> /dev/null || true
+  local p
+  for p in "${stack_pids[@]}"; do
+    for _ in $(seq 1 20); do
+      kill -0 "${p}" 2> /dev/null || break
+      sleep 0.5
+    done
+    kill -9 "${p}" 2> /dev/null || true
+  done
+  wait "${stack_pids[@]}" 2> /dev/null || true
+  stack_pids=()
 }
 
 case "${suite}" in
