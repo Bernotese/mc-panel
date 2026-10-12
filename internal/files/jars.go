@@ -168,7 +168,8 @@ func (s *Service) jarInfo(ctx context.Context, name string, f *os.File, st fs.Fi
 			info.sha256, info.sha512 = h256, h512
 		}
 	}
-	// A jar that is written to while it is read has no reliable checksum.
+	info.meta = readJarMeta(f, st.Size(), maxJarEntries)
+	// A jar that is written to while it is read has no reliable checksum or metadata.
 	if now, err := f.Stat(); err != nil || now.Size() != st.Size() || !now.ModTime().Equal(st.ModTime()) {
 		return jarInfo{}, nil
 	}
