@@ -58,6 +58,8 @@ type Handler struct {
 	log     *slog.Logger
 	restart *restartTracker
 	limit   *userLimiter
+	jobs    *jobRegistry
+	updates *upstream.Cache[updatesResult]
 }
 
 func NewHandler(d Deps) *Handler {
@@ -83,7 +85,8 @@ func NewHandler(d Deps) *Handler {
 	}
 	return &Handler{
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, files: fc, inst: inst, catalog: cat, up: up, log: log,
-		restart: newRestartTracker(), limit: newUserLimiter(),
+		restart: newRestartTracker(), limit: newUserLimiter(), jobs: newJobRegistry(d.Clock, maxJobs),
+		updates: upstream.NewCache[updatesResult](d.Clock, updatesTTL, upstream.MaxCacheEntries),
 	}
 }
 
@@ -103,8 +106,11 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Get("/servers/{id}/plugins/icon", rule, h.handleIcon)
 }
 
-// Run blocks until ctx is done (task 11: then it cancels running jobs and waits for them).
-func (h *Handler) Run(ctx context.Context) { <-ctx.Done() }
+// Run blocks until ctx is done; then it cancels running jobs and waits for them.
+func (h *Handler) Run(ctx context.Context) {
+	<-ctx.Done()
+	h.jobs.shutdown()
+}
 
 // server is a loaded server with an instance.
 type server struct {
