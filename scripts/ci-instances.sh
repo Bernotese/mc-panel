@@ -281,19 +281,22 @@ p_restart() {
 
 # check_plugins <listed names, comma-separated> <absent names, comma-separated>: runs "plugins"
 # through the panel console (RCON) and checks the answer: listed names must appear and must not
-# be marked disabled (§c, red); absent names must not appear.
+# be marked disabled (red); absent names must not appear. rcon-cli turns Paper's colour codes
+# into ANSI escapes (green \e[32m active, red \e[31m disabled); raw § codes are handled too.
 check_plugins() {
   papi POST "/servers/$psrv/console" "$po/plugins.json" '{"command": "plugins"}'
   [ "$pcode" = 200 ] || fail "console plugins: HTTP $pcode $(cat "$po/plugins.json")"
   python3 -I -c '
 import json, re, sys
 raw = json.load(open(sys.argv[1]))["output"]
-plain = re.sub("§.", "", raw)
+plain = re.sub("\x1b\\[[0-9;]*m|§.", "", raw)
 def listed(n):
     return re.search(r"(?<![A-Za-z0-9_])" + re.escape(n) + r"(?![A-Za-z0-9_])", plain) is not None
+def red(n):
+    return re.search("(§c|\x1b\\[(?:0;)?(?:31|91)m)" + re.escape(n) + r"(?![A-Za-z0-9_])", raw) is not None
 want = [n for n in sys.argv[2].split(",") if n]
 gone = [n for n in sys.argv[3].split(",") if n]
-bad = [n for n in want if not listed(n) or "§c" + n in raw] + [n for n in gone if listed(n)]
+bad = [n for n in want if not listed(n) or red(n)] + [n for n in gone if listed(n)]
 if "Plugins" not in plain or bad:
     sys.exit("plugins list: unexpected %r in %r" % (bad, plain))
 print("plugins: " + " | ".join(l.strip() for l in plain.splitlines() if l.strip()))' "$po/plugins.json" "$1" "$2" ||
