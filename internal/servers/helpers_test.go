@@ -66,7 +66,7 @@ func newEnv(t *testing.T) *env {
 	}
 	e.h = servers.NewHandler(servers.Deps{
 		DB: db, Clock: e.clk, Audit: e.rec, Box: box, Instances: e.agent,
-		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog, Extract: e.gate,
+		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog, Gate: e.gate,
 	})
 	mux := chi.NewRouter()
 	e.h.Routes(rbac.NewRouter(mux, rbac.NewDBChecker(db), e.clk))
@@ -292,7 +292,7 @@ func (f *fakeCatalog) Get(_ context.Context, t instancespec.Type) (catalog.Catal
 	return f.cat, f.err
 }
 
-// fakeGate is a servers.ExtractGate with a switch per server.
+// fakeGate is a servers.DataGate with a switch per server.
 type fakeGate struct {
 	mu      sync.Mutex
 	running map[int64]bool
@@ -303,7 +303,7 @@ func (g *fakeGate) set(id int64, on bool) { g.mu.Lock(); g.running[id] = on; g.m
 
 func (g *fakeGate) askedCount() int { g.mu.Lock(); defer g.mu.Unlock(); return g.asked }
 
-func (g *fakeGate) ExtractRunning(_ context.Context, id int64) bool {
+func (g *fakeGate) DataJobRunning(_ context.Context, id int64) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.asked++

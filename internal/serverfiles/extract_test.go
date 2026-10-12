@@ -167,24 +167,24 @@ func TestFileJob(t *testing.T) {
 	}
 }
 
-func TestExtractRunning(t *testing.T) {
+func TestDataJobRunning(t *testing.T) {
 	e := newEnv(t)
 	id := createInstance(t, e.db, "survival")
 	ctx := context.Background()
-	if e.h.ExtractRunning(ctx, id) {
+	if e.h.DataJobRunning(ctx, id) {
 		t.Fatal("no job: running")
 	}
 	e.files.setJob(&filesapi.Job{ID: "j1", State: "running"})
-	if !e.h.ExtractRunning(ctx, id) {
+	if !e.h.DataJobRunning(ctx, id) {
 		t.Fatal("running job: not running")
 	}
 	e.files.setJob(&filesapi.Job{ID: "j1", State: "failed"})
-	if e.h.ExtractRunning(ctx, id) {
+	if e.h.DataJobRunning(ctx, id) {
 		t.Fatal("failed job: running")
 	}
 	e.files.setJob(&filesapi.Job{ID: "j1", State: "running"})
 	e.files.setErr(filesapi.ErrUnavailable)
-	if e.h.ExtractRunning(ctx, id) {
+	if e.h.DataJobRunning(ctx, id) {
 		t.Fatal("service down must count as no job")
 	}
 }
@@ -199,7 +199,7 @@ func TestExtractPendingHoldsStarts(t *testing.T) {
 	var during, otherDuring bool
 	e.agent.onCall = func() {
 		ctx := context.Background()
-		during, otherDuring = e.h.ExtractRunning(ctx, id), e.h.ExtractRunning(ctx, other)
+		during, otherDuring = e.h.DataJobRunning(ctx, id), e.h.DataJobRunning(ctx, other)
 	}
 	e.agent.set(status(id, agentapi.StateRunning, ""))
 	rec := e.do(http.MethodPost, srvPath(id, "/files/extract"), map[string]string{"path": "w.zip", "dest": "w"}, &admin)
@@ -209,7 +209,7 @@ func TestExtractPendingHoldsStarts(t *testing.T) {
 	if !during || otherDuring {
 		t.Fatalf("during the state check: running=%v, other server=%v", during, otherDuring)
 	}
-	if e.h.ExtractRunning(context.Background(), id) {
+	if e.h.DataJobRunning(context.Background(), id) {
 		t.Fatal("a refused extract keeps holding starts")
 	}
 
@@ -218,7 +218,7 @@ func TestExtractPendingHoldsStarts(t *testing.T) {
 	e.agent.set(status(id, agentapi.StateExited, ""))
 	e.agent.onCall = nil
 	var inCall bool
-	e.files.onExtract = func() { inCall = e.h.ExtractRunning(context.Background(), id) }
+	e.files.onExtract = func() { inCall = e.h.DataJobRunning(context.Background(), id) }
 	e.files.setErr(fmt.Errorf("service: %w", filesapi.ErrBusy))
 	rec = e.do(http.MethodPost, srvPath(id, "/files/extract"), map[string]string{"path": "w.zip", "dest": "w"}, &admin)
 	if rec.Code != http.StatusTooManyRequests {
@@ -228,21 +228,66 @@ func TestExtractPendingHoldsStarts(t *testing.T) {
 		t.Fatal("the gate was open during the service call")
 	}
 	e.files.setErr(nil) // the service answers again and knows no job
-	if e.h.ExtractRunning(context.Background(), id) {
+	if e.h.DataJobRunning(context.Background(), id) {
 		t.Fatal("a failed extract keeps holding starts")
 	}
 }
 
 // An open gate because the service is unreachable is logged.
-func TestExtractRunningLogsUnreachableService(t *testing.T) {
+func TestDataJobRunningLogsUnreachableService(t *testing.T) {
 	var logs bytes.Buffer
 	e := newEnvWith(t, func(d *serverfiles.Deps) { d.Log = slog.New(slog.NewTextHandler(&logs, nil)) })
 	id := createInstance(t, e.db, "survival")
 	e.files.setErr(filesapi.ErrUnavailable)
-	if e.h.ExtractRunning(context.Background(), id) {
+	if e.h.DataJobRunning(context.Background(), id) {
 		t.Fatal("service down must count as no job")
 	}
 	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), fmt.Sprintf("server_id=%d", id)) {
 		t.Fatalf("log = %q", logs.String())
+	}
+}
+
+// Backups spec §5.5: an extract and a restore rewrite the data directory and hold starts; a
+// backup only reads it (the server keeps running with save-off), a forget does not touch it.
+func TestDataJobRunningOnlyForJobsThatRewriteData(t *testing.T) {
+	e := newEnv(t)
+	id := createInstance(t, e.db, "survival")
+	ctx := context.Background()
+	for kind, want := range map[filesapi.JobKind]bool{
+		"":                  true, // an extract job of a service before sub-project 4
+		filesapi.JobExtract: true,
+		filesapi.JobRestore: true,
+		filesapi.JobBackup:  false,
+		filesapi.JobForget:  false,
+	} {
+		e.files.setJob(&filesapi.Job{ID: "j1", Kind: kind, State: filesapi.JobRunning})
+		if got := e.h.DataJobRunning(ctx, id); got != want {
+			t.Errorf("running %q job: DataJobRunning = %v, want %v", kind, got, want)
+		}
+		e.files.setJob(&filesapi.Job{ID: "j1", Kind: kind, State: filesapi.JobDone})
+		if e.h.DataJobRunning(ctx, id) {
+			t.Errorf("finished %q job holds starts", kind)
+		}
+	}
+}
+
+// The file browser shows only extract jobs, in the FileJob shape of the contract.
+func TestFileJobsShowOnlyExtractJobs(t *testing.T) {
+	e := newEnv(t)
+	id := createInstance(t, e.db, "survival")
+	admin := e.admin()
+	for _, kind := range []filesapi.JobKind{filesapi.JobBackup, filesapi.JobRestore, filesapi.JobForget} {
+		e.files.setJob(&filesapi.Job{ID: "j1", Kind: kind, State: filesapi.JobRunning, Snapshot: strings.Repeat("a", 64)})
+		rec := e.do(http.MethodGet, srvPath(id, "/files/jobs"), nil, &admin)
+		if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"job":null}` {
+			t.Errorf("%s job: %d %s, want {\"job\":null}", kind, rec.Code, rec.Body)
+		}
+	}
+	e.files.setJob(&filesapi.Job{ID: "j2", Kind: filesapi.JobExtract, State: filesapi.JobRunning, Path: "w.zip", Dest: "w"})
+	rec := e.do(http.MethodGet, srvPath(id, "/files/jobs"), nil, &admin)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, `"dest":"w"`) || strings.Contains(body, `"kind"`) ||
+		strings.Contains(body, `"snapshot"`) || strings.Contains(body, `"skipped"`) {
+		t.Fatalf("extract job: %d %s", rec.Code, body)
 	}
 }

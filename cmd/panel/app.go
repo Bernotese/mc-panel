@@ -120,8 +120,8 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		return nil, fmt.Errorf("auth: %w", err)
 	}
 	usersH := users.NewHandler(db, d.Clock, auditRec, disp)
-	// The files handler is the servers handler's extract gate: no start while an archive is
-	// extracted into a server (files spec §5.1).
+	// The files handler is one of the servers handler's data gates: no start while an archive
+	// is extracted into a server (files spec §5.1).
 	filesH := serverfiles.NewHandler(serverfiles.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Files: d.Files, Instances: d.Instances,
 	})
@@ -130,7 +130,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 	serversH := servers.NewHandler(servers.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Box: box, Instances: d.Instances,
 		Catalog: cat,
-		Extract: filesH,
+		Gate:    filesH,
 	})
 	pluginsH := plugins.NewHandler(plugins.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Files: d.Files, Instances: d.Instances,

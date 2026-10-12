@@ -126,6 +126,7 @@ const (
 
 type Job struct {
 	ID           string   `json:"id"`
+	Kind         JobKind  `json:"kind"` // "" (a service before sub-project 4) counts as JobExtract
 	State        JobState `json:"state"`
 	Path         string   `json:"path"`
 	Dest         string   `json:"dest"`
@@ -133,6 +134,8 @@ type Job struct {
 	Entries      int64    `json:"entries"`
 	TotalBytes   int64    `json:"total_bytes"`
 	TotalEntries int64    `json:"total_entries"`
+	Snapshot     string   `json:"snapshot"` // backup: the new snapshot once done; restore: its source; else ""
+	Skipped      int64    `json:"skipped"`  // entries a backup left out (symlinks, special files, hidden or invalid names)
 	Error        string   `json:"error"`
 	StartedAt    int64    `json:"started_at"`  // Unix ms
 	FinishedAt   int64    `json:"finished_at"` // 0 while running
