@@ -8,7 +8,8 @@ Selbst gehostetes Web-Panel für die eigenen Minecraft-Server auf einem Linux-VP
 - **Konsole und Spieler:** Live-Log im Browser (läuft über Neustarts weiter), Befehle per RCON, Online-Spieler, Ops, Whitelist und Bans ohne Neustart pflegen (Kick, Ban, Entbannen, Op, Whitelist). Was im Spiel vergeben wird, bleibt erhalten.
 - **Anmeldung:** Passwort plus zweiter Faktor (TOTP oder Passkey, für Admins Pflicht), Wiederherstellungscodes, Sessions mit Idle- und Absolut-Timeout, Sudo-Modus für kritische Aktionen.
 - **Dateien:** Dateibrowser pro Server mit Editor für Konfigurationsdateien, Up- und Download (bis 4 GiB, Ordner als Zip), Anlegen, Umbenennen, Verschieben, Löschen und Entpacken von Zips (z. B. Welt-Upload bei gestopptem Server). Ausgeführt von einem eigenen, unprivilegierten Dienst; das RCON-Passwort bleibt verborgen.
-- **Rechte:** Admins und Benutzer mit Rechten pro Server (`server.view`, `server.power`, `server.console`, `server.files`).
+- **Plugins und Mods:** Plugins für Paper/Purpur aus Modrinth und Hangar, Mods für Fabric/NeoForge aus Modrinth suchen und mit einem Klick samt Pflicht-Abhängigkeiten installieren; installierte Jars (auch per Hand hochgeladene) sehen, aktualisieren, deaktivieren und entfernen. Das panel prüft jede Datei gegen die Prüfsumme der Quelle; geschrieben wird sie vom unprivilegierten Dateidienst.
+- **Rechte:** Admins und Benutzer mit Rechten pro Server (`server.view`, `server.power`, `server.console`, `server.files`, `server.plugins`).
 - **Abwehr:** Rate-Limits, Jail nach Fehlversuchen (in der App und per nftables auf dem Host), IP-Regeln, Länderfilter (GeoIP), Security Center in der Oberfläche, Benachrichtigungen über Discord und ntfy.
 - **Audit-Log:** unveränderlich und hash-verkettet, prüfbar mit `panel audit verify`.
 
@@ -16,7 +17,7 @@ Selbst gehostetes Web-Panel für die eigenen Minecraft-Server auf einem Linux-VP
 
 | Binary | läuft als | Aufgabe |
 |---|---|---|
-| `panel` | Benutzer `mcpanel` (unprivilegiert) | Weboberfläche und `/api`, SQLite-Datenbank, CLI (`serve`, `admin create`, `admin unlock`, `audit verify`) |
+| `panel` | Benutzer `mcpanel` (unprivilegiert) | Weboberfläche und `/api`, SQLite-Datenbank, Downloads von Modrinth/Hangar, CLI (`serve`, `admin create`, `admin unlock`, `audit verify`) |
 | `agent` | root | schmale JSON-API über einen Unix-Socket, nur für das panel: nftables-Jails und Docker (Minecraft-Container, Router) |
 | `files` | Benutzer `mcpanel-mc` (wie die Minecraft-Container, ohne Capabilities) | Dateibrowser: Dateioperationen im Datenverzeichnis eines Servers, nur für das panel (und root), über einen eigenen Unix-Socket |
 
@@ -46,6 +47,8 @@ Zum Ausprobieren gegen das echte Backend mit Docker gibt es eine interne Test-VM
 | [`docs/dev/acceptance-tp3a.md`](docs/dev/acceptance-tp3a.md) | manuelle Abnahme von Konsole, Logs und Spieler-Verwaltung auf der Test-VM |
 | [`docs/dev/acceptance-tp3b.md`](docs/dev/acceptance-tp3b.md) | manuelle Abnahme des Dateibrowsers auf der Test-VM |
 | [`docs/superpowers/specs/2026-10-11-mc-panel-files-design.md`](docs/superpowers/specs/2026-10-11-mc-panel-files-design.md) | Dateibrowser über den unprivilegierten Dienst `mcpanel-files` |
+| [`docs/dev/acceptance-tp3c.md`](docs/dev/acceptance-tp3c.md) | manuelle Abnahme von Plugins und Mods auf der Test-VM |
+| [`docs/superpowers/specs/2026-10-12-mc-panel-plugins-design.md`](docs/superpowers/specs/2026-10-12-mc-panel-plugins-design.md) | Plugins und Mods aus Modrinth und Hangar |
 | [`docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`](docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md) | Architektur, Security-Anforderungen, Roadmap |
 | [`docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md`](docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md) | Minecraft-Instanzen (Docker, Router, Reconcile) |
 | [`docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md`](docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md) | Konsole, Live-Log, Spieler-Verwaltung (RCON, SSE) |
@@ -60,7 +63,7 @@ Zum Ausprobieren gegen das echte Backend mit Docker gibt es eine interne Test-VM
 | 2 | Instanzen-Lifecycle | fertig |
 | 3a | Live-Betrieb: Konsole, Logs, Spieler | fertig |
 | 3b | Live-Betrieb: Dateibrowser | fertig |
-| 3c | Live-Betrieb: Plugins/Mods (Modrinth, Hangar) | offen |
+| 3c | Live-Betrieb: Plugins/Mods (Modrinth, Hangar) | in Arbeit |
 | 4 | Backups | offen |
 | 5 | Monitoring + Alerts | offen |
 | 6 | Installer-CLI (`install`/`update`/`doctor`, Caddy, VPS-Härtung) | offen |
