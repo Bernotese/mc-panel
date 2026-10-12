@@ -99,6 +99,20 @@ type Permission struct {
 	Permission string
 }
 
+type PluginInstall struct {
+	ServerID    int64
+	Filename    string
+	Sha512      string
+	Source      string
+	ProjectID   string
+	ProjectSlug string
+	Title       string
+	VersionID   string
+	VersionName string
+	Channel     string
+	InstalledAt int64
+}
+
 type RecoveryCode struct {
 	ID        int64
 	UserID    int64

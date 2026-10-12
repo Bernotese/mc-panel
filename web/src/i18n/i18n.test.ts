@@ -36,6 +36,10 @@ const ERROR_CODES = [
   'not_regular',
   'instance_running',
   'insufficient_storage',
+  'plugins_unsupported',
+  'plugin_source_unavailable',
+  'plugin_not_downloadable',
+  'plugin_incompatible',
   'internal',
 ]
 
