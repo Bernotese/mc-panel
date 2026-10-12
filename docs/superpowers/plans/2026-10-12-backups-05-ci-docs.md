@@ -6,7 +6,7 @@
 
 **Architecture:**
 - Aufgabe 18 berührt nur `scripts/**` und `.github/workflows/ci.yml`.
-- Ein gemeinsames Installationsskript `scripts/install-restic.sh` installiert restic 0.19.1 mit fest eingetragener SHA-256. Es wird nur angelegt, wenn Phase A es nicht schon angelegt hat. Nutzer: Go-Job und Job `instances` der CI, `scripts/vm-test.sh`, `scripts/testvm-deploy.sh`.
+- Ein gemeinsames Installationsskript `scripts/install-restic.sh` installiert restic 0.19.1 mit fest eingetragener SHA-256. Phase A hat es angelegt (ohne Argument, Ziel `/usr/local/bin/restic`); diese Phase ruft es zusätzlich auf. Nutzer: Go-Job und Job `instances` der CI, `scripts/vm-test.sh`, `scripts/testvm-deploy.sh`.
 - `scripts/ci-instances.sh` hängt nach dem Plugin-Teil einen Abschnitt „backups“ an. Er läuft auf dem bereits laufenden Plugin-Server `ciplugins` und prüft der Reihe nach:
   - manuelles Backup mit `save-off`/`save-all flush`/`save-on` im Server-Log
   - Repo-Layout und Snapshot-Inhalt, direkt mit restic als `mcpanel-mc`
@@ -42,10 +42,8 @@
 ### Task 18: CI-Abnahme mit echtem restic, Units der Test-VM
 
 **Files:**
-- Create (falls Phase A es nicht angelegt hat): `scripts/install-restic.sh`
 - Modify: `scripts/ci-instances.sh` (Kopf, `files.toml`, Layout-Prüfung, Variablen, Helfer, Abschnitte „backups …“, `PASS`-Zeile)
 - Modify: `.github/workflows/ci.yml` (Filter `go`/`instances`, Go-Job falls nötig, Job `instances`)
-- Modify (nur falls Phase A restic dort inline installiert): `scripts/vm-test.sh`
 - Modify: `scripts/testvm-deploy.sh`
 
 **Interfaces:**
@@ -57,7 +55,6 @@
   - Layout `backups/` (`mcpanel-mc 0700`), `repos/<id>`, `keys/<id>` (0600).
   - Helfer des Plugin-Teils in `ci-instances.sh`: `papi`, `is_perror`, `jget`, `jcheck`, `totp`, `inst_field`, `pwait_for`, `p_running`, `p_rcon_ready`, `p_restarted`, `logs`, `fcurl`, `no_tmp_in`; Variablen `psecret`, `psrv`, `pdata`, `p_before`.
 - Produces:
-  - `scripts/install-restic.sh [DEST]`.
   - `scripts/ci-instances.sh AGENT_BINARY FILES_BINARY PANEL_BINARY` endet mit `PASS: instance acceptance (agent, files, plugins and backups path)`.
   - Test-VM-Deploy mit restic und Backup-fähigem Dateidienst.
 
@@ -87,69 +84,18 @@ Expected:
 - `restic_binary` in der Dateidienst-Konfiguration
 - Tags und `--stdin-filename data.tar` wie in den Global Constraints
 
-Ob Phase A `scripts/install-restic.sh` angelegt hat, entscheidet über Step 2.
+`scripts/install-restic.sh` stammt aus Phase A (Step 2 prüft es nur).
 
-- [ ] **Step 2: `scripts/install-restic.sh`**
+- [ ] **Step 2: `scripts/install-restic.sh` (aus Phase A, nur prüfen)**
 
-**Falls die Datei schon existiert** (Phase A): nur prüfen, dass Version und beide SHA-256 den Global Constraints entsprechen und dass sie `[DEST]` annimmt. Dann weiter mit Step 3.
-
-**Sonst:** mit genau diesem Inhalt anlegen (`chmod 0755`):
+Phase A hat das Skript angelegt (Plan 01, Aufgabe 3 Step 9) und ruft es aus `scripts/vm-test.sh` und dem Go-Job der CI auf. Es nimmt **kein Argument**, installiert immer nach `/usr/local/bin/restic`, braucht root (`sudo bash scripts/install-restic.sh`) und installiert `bzip2` bei Bedarf selbst. Diese Phase ändert es nicht; sie ruft es nur zusätzlich im Job `instances` und in `scripts/testvm-deploy.sh` auf.
 
 ```bash
-#!/usr/bin/env bash
-# Installs the pinned restic release (checksum-verified) to DEST (default /usr/local/bin/restic):
-# the binary the files service runs for backups (sub-project 4). Used by the CI (go and
-# instances jobs), scripts/vm-test.sh and scripts/testvm-deploy.sh. Idempotent: an installed
-# binary of the same version is kept.
-#
-# Usage: scripts/install-restic.sh [DEST]   (needs write access to DEST's directory)
-set -euo pipefail
-
-RESTIC_VERSION="0.19.1"
-dest="${1:-/usr/local/bin/restic}"
-
-case "$(uname -m)" in
-  x86_64) arch=amd64 sum=f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c ;;
-  aarch64) arch=arm64 sum=a5f64aaab53d51e311fa3829124c5b703f2d14cf187d8640b6be3b2b49376465 ;;
-  *)
-    echo "install-restic: unsupported architecture $(uname -m)" >&2
-    exit 1
-    ;;
-esac
-
-if [ -x "$dest" ] && "$dest" version 2>/dev/null | grep -q "^restic ${RESTIC_VERSION} "; then
-  exit 0
-fi
-
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-file="restic_${RESTIC_VERSION}_linux_${arch}.bz2"
-curl -fsSL -o "$tmp/$file" "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/$file"
-echo "$sum  $tmp/$file" | sha256sum -c --quiet
-bunzip2 "$tmp/$file"
-install -m 0755 "$tmp/${file%.bz2}" "$dest"
-"$dest" version
+grep -n 'RESTIC_VERSION=\|RESTIC_SHA256_\|BIN=' scripts/install-restic.sh
+grep -n 'install-restic' scripts/vm-test.sh .github/workflows/ci.yml
 ```
 
-Hat Phase A restic **inline** in `.github/workflows/ci.yml` (Go-Job) und `scripts/vm-test.sh` installiert, diese Stellen auf das Skript umstellen:
-
-- Go-Job, Schritt „Install restic“:
-
-```yaml
-      # Integration tests of the files service run against a real restic (sub-project 4 §8).
-      - name: Install restic
-        run: sudo scripts/install-restic.sh /usr/local/bin/restic
-```
-
-  Die Umgebungsvariable `MCPANEL_TEST_RESTIC: /usr/local/bin/restic` am Test-Schritt bleibt, wie Phase A sie gesetzt hat.
-
-- `scripts/vm-test.sh`: die Installationsfunktion von Phase A (Name per `grep -n restic scripts/vm-test.sh`) im Rumpf ersetzen durch:
-
-```bash
-  # Pinned and checksum-verified; a no-op when the same version is installed (sub-project 4 §7).
-  sudo bash scripts/install-restic.sh /usr/local/bin/restic >/dev/null
-  export MCPANEL_TEST_RESTIC=/usr/local/bin/restic
-```
+Expected: `RESTIC_VERSION="0.19.1"`, beide SHA-256 wie in den Global Constraints der Übersicht, `BIN="/usr/local/bin/restic"`; Aufrufe in `vm-test.sh` und im Go-Job. Weicht etwas ab: Lead fragen, nicht selbst ändern (Datei gehört Phase A).
 
 - [ ] **Step 3: `scripts/ci-instances.sh` – Kopf, Konfiguration, Layout, Variablen** (Reihenfolge wie im Skript)
 
@@ -537,7 +483,7 @@ Hinweise zu Step 5:
 ```yaml
       # The files service runs restic for backups (sub-project 4): the pinned release.
       - name: Install restic
-        run: sudo scripts/install-restic.sh /usr/local/bin/restic
+        run: sudo bash scripts/install-restic.sh
 
       # Real agent + Docker + itzg Paper server: routing by hostname, hardening, console
       # (rcon, log stream, player lists, planted player files), automatic restart after a
@@ -567,7 +513,7 @@ Hinweise zu Step 5:
 # the checked-out tree (the script is read after the checkout).
 install_restic() {
   log "restic"
-  quiet sudo bash "$SRC/scripts/install-restic.sh" /usr/local/bin/restic
+  quiet sudo bash "$SRC/scripts/install-restic.sh"
 }
 ```
 
@@ -648,7 +594,7 @@ ssh claude@192.168.1.117 'set -e
   rm -rf ~/wt-backups && git clone -q --branch feat/backups-ci-docs git@github.com:Bernotese/mc-panel.git ~/wt-backups
   cd ~/wt-backups && export PATH=/usr/local/go/bin:$PATH
   go build -o bin/agent ./cmd/agent && go build -o bin/files ./cmd/files && go build -o bin/panel ./cmd/panel
-  sudo bash scripts/install-restic.sh /usr/local/bin/restic
+  sudo bash scripts/install-restic.sh
   sudo systemctl stop mcpanel-panel mcpanel-files.service mcpanel-files.socket mcpanel-agent
   sudo bash scripts/ci-instances.sh bin/agent bin/files bin/panel; rc=$?
   sudo systemctl start mcpanel-agent mcpanel-files.socket mcpanel-files.service mcpanel-panel
@@ -660,7 +606,7 @@ Expected: alle `OK: … backups …`-Zeilen und `PASS: instance acceptance (agen
 - [ ] **Step 9: Commit, Draft-PR, CI**
 
 ```bash
-git add scripts/install-restic.sh scripts/ci-instances.sh scripts/testvm-deploy.sh scripts/vm-test.sh .github/workflows/ci.yml
+git add scripts/ci-instances.sh scripts/testvm-deploy.sh .github/workflows/ci.yml
 git commit -m "ci(backups): accept backup, restore and download on a real Paper server
 
 The instance acceptance installs the pinned restic and, on the plugins
@@ -678,7 +624,7 @@ git push
 gh pr create --draft --title "ci,docs: TP4 backup acceptance with a real restic and documentation" --body "$(cat <<'EOF'
 Phase C of docs/superpowers/plans/2026-10-12-backups-00-overview.md (Tasks 18–19, see docs/superpowers/plans/2026-10-12-backups-05-ci-docs.md).
 
-- `scripts/install-restic.sh`: pinned restic 0.19.1 (SHA-256) for CI, test VM tests and deploy
+- `scripts/install-restic.sh` (from phase A) now also installs restic for the instances job and the test VM deploy
 - `scripts/ci-instances.sh`: manual backup of a running Paper server (save-off/save-on), repo and tar content, restore with sudo, zip download, schedule firing in the panel's time zone, pin, delete, purge with the server, audit
 - `scripts/testvm-deploy.sh`: restic, `/srv/mc-panel/backups`, files unit (`ReadWritePaths`, `MemoryMax=1G`, `TasksMax=512`, `IOWeight`/`CPUWeight`)
 - docs: `docs/dev/acceptance-tp4.md`, `docs/dev/README.md`, `CLAUDE.md`, `README.md`
@@ -740,7 +686,7 @@ Manuell auf der Test-VM: alles mit Browser, Minecraft-Client, echter Session, Be
 3. Als `admin` anmelden. Server `survival` (Paper, aktuelle Version) läuft; im Minecraft-Client verbinden (`survival.mc.192-168-1-117.sslip.io`) und neben dem Spawn einen Turm aus **Holz** bauen.
 4. Benutzer `freund` hat nur `server.view` auf `survival` (aus TP3a). Benutzer `helfer` bekommt auf `survival` zusätzlich `server.backups` und `server.power` (Benutzer → Rechte). Beim Anhaken von „Backups“ erscheint der Hinweis, dass das Recht alle Dateien lesbar macht (Download) und den Stand zurücksetzen kann.
 5. Security Center → Benachrichtigungen: einen ntfy-Empfänger anlegen (z. B. `https://ntfy.sh/<zufälliges-thema>`, im Browser oder in der ntfy-App abonnieren), „Test senden“ kommt an.
-6. Zeitzone: Einstellungen → „Zeitzone für Backup-Zeitpläne“ steht auf `Europe/Berlin`.
+6. Zeitzone: Einstellungen → „Zeitzone für Backups“ steht auf `Europe/Berlin`.
 
 ## Kriterien
 
@@ -749,7 +695,7 @@ Manuell auf der Test-VM: alles mit Browser, Minecraft-Client, echter Session, Be
 | 1 | Manuelles Backup bei laufendem Server | als `helfer` Server `survival` → Tab „Backups“ → „Backup erstellen“, Notiz „Holzturm“ → bestätigen; parallel Tab „Konsole“ | Job-Anzeige zeigt die Schritte (speichern aus, sichern, speichern an); die Konsole zeigt `Automatic saving is now disabled`, `Saved the game`, `Automatic saving is now enabled`; danach steht der Snapshot als „manuell“ mit Notiz „Holzturm“, Zeit und Größe in der Liste; Spieler bleiben verbunden |
 | 2a | Zeitplan feuert | Karte „Zeitplan“: Modus „täglich“, Uhrzeit = jetzt + 3 min, Aufbewahrung „letzte“ 2, täglich/wöchentlich/monatlich 0 → Speichern | „Nächster Lauf“ zeigt die Uhrzeit (Hinweis auf die Zeitzone `Europe/Berlin`); zur Uhrzeit (± 1 min) startet ein Job, danach steht ein Snapshot „geplant“ da, „Letzter Lauf“ ist erfolgreich, „Nächster Lauf“ ist morgen |
 | 2b | Retention und Anpinnen | den ersten geplanten Snapshot anpinnen; danach den Zeitplan dreimal hintereinander auf jetzt + 2 min stellen und jeden Lauf abwarten | nach dem Anpinnen hat der Snapshot eine neue Kurz-ID; am Ende: der angepinnte plus die zwei neuesten geplanten Snapshots, ein älterer geplanter ist verschwunden; manuelle und „vor Restore“-Snapshots unverändert |
-| 2c | Zeitzone | als `admin` Einstellungen → Zeitzone `UTC` → Speichern; Tab „Backups“ neu laden; danach wieder `Europe/Berlin` | „Nächster Lauf“ verschiebt sich um den Abstand zwischen UTC und Berlin (1 bzw. 2 h); der Hinweis nennt die neue Zone; nach dem Zurückstellen stimmt der Termin wieder |
+| 2c | Zeitzone | als `admin` Einstellungen → Zeitzone `UTC` → Speichern; Tab „Backups“ nach ≤ 1 min neu laden (das panel rechnet die Termine beim nächsten Minuten-Tick neu); danach wieder `Europe/Berlin` | „Nächster Lauf“ verschiebt sich um den Abstand zwischen UTC und Berlin (1 bzw. 2 h); der Hinweis nennt die neue Zone; nach dem Zurückstellen stimmt der Termin wieder |
 | 3a | Restore | im Spiel den Holzturm durch **Stein** ersetzen; als `helfer` am Snapshot „Holzturm“ → „Wiederherstellen“ → Dialog: Servername abtippen → Sudo (Passwort bzw. TOTP) | Dialog erklärt Stopp, Sicherheits-Snapshot und Neustart; währenddessen ist „Starten“ gesperrt (Meldung, dass ein Datei- oder Backup-Vorgang läuft); Spieler werden getrennt; danach läuft der Server wieder, im Spiel steht der **Holz**turm; in der Liste steht ein neuer Snapshot „vor Restore“ |
 | 3b | Restore umkehrbar | den Snapshot „vor Restore“ wiederherstellen | im Spiel steht wieder der **Stein**turm |
 | 3c | Verborgenes bleibt, gestoppter Server bleibt gestoppt | `ssh claude@192.168.1.117 'sudo ls -la /srv/mc-panel/instances/<id>/ \| grep -E "\.rcon-cli\|\.mcpanel-"'` vor und nach einem Restore; Server stoppen, Restore, Status ansehen | `.rcon-cli.*` vorhanden und nicht aus dem Snapshot überschrieben; ein gestoppter Server ist nach dem Restore weiterhin gestoppt |
@@ -870,7 +816,7 @@ grep -rn "MaxNoteRunes\|max_backup_bytes\|max_backup_entries\|max_backup_jobs\|M
 grep -rn "6 \* time.Hour\|time.Minute\|120 \* time.Second\|60 \* time.Second" internal/backups/*.go | grep -v _test | head
 grep -rn "ActionBackup" internal/audit/types.go
 grep -rn "EventBackupFailed\|Backup failed" internal/notify/*.go
-grep -rn "Backup erstellen\|Wiederherstellen\|Herunterladen\|Anpinnen\|Zeitzone für Backup-Zeitpläne\|Backups ebenfalls löschen\|nicht verfügbar" web/src/i18n/de.ts | head -20
+grep -rn "Backup erstellen\|Wiederherstellen\|Herunterladen\|Anpinnen\|Zeitzone für Backups\|Backups ebenfalls löschen\|nicht verfügbar" web/src/i18n/de.ts | head -20
 ls web/e2e
 ```
 
