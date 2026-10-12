@@ -816,6 +816,205 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/servers/{id}/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Installed plugins or mods (jars on disk, matched to their source)
+         * @description Every jar in plugins/ resp. mods/ is matched by the install record of the panel (same name and sha512), else by a Modrinth hash lookup, else it is manual. If Modrinth is unreachable the affected jars stay manual and source_errors names it.
+         */
+        get: operations["listPlugins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/plugins/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search compatible projects of one source (20 per page; the most downloaded without q) */
+        get: operations["searchPlugins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/plugins/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Compatible versions of a project, newest first (at most 25) */
+        get: operations["listPluginVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/plugins/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview of an installation with its required dependencies
+         * @description Dependencies without a compatible downloadable version are listed in incompatible (200); the plan is then not installable. Only a problem of the requested project itself answers 409.
+         */
+        get: operations["resolvePlugin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/plugins/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a job that installs a project with its required dependencies (audited per jar)
+         * @description The plan is computed again (the preview is not trusted). Dependencies are installed first; a failed step ends the job, steps already done stay installed.
+         */
+        post: operations["installPlugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/plugins/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Available updates of the installed jars (cached for 1 h per server) */
+        get: operations["getPluginUpdates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/plugins/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a job that updates jars (audited per jar)
+         * @description A failed step does not stop the job; it then ends failed. Disabled jars stay disabled, new required dependencies are installed as well. A file without an available update, or no update at all, is 400 validation_failed.
+         */
+        post: operations["updatePlugins"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/plugins/toggle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable or disable a jar by renaming it to or from .jar.disabled (audited) */
+        post: operations["togglePlugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/plugins/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove a jar and its install record (audited) */
+        post: operations["deletePlugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/plugins/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The running or last plugin job of the server (kept in memory until the next job or a panel restart) */
+        get: operations["getPluginJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/plugins/icon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Project icon through the panel (CSP img-src self); only from cdn.modrinth.com and hangarcdn.papermc.io */
+        get: operations["getPluginIcon"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/audit": {
         parameters: {
             query?: never;
@@ -1446,6 +1645,214 @@ export interface components {
         FileJobResponse: {
             job: components["schemas"]["FileJob"] | null;
         };
+        /** @enum {string} */
+        PluginSource: "modrinth" | "hangar";
+        /** @enum {string} */
+        PluginKind: "plugin" | "mod";
+        /** @enum {string} */
+        PluginChannel: "release" | "beta" | "alpha";
+        /** @enum {string} */
+        PluginJarSource: "modrinth" | "hangar" | "manual";
+        PluginProjectRef: {
+            /** @description Modrinth project ID resp. Hangar ID (number as text) */
+            id: string;
+            slug: string;
+            title: string;
+            /** @description https://modrinth.com/<plugin|mod>/<slug> resp. https://hangar.papermc.io/<owner>/<slug> */
+            page_url: string;
+            /** @description Icon proxy /api/servers/{id}/plugins/icon?url=<encoded>; null without icon */
+            icon_url: string | null;
+        };
+        PluginVersionRef: {
+            /** @description Modrinth version ID resp. Hangar version name */
+            id: string;
+            name: string;
+            channel: components["schemas"]["PluginChannel"];
+        };
+        PluginJarMeta: {
+            kind: components["schemas"]["PluginKind"];
+            /** @description Mod id (fabric, neoforge); empty for plugins */
+            id: string;
+            name: string;
+            version: string;
+        };
+        InstalledJar: {
+            /** @description Base name incl. .jar resp. .jar.disabled */
+            file: string;
+            enabled: boolean;
+            /** Format: int64 */
+            size: number;
+            /**
+             * Format: int64
+             * @description Unix ms
+             */
+            mtime: number;
+            source: components["schemas"]["PluginJarSource"];
+            project: components["schemas"]["PluginProjectRef"] | null;
+            version: components["schemas"]["PluginVersionRef"] | null;
+            /** @description Read from the jar; null if not readable */
+            meta: components["schemas"]["PluginJarMeta"] | null;
+            /** @description The install record of the panel matches (name and sha512) */
+            installed_by_panel: boolean;
+        };
+        PluginInventory: {
+            kind: components["schemas"]["PluginKind"];
+            /** @enum {string} */
+            dir: "plugins" | "mods";
+            /** @description Game version of the instance (LATEST resolved); null if the version catalog is unavailable */
+            game_version: string | null;
+            sources: components["schemas"]["PluginSource"][];
+            /** @description Sorted by file name */
+            jars: components["schemas"]["InstalledJar"][];
+            /** @description More than 500 jars; only the first are listed */
+            truncated: boolean;
+            /** @description The server runs and the panel changed its plugins since it started */
+            restart_needed: boolean;
+            /** @description Sources that failed while matching; their jars may show as manual */
+            source_errors: components["schemas"]["PluginSource"][];
+        };
+        PluginSearchHit: {
+            source: components["schemas"]["PluginSource"];
+            project_id: string;
+            slug: string;
+            title: string;
+            /** @description Short description as plain text (never rendered as Markdown or HTML) */
+            description: string;
+            author: string;
+            /** Format: int64 */
+            downloads: number;
+            icon_url: string | null;
+            page_url: string;
+            installed: boolean;
+        };
+        PluginSearchResult: {
+            hits: components["schemas"]["PluginSearchHit"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+        };
+        PluginVersion: {
+            id: string;
+            name: string;
+            channel: components["schemas"]["PluginChannel"];
+            /**
+             * Format: int64
+             * @description Unix ms
+             */
+            published_at: number;
+            /** @description false = only available externally (external_url) */
+            downloadable: boolean;
+            external_url: string | null;
+        };
+        PluginVersionList: {
+            versions: components["schemas"]["PluginVersion"][];
+        };
+        PluginPlanEntry: {
+            source: components["schemas"]["PluginSource"];
+            project_id: string;
+            slug: string;
+            title: string;
+            version_id: string;
+            version_name: string;
+            channel: components["schemas"]["PluginChannel"];
+            filename: string;
+            /** Format: int64 */
+            size: number;
+            /** @description Title of the plan entry that requires it; null for the requested project */
+            required_by: string | null;
+        };
+        PluginAlready: {
+            source: components["schemas"]["PluginSource"];
+            project_id: string;
+            title: string;
+            file: string;
+        };
+        PluginExternal: {
+            name: string;
+            url: string;
+        };
+        /** @enum {string} */
+        PluginIncompatibleReason: "no_compatible_version" | "client_only" | "not_downloadable" | "too_deep" | "too_many";
+        PluginIncompatible: {
+            title: string;
+            reason: components["schemas"]["PluginIncompatibleReason"];
+        };
+        PluginResolution: {
+            /** @description Dependencies first */
+            install: components["schemas"]["PluginPlanEntry"][];
+            already: components["schemas"]["PluginAlready"][];
+            external: components["schemas"]["PluginExternal"][];
+            /** @description Not empty = the plan cannot be installed */
+            incompatible: components["schemas"]["PluginIncompatible"][];
+        };
+        InstallPluginRequest: {
+            source: components["schemas"]["PluginSource"];
+            project: string;
+            /** @description Omitted or null = newest compatible release */
+            version?: string | null;
+        };
+        PluginUpdate: {
+            file: string;
+            from: components["schemas"]["PluginVersionRef"];
+            to: components["schemas"]["PluginVersionRef"];
+        };
+        PluginUpdates: {
+            updates: components["schemas"]["PluginUpdate"][];
+            /**
+             * Format: int64
+             * @description Unix ms
+             */
+            checked_at: number;
+        };
+        UpdatePluginsRequest: {
+            /** @description Jar file names; empty = every jar with an update */
+            files: string[];
+        };
+        TogglePluginRequest: {
+            /** @description Base name ending in .jar or .jar.disabled */
+            file: string;
+            enabled: boolean;
+        };
+        PluginFileRequest: {
+            /** @description Base name ending in .jar or .jar.disabled */
+            file: string;
+        };
+        /** @enum {string} */
+        PluginJobKind: "install" | "update";
+        /** @enum {string} */
+        PluginJobState: "running" | "done" | "failed";
+        /** @enum {string} */
+        PluginJobStepState: "pending" | "downloading" | "done" | "failed" | "skipped";
+        /** @enum {string} */
+        PluginStepErrorCode: "download_failed" | "hash_mismatch" | "file_exists" | "insufficient_storage" | "files_unavailable" | "source_unavailable";
+        PluginJobStep: {
+            title: string;
+            /** @description Target file name (for an update the new name) */
+            file: string;
+            state: components["schemas"]["PluginJobStepState"];
+            error_code: components["schemas"]["PluginStepErrorCode"] | null;
+            /** @description Reason without host paths; empty unless failed */
+            error: string;
+        };
+        PluginJob: {
+            id: string;
+            kind: components["schemas"]["PluginJobKind"];
+            state: components["schemas"]["PluginJobState"];
+            steps: components["schemas"]["PluginJobStep"][];
+            /**
+             * Format: int64
+             * @description Unix ms
+             */
+            started_at: number;
+            /**
+             * Format: int64
+             * @description 0 while running
+             */
+            finished_at: number;
+        };
+        PluginJobResponse: {
+            job: components["schemas"]["PluginJob"] | null;
+        };
         PermissionGrant: {
             /** Format: int64 */
             server_id: number;
@@ -1701,6 +2108,24 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description plugins_unsupported (the server type has no plugins or mods: vanilla and modpacks) */
+        PluginsUnsupported: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description plugin_source_unavailable (Modrinth or Hangar unreachable, rate limited or answering unusably) or catalog_unavailable (the newest game version for LATEST cannot be resolved) */
+        PluginSourceUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: {
         CSRF: string;
@@ -1711,6 +2136,10 @@ export interface components {
         FilePathQuery: string;
         /** @description Relative path in the data directory */
         FilePathQueryRequired: string;
+        /** @description hangar only for plugins (paper, purpur) */
+        PluginSourceQuery: components["schemas"]["PluginSource"];
+        /** @description Modrinth project ID or slug, Hangar slug or ID */
+        PluginProjectQuery: string;
     };
     requestBodies: never;
     headers: never;
@@ -3558,6 +3987,413 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listPlugins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginInventory"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["PluginsUnsupported"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    searchPlugins: {
+        parameters: {
+            query: {
+                /** @description hangar only for plugins (paper, purpur) */
+                source: components["parameters"]["PluginSourceQuery"];
+                q?: string;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginSearchResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["PluginsUnsupported"];
+            429: components["responses"]["TooManyRequests"];
+            502: components["responses"]["PluginSourceUnavailable"];
+        };
+    };
+    listPluginVersions: {
+        parameters: {
+            query: {
+                /** @description hangar only for plugins (paper, purpur) */
+                source: components["parameters"]["PluginSourceQuery"];
+                /** @description Modrinth project ID or slug, Hangar slug or ID */
+                project: components["parameters"]["PluginProjectQuery"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginVersionList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["PluginsUnsupported"];
+            429: components["responses"]["TooManyRequests"];
+            502: components["responses"]["PluginSourceUnavailable"];
+        };
+    };
+    resolvePlugin: {
+        parameters: {
+            query: {
+                /** @description hangar only for plugins (paper, purpur) */
+                source: components["parameters"]["PluginSourceQuery"];
+                /** @description Modrinth project ID or slug, Hangar slug or ID */
+                project: components["parameters"]["PluginProjectQuery"];
+                /** @description Modrinth version ID or Hangar version name; omitted = newest compatible release, else newest compatible version */
+                version?: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginResolution"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description plugins_unsupported, plugin_incompatible (the requested project has no compatible version) or plugin_not_downloadable (the requested version is only available externally) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            502: components["responses"]["PluginSourceUnavailable"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    installPlugin: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstallPluginRequest"];
+            };
+        };
+        responses: {
+            /** @description Job started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description plugins_unsupported, conflict (a plugin job of this server is running, or the requested project is already installed in this version), plugin_incompatible (the plan has incompatible entries), plugin_not_downloadable (the requested version is only available externally) or file_exists (a target file name belongs to another jar) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            502: components["responses"]["PluginSourceUnavailable"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getPluginUpdates: {
+        parameters: {
+            query?: {
+                /** @description true (or 1) bypasses the cache; rate limited */
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginUpdates"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["PluginsUnsupported"];
+            429: components["responses"]["TooManyRequests"];
+            502: components["responses"]["PluginSourceUnavailable"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updatePlugins: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePluginsRequest"];
+            };
+        };
+        responses: {
+            /** @description Job started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description plugins_unsupported or conflict (a plugin job of this server is running) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            502: components["responses"]["PluginSourceUnavailable"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    togglePlugin: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TogglePluginRequest"];
+            };
+        };
+        responses: {
+            /** @description Done (also when the jar already had the requested state) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description plugins_unsupported, file_exists (a jar with the target name exists) or conflict (a plugin job of this server is running) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deletePlugin: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginFileRequest"];
+            };
+        };
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description plugins_unsupported or conflict (a plugin job of this server is running) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getPluginJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginJobResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["PluginsUnsupported"];
+        };
+    };
+    getPluginIcon: {
+        parameters: {
+            query: {
+                /** @description https://cdn.modrinth.com/... or https://hangarcdn.papermc.io/... */
+                url: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The image with its detected Content-Type (Cache-Control: private, max-age=86400; X-Content-Type-Options: nosniff) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                    "image/jpeg": string;
+                    "image/webp": string;
+                    "image/gif": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description plugin_source_unavailable (fetch failed, larger than 256 KiB or not a PNG, JPEG, WebP or GIF image) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     listAudit: {
