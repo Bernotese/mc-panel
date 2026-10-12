@@ -364,3 +364,21 @@ func TestJarsOutliveWriteTimeout(t *testing.T) {
 		t.Fatalf("slow jars: %d %s", status, body)
 	}
 }
+
+// The server's ReadTimeout does not cancel a long listing either: net/http clears the read
+// deadline when it starts its background read after the request body, so the request context
+// stays alive while a slow cache miss is computed.
+func TestJarsOutliveReadTimeout(t *testing.T) {
+	s, data := newService(t)
+	put(t, data, "plugins/a.jar", "a")
+	s.jarHook = func(string) { time.Sleep(300 * time.Millisecond) } // inside the ctx-checked pass
+	ts := httptest.NewUnstartedServer(NewServer(s, "test", discardLog()))
+	ts.Config.ReadTimeout = 100 * time.Millisecond
+	ts.Start()
+	t.Cleanup(ts.Close)
+	status, body := postJSON(t, ts, filesapi.PathJars, filesapi.JarsRequest{ID: 1, Dir: filesapi.DirPlugins})
+	var res filesapi.JarsResponse
+	if err := json.Unmarshal(body, &res); status != http.StatusOK || err != nil || len(res.Jars) != 1 || res.Jars[0].SHA256 == "" {
+		t.Fatalf("slow jars past ReadTimeout: %d %q", status, body)
+	}
+}
