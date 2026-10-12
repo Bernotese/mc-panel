@@ -78,6 +78,7 @@ describe('SettingsPage', () => {
         HttpResponse.json<ServerSettings>({
           base_domain: 'mc.example.com',
           curseforge_api_key_set: false,
+          backup_timezone: 'Europe/Berlin',
           docker: 'unavailable',
           unknown_containers: [{ id: 7, name: 'oldworld' }],
         }),

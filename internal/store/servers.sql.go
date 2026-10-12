@@ -124,7 +124,7 @@ func (q *Queries) ServersGetInstance(ctx context.Context, serverID int64) (Insta
 }
 
 const serversGetSettings = `-- name: ServersGetSettings :one
-SELECT id, base_domain, curseforge_api_key, updated_at FROM instance_settings WHERE id = 1
+SELECT id, base_domain, curseforge_api_key, updated_at, backup_timezone FROM instance_settings WHERE id = 1
 `
 
 func (q *Queries) ServersGetSettings(ctx context.Context) (InstanceSetting, error) {
@@ -135,6 +135,7 @@ func (q *Queries) ServersGetSettings(ctx context.Context) (InstanceSetting, erro
 		&i.BaseDomain,
 		&i.CurseforgeApiKey,
 		&i.UpdatedAt,
+		&i.BackupTimezone,
 	)
 	return i, err
 }
@@ -212,6 +213,20 @@ func (q *Queries) ServersNextServerID(ctx context.Context) (int64, error) {
 	var last_id int64
 	err := row.Scan(&last_id)
 	return last_id, err
+}
+
+const serversSetBackupTimezone = `-- name: ServersSetBackupTimezone :exec
+UPDATE instance_settings SET backup_timezone = ?, updated_at = ? WHERE id = 1
+`
+
+type ServersSetBackupTimezoneParams struct {
+	BackupTimezone string
+	UpdatedAt      int64
+}
+
+func (q *Queries) ServersSetBackupTimezone(ctx context.Context, arg ServersSetBackupTimezoneParams) error {
+	_, err := q.db.ExecContext(ctx, serversSetBackupTimezone, arg.BackupTimezone, arg.UpdatedAt)
+	return err
 }
 
 const serversSetDesiredState = `-- name: ServersSetDesiredState :execrows

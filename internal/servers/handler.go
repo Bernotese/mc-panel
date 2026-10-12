@@ -35,6 +35,9 @@ type Deps struct {
 	// Gate holds starts while a job rewrites a server's data directory (extract, restore);
 	// nil = never blocked.
 	Gate DataGate
+	// Backups deletes a server's backups on DELETE /servers/{id}?purge_backups=1; nil = nothing
+	// to delete.
+	Backups BackupPurger
 }
 
 type Handler struct {
@@ -46,6 +49,7 @@ type Handler struct {
 	inst    agentapi.InstancesClient
 	catalog CatalogSource
 	gate    DataGate
+	backups BackupPurger
 	log     *slog.Logger
 	power   *powerLimiter
 	kick    chan struct{} // Trigger -> reconcile loop (buffer 1, never blocks)
@@ -71,9 +75,13 @@ func NewHandler(d Deps) *Handler {
 	if gate == nil {
 		gate = noGate{}
 	}
+	purger := d.Backups
+	if purger == nil {
+		purger = noPurger{}
+	}
 	return &Handler{
 		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst, catalog: cat, log: log,
-		gate:  gate,
+		gate: gate, backups: purger,
 		power: newPowerLimiter(), kick: make(chan struct{}, 1),
 		reconcile: reconcileState{attempts: map[int64]attempt{}, warned: map[int64]bool{}, foreign: map[int64]bool{}},
 	}

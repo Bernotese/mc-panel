@@ -13,6 +13,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
 	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
@@ -40,15 +41,17 @@ type unknownContainerJSON struct {
 type settingsJSON struct {
 	BaseDomain          *string                `json:"base_domain"`
 	CurseForgeAPIKeySet bool                   `json:"curseforge_api_key_set"`
+	BackupTimezone      string                 `json:"backup_timezone"`
 	Docker              string                 `json:"docker"`
 	UnknownContainers   []unknownContainerJSON `json:"unknown_containers"`
 }
 
 // updateSettingsRequest is the OpenAPI schema UpdateServerSettingsRequest: absent fields stay,
-// null removes the value.
+// null removes the value; backup_timezone cannot be null.
 type updateSettingsRequest struct {
 	BaseDomain       optional[string] `json:"base_domain"`
 	CurseForgeAPIKey optional[string] `json:"curseforge_api_key"`
+	BackupTimezone   optional[string] `json:"backup_timezone"`
 }
 
 func nullString(ns sql.NullString) *string {
@@ -142,6 +145,7 @@ func (h *Handler) settingsBody(ctx context.Context) (settingsJSON, error) {
 	out := settingsJSON{
 		BaseDomain:          nullString(row.BaseDomain),
 		CurseForgeAPIKeySet: len(row.CurseforgeApiKey) > 0,
+		BackupTimezone:      row.BackupTimezone,
 		Docker:              dockerUnknown,
 		UnknownContainers:   []unknownContainerJSON{},
 	}
@@ -192,10 +196,16 @@ func (h *Handler) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.BackupTimezone.Set && (req.BackupTimezone.Value == nil || !filesapi.ValidTimezone(*req.BackupTimezone.Value)) {
+		writeValidation(w, r, "backup_timezone must be an IANA time zone such as Europe/Berlin")
+		return
+	}
 	var (
 		oldBase     *string
 		baseChanged bool
 		keyChanged  bool
+		oldTZ       string
+		tzChanged   bool
 	)
 	now := h.clock.Now().UnixMilli()
 	err := h.inTx(ctx, func(q *store.Queries) error {
@@ -216,6 +226,15 @@ func (h *Handler) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		baseChanged = params.BaseDomain != cur.BaseDomain
 		if err := q.ServersUpdateSettings(ctx, params); err != nil {
 			return err
+		}
+		oldTZ = cur.BackupTimezone
+		if req.BackupTimezone.Set && *req.BackupTimezone.Value != cur.BackupTimezone {
+			tzChanged = true
+			if err := q.ServersSetBackupTimezone(ctx, store.ServersSetBackupTimezoneParams{
+				BackupTimezone: *req.BackupTimezone.Value, UpdatedAt: now,
+			}); err != nil {
+				return err
+			}
 		}
 		switch {
 		case baseChanged:
@@ -240,6 +259,9 @@ func (h *Handler) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		if req.CurseForgeAPIKey.Value == nil {
 			details["curseforge_api_key"] = "removed"
 		}
+	}
+	if tzChanged {
+		details["backup_timezone"] = map[string]any{"old": oldTZ, "new": *req.BackupTimezone.Value}
 	}
 	if len(details) > 0 {
 		h.record(ctx, audit.ActionServerSettingsUpdate, settingsTarget, audit.ResultSuccess, details)

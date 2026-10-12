@@ -161,6 +161,7 @@ var defaultTitles = map[EventType]string{
 	EventUserDeleted:        "User deleted",
 	Event2FAChanged:         "Two-factor authentication changed",
 	EventAuditChainBroken:   "Audit log chain is broken",
+	EventBackupFailed:       "Backup failed",
 	EventTest:               "mc-panel test notification",
 }
 

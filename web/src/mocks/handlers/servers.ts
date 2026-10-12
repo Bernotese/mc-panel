@@ -31,6 +31,17 @@ function validMemory(m: unknown): m is number {
   return typeof m === 'number' && Number.isInteger(m) && m >= 1024 && m <= 32768 && m % 256 === 0
 }
 
+/** Like filesapi.ValidTimezone: an IANA name the browser knows, not empty, at most 64 characters. */
+function validTimezone(tz: unknown): tz is string {
+  if (typeof tz !== 'string' || tz === '' || tz === 'Local' || tz.length > 64) return false
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: tz })
+    return true
+  } catch {
+    return false
+  }
+}
+
 function settingsBody(): ServerSettings {
   return { ...db.serverSettings, unknown_containers: [] }
 }
@@ -166,6 +177,13 @@ export const serverOperations: MockOperation[] = [
         db.serverSettings.curseforge_api_key_set = body.curseforge_api_key !== null
         details.curseforge_api_key = body.curseforge_api_key === null ? 'removed' : 'set'
       }
+      if (body.backup_timezone !== undefined) {
+        if (!validTimezone(body.backup_timezone)) return apiError(400, 'validation_failed', 'backup_timezone must be an IANA time zone such as Europe/Berlin')
+        if (body.backup_timezone !== db.serverSettings.backup_timezone) {
+          details.backup_timezone = { old: db.serverSettings.backup_timezone, new: body.backup_timezone }
+          db.serverSettings.backup_timezone = body.backup_timezone
+        }
+      }
       if (Object.keys(details).length > 0) recordAudit(g.user, 'server.settings_update', 'servers', 'success', details)
       return HttpResponse.json<ServerSettings>(settingsBody())
     }),
@@ -221,12 +239,20 @@ export const serverOperations: MockOperation[] = [
     http.delete(`${API}/servers/:id`, ({ request, params }) => {
       const g = guard(request, { admin: true, sudo: true })
       if (g instanceof Response) return g
+      const raw = new URL(request.url).searchParams.get('purge_backups')
+      if (raw !== null && !['1', 'true', '0', 'false'].includes(raw)) return apiError(400, 'validation_failed', 'purge_backups must be true, false, 1 or 0')
+      const purge = raw === '1' || raw === 'true'
       const id = idParam(params)
       const server = db.servers.find((s) => s.id === id)
       if (!server) return apiError(404, 'not_found', 'server not found')
       db.servers = db.servers.filter((s) => s.id !== id)
       for (const [userId, grants] of db.grants) db.grants.set(userId, grants.filter((gr) => gr.server_id !== id))
-      recordAudit(g.user, 'server.delete', `server:${server.id}`, 'success', { name: server.name })
+      const details: Record<string, unknown> = { name: server.name }
+      if (purge) {
+        // Task 3 adds db.backups/db.backupJobs; until then there is nothing to purge.
+        details.backups_purged = true
+      }
+      recordAudit(g.user, 'server.delete', `server:${server.id}`, 'success', details)
       return noContent()
     }),
   ),

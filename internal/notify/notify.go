@@ -18,6 +18,7 @@ const (
 	EventUserDeleted        EventType = "user.deleted"
 	Event2FAChanged         EventType = "auth.2fa_changed"
 	EventAuditChainBroken   EventType = "audit.chain_broken"
+	EventBackupFailed       EventType = "backup.failed"
 	EventTest               EventType = "test"
 )
 

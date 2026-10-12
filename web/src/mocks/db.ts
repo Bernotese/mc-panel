@@ -346,6 +346,7 @@ export function notConfiguredStatus(): ServerStatus {
 export interface MockServerSettings {
   base_domain: string | null
   curseforge_api_key_set: boolean
+  backup_timezone: string
   docker: 'ok' | 'unavailable' | 'unknown'
 }
 
@@ -545,7 +546,7 @@ function seed(now: number): MockDb {
     fileJobs: {},
     plugins: seedPlugins(now),
     pluginJobs: {},
-    serverSettings: { base_domain: 'mc.example.com', curseforge_api_key_set: false, docker: 'ok' },
+    serverSettings: { base_domain: 'mc.example.com', curseforge_api_key_set: false, backup_timezone: 'Europe/Berlin', docker: 'ok' },
     catalogs: {
       vanilla: {
         versions: [
