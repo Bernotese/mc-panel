@@ -32,6 +32,8 @@ const (
 	maxFileDownloads = 16 // single files
 	maxJobsTotal     = 2
 	cleanupMaxDepth  = 64
+	maxHashRuns      = 2    // concurrent jar checksum and metadata passes (spec 3c §5.1)
+	hashCacheSize    = 4096 // cached jars (spec 3c §5.1)
 	fileMode         = 0o644
 	dirMode          = 0o755
 	serverProps      = "server.properties"
@@ -57,6 +59,10 @@ type Service struct {
 	zipDownloads  chan struct{} // at most maxZipDownloads concurrent folder zips
 	fileDownloads chan struct{} // at most maxFileDownloads concurrent file downloads
 	jobs          *jobs
+	hashSlots     chan struct{}     // at most maxHashRuns jar passes at a time, for all requests
+	jarCache      *hashCache        // checksums and metadata by file identity
+	jarHashMax    int64             // larger jars get no checksums (filesapi.MaxJarHashBytes; tests lower it)
+	jarHook       func(name string) // tests: runs before every jar that is computed, not cached
 	// tempToken is part of every temp name this process creates, so CleanupTemp, which runs
 	// while the service already serves, removes only the leftovers of earlier runs.
 	tempToken string
@@ -74,6 +80,9 @@ func New(cfg Config) *Service {
 		uploads:       make(chan struct{}, maxUploads),
 		zipDownloads:  make(chan struct{}, maxZipDownloads),
 		fileDownloads: make(chan struct{}, maxFileDownloads),
+		hashSlots:     make(chan struct{}, maxHashRuns),
+		jarCache:      newHashCache(hashCacheSize),
+		jarHashMax:    filesapi.MaxJarHashBytes,
 		tempToken:     randomHex(4),
 	}
 	instances := regexp.QuoteMeta(filepath.Join(cfg.InstancesDir, "instances") + string(filepath.Separator))
@@ -309,7 +318,8 @@ func fsErr(err error) error {
 		return nil
 	case errors.Is(err, filesapi.ErrNotFound), errors.Is(err, filesapi.ErrExists), errors.Is(err, filesapi.ErrModified),
 		errors.Is(err, filesapi.ErrNotRegular), errors.Is(err, filesapi.ErrNotText), errors.Is(err, filesapi.ErrTooLarge),
-		errors.Is(err, filesapi.ErrInsufficientStorage), errors.Is(err, filesapi.ErrBusy), errors.Is(err, filesapi.ErrInvalid):
+		errors.Is(err, filesapi.ErrInsufficientStorage), errors.Is(err, filesapi.ErrBusy), errors.Is(err, filesapi.ErrInvalid),
+		errors.Is(err, filesapi.ErrHashMismatch):
 		return err
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
 		return fmt.Errorf("%w: %w", filesapi.ErrNotFound, err)

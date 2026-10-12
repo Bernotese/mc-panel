@@ -2,6 +2,9 @@ package files
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +17,20 @@ import (
 // Upload stores body (exactly size bytes) at path via a temp file next to it; the target
 // only changes when every byte arrived. At most maxUploads run at the same time.
 func (s *Service) Upload(ctx context.Context, id int64, p string, overwrite bool, size int64, body io.Reader) (filesapi.UploadResponse, error) {
+	return s.UploadChecked(ctx, id, p, overwrite, size, filesapi.Checksum{}, body)
+}
+
+// UploadChecked is Upload with an expected digest (spec 3c §5.2). With a non-zero sum it
+// computes sha256 and sha512 while it writes the temp file and compares them before fsync and
+// rename: a mismatch is ErrHashMismatch, the temp file is removed and the target stays as it
+// was. Only a checked upload answers with both digests; the zero Checksum means no check.
+func (s *Service) UploadChecked(ctx context.Context, id int64, p string, overwrite bool, size int64, sum filesapi.Checksum, body io.Reader) (filesapi.UploadResponse, error) {
+	checked := sum != (filesapi.Checksum{})
+	if checked {
+		if err := sum.Validate(); err != nil {
+			return filesapi.UploadResponse{}, err
+		}
+	}
 	if size < 0 {
 		return filesapi.UploadResponse{}, fmt.Errorf("%w: Content-Length is required", filesapi.ErrInvalid)
 	}
@@ -71,7 +88,12 @@ func (s *Service) Upload(ctx context.Context, id int64, p string, overwrite bool
 		}
 	}()
 	src := &bodyReader{r: body}
-	n, err := io.Copy(landingWriter{w: f, res: res}, io.LimitReader(src, size+1))
+	h256, h512 := sha256.New(), sha512.New()
+	var dst io.Writer = landingWriter{w: f, res: res}
+	if checked {
+		dst = io.MultiWriter(dst, h256, h512) // one pass: both digests while the bytes land
+	}
+	n, err := io.Copy(dst, io.LimitReader(src, size+1))
 	if src.err != nil {
 		// The caller's body broke off or stalled: its problem, not an internal error (the panel
 		// would otherwise report the service as unavailable).
@@ -82,6 +104,13 @@ func (s *Service) Upload(ctx context.Context, id int64, p string, overwrite bool
 	}
 	if err == nil {
 		err = ctx.Err()
+	}
+	out := filesapi.UploadResponse{Size: n}
+	if err == nil && checked {
+		out.SHA256, out.SHA512 = hex.EncodeToString(h256.Sum(nil)), hex.EncodeToString(h512.Sum(nil))
+		if !sum.Matches(out.SHA256, out.SHA512) {
+			err = fmt.Errorf("%w: the upload does not match the expected %s checksum", filesapi.ErrHashMismatch, sum.Algo)
+		}
 	}
 	if err == nil {
 		err = f.Sync()
@@ -96,7 +125,7 @@ func (s *Service) Upload(ctx context.Context, id int64, p string, overwrite bool
 		return filesapi.UploadResponse{}, err
 	}
 	committed = true
-	return filesapi.UploadResponse{Size: n}, nil
+	return out, nil
 }
 
 // bodyReader records the error of the upload body (as opposed to a write error on disk).
