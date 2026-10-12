@@ -9,3 +9,6 @@ func SetDownloadHeaderTimeout(c *UnixClient, d time.Duration) { c.downloadHeader
 func SetCallTimeouts(c *UnixClient, call, long time.Duration) {
 	c.callTimeout, c.deleteTimeout, c.extractTimeout = call, long, long
 }
+
+// SetJarsTimeout sets the timeout of a jars listing.
+func SetJarsTimeout(c *UnixClient, d time.Duration) { c.jarsTimeout = d }

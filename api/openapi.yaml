@@ -15,6 +15,7 @@ tags:
   - { name: servers, description: 'Servers and power control' }
   - { name: console, description: 'Live console: log stream, RCON commands, players' }
   - { name: files, description: 'File browser of a server: list, edit, upload, download, manage, extract' }
+  - { name: plugins, description: 'Plugins and mods of a server: inventory, search in Modrinth and Hangar, install, update, toggle, remove' }
   - { name: audit, description: 'Audit log' }
   - { name: security, description: 'Security center: attempts, jails, IP rules, settings, notifiers, agent' }
 paths:
@@ -811,6 +812,212 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/plugins:
+    get:
+      operationId: listPlugins
+      tags: [plugins]
+      summary: Installed plugins or mods (jars on disk, matched to their source)
+      description: 'Every jar in plugins/ resp. mods/ is matched by the install record of the panel (same name and sha512), else by a Modrinth hash lookup, else it is manual. If Modrinth is unreachable the affected jars stay manual and source_errors names it.'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PluginInventory' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/PluginsUnsupported' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/plugins/search:
+    get:
+      operationId: searchPlugins
+      tags: [plugins]
+      summary: Search compatible projects of one source (20 per page; the most downloaded without q)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/PluginSourceQuery'
+        - { name: q, in: query, required: false, schema: { type: string, maxLength: 100, default: '' } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, maximum: 1000, default: 0 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PluginSearchResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/PluginsUnsupported' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/PluginSourceUnavailable' }
+  /servers/{id}/plugins/versions:
+    get:
+      operationId: listPluginVersions
+      tags: [plugins]
+      summary: Compatible versions of a project, newest first (at most 25)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/PluginSourceQuery'
+        - $ref: '#/components/parameters/PluginProjectQuery'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PluginVersionList' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/PluginsUnsupported' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/PluginSourceUnavailable' }
+  /servers/{id}/plugins/resolve:
+    get:
+      operationId: resolvePlugin
+      tags: [plugins]
+      summary: Preview of an installation with its required dependencies
+      description: 'Dependencies without a compatible downloadable version are listed in incompatible (200); the plan is then not installable. Only a problem of the requested project itself answers 409.'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/PluginSourceQuery'
+        - $ref: '#/components/parameters/PluginProjectQuery'
+        - { name: version, in: query, required: false, description: 'Modrinth version ID or Hangar version name; omitted = newest compatible release, else newest compatible version', schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._+-]+$' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PluginResolution' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'plugins_unsupported, plugin_incompatible (the requested project has no compatible version) or plugin_not_downloadable (the requested version is only available externally)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/PluginSourceUnavailable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/plugins/install:
+    post:
+      operationId: installPlugin
+      tags: [plugins]
+      summary: Start a job that installs a project with its required dependencies (audited per jar)
+      description: The plan is computed again (the preview is not trusted). Dependencies are installed first; a failed step ends the job, steps already done stay installed.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/InstallPluginRequest' } } }
+      responses:
+        '202': { description: Job started, content: { application/json: { schema: { $ref: '#/components/schemas/PluginJob' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'plugins_unsupported, conflict (a plugin job of this server is running, or the requested project is already installed in this version), plugin_incompatible (the plan has incompatible entries), plugin_not_downloadable (the requested version is only available externally) or file_exists (a target file name belongs to another jar)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/PluginSourceUnavailable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/plugins/updates:
+    get:
+      operationId: getPluginUpdates
+      tags: [plugins]
+      summary: Available updates of the installed jars (cached for 1 h per server)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - { name: refresh, in: query, required: false, description: 'true (or 1) bypasses the cache; rate limited', schema: { type: boolean, default: false } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PluginUpdates' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/PluginsUnsupported' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/PluginSourceUnavailable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/plugins/update:
+    post:
+      operationId: updatePlugins
+      tags: [plugins]
+      summary: Start a job that updates jars (audited per jar)
+      description: A failed step does not stop the job; it then ends failed. Disabled jars stay disabled, new required dependencies are installed as well. A file without an available update, or no update at all, is 400 validation_failed.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdatePluginsRequest' } } }
+      responses:
+        '202': { description: Job started, content: { application/json: { schema: { $ref: '#/components/schemas/PluginJob' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'plugins_unsupported or conflict (a plugin job of this server is running)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/PluginSourceUnavailable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/plugins/toggle:
+    post:
+      operationId: togglePlugin
+      tags: [plugins]
+      summary: Enable or disable a jar by renaming it to or from .jar.disabled (audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/TogglePluginRequest' } } }
+      responses:
+        '204': { description: Done (also when the jar already had the requested state) }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'plugins_unsupported, file_exists (a jar with the target name exists) or conflict (a plugin job of this server is running)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/plugins/delete:
+    post:
+      operationId: deletePlugin
+      tags: [plugins]
+      summary: Remove a jar and its install record (audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PluginFileRequest' } } }
+      responses:
+        '204': { description: Removed }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'plugins_unsupported or conflict (a plugin job of this server is running)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/plugins/jobs:
+    get:
+      operationId: getPluginJob
+      tags: [plugins]
+      summary: The running or last plugin job of the server (kept in memory until the next job or a panel restart)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PluginJobResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/PluginsUnsupported' }
+  /servers/{id}/plugins/icon:
+    get:
+      operationId: getPluginIcon
+      tags: [plugins]
+      summary: Project icon through the panel (CSP img-src self); only from cdn.modrinth.com and hangarcdn.papermc.io
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - { name: url, in: query, required: true, description: 'https://cdn.modrinth.com/... or https://hangarcdn.papermc.io/...', schema: { type: string, minLength: 1, maxLength: 512 } }
+      responses:
+        '200':
+          description: 'The image with its detected Content-Type (Cache-Control: private, max-age=86400; X-Content-Type-Options: nosniff)'
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+            image/gif: { schema: { type: string, format: binary } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { description: 'plugin_source_unavailable (fetch failed, larger than 256 KiB or not a PNG, JPEG, WebP or GIF image)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /audit:
     get:
       operationId: listAudit
@@ -1021,6 +1228,8 @@ components:
     Limit: { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
     FilePathQuery: { name: path, in: query, required: false, description: 'Relative path in the data directory; empty = root', schema: { type: string, maxLength: 4096, default: '' } }
     FilePathQueryRequired: { name: path, in: query, required: true, description: 'Relative path in the data directory', schema: { type: string, minLength: 1, maxLength: 4096 } }
+    PluginSourceQuery: { name: source, in: query, required: true, description: 'hangar only for plugins (paper, purpur)', schema: { $ref: '#/components/schemas/PluginSource' } }
+    PluginProjectQuery: { name: project, in: query, required: true, description: 'Modrinth project ID or slug, Hangar slug or ID', schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._+-]+$' } }
   responses:
     BadRequest: { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Unauthorized: { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -1030,12 +1239,14 @@ components:
     TooManyRequests: { description: Rate limited (Retry-After header set), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     ServiceUnavailable: { description: 'Agent, Docker, RCON or the files service not available (agent_unavailable, docker_unavailable, rcon_unavailable, files_unavailable)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     InsufficientStorage: { description: insufficient_storage (less than the reserve would be left), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    PluginsUnsupported: { description: 'plugins_unsupported (the server type has no plugins or mods: vanilla and modpacks)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    PluginSourceUnavailable: { description: 'plugin_source_unavailable (Modrinth or Hangar unreachable, rate limited or answering unusably) or catalog_unavailable (the newest game version for LATEST cannot be resolved)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   schemas:
     Error:
       type: object
       required: [error, message]
       properties:
-        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, files_unavailable, file_exists, file_modified, not_text, not_regular, instance_running, insufficient_storage, internal] }
+        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, files_unavailable, file_exists, file_modified, not_text, not_regular, instance_running, insufficient_storage, plugins_unsupported, plugin_source_unavailable, plugin_not_downloadable, plugin_incompatible, internal] }
         message: { type: string }
         request_id: { type: string }
     Role: { type: string, enum: [admin, user] }
@@ -1440,6 +1651,206 @@ components:
           oneOf:
             - $ref: '#/components/schemas/FileJob'
             - type: 'null'
+    PluginSource: { type: string, enum: [modrinth, hangar] }
+    PluginKind: { type: string, enum: [plugin, mod] }
+    PluginChannel: { type: string, enum: [release, beta, alpha] }
+    PluginJarSource: { type: string, enum: [modrinth, hangar, manual] }
+    PluginProjectRef:
+      type: object
+      required: [id, slug, title, page_url, icon_url]
+      properties:
+        id: { type: string, description: 'Modrinth project ID resp. Hangar ID (number as text)' }
+        slug: { type: string }
+        title: { type: string }
+        page_url: { type: string, description: 'https://modrinth.com/<plugin|mod>/<slug> resp. https://hangar.papermc.io/<owner>/<slug>' }
+        icon_url: { type: [string, 'null'], description: 'Icon proxy /api/servers/{id}/plugins/icon?url=<encoded>; null without icon' }
+    PluginVersionRef:
+      type: object
+      required: [id, name, channel]
+      properties:
+        id: { type: string, description: 'Modrinth version ID resp. Hangar version name' }
+        name: { type: string }
+        channel: { $ref: '#/components/schemas/PluginChannel' }
+    PluginJarMeta:
+      type: object
+      required: [kind, id, name, version]
+      properties:
+        kind: { $ref: '#/components/schemas/PluginKind' }
+        id: { type: string, description: 'Mod id (fabric, neoforge); empty for plugins' }
+        name: { type: string }
+        version: { type: string }
+    InstalledJar:
+      type: object
+      required: [file, enabled, size, mtime, source, project, version, meta, installed_by_panel]
+      properties:
+        file: { type: string, description: 'Base name incl. .jar resp. .jar.disabled' }
+        enabled: { type: boolean }
+        size: { type: integer, format: int64 }
+        mtime: { type: integer, format: int64, description: Unix ms }
+        source: { $ref: '#/components/schemas/PluginJarSource' }
+        project: { anyOf: [{ $ref: '#/components/schemas/PluginProjectRef' }, { type: 'null' }] }
+        version: { anyOf: [{ $ref: '#/components/schemas/PluginVersionRef' }, { type: 'null' }] }
+        meta: { anyOf: [{ $ref: '#/components/schemas/PluginJarMeta' }, { type: 'null' }], description: 'Read from the jar; null if not readable' }
+        installed_by_panel: { type: boolean, description: 'The install record of the panel matches (name and sha512)' }
+    PluginInventory:
+      type: object
+      required: [kind, dir, game_version, sources, jars, truncated, restart_needed, source_errors]
+      properties:
+        kind: { $ref: '#/components/schemas/PluginKind' }
+        dir: { type: string, enum: [plugins, mods] }
+        game_version: { type: [string, 'null'], description: 'Game version of the instance (LATEST resolved); null if the version catalog is unavailable' }
+        sources: { type: array, items: { $ref: '#/components/schemas/PluginSource' } }
+        jars: { type: array, items: { $ref: '#/components/schemas/InstalledJar' }, description: Sorted by file name }
+        truncated: { type: boolean, description: 'More than 500 jars; only the first are listed' }
+        restart_needed: { type: boolean, description: 'The server runs and the panel changed its plugins since it started' }
+        source_errors: { type: array, items: { $ref: '#/components/schemas/PluginSource' }, description: 'Sources that failed while matching; their jars may show as manual' }
+    PluginSearchHit:
+      type: object
+      required: [source, project_id, slug, title, description, author, downloads, icon_url, page_url, installed]
+      properties:
+        source: { $ref: '#/components/schemas/PluginSource' }
+        project_id: { type: string }
+        slug: { type: string }
+        title: { type: string }
+        description: { type: string, description: 'Short description as plain text (never rendered as Markdown or HTML)' }
+        author: { type: string }
+        downloads: { type: integer, format: int64 }
+        icon_url: { type: [string, 'null'] }
+        page_url: { type: string }
+        installed: { type: boolean }
+    PluginSearchResult:
+      type: object
+      required: [hits, total, offset]
+      properties:
+        hits: { type: array, items: { $ref: '#/components/schemas/PluginSearchHit' } }
+        total: { type: integer, format: int64 }
+        offset: { type: integer }
+    PluginVersion:
+      type: object
+      required: [id, name, channel, published_at, downloadable, external_url]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        channel: { $ref: '#/components/schemas/PluginChannel' }
+        published_at: { type: integer, format: int64, description: Unix ms }
+        downloadable: { type: boolean, description: 'false = only available externally (external_url)' }
+        external_url: { type: [string, 'null'] }
+    PluginVersionList:
+      type: object
+      required: [versions]
+      properties:
+        versions: { type: array, items: { $ref: '#/components/schemas/PluginVersion' } }
+    PluginPlanEntry:
+      type: object
+      required: [source, project_id, slug, title, version_id, version_name, channel, filename, size, required_by]
+      properties:
+        source: { $ref: '#/components/schemas/PluginSource' }
+        project_id: { type: string }
+        slug: { type: string }
+        title: { type: string }
+        version_id: { type: string }
+        version_name: { type: string }
+        channel: { $ref: '#/components/schemas/PluginChannel' }
+        filename: { type: string }
+        size: { type: integer, format: int64 }
+        required_by: { type: [string, 'null'], description: 'Title of the plan entry that requires it; null for the requested project' }
+    PluginAlready:
+      type: object
+      required: [source, project_id, title, file]
+      properties:
+        source: { $ref: '#/components/schemas/PluginSource' }
+        project_id: { type: string }
+        title: { type: string }
+        file: { type: string }
+    PluginExternal:
+      type: object
+      required: [name, url]
+      properties:
+        name: { type: string }
+        url: { type: string }
+    PluginIncompatibleReason: { type: string, enum: [no_compatible_version, client_only, not_downloadable, too_deep, too_many] }
+    PluginIncompatible:
+      type: object
+      required: [title, reason]
+      properties:
+        title: { type: string }
+        reason: { $ref: '#/components/schemas/PluginIncompatibleReason' }
+    PluginResolution:
+      type: object
+      required: [install, already, external, incompatible]
+      properties:
+        install: { type: array, items: { $ref: '#/components/schemas/PluginPlanEntry' }, description: Dependencies first }
+        already: { type: array, items: { $ref: '#/components/schemas/PluginAlready' } }
+        external: { type: array, items: { $ref: '#/components/schemas/PluginExternal' } }
+        incompatible: { type: array, items: { $ref: '#/components/schemas/PluginIncompatible' }, description: 'Not empty = the plan cannot be installed' }
+    InstallPluginRequest:
+      type: object
+      additionalProperties: false
+      required: [source, project]
+      properties:
+        source: { $ref: '#/components/schemas/PluginSource' }
+        project: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._+-]+$' }
+        version: { type: [string, 'null'], minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._+-]+$', description: 'Omitted or null = newest compatible release' }
+    PluginUpdate:
+      type: object
+      required: [file, from, to]
+      properties:
+        file: { type: string }
+        from: { $ref: '#/components/schemas/PluginVersionRef' }
+        to: { $ref: '#/components/schemas/PluginVersionRef' }
+    PluginUpdates:
+      type: object
+      required: [updates, checked_at]
+      properties:
+        updates: { type: array, items: { $ref: '#/components/schemas/PluginUpdate' } }
+        checked_at: { type: integer, format: int64, description: Unix ms }
+    UpdatePluginsRequest:
+      type: object
+      additionalProperties: false
+      required: [files]
+      properties:
+        files: { type: array, maxItems: 500, items: { type: string, minLength: 5, maxLength: 255 }, description: 'Jar file names; empty = every jar with an update' }
+    TogglePluginRequest:
+      type: object
+      additionalProperties: false
+      required: [file, enabled]
+      properties:
+        file: { type: string, minLength: 5, maxLength: 255, description: 'Base name ending in .jar or .jar.disabled' }
+        enabled: { type: boolean }
+    PluginFileRequest:
+      type: object
+      additionalProperties: false
+      required: [file]
+      properties:
+        file: { type: string, minLength: 5, maxLength: 255, description: 'Base name ending in .jar or .jar.disabled' }
+    PluginJobKind: { type: string, enum: [install, update] }
+    PluginJobState: { type: string, enum: [running, done, failed] }
+    PluginJobStepState: { type: string, enum: [pending, downloading, done, failed, skipped] }
+    PluginStepErrorCode: { type: string, enum: [download_failed, hash_mismatch, file_exists, insufficient_storage, files_unavailable, source_unavailable] }
+    PluginJobStep:
+      type: object
+      required: [title, file, state, error_code, error]
+      properties:
+        title: { type: string }
+        file: { type: string, description: 'Target file name (for an update the new name)' }
+        state: { $ref: '#/components/schemas/PluginJobStepState' }
+        error_code: { anyOf: [{ $ref: '#/components/schemas/PluginStepErrorCode' }, { type: 'null' }] }
+        error: { type: string, description: 'Reason without host paths; empty unless failed' }
+    PluginJob:
+      type: object
+      required: [id, kind, state, steps, started_at, finished_at]
+      properties:
+        id: { type: string }
+        kind: { $ref: '#/components/schemas/PluginJobKind' }
+        state: { $ref: '#/components/schemas/PluginJobState' }
+        steps: { type: array, items: { $ref: '#/components/schemas/PluginJobStep' } }
+        started_at: { type: integer, format: int64, description: Unix ms }
+        finished_at: { type: integer, format: int64, description: 0 while running }
+    PluginJobResponse:
+      type: object
+      required: [job]
+      properties:
+        job: { anyOf: [{ $ref: '#/components/schemas/PluginJob' }, { type: 'null' }] }
     PermissionGrant:
       type: object
       required: [server_id, permissions]

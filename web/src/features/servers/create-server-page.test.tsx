@@ -65,7 +65,7 @@ describe('CreateServerPage', () => {
     expect(screen.getByText('Bitte korrigiere die markierten Felder.')).toBeInTheDocument()
     expect(screen.getByText('Ohne Zustimmung zur EULA kann kein Server angelegt werden.')).toBeInTheDocument()
     await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(db.servers).toHaveLength(3)
+    expect(db.servers).toHaveLength(4)
     expect(onCreated).not.toHaveBeenCalled()
   })
 

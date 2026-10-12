@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"crypto/sha512"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -300,6 +303,45 @@ func (f *fakeFiles) Upload(ctx context.Context, id int64, path string, overwrite
 	f.uploads[path] = b
 	f.mu.Unlock()
 	return filesapi.UploadResponse{Size: size}, nil
+}
+
+// UploadChecked stores the upload like Upload, but only if the digest really matches.
+func (f *fakeFiles) UploadChecked(ctx context.Context, id int64, path string, overwrite bool, size int64, sum filesapi.Checksum, body io.Reader) (filesapi.UploadResponse, error) {
+	if err := sum.Validate(); err != nil {
+		return filesapi.UploadResponse{}, err
+	}
+	if err := f.begin(ctx, fmt.Sprintf("upload-checked %d %s overwrite=%t size=%d %s", id, path, overwrite, size, sum.Algo)); err != nil {
+		return filesapi.UploadResponse{}, err
+	}
+	b, err := io.ReadAll(body)
+	if err != nil {
+		return filesapi.UploadResponse{}, fmt.Errorf("%w: %w", filesapi.ErrUnavailable, err)
+	}
+	if int64(len(b)) != size {
+		return filesapi.UploadResponse{}, fmt.Errorf("%w: got %d bytes, announced %d", filesapi.ErrInvalid, len(b), size)
+	}
+	h256, h512 := digests(b)
+	if !sum.Matches(h256, h512) {
+		return filesapi.UploadResponse{}, fmt.Errorf("%w: %s differs", filesapi.ErrHashMismatch, sum.Algo)
+	}
+	f.mu.Lock()
+	f.uploads[path] = b
+	f.mu.Unlock()
+	return filesapi.UploadResponse{Size: size, SHA256: h256, SHA512: h512}, nil
+}
+
+// Jars lists nothing: the file browser never asks for jars.
+func (f *fakeFiles) Jars(ctx context.Context, id int64, dir string) (filesapi.JarsResponse, error) {
+	if err := f.begin(ctx, fmt.Sprintf("jars %d %s", id, dir)); err != nil {
+		return filesapi.JarsResponse{}, err
+	}
+	return filesapi.JarsResponse{Jars: []filesapi.Jar{}}, nil
+}
+
+// digests returns the lowercase hex sha256 and sha512 of b.
+func digests(b []byte) (sha256Hex, sha512Hex string) {
+	s256, s512 := sha256.Sum256(b), sha512.Sum512(b)
+	return hex.EncodeToString(s256[:]), hex.EncodeToString(s512[:])
 }
 
 func (f *fakeFiles) Download(ctx context.Context, id int64, path string) (filesapi.Download, error) {

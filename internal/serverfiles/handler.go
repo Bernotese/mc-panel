@@ -335,6 +335,12 @@ func (noFiles) Extract(context.Context, filesapi.ExtractRequest) (filesapi.Job, 
 	return filesapi.Job{}, errNoFiles
 }
 func (noFiles) Job(context.Context, int64) (*filesapi.Job, error) { return nil, errNoFiles }
+func (noFiles) UploadChecked(context.Context, int64, string, bool, int64, filesapi.Checksum, io.Reader) (filesapi.UploadResponse, error) {
+	return filesapi.UploadResponse{}, errNoFiles
+}
+func (noFiles) Jars(context.Context, int64, string) (filesapi.JarsResponse, error) {
+	return filesapi.JarsResponse{}, errNoFiles
+}
 
 var errNoAgent = fmt.Errorf("%w: no agent configured", agentapi.ErrUnavailable)
 

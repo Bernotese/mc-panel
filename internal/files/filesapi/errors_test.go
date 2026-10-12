@@ -20,6 +20,7 @@ func TestCodesRoundTrip(t *testing.T) {
 		filesapi.CodeInsufficientStorage: http.StatusInsufficientStorage,
 		filesapi.CodeBusy:                http.StatusTooManyRequests,
 		filesapi.CodeInvalid:             http.StatusBadRequest,
+		filesapi.CodeHashMismatch:        http.StatusBadRequest,
 	} {
 		err := filesapi.ErrorFromCode(code)
 		if err == nil {
@@ -48,6 +49,7 @@ func TestStatusErrorIs(t *testing.T) {
 		{&filesapi.StatusError{Status: 507, Code: "insufficient_storage"}, filesapi.ErrInsufficientStorage},
 		{&filesapi.StatusError{Status: 500}, filesapi.ErrUnavailable},
 		{&filesapi.StatusError{Status: 418, Code: "teapot"}, filesapi.ErrUnavailable},
+		{&filesapi.StatusError{Status: 400, Code: "hash_mismatch"}, filesapi.ErrHashMismatch},
 	}
 	for _, c := range cases {
 		if !errors.Is(c.err, c.want) {
@@ -56,6 +58,13 @@ func TestStatusErrorIs(t *testing.T) {
 	}
 	if errors.Is(&filesapi.StatusError{Status: 507, Code: "insufficient_storage"}, filesapi.ErrUnavailable) {
 		t.Fatal("a known code must not also match ErrUnavailable")
+	}
+	// hash_mismatch and invalid share the status 400 but are different sentinels.
+	if errors.Is(&filesapi.StatusError{Status: 400, Code: "hash_mismatch"}, filesapi.ErrInvalid) {
+		t.Fatal("hash_mismatch must not match ErrInvalid")
+	}
+	if errors.Is(&filesapi.StatusError{Status: 400, Code: "invalid"}, filesapi.ErrHashMismatch) {
+		t.Fatal("invalid must not match ErrHashMismatch")
 	}
 }
 
