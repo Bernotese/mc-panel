@@ -55,8 +55,9 @@ export function updateServer(id: number, body: UpdateServerRequest): Promise<Ser
   return unwrap(api.PATCH('/servers/{id}', { params: { path: { id } }, body }))
 }
 
-export function deleteServer(id: number): Promise<void> {
-  return unwrapVoid(api.DELETE('/servers/{id}', { params: { path: { id } } }))
+/** purgeBackups also removes the server's restic repository (backups spec §5.6); the parameter is only sent when true. */
+export function deleteServer(id: number, purgeBackups = false): Promise<void> {
+  return unwrapVoid(api.DELETE('/servers/{id}', { params: { path: { id }, query: purgeBackups ? { purge_backups: true } : undefined } }))
 }
 
 export function powerServer(id: number, action: PowerAction): Promise<PowerResponse> {

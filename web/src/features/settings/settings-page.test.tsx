@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
@@ -98,5 +98,26 @@ describe('SettingsPage', () => {
     const status = await screen.findByRole('region', { name: 'Status' })
     expect(within(status).getAllByText('Erreichbar')).toHaveLength(2)
     expect(within(status).getByText('Keine.')).toBeInTheDocument()
+  })
+
+  it('saves the time zone of the backup schedules', async () => {
+    const user = userEvent.setup()
+    let sent: unknown = null
+    server.use(
+      http.put('*/api/servers/settings', async ({ request }) => {
+        sent = await request.json()
+        return HttpResponse.json<ServerSettings>({ ...db.serverSettings, unknown_containers: [], backup_timezone: 'UTC' })
+      }),
+    )
+    await renderWithProviders(<SettingsPage />, { me: loginAs('admin', { sudo: true }) })
+    const card = await screen.findByRole('region', { name: 'Zeitzone für Backups' })
+    const select = within(card).getByRole('combobox', { name: 'Zeitzone' })
+    expect(select).toHaveValue('Europe/Berlin')
+    const save = within(card).getByRole('button', { name: 'Zeitzone speichern' })
+    expect(save).toBeDisabled()
+    await user.selectOptions(select, 'UTC')
+    await user.click(save)
+    await waitFor(() => expect(sent).toEqual({ backup_timezone: 'UTC' }))
+    expect(await screen.findByText('Zeitzone gespeichert.')).toBeInTheDocument()
   })
 })

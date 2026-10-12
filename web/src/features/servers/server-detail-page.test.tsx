@@ -233,13 +233,13 @@ describe('ServerDetailPage', () => {
     expect(within(group).getByRole('button', { name: 'Starten' })).toBeDisabled()
   })
 
-  it('shows the extraction lock text when the panel answers a start with 409', async () => {
+  it('shows the data job lock text when the panel answers a start with 409', async () => {
     server.use(http.post('*/api/servers/:id/power', () => HttpResponse.json({ error: 'conflict', message: 'extracting' }, { status: 409 })))
     const user = userEvent.setup()
     await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('admin') })
     const group = await screen.findByRole('group', { name: 'Steuerung für creative' })
     await user.click(within(group).getByRole('button', { name: 'Starten' }))
-    expect(await screen.findByText('Entpacken läuft – Starten ist erst danach möglich.')).toBeInTheDocument()
+    expect(await screen.findByText('Gerade wird ein Archiv entpackt oder ein Backup wiederhergestellt – Starten ist erst danach möglich.')).toBeInTheDocument()
     expect(screen.queryByText('Konflikt mit dem aktuellen Zustand')).not.toBeInTheDocument()
   })
 
@@ -306,5 +306,58 @@ describe('ServerDetailPage', () => {
     db.grants.set(2, [{ server_id: 2, permissions: ['server.view', 'server.backups'] }])
     await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('alice') })
     expect(await screen.findByRole('tab', { name: 'Backups' })).toBeInTheDocument()
+  })
+
+  it('deletes the backups too when the checkbox is set', async () => {
+    const user = userEvent.setup()
+    let query: string | null = null
+    server.use(
+      http.delete('*/api/servers/:id', ({ request }) => {
+        query = new URL(request.url).search
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    await renderWithProviders(<ServerDetailPage serverId={1} />, { path: '/servers/1', me: loginAs('admin', { sudo: true }) })
+    await user.click(await screen.findByRole('tab', { name: 'Löschen' }))
+    expect(screen.getByText('Ohne diese Option bleiben die Backups des Servers auf dem Host liegen und belegen weiter Platz.')).toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: 'Backups ebenfalls löschen' }))
+    await user.type(screen.getByLabelText('Zum Bestätigen den Namen „survival“ eintippen'), 'survival')
+    await user.click(screen.getByRole('button', { name: 'Server löschen' }))
+    await waitFor(() => expect(query).toBe('?purge_backups=true'))
+  })
+
+  it('offers no backup checkbox for a server without instance and sends no parameter by default', async () => {
+    const user = userEvent.setup()
+    let query: string | null = null
+    server.use(
+      http.delete('*/api/servers/:id', ({ request }) => {
+        query = new URL(request.url).search
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    await renderWithProviders(<ServerDetailPage serverId={3} />, { path: '/servers/3', me: loginAs('admin', { sudo: true }) })
+    await screen.findByLabelText('Zum Bestätigen den Namen „lobby“ eintippen')
+    expect(screen.queryByRole('checkbox', { name: 'Backups ebenfalls löschen' })).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Zum Bestätigen den Namen „lobby“ eintippen'), 'lobby')
+    await user.click(screen.getByRole('button', { name: 'Server löschen' }))
+    await waitFor(() => expect(query).toBe(''))
+  })
+
+  it('explains a 409 when the server cannot be deleted while a restore runs', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.delete('*/api/servers/:id', () =>
+        HttpResponse.json({ error: 'conflict', message: 'a file or backup job is running for this server; try again when it is done' }, { status: 409 }),
+      ),
+    )
+    await renderWithProviders(<ServerDetailPage serverId={1} />, { path: '/servers/1', me: loginAs('admin', { sudo: true }) })
+    await user.click(await screen.findByRole('tab', { name: 'Löschen' }))
+    await user.type(screen.getByLabelText('Zum Bestätigen den Namen „survival“ eintippen'), 'survival')
+    await user.click(screen.getByRole('button', { name: 'Server löschen' }))
+    expect(
+      await screen.findByText('Für diesen Server wird gerade ein Archiv entpackt oder ein Backup wiederhergestellt. Lösche ihn, wenn der Auftrag fertig ist.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Konflikt mit dem aktuellen Zustand')).not.toBeInTheDocument()
+    expect(db.servers.some((s) => s.id === 1)).toBe(true)
   })
 })

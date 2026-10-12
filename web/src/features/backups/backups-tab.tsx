@@ -24,6 +24,7 @@ import { CreateBackupDialog } from './create-dialog'
 import { JobStatus } from './job-status'
 import { useBackupErrorToast } from './messages'
 import { RestoreDialog } from './restore-dialog'
+import { ScheduleCard } from './schedule-card'
 import { SnapshotList } from './snapshot-list'
 import { useBackupJob } from './use-backup-job'
 
@@ -148,6 +149,7 @@ export function BackupsTab({ server }: { server: Server }) {
           onDelete={setDeleting}
         />
       </SectionCard>
+      <ScheduleCard serverId={server.id} schedule={data.schedule} />
       {creating ? <CreateBackupDialog pending={create.isPending} onClose={() => setCreating(false)} onSubmit={(note) => create.mutate(note)} /> : null}
       {restoring ? (
         <RestoreDialog
