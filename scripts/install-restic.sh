@@ -28,7 +28,10 @@ case "$(uname -m)" in
   aarch64 | arm64) arch=arm64 sum="${RESTIC_SHA256_ARM64}" ;;
   *) die "unsupported architecture $(uname -m)" ;;
 esac
-command -v bunzip2 > /dev/null || apt-get install -y bzip2
+if ! command -v bunzip2 > /dev/null; then
+  apt-get update
+  apt-get install -y bzip2
+fi
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT

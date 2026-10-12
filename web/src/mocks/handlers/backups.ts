@@ -125,7 +125,39 @@ function scheduleBody(b: MockBackups): BackupSchedule {
   return { ...b.schedule, timezone: db.serverSettings.backup_timezone }
 }
 
-/** A rough next run in the browser's time zone (the panel computes daily/weekly in the panel time zone). */
+interface WallClock {
+  year: number
+  month: number // 1..12
+  day: number
+  hour: number
+  minute: number
+  second: number
+  weekday: number // 0 = Sunday
+}
+
+/** The wall clock of an instant in a time zone. */
+function wallClock(ms: number, tz: string): WallClock {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(ms))
+  const n = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((x) => x.type === type)?.value ?? 0)
+  const w = { year: n('year'), month: n('month'), day: n('day'), hour: n('hour'), minute: n('minute'), second: n('second') }
+  return { ...w, weekday: new Date(Date.UTC(w.year, w.month - 1, w.day)).getUTCDay() }
+}
+
+/** The instant of a wall-clock time (minutes after midnight) in a time zone; day may overflow the month. */
+function zonedTime(tz: string, year: number, month: number, day: number, minutes: number): number {
+  const local = Date.UTC(year, month - 1, day, 0, minutes)
+  const offset = (ms: number) => {
+    const w = wallClock(ms, tz)
+    return Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, w.second) - ms
+  }
+  // the second pass corrects the offset across a DST change
+  return local - offset(local - offset(local))
+}
+
+/** The next run like the panel: daily/weekly in the panel time zone (backup_timezone). */
 function nextRun(s: MockBackups['schedule'], now: number): number | null {
   switch (s.mode) {
     case 'off':
@@ -138,13 +170,24 @@ function nextRun(s: MockBackups['schedule'], now: number): number | null {
     }
     case 'daily':
     case 'weekly': {
-      const d = new Date(now)
-      d.setHours(Math.floor(s.time_of_day / 60), s.time_of_day % 60, 0, 0)
-      if (s.mode === 'weekly') d.setDate(d.getDate() + ((s.weekday - d.getDay() + 7) % 7))
-      while (d.getTime() <= now) d.setDate(d.getDate() + (s.mode === 'weekly' ? 7 : 1))
-      return d.getTime()
+      const tz = db.serverSettings.backup_timezone
+      const today = wallClock(now, tz)
+      const step = s.mode === 'weekly' ? 7 : 1
+      let k = s.mode === 'weekly' ? (s.weekday - today.weekday + 7) % 7 : 0
+      let t = zonedTime(tz, today.year, today.month, today.day + k, s.time_of_day)
+      while (t <= now) {
+        k += step
+        t = zonedTime(tz, today.year, today.month, today.day + k, s.time_of_day)
+      }
+      return t
     }
   }
+}
+
+/** A queued or running restore holds the server like the panel's data gate (deleteServer answers 409). */
+export function restoreActive(serverId: number): boolean {
+  const job = jobNow(serverId)
+  return job !== null && job.kind === 'restore' && (job.state === 'queued' || job.state === 'running')
 }
 
 function validNote(n: string): boolean {
@@ -153,12 +196,9 @@ function validNote(n: string): boolean {
 
 /** "<server>-YYYYMMDD-HHMMSS.zip" in the panel time zone (backup_timezone), like the panel. */
 function zipName(server: MockServer, time: number): string {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: db.serverSettings.backup_timezone,
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-  }).formatToParts(new Date(time))
-  const p = (type: Intl.DateTimeFormatPartTypes) => parts.find((x) => x.type === type)?.value ?? '00'
-  return `${server.name}-${p('year')}${p('month')}${p('day')}-${p('hour')}${p('minute')}${p('second')}.zip`
+  const w = wallClock(time, db.serverSettings.backup_timezone)
+  const p = (v: number, len = 2) => String(v).padStart(len, '0')
+  return `${server.name}-${p(w.year, 4)}${p(w.month)}${p(w.day)}-${p(w.hour)}${p(w.minute)}${p(w.second)}.zip`
 }
 
 /** The schedule fields of an audit entry (from/to), like the panel. */

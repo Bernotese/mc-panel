@@ -208,3 +208,32 @@ func TestDeletePurgeSurvivesAClientThatGoesAway(t *testing.T) {
 		t.Fatalf("audit = %+v", en)
 	}
 }
+
+// While a job rewrites the data directory (extract or restore), a delete is refused with 409
+// before anything changes; afterwards it goes through.
+func TestDeleteRefusedWhileADataJobRuns(t *testing.T) {
+	e := newEnv(t)
+	setBaseDomain(t, e.db, "mc.example.com")
+	admin := e.admin()
+	s := e.create(t, paper("survival"))
+	e.gate.set(s.ID, true)
+	audits := len(e.rec.Entries)
+	rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d?purge_backups=1", s.ID), nil, &admin)
+	if rec.Code != http.StatusConflict || errCode(t, rec) != "conflict" ||
+		!strings.Contains(rec.Body.String(), "a file or backup job is running for this server") {
+		t.Fatalf("delete during a data job: %d %s", rec.Code, rec.Body)
+	}
+	if n := e.count(t, "servers"); n != 1 {
+		t.Fatalf("refused delete removed rows: %d", n)
+	}
+	if calls := e.purger.takeCalls(); len(calls) != 0 {
+		t.Fatalf("refused delete purged: %v", calls)
+	}
+	if len(e.rec.Entries) != audits {
+		t.Fatalf("refused delete was audited: %v", e.rec.Actions())
+	}
+	e.gate.set(s.ID, false)
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", s.ID), nil, &admin); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete after the job: %d %s", rec.Code, rec.Body)
+	}
+}

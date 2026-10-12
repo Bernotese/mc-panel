@@ -400,6 +400,7 @@ func purgeBackupsParam(r *http.Request) (purge, ok bool) {
 // Without the agent a configured server cannot be deleted, so no container is orphaned; a
 // server without instance needs no agent. A container of another server is never removed.
 // With ?purge_backups=1 the server's backups are deleted after the commit (backups spec §5.6).
+// While a job rewrites the data directory (extract or restore) the delete is refused like a start.
 func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	purge, ok := purgeBackupsParam(r)
@@ -409,6 +410,10 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	}
 	s, ok := h.loadServer(w, r)
 	if !ok {
+		return
+	}
+	if h.gate.DataJobRunning(ctx, s.ID) {
+		writeConflict(w, r, "a file or backup job is running for this server; try again when it is done")
 		return
 	}
 	configured, ok := h.deleteServerRows(w, r, s)
