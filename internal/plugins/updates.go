@@ -63,6 +63,13 @@ func (h *Handler) checkUpdates(ctx context.Context, srv server, gv string, refre
 	return h.updates.Get(ctx, key, func(ctx context.Context) (updatesResult, error) { return h.findUpdates(ctx, srv, gv) })
 }
 
+// updatesCached reports whether checkUpdates would answer from the cache: a check that asks the
+// upstream counts against the lookup limit (jobs, toggling and deleting drop the cache).
+func (h *Handler) updatesCached(srv server, gv string) bool {
+	v, ok := h.updates.Peek(updatesKey(srv.ID))
+	return ok && v.scope == updatesScope(srv, gv)
+}
+
 func (h *Handler) findUpdates(ctx context.Context, srv server, gv string) (updatesResult, error) {
 	inv, err := h.inventory(ctx, srv)
 	if err != nil {
@@ -162,12 +169,12 @@ func (h *Handler) handleUpdates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	refresh := parseRefresh(r.URL.Query().Get("refresh"))
-	if refresh && !h.allow(w, r) {
-		return
-	}
 	gv, err := h.gameVersion(ctx, srv)
 	if err != nil {
 		h.writeError(w, r, err)
+		return
+	}
+	if (refresh || !h.updatesCached(srv, gv)) && !h.allow(w, r) {
 		return
 	}
 	res, err := h.checkUpdates(ctx, srv, gv, refresh)
@@ -211,6 +218,9 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
+	if !h.updatesCached(srv, gv) && !h.allow(w, r) {
+		return
+	}
 	upd, err := h.checkUpdates(ctx, srv, gv, false)
 	if err != nil {
 		h.writeError(w, r, err)
@@ -219,7 +229,8 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	selected := upd.Updates
 	if len(req.Files) > 0 {
 		selected = make([]updateEntry, 0, len(req.Files))
-		for _, f := range req.Files {
+		slices.Sort(req.Files)
+		for _, f := range slices.Compact(req.Files) { // a name given twice is updated once
 			i := slices.IndexFunc(upd.Updates, func(u updateEntry) bool { return u.File == f })
 			if i < 0 {
 				writeValidation(w, r, "no update available for "+f)
@@ -255,13 +266,17 @@ func (h *Handler) updateTasks(ctx context.Context, srv server, gv string, inv in
 	for _, j := range inv.Jars {
 		current[j.File] = j
 	}
-	p := newPlanner(h, srv, gv, installedByProject(inv), nil)
+	installed := installedByProject(inv)
 	var tasks []jobTask
 	for g, u := range selected {
 		from := u.From
+		// One planner per update: a dependency two updates share is planned in both groups (the
+		// job installs it once, runJob), so neither update runs without it.
+		p := newPlanner(h, srv, gv, installed, nil)
 		root, deps, terr := h.planUpdate(ctx, p, u)
 		if j, ok := current[u.File]; !ok || j.sha512 != u.jar.sha512 {
-			deps, terr = nil, &taskError{codeFilesUnavailable, "the jar changed since the update check, check for updates again"}
+			deps, terr = nil, &taskError{codeFileExists, "the jar changed since the update check, check for updates again"}
+			h.updates.Delete(updatesKey(srv.ID))
 		}
 		for _, d := range deps {
 			tasks = append(tasks, jobTask{entry: d, group: g})

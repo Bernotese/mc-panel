@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/clock"
@@ -183,7 +182,24 @@ func DefaultHostAllowed(u *url.URL) bool {
 	if p := u.Port(); p != "" && p != "443" {
 		return false
 	}
-	return slices.Contains(AllowedHosts, strings.ToLower(u.Hostname()))
+	host, ok := asciiLower(u.Hostname())
+	return ok && slices.Contains(AllowedHosts, host)
+}
+
+// asciiLower lowercases A-Z only and refuses any byte outside printable ASCII: Unicode case
+// mapping would turn e.g. "\u0130" into "i" (strings.ToLower) or the Kelvin sign into "k"
+// (strings.EqualFold), while net/http contacts the punycode form of the original host.
+func asciiLower(s string) (string, bool) {
+	b := []byte(s)
+	for i, c := range b {
+		switch {
+		case c < 0x21 || c > 0x7e:
+			return "", false
+		case 'A' <= c && c <= 'Z':
+			b[i] = c + ('a' - 'A')
+		}
+	}
+	return string(b), true
 }
 
 // sameHostHTTPS follows an API redirect only to https on the host of the original request, at

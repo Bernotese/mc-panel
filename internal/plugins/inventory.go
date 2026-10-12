@@ -206,6 +206,12 @@ func (h *Handler) enrichProjects(ctx context.Context, srv server, inv *inventory
 		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			mu.Lock()
+			down := failed[k.src]
+			mu.Unlock()
+			if down {
+				return // the source failed already: do not wait for every lookup (source_errors)
+			}
 			p, err := h.up.Project(ctx, k.src, k.id)
 			mu.Lock()
 			defer mu.Unlock()

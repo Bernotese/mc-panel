@@ -10,3 +10,7 @@ func WaitJobs(h *Handler) { h.jobs.wg.Wait() }
 
 // SetIconCacheBytes shrinks the icon cache (eviction test).
 func SetIconCacheBytes(h *Handler, n int64) { h.icons.maxBytes = n }
+
+// SetBusyBackoff shortens the wait before a job step retries an upload the service refused as
+// busy.
+func SetBusyBackoff(h *Handler, d time.Duration) { h.busyBackoff = d }

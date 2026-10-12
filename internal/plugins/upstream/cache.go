@@ -28,9 +28,10 @@ type cacheEntry[V any] struct {
 }
 
 type cacheCall[V any] struct {
-	done chan struct{}
-	v    V
-	err  error
+	done  chan struct{}
+	v     V
+	err   error
+	stale bool // Delete ran while the fetch was in flight: its result is not stored
 }
 
 // NewCache returns an empty cache; maxEntries <= 0 means MaxCacheEntries.
@@ -69,10 +70,12 @@ func (c *Cache[V]) Get(ctx context.Context, key string, fetch func(context.Conte
 func (c *Cache[V]) run(ctx context.Context, key string, fetch func(context.Context) (V, error), cl *cacheCall[V]) {
 	v, err := fetch(ctx)
 	c.mu.Lock()
-	if err == nil && c.ttl > 0 {
+	if err == nil && c.ttl > 0 && !cl.stale {
 		c.putLocked(key, v)
 	}
-	delete(c.inflight, key)
+	if c.inflight[key] == cl {
+		delete(c.inflight, key)
+	}
 	c.mu.Unlock()
 	cl.v, cl.err = v, err
 	close(cl.done)
@@ -95,10 +98,16 @@ func (c *Cache[V]) Put(key string, v V) {
 	c.putLocked(key, v)
 }
 
+// Delete drops key, including a fetch of it that is still running: its waiters still get its
+// result, but it is not stored, and the next Get fetches again.
 func (c *Cache[V]) Delete(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.entries, key)
+	if cl, ok := c.inflight[key]; ok {
+		cl.stale = true
+		delete(c.inflight, key)
+	}
 }
 
 func (c *Cache[V]) Len() int {

@@ -246,14 +246,19 @@ type fakeFiles struct {
 	mu        sync.Mutex
 	files     map[string][]byte // "<id>/<path>"
 	meta      map[string]*filesapi.JarMeta
-	errs      map[string]error // by operation: jars, upload, rename, delete, mkdir
+	errs      map[string]error   // by operation: jars, upload, rename, delete, mkdir
+	errQueue  map[string][]error // by operation, used up one per call before errs (nil = success)
+	callErrs  map[string]error   // by exact call, e.g. "delete 1 plugins/x.jar"
 	calls     []string
 	truncated bool
 	onUpload  func(id int64, path string) // runs before an upload is stored (outside the lock)
 }
 
 func newFakeFiles() *fakeFiles {
-	return &fakeFiles{files: map[string][]byte{}, meta: map[string]*filesapi.JarMeta{}, errs: map[string]error{}}
+	return &fakeFiles{
+		files: map[string][]byte{}, meta: map[string]*filesapi.JarMeta{}, errs: map[string]error{},
+		errQueue: map[string][]error{}, callErrs: map[string]error{},
+	}
 }
 
 func fkey(id int64, p string) string { return fmt.Sprintf("%d/%s", id, p) }
@@ -291,6 +296,20 @@ func (f *fakeFiles) setErr(op string, err error) {
 	f.errs[op] = err
 }
 
+// queueErrs makes the next len(errs) calls of op answer errs in order.
+func (f *fakeFiles) queueErrs(op string, errs ...error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.errQueue[op] = append(f.errQueue[op], errs...)
+}
+
+// setCallErr makes every call equal to call (see begin) fail with err.
+func (f *fakeFiles) setCallErr(call string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.callErrs[call] = err
+}
+
 func (f *fakeFiles) setTruncated(v bool) { f.mu.Lock(); f.truncated = v; f.mu.Unlock() }
 
 func (f *fakeFiles) setOnUpload(h func(id int64, path string)) {
@@ -314,6 +333,13 @@ func (f *fakeFiles) begin(ctx context.Context, op, call string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, call)
+	if q := f.errQueue[op]; len(q) > 0 {
+		f.errQueue[op] = q[1:]
+		return q[0]
+	}
+	if err, ok := f.callErrs[call]; ok {
+		return err
+	}
 	return f.errs[op]
 }
 
