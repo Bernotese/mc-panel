@@ -98,7 +98,7 @@ func TestDescribeJarSkipsSwappedFIFO(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		_, ok, err := s.describeJar(ctx, root, filesapi.DirPlugins, jarFile{name: "pipe.jar", fi: fi})
+		_, ok, err := s.describeJar(ctx, root, &jarScan{id: 1, dir: filesapi.DirPlugins, budget: s.jarHashBudget}, jarFile{name: "pipe.jar", fi: fi})
 		done <- result{ok, err}
 	}()
 	select {
