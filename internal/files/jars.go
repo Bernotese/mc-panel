@@ -47,8 +47,9 @@ func (s *Service) Jars(ctx context.Context, id int64, dir string) (filesapi.Jars
 		return filesapi.JarsResponse{}, err
 	}
 	res.Truncated = truncated
+	scan := &jarScan{id: id, dir: dir, budget: s.jarHashBudget}
 	for _, jf := range found {
-		jar, ok, err := s.describeJar(ctx, root, dir, jf)
+		jar, ok, err := s.describeJar(ctx, root, scan, jf)
 		if err != nil {
 			return filesapi.JarsResponse{}, err
 		}
@@ -101,13 +102,66 @@ func findJars(root *os.Root, dir string) ([]jarFile, bool, error) {
 	return out, truncated, nil
 }
 
+// jarScan is the state of one listing: the instance, the folder and the hash budget left.
+type jarScan struct {
+	id     int64
+	dir    string
+	budget int64 // bytes this listing may still hash (jarHashBudget at the start)
+}
+
+// instSlot serialises the jar passes of one instance; refs counts the requests holding or
+// waiting for it, the entry goes when it drops to zero.
+type instSlot struct {
+	ch   chan struct{}
+	refs int
+}
+
+// hashSlot waits for this instance's slot and then for one of the service-wide maxHashRuns
+// slots (in that order, so a waiting request never holds a service-wide slot), as long as ctx
+// lives. release gives both back.
+func (s *Service) hashSlot(ctx context.Context, id int64) (release func(), err error) {
+	s.instMu.Lock()
+	is := s.instHash[id]
+	if is == nil {
+		is = &instSlot{ch: make(chan struct{}, 1)}
+		s.instHash[id] = is
+	}
+	is.refs++
+	s.instMu.Unlock()
+	drop := func() {
+		s.instMu.Lock()
+		if is.refs--; is.refs == 0 {
+			delete(s.instHash, id)
+		}
+		s.instMu.Unlock()
+	}
+	select {
+	case is.ch <- struct{}{}:
+	case <-ctx.Done():
+		drop()
+		return nil, ctx.Err()
+	}
+	select {
+	case s.hashSlots <- struct{}{}:
+	case <-ctx.Done():
+		<-is.ch
+		drop()
+		return nil, ctx.Err()
+	}
+	return func() {
+		<-s.hashSlots
+		<-is.ch
+		drop()
+	}, nil
+}
+
 // describeJar returns the entry of one jar; ok is false when it is no longer a regular file
 // (removed, or swapped for a symlink or FIFO after findJars saw it). A jar the service cannot
 // open for another reason (permissions) is listed without checksums and metadata.
-func (s *Service) describeJar(ctx context.Context, root *os.Root, dir string, jf jarFile) (filesapi.Jar, bool, error) {
+func (s *Service) describeJar(ctx context.Context, root *os.Root, scan *jarScan, jf jarFile) (filesapi.Jar, bool, error) {
 	enabled, _ := filesapi.IsJarName(jf.name)
 	jar := filesapi.Jar{Name: jf.name, Enabled: enabled, Size: jf.fi.Size(), MTime: jf.fi.ModTime().UnixMilli()}
-	p := filesapi.Join(dir, jf.name)
+	p := filesapi.Join(scan.dir, jf.name)
 	f, st, err := openRegular(root, p, os.O_RDONLY)
 	switch {
 	case errors.Is(err, filesapi.ErrNotFound), errors.Is(err, filesapi.ErrNotRegular):
@@ -118,7 +172,7 @@ func (s *Service) describeJar(ctx context.Context, root *os.Root, dir string, jf
 	}
 	defer f.Close()
 	jar.Size, jar.MTime = st.Size(), st.ModTime().UnixMilli()
-	info, err := s.jarInfo(ctx, jf.name, f, st)
+	info, err := s.jarInfo(ctx, scan, jf.name, f, st)
 	if err != nil {
 		return filesapi.Jar{}, false, err
 	}
@@ -130,22 +184,31 @@ func (s *Service) describeJar(ctx context.Context, root *os.Root, dir string, jf
 	return jar, true, nil
 }
 
+// sparse reports a file that occupies less disk than its size: such a jar costs the
+// container no disk but the service a full read, and no real jar looks like that.
+func sparse(fi fs.FileInfo) bool {
+	n, ok := allocatedBytes(fi)
+	return ok && n < fi.Size()
+}
+
 // jarInfo returns checksums and metadata of the open jar f, from the cache when its identity
-// is known. A computation takes one of maxHashRuns slots; a request waits for a slot as long
-// as its context lives. A jar that changed while it was read gets nothing and is not cached.
-func (s *Service) jarInfo(ctx context.Context, name string, f *os.File, st fs.FileInfo) (jarInfo, error) {
+// is known. A computation takes this instance's slot and one of maxHashRuns service-wide
+// slots; a request waits for them as long as its context lives. Jars above jarHashMax and
+// sparse jars get no checksums; a jar beyond the listing's hash budget gets none either and is
+// not cached (a later listing computes it). A jar that changed while it was read (size, mtime
+// or ctime) gets nothing and is not cached.
+func (s *Service) jarInfo(ctx context.Context, scan *jarScan, name string, f *os.File, st fs.FileInfo) (jarInfo, error) {
 	key, keyed := fileKeyOf(st)
 	if keyed {
 		if info, ok := s.jarCache.get(key); ok {
 			return info, nil
 		}
 	}
-	select {
-	case s.hashSlots <- struct{}{}:
-		defer func() { <-s.hashSlots }()
-	case <-ctx.Done():
-		return jarInfo{}, ctx.Err()
+	release, err := s.hashSlot(ctx, scan.id)
+	if err != nil {
+		return jarInfo{}, err
 	}
+	defer release()
 	if keyed { // computed by another request while this one waited
 		if info, ok := s.jarCache.get(key); ok {
 			return info, nil
@@ -156,27 +219,43 @@ func (s *Service) jarInfo(ctx context.Context, name string, f *os.File, st fs.Fi
 	}
 	var info jarInfo
 	cacheable := keyed
-	if st.Size() <= s.jarHashMax {
-		h256, h512, err := hashJar(ctx, f, st.Size())
-		switch {
-		case ctx.Err() != nil:
-			return jarInfo{}, ctx.Err()
-		case err != nil:
-			s.log.Warn("files: cannot hash jar", "name", name, "err", err)
-			cacheable = false
-		default:
-			info.sha256, info.sha512 = h256, h512
+	if st.Size() <= s.jarHashMax && !sparse(st) {
+		if st.Size() > scan.budget {
+			cacheable = false // over this listing's budget: checksums next time
+		} else {
+			scan.budget -= st.Size()
+			h256, h512, err := hashJar(ctx, f, st.Size())
+			switch {
+			case ctx.Err() != nil:
+				return jarInfo{}, ctx.Err()
+			case err != nil:
+				s.log.Warn("files: cannot hash jar", "name", name, "err", err)
+				cacheable = false
+			default:
+				info.sha256, info.sha512 = h256, h512
+			}
 		}
 	}
 	info.meta = readJarMeta(f, st.Size(), maxJarEntries)
 	// A jar that is written to while it is read has no reliable checksum or metadata.
-	if now, err := f.Stat(); err != nil || now.Size() != st.Size() || !now.ModTime().Equal(st.ModTime()) {
+	if now, err := f.Stat(); err != nil || changed(st, now) {
 		return jarInfo{}, nil
 	}
 	if cacheable {
 		s.jarCache.put(key, info)
 	}
 	return info, nil
+}
+
+// changed reports whether the file behind before was modified by the time of now: size,
+// mtime or, where the platform has it, the ctime (a container can set the mtime back).
+func changed(before, now fs.FileInfo) bool {
+	if now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
+		return true
+	}
+	a, ok1 := fileKeyOf(before)
+	b, ok2 := fileKeyOf(now)
+	return ok1 && ok2 && a != b
 }
 
 // hashJar computes sha256 and sha512 of the first size bytes of r in one pass; it stops as

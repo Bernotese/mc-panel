@@ -49,6 +49,33 @@ test('admin installs ViaBackwards, disables a jar, installs an update and remove
   await expect(installed.getByText('ViaBackwards', { exact: true })).toHaveCount(0)
 })
 
+test('installing ChunkyBorder brings its required dependency Chunky along', async ({ page }) => {
+  await signIn(page, 'admin', true)
+  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await expect(page).toHaveURL(/\/servers\/1$/)
+  await page.getByRole('tab', { name: 'Plugins', exact: true }).click()
+  const installed = page.getByRole('region', { name: 'Installierte Plugins' })
+  await expect(installed.getByText('LuckPerms', { exact: true })).toBeVisible()
+  await expect(installed.getByText('Chunky', { exact: true })).toHaveCount(0)
+
+  await page.getByRole('tab', { name: 'Entdecken' }).click()
+  const discover = page.getByRole('region', { name: 'Entdecken' })
+  await discover.getByLabel('Suchen').fill('ChunkyBorder')
+  await discover.getByRole('button', { name: 'ChunkyBorder installieren', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'ChunkyBorder installieren' })
+  const dependency = dialog.getByRole('region', { name: 'Wird mitinstalliert', exact: true })
+  await expect(dependency.getByText('Chunky', { exact: true })).toBeVisible()
+  await expect(dependency.getByText('benötigt von ChunkyBorder')).toBeVisible()
+  await expect(dialog.getByRole('region', { name: 'Wird installiert', exact: true }).getByText('ChunkyBorder', { exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Installieren', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByText('Installation abgeschlossen')).toBeVisible({ timeout: 15_000 })
+
+  await page.getByRole('tab', { name: 'Installiert' }).click()
+  await expect(installed.getByText('ChunkyBorder', { exact: true })).toBeVisible()
+  await expect(installed.getByText('Chunky', { exact: true })).toBeVisible()
+})
+
 test('the mods tab of a fabric server offers only Modrinth', async ({ page }) => {
   await signIn(page, 'admin', true)
   await page.getByRole('link', { name: 'modded', exact: true }).click()
@@ -63,7 +90,7 @@ test('the mods tab of a fabric server offers only Modrinth', async ({ page }) =>
   await expect(discover.getByRole('button', { name: 'Hangar' })).toHaveCount(0)
 })
 
-test('vanilla servers and users without the permission see no plugins tab', async ({ page }) => {
+test('vanilla servers have neither a plugins nor a mods tab', async ({ page }) => {
   await signIn(page, 'admin', true)
   await page.getByRole('link', { name: 'creative', exact: true }).click()
   await expect(page).toHaveURL(/\/servers\/2$/)

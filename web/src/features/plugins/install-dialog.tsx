@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { formatBytes } from '@/features/files/format'
 import { useFormat } from '@/lib/format'
-import { installPlugin, refreshJobOnConflict, resolveQueryOptions, versionsQueryOptions } from './api'
+import { isApiError } from '@/api/errors'
+import { installPlugin, refreshJobOnConflict, refreshPluginState, resolveQueryOptions, versionsQueryOptions } from './api'
 import { installErrorMessage, pluginErrorMessage } from './messages'
 import { canInstall, defaultVersion, externalHref, type InstallTarget } from './model'
 
@@ -50,7 +51,11 @@ export function InstallDialog({ serverId, dir, target, busy, onClose, onStarted 
   const install = useMutation({
     mutationFn: (version: string) => installPlugin(serverId, { source: target.source, project: target.project, version }),
     onSuccess: (job) => onStarted(job),
-    onError: (err) => refreshJobOnConflict(queryClient, serverId, err),
+    onError: (err) => {
+      refreshJobOnConflict(queryClient, serverId, err)
+      // 409 conflict may also mean the project got installed meanwhile: the preview ("Bereits vorhanden") is stale.
+      if (isApiError(err, 'conflict')) void refreshPluginState(queryClient, serverId)
+    },
   })
   const plan = resolve.data
   const blocked = busy || selected === null || !plan || !canInstall(plan) || install.isPending
@@ -140,9 +145,12 @@ export function InstallDialog({ serverId, dir, target, busy, onClose, onStarted 
     if (selected === null) return null
     if (resolve.isError) {
       return (
-        <p role="alert" className="text-destructive text-sm">
-          {pluginErrorMessage(resolve.error, t)}
-        </p>
+        <div role="alert" className="space-y-2 text-sm">
+          <p className="text-destructive">{pluginErrorMessage(resolve.error, t)}</p>
+          <Button type="button" variant="outline" size="sm" disabled={resolve.isFetching} onClick={() => void resolve.refetch()}>
+            {t('common.retry')}
+          </Button>
+        </div>
       )
     }
     if (!plan) return <p className="text-muted-foreground text-sm">{t('plugins.install.preview_loading')}</p>

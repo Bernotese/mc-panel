@@ -18,7 +18,11 @@ function jobTitle(job: PluginJob, t: TFunction): string {
 /** Spec §7.1: failed steps name the reason from error_code (translated); the panel's text is only a fallback. */
 function stepText(step: PluginJobStep, t: TFunction): string {
   if (step.state !== 'failed') return t(`plugins.step.state.${step.state}`)
-  if (step.error_code) return t('plugins.step.failed_reason', { reason: t(`plugins.step.error.${step.error_code}`) })
+  if (step.error_code) {
+    // A code this UI does not know yet (newer panel) falls back to the panel's text instead of the raw i18n key.
+    const reason = t(`plugins.step.error.${step.error_code}`, { defaultValue: step.error || t('plugins.step.state.failed') })
+    return t('plugins.step.failed_reason', { reason })
+  }
   return step.error ? t('plugins.step.failed_reason', { reason: step.error }) : t('plugins.step.state.failed')
 }
 

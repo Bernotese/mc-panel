@@ -107,13 +107,15 @@ describe('InstallDialog', () => {
   })
 
   it('says when another job is running or the project got installed meanwhile', async () => {
-    mockUpstream(resolution())
+    const resolved = mockUpstream(resolution())
     server.use(http.post('*/api/servers/:id/plugins/install', () => HttpResponse.json({ error: 'conflict', message: 'job running' }, { status: 409 })))
     const { user, dialog, onStarted } = await openDialog()
     await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Installieren' })).toBeEnabled())
     await user.click(within(dialog).getByRole('button', { name: 'Installieren' }))
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Für diesen Server läuft gerade schon ein Auftrag, oder das Projekt ist inzwischen installiert.')
     expect(onStarted).not.toHaveBeenCalled()
+    // The project may have been installed meanwhile: the preview ("Bereits vorhanden") is asked again.
+    await waitFor(() => expect(resolved).toEqual(['v2', 'v2']))
   })
 
   it('names the job limit of the panel', async () => {
@@ -155,5 +157,22 @@ describe('InstallDialog', () => {
     const { dialog } = await openDialog()
     expect(await within(dialog).findByText('Es gibt nichts zu installieren – alles ist bereits vorhanden.')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: 'Installieren' })).toBeDisabled()
+  })
+})
+
+describe('InstallDialog – preview errors', () => {
+  it('retries the preview after the source failed', async () => {
+    let fail = true
+    const resolved = mockUpstream(() =>
+      fail
+        ? HttpResponse.json({ error: 'plugin_source_unavailable', message: 'modrinth: 503' }, { status: 502 })
+        : HttpResponse.json(resolution()),
+    )
+    const { user, dialog } = await openDialog()
+    const alert = await within(dialog).findByRole('alert')
+    fail = false
+    await user.click(within(alert).getByRole('button', { name: 'Erneut versuchen' }))
+    expect(await within(dialog).findByRole('region', { name: 'Wird installiert' })).toBeInTheDocument()
+    expect(resolved).toEqual(['v2', 'v2'])
   })
 })
