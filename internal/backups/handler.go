@@ -65,6 +65,7 @@ type Handler struct {
 	queue     *queue
 	tickMu    sync.Mutex // serialises ticks (Run and tests)
 	alerts    *alerts
+	downloads *userSlots
 	lastTZ    string // panel time zone of the previous tick ("" before the first; guarded by tickMu)
 
 	tickEvery, pollEvery, rconTimeout, stopTimeout, shutdownWait, ioTimeout time.Duration
@@ -90,7 +91,7 @@ func NewHandler(d Deps) *Handler {
 	}
 	h := &Handler{
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, notifier: n, files: d.Files, inst: d.Instances,
-		console: con, reconcile: rf, log: log, queue: newQueue(d.Clock), alerts: newAlerts(),
+		console: con, reconcile: rf, log: log, queue: newQueue(d.Clock), alerts: newAlerts(), downloads: newUserSlots(maxDownloadsPerUser),
 		tickEvery: tickEvery, pollEvery: pollEvery, rconTimeout: rconTimeout, stopTimeout: stopTimeout,
 		shutdownWait: shutdownWait, ioTimeout: ioTimeout, ioClock: clock.Real{},
 	}
@@ -109,7 +110,7 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Post("/servers/{id}/backups/{snapshot}/pin", rule, h.slow(h.handlePin))
 	api.Post("/servers/{id}/backups/{snapshot}/restore", sudo, h.slow(h.handleRestore))
 	api.Delete("/servers/{id}/backups/{snapshot}", sudo, h.slow(h.handleDelete))
-	api.Get("/servers/{id}/backups/{snapshot}/download", rule, h.notImplemented)
+	api.Get("/servers/{id}/backups/{snapshot}/download", rule, h.handleDownload)
 }
 
 // Run blocks until ctx is done: recovery first, then the worker and the ticker. On ctx.Done it

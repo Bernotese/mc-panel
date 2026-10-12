@@ -1,7 +1,6 @@
 package backups_test
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -81,24 +80,6 @@ func TestRoutesCheckPermissionAndSudo(t *testing.T) {
 		rec := e.do(method, expand(pattern), "{}", &noSudo)
 		if rec.Code != http.StatusForbidden || errCode(t, rec) != "sudo_required" {
 			t.Errorf("%s without sudo: %d %s", key, rec.Code, rec.Body)
-		}
-	}
-}
-
-// stubbed are the routes that still answer 503 backups_unavailable; each task of phase B2
-// removes its routes, task 13 deletes the list and this test.
-var stubbed = []struct{ method, path string }{
-	{http.MethodGet, "/backups/" + strings.Repeat("a", 64) + "/download"},
-}
-
-func TestRemainingStubs(t *testing.T) {
-	e := newEnv(t)
-	id := e.instance("survival")
-	for _, s := range stubbed {
-		p := e.sudoAdmin()
-		rec := e.do(s.method, fmt.Sprintf("/servers/%d%s", id, s.path), "{}", &p)
-		if rec.Code != http.StatusServiceUnavailable || errCode(t, rec) != "backups_unavailable" {
-			t.Errorf("%s %s = %d %s", s.method, s.path, rec.Code, rec.Body)
 		}
 	}
 }
