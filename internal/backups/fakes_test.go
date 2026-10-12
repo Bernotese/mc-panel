@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/clock"
@@ -28,10 +29,11 @@ type fakeFiles struct {
 	hold      map[string]chan struct{}
 	fail      map[string]string
 	failCode  map[string]string
-	createTZ  map[int64]string   // Timezone of the last CreateBackup per server
-	errs      map[string]error   // by operation: status, list, create, restore, forget, pin, download, purge, cancel, job
-	errQueue  map[string][]error // used up one per call before errs
-	loseJobs  bool               // Job answers nil (a restarted service)
+	createTZ  map[int64]string         // Timezone of the last CreateBackup per server
+	errs      map[string]error         // by operation: status, list, create, restore, forget, pin, download, purge, cancel, job
+	errQueue  map[string][]error       // used up one per call before errs
+	delay     map[string]time.Duration // by operation, slept outside mu before the answer (list)
+	loseJobs  bool                     // Job answers nil (a restarted service)
 	calls     []string
 	seq       int
 	zip       []byte
@@ -52,7 +54,7 @@ func newFakeFiles(clk *clock.Fake) *fakeFiles {
 	return &fakeFiles{
 		clk: clk, status: filesapi.BackupsStatus{Available: true, Version: "0.19.1"},
 		snaps: map[int64][]filesapi.Snapshot{}, jobs: map[int64]*fakeJob{}, hold: map[string]chan struct{}{},
-		fail: map[string]string{}, failCode: map[string]string{}, createTZ: map[int64]string{}, errs: map[string]error{}, errQueue: map[string][]error{},
+		fail: map[string]string{}, failCode: map[string]string{}, createTZ: map[int64]string{}, errs: map[string]error{}, errQueue: map[string][]error{}, delay: map[string]time.Duration{},
 		zip: []byte("PK\x05\x06" + strings.Repeat("\x00", 18)), // an empty zip archive
 	}
 }
@@ -138,6 +140,10 @@ func (f *fakeFiles) BackupsStatus(context.Context) (filesapi.BackupsStatus, erro
 }
 
 func (f *fakeFiles) Snapshots(_ context.Context, id int64) ([]filesapi.Snapshot, error) {
+	f.mu.Lock()
+	d := f.delay["list"]
+	f.mu.Unlock()
+	time.Sleep(d)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.errFor("list"); err != nil {
