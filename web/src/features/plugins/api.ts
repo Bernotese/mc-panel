@@ -137,11 +137,21 @@ export function refreshJobOnConflict(queryClient: QueryClient, id: number, err: 
   if (isApiError(err, 'conflict')) void queryClient.invalidateQueries({ queryKey: pluginJobKey(id) })
 }
 
-/** After a job, a toggle or a removal the disk changed: inventory, updates, "installiert" badges and previews are stale. */
-export function refreshPluginState(queryClient: QueryClient, id: number): Promise<unknown> {
+/**
+ * After a toggle the jar list and its updates are stale, but not the search or the previews: a disabled jar still counts
+ * as installed (spec §6.3), and asking Modrinth/Hangar again would only cost upstream calls and the 60/min limit.
+ */
+export function refreshInventory(queryClient: QueryClient, id: number): Promise<unknown> {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: inventoryKey(id) }),
     queryClient.invalidateQueries({ queryKey: updatesKey(id) }),
+  ])
+}
+
+/** After a job or a removal the disk changed: inventory, updates, "installiert" badges and previews are stale. */
+export function refreshPluginState(queryClient: QueryClient, id: number): Promise<unknown> {
+  return Promise.all([
+    refreshInventory(queryClient, id),
     queryClient.invalidateQueries({ queryKey: searchesKey(id) }),
     queryClient.invalidateQueries({ queryKey: resolvesKey(id) }),
   ])

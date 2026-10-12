@@ -746,7 +746,7 @@ export const en: Messages = {
       progress: 'Job progress',
       counts: '{{finished}} of {{total}} jars',
       dismiss: 'Hide',
-      toast_done: 'Done. Restart the server for the changes to take effect.',
+      toast_done: 'Done.',
       toast_failed: 'Not everything worked – see the job for details.',
     },
     step: {

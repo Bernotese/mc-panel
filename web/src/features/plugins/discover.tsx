@@ -55,6 +55,16 @@ export function Discover({ serverId, sources, busy, onInstall }: DiscoverProps) 
             <HitCard key={`${hit.source}:${hit.project_id}`} hit={hit} busy={busy} onInstall={onInstall} />
           ))}
         </ul>
+        {search.isRefetchError ? (
+          // Spec §7.1: refreshing failed (e.g. after an install) – the hits below may be stale, so say so.
+          <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-destructive">{t('plugins.discover.failed')}</span>
+            <span className="text-muted-foreground">{pluginErrorMessage(search.error, t)}</span>
+            <Button type="button" variant="outline" size="sm" disabled={search.isFetching} onClick={() => void search.refetch()}>
+              {t('common.retry')}
+            </Button>
+          </div>
+        ) : null}
         {search.isFetchNextPageError ? (
           <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-destructive">{pluginErrorMessage(search.error, t)}</span>
