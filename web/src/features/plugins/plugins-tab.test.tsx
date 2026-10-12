@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { db } from '@/mocks/db'
 import { server } from '@/mocks/node'
 import { setViewport } from '@/test/media'
-import { hangarJar, inventory, jar, mockInventory, modrinthJar, openPlugins } from './test-utils'
+import { hangarJar, inventory, jar, mockInventory, modrinthJar, openPlugins, planEntry, version } from './test-utils'
 
 const OLDTOOL_META = { kind: 'plugin' as const, id: '', name: 'OldTool', version: '1.0' }
 
@@ -139,5 +139,41 @@ describe('PluginsTab – installed', () => {
     const { region } = await openPlugins()
     expect(await within(region).findByText('Dieser Servertyp unterstützt keine Plugins oder Mods.')).toBeInTheDocument()
     expect(within(region).queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('PluginsTab – views', () => {
+  it('changes the version of an installed jar through the install dialog', async () => {
+    mockInventory(inventory({ jars: [modrinthJar('LuckPerms-Bukkit-5.5.71.jar', 'LuckPerms', '5.5.71')] }))
+    server.use(
+      http.get('*/api/servers/:id/plugins/versions', () => HttpResponse.json({ versions: [version('v-5.5.72', '5.5.72'), version('v-5.5.71', '5.5.71')] })),
+      http.get('*/api/servers/:id/plugins/resolve', () =>
+        HttpResponse.json({ install: [planEntry('LuckPerms', '5.5.72')], already: [], external: [], incompatible: [] }),
+      ),
+    )
+    const { user, region } = await openPlugins()
+    await user.click(await within(region).findByRole('button', { name: 'Aktionen für LuckPerms' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Version wechseln …' }))
+    const dialog = await screen.findByRole('dialog', { name: 'LuckPerms installieren' })
+    expect(await within(dialog).findByRole('radio', { name: '5.5.71' })).toBeChecked()
+  })
+
+  it('offers no version change for unmatched jars', async () => {
+    mockInventory(inventory({ jars: [jar('OldTool.jar', { meta: OLDTOOL_META })] }))
+    const { user, region } = await openPlugins()
+    await user.click(await within(region).findByRole('button', { name: 'Aktionen für OldTool' }))
+    expect(screen.queryByRole('menuitem', { name: 'Version wechseln …' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the installed list usable while the search fails', async () => {
+    server.use(
+      http.get('*/api/servers/:id/plugins/search', () => HttpResponse.json({ error: 'plugin_source_unavailable', message: 'down' }, { status: 502 })),
+    )
+    const { user, region } = await openPlugins() // mock inventory V5
+    await within(region).findByRole('switch', { name: 'OldTool aktiv' })
+    await user.click(screen.getByRole('tab', { name: 'Entdecken' }))
+    expect(await screen.findByText('Die Suche ist gerade nicht möglich.')).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Installiert' }))
+    expect(await screen.findByRole('switch', { name: 'OldTool aktiv' })).toBeEnabled()
   })
 })
