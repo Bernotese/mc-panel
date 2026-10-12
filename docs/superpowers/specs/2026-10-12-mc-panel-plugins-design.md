@@ -155,7 +155,7 @@ Ist Modrinth nicht erreichbar, bleiben die betroffenen Jars `manual` und die Ant
 `resolve` und jeder Job bauen denselben Plan aus Projekt und gewünschter Version (fehlt sie: neueste kompatible `release`, sonst die neueste kompatible überhaupt):
 
 - Pflicht-Abhängigkeiten rekursiv bis Tiefe 5, höchstens 20 Pakete im Plan; Zyklen werden erkannt. Modrinth-Abhängigkeit mit `version_id` → genau diese Version (muss kompatibel sein), sonst neueste kompatible `release`. Hangar-Abhängigkeit mit `projectId` → neueste kompatible Version im Kanal `Release`, sonst die neueste.
-- Bereits installiert ist ein Projekt, wenn das Inventar ein Jar mit derselben Quelle und Projekt-ID hat (aktiv oder deaktiviert) → `already`, wird nicht angefasst. Abhängigkeiten über Quellen hinweg werden nicht abgeglichen.
+- Bereits installiert ist ein Projekt, wenn das Inventar ein Jar mit derselben Quelle und Projekt-ID hat (aktiv oder deaktiviert) → `already`, wird nicht angefasst. Abhängigkeiten über Quellen hinweg werden nicht abgeglichen. Für das **angefragte** Projekt gilt: ohne `version` oder mit der installierten Version → `already`; mit einer anderen `version` → Plan-Eintrag, der das vorhandene Jar ersetzt (Versionswechsel, Ablauf wie ein Update in §6.4).
 - Extern verlinkte Abhängigkeit (Hangar `externalUrl`) → `external` mit Name und Link. Abhängigkeit ohne kompatible herunterladbare Version → `incompatible`; dann ist der Plan nicht ausführbar (`409 plugin_incompatible`). Gewünschte Version nur extern → `409 plugin_not_downloadable`.
 - Plan-Eintrag: `{source, project_id, slug, title, version_id, version_name, channel, filename, size, required_by}`.
 
@@ -168,7 +168,7 @@ Ist Modrinth nicht erreichbar, bleiben die betroffenen Jars `manual` und die Ant
 
 ### 6.5 Updates
 
-`GET /servers/{id}/plugins/updates` (Cache 1 h pro Server, `?refresh=1` umgeht ihn) liefert `{updates: [{file, from: {version_id, version_name}, to: {version_id, version_name, channel}}], checked_at}`. Modrinth-Jars (DB oder Hash-Zuordnung) über `version_files/update` mit `version_types = [release]` bzw. `[release, beta]` bei einem Beta-Jar bzw. allen dreien bei Alpha; Hangar-Jars aus der DB über die Versionsliste, neueste herunterladbare Version im gleichen oder stabileren Kanal, nur wenn sie neuer veröffentlicht wurde als die installierte. Manuelle Jars bekommen keine Updates.
+`GET /servers/{id}/plugins/updates` (Cache 1 h pro Server, `?refresh=true` bzw. `?refresh=1` umgeht ihn; Jobs, Schalten und Löschen verwerfen ihn) liefert `{updates: [{file, from: {id, name, channel}, to: {id, name, channel}}], checked_at}`. Modrinth-Jars (DB oder Hash-Zuordnung) über `version_files/update` mit `version_types = [release]` bzw. `[release, beta]` bei einem Beta-Jar bzw. allen dreien bei Alpha; Hangar-Jars aus der DB über die Versionsliste, neueste herunterladbare Version im gleichen oder stabileren Kanal, nur wenn sie neuer veröffentlicht wurde als die installierte. Manuelle Jars bekommen keine Updates.
 
 ### 6.6 API
 
@@ -180,9 +180,9 @@ Alle Routen über `*rbac.Router` mit `rbac.Server(rbac.PermServerPlugins, "id")`
 | `GET /servers/{id}/plugins/search?source=&q=&offset=` | `{hits: [{source, project_id, slug, title, description, author, downloads, icon_url, page_url, installed}], total, offset}`; `q` ≤ 100 Zeichen, `offset` ≤ 1000 |
 | `GET /servers/{id}/plugins/versions?source=&project=` | `{versions: [{id, name, channel, published_at, downloadable, external_url?}]}` (kompatibel, neueste zuerst, höchstens 25) |
 | `GET /servers/{id}/plugins/resolve?source=&project=&version=` | `{install: [PlanEntry], already: [...], external: [{name, url}], incompatible: [{title, reason}]}` |
-| `POST /servers/{id}/plugins/install` | `{source, project, version?}` → `202 {job}` |
+| `POST /servers/{id}/plugins/install` | `{source, project, version?}` → `202` mit dem Job (`PluginJob`); nichts zu tun (alles schon installiert) → `409 conflict` |
 | `GET /servers/{id}/plugins/updates` | §6.5 |
-| `POST /servers/{id}/plugins/update` | `{files: [string]}` → `202 {job}` |
+| `POST /servers/{id}/plugins/update` | `{files: [string]}` → `202` mit dem Job; Datei ohne Update bzw. gar kein Update → `400 validation_failed` |
 | `POST /servers/{id}/plugins/toggle` | `{file, enabled}` → `204`; `rename` im Dienst |
 | `POST /servers/{id}/plugins/delete` | `{file}` → `204`; löscht auch den DB-Eintrag |
 | `GET /servers/{id}/plugins/jobs` | `{job: null \| {id, kind: install\|update, state, steps: [{title, file, state, error_code, error}], started_at, finished_at}}` |
@@ -190,7 +190,8 @@ Alle Routen über `*rbac.Router` mit `rbac.Server(rbac.PermServerPlugins, "id")`
 
 - `source` ∈ `modrinth|hangar` (`hangar` nur bei Plugins, sonst `400 validation_failed`); `project`/`version` ≤ 128 Zeichen, `^[A-Za-z0-9._+-]+$`. `file` ist ein reiner Dateiname ohne `/`, endet auf `.jar` oder `.jar.disabled` und besteht `filesapi.CleanPath`; der Pfad im Dienst ist immer `<dir>/<file>`.
 - `icon_url` und `project.icon_url` in Antworten zeigen bereits auf den Icon-Proxy (`/api/servers/{id}/plugins/icon?url=…`), `page_url` auf die Projektseite (`https://modrinth.com/<plugin|mod>/<slug>` bzw. `https://hangar.papermc.io/<owner>/<slug>`).
-- **CSRF** gilt für alle `POST`. **Rate-Limit** pro Konto: 60 Aufrufe pro Minute über `search`, `versions`, `resolve`, `updates` mit `refresh=1` (sonst `429 rate_limited` mit `Retry-After`).
+- **CSRF** gilt für alle `POST`. **Rate-Limit** pro Konto über `search`, `versions`, `resolve`, `updates` mit `refresh`: Token-Bucket mit 1 Aufruf/s und Spitze 20, also etwa 60 pro Minute (sonst `429 rate_limited` mit `Retry-After`).
+- Unbekanntes Projekt oder unbekannte Version beim Upstream → `404 not_found` (als Abhängigkeit: `incompatible`). Externe Links (`external_url`, `external[].url`) gibt das panel nur bei `http`/`https` weiter.
 - **Fehler-Mapping** des Dienstes wie TP3b §5.1 (`files_unavailable`, `file_exists`, `not_found`, `insufficient_storage` …).
 
 ### 6.7 Fehlercodes
