@@ -30,7 +30,9 @@ func TestDefaultSlots(t *testing.T) {
 }
 
 func TestConcurrencyNeverExceedsSlots(t *testing.T) {
-	l := withLimiter(t, 2, 10*time.Second)
+	// The budget only has to outlast the queue: 24 full-cost hashes through 2 slots take well
+	// over 10 s under -race on a loaded machine, and this test checks concurrency, not timing.
+	l := withLimiter(t, 2, 2*time.Minute)
 	enc := HashWithParams("correct horse battery", 4*1024, 2, 1)
 	var wg sync.WaitGroup
 	for range 12 {
