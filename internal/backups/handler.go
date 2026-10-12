@@ -102,13 +102,13 @@ func NewHandler(d Deps) *Handler {
 func (h *Handler) Routes(api *rbac.Router) {
 	rule := rbac.Server(rbac.PermServerBackups, "id")
 	sudo := rule.WithSudo()
-	api.Get("/servers/{id}/backups", rule, h.notImplemented)
+	api.Get("/servers/{id}/backups", rule, h.slow(h.handleOverview))
 	api.Post("/servers/{id}/backups", rule, h.handleCreate)
 	api.Get("/servers/{id}/backups/job", rule, h.handleJob)
 	api.Put("/servers/{id}/backups/schedule", rule, h.handleUpdateSchedule)
-	api.Post("/servers/{id}/backups/{snapshot}/pin", rule, h.notImplemented)
-	api.Post("/servers/{id}/backups/{snapshot}/restore", sudo, h.notImplemented)
-	api.Delete("/servers/{id}/backups/{snapshot}", sudo, h.notImplemented)
+	api.Post("/servers/{id}/backups/{snapshot}/pin", rule, h.slow(h.handlePin))
+	api.Post("/servers/{id}/backups/{snapshot}/restore", sudo, h.slow(h.handleRestore))
+	api.Delete("/servers/{id}/backups/{snapshot}", sudo, h.slow(h.handleDelete))
 	api.Get("/servers/{id}/backups/{snapshot}/download", rule, h.notImplemented)
 }
 
@@ -140,17 +140,6 @@ func (h *Handler) Run(ctx context.Context) {
 		case <-t.C:
 		}
 	}
-}
-
-// DataJobRunning is true while the panel holds a restore job for the server (task 12).
-func (h *Handler) DataJobRunning(context.Context, int64) bool { return false }
-
-// PurgeBackups deletes the server's repository (task 12 drops its jobs first).
-func (h *Handler) PurgeBackups(ctx context.Context, serverID int64) error {
-	if h.files == nil {
-		return nil
-	}
-	return h.files.PurgeBackups(ctx, serverID)
 }
 
 // server is a loaded server; HasInstance says whether it has a Minecraft instance.
@@ -299,4 +288,26 @@ func (noConsole) Rcon(context.Context, int64, string) (string, error) {
 }
 func (noConsole) Players(context.Context, int64) (agentapi.PlayersResponse, error) {
 	return agentapi.PlayersResponse{}, agentapi.ErrUnavailable
+}
+
+// slowWriteTimeout is the write deadline of the routes that wait for a synchronous restic call
+// (overview, pin, restore and delete pre-checks): the client timeout plus a margin.
+const slowWriteTimeout = filesapi.BackupCallTimeout + 30*time.Second
+
+// slow extends the write deadline of a route beyond the server's WriteTimeout (pattern of the
+// serverfiles downloads); recorders without deadline support are fine.
+func (h *Handler) slow(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := ignoreUnsupported(http.NewResponseController(w).SetWriteDeadline(h.ioClock.Now().Add(slowWriteTimeout))); err != nil {
+			h.log.WarnContext(r.Context(), "backups: extend write deadline", "err", err)
+		}
+		next(w, r)
+	}
+}
+
+func ignoreUnsupported(err error) error {
+	if errors.Is(err, http.ErrNotSupported) {
+		return nil
+	}
+	return err
 }

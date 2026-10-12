@@ -88,10 +88,6 @@ func TestRoutesCheckPermissionAndSudo(t *testing.T) {
 // stubbed are the routes that still answer 503 backups_unavailable; each task of phase B2
 // removes its routes, task 13 deletes the list and this test.
 var stubbed = []struct{ method, path string }{
-	{http.MethodGet, "/backups"},
-	{http.MethodPost, "/backups/" + strings.Repeat("a", 64) + "/pin"},
-	{http.MethodPost, "/backups/" + strings.Repeat("a", 64) + "/restore"},
-	{http.MethodDelete, "/backups/" + strings.Repeat("a", 64)},
 	{http.MethodGet, "/backups/" + strings.Repeat("a", 64) + "/download"},
 }
 
