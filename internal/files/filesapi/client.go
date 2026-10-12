@@ -210,7 +210,8 @@ func (c *UnixClient) Upload(ctx context.Context, id int64, p string, overwrite b
 
 // UploadChecked is Upload with an expected digest (sub-project 3c §5.2): the service computes
 // sha256 and sha512 while writing and refuses a mismatch with hash_mismatch before the file is
-// renamed into place. An invalid sum fails with ErrInvalid before anything is sent.
+// renamed into place. An invalid sum fails with ErrInvalid before anything is sent; an answer
+// without matching digests (a service that ignored the checksum) is ErrUnavailable.
 func (c *UnixClient) UploadChecked(ctx context.Context, id int64, p string, overwrite bool, size int64, sum Checksum, body io.Reader) (UploadResponse, error) {
 	if err := sum.Validate(); err != nil {
 		return UploadResponse{}, err
@@ -252,7 +253,17 @@ func (c *UnixClient) upload(ctx context.Context, id int64, p string, overwrite b
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var out UploadResponse
-	return out, decode(resp, &out)
+	if err := decode(resp, &out); err != nil {
+		return out, err
+	}
+	// A service that ignored the checksum parameter (an older version) answers without
+	// digests: the file was stored unverified, which must not pass as a checked upload.
+	if sum != nil && (!sum.Matches(out.SHA256, out.SHA512) ||
+		(Checksum{Algo: AlgoSHA256, Hex: out.SHA256}).Validate() != nil ||
+		(Checksum{Algo: AlgoSHA512, Hex: out.SHA512}).Validate() != nil) {
+		return UploadResponse{}, fmt.Errorf("%w: the files service did not verify the checksum", ErrUnavailable)
+	}
+	return out, nil
 }
 
 // Download opens path for streaming. Headers must arrive within DownloadHeaderTimeout; the body
