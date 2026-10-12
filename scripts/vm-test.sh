@@ -2,7 +2,9 @@
 # Runs test suites on the test VM (started by scripts/test-vm.sh, i.e. make test-vm). Runs as the
 # ordinary VM user in its own copy of the tree: dev mode, own sockets in .dev/, own ports (panel
 # 18080, Playwright mock 5174), so the panel deployed on the VM (127.0.0.1:8080) stays untouched.
-# Tools are set up on first use; Go and Node come from scripts/testvm-deploy.sh.
+# Tools are set up on first use; Go and Node come from scripts/testvm-deploy.sh. Runs from all
+# copies on the VM are serialised (one lock): parallel race and Vitest runs of several teammates
+# overload the VM and make timing-sensitive tests fail.
 #
 #   bash scripts/vm-test.sh [all|go|lint|web|e2e]
 set -euo pipefail
@@ -15,7 +17,7 @@ cd "$(dirname "$0")/.."
 suite="${1:-all}"
 GOLANGCI_VERSION="2.14.0"
 E2E_PORT=18080
-E2E_LOCK="${HOME}/.cache/mcpanel-e2e.lock"
+VM_LOCK="${HOME}/.cache/mcpanel-vm-test.lock"
 
 log() { printf '\n==> %s\n' "$*"; }
 die() {
@@ -103,18 +105,11 @@ suite_web() {
 }
 
 # Real backend (agent, files and panel in dev mode; the panel serves the built UI itself on
-# E2E_PORT) and the mock backend. Serialised across all copies on the VM: the mock server always
-# uses port 5174.
+# E2E_PORT) and the mock backend (port 5174).
 suite_e2e() {
   need_go
   need_node_modules
   need_playwright
-  mkdir -p "$(dirname "${E2E_LOCK}")"
-  exec 9> "${E2E_LOCK}"
-  if ! flock -n 9; then
-    log "waiting for another e2e run on this VM"
-    flock 9
-  fi
 
   log "build UI and binaries"
   (cd web && npm run build)
@@ -126,20 +121,17 @@ listen = "127.0.0.1:${E2E_PORT}"
 public_url = "http://localhost:${E2E_PORT}"
 EOF
 
-  local pids=()
-  stop_stack() {
-    local p
-    for p in "${pids[@]}"; do kill "${p}" 2> /dev/null || true; done
-    wait 2> /dev/null || true
-  }
+  # stack_pids is global: the EXIT trap runs after this function has returned, when a local
+  # array would already be gone (and a bare "wait" would then wait for the servers forever).
+  stack_pids=()
   trap stop_stack EXIT
-  .dev/bin/agent -dev > .dev/agent.log 2>&1 &
-  pids+=("$!")
-  .dev/bin/files -dev > .dev/files.log 2>&1 &
-  pids+=("$!")
+  .dev/bin/agent -dev > .dev/agent.log 2>&1 9>&- &
+  stack_pids+=("$!")
+  .dev/bin/files -dev > .dev/files.log 2>&1 9>&- &
+  stack_pids+=("$!")
   sleep 1
-  .dev/bin/panel serve -dev -config .dev/panel-vm.toml > .dev/panel.log 2>&1 &
-  pids+=("$!")
+  .dev/bin/panel serve -dev -config .dev/panel-vm.toml > .dev/panel.log 2>&1 9>&- &
+  stack_pids+=("$!")
   local ok=""
   for _ in $(seq 1 30); do
     if curl -sf "http://127.0.0.1:${E2E_PORT}/api/health" > /dev/null; then
@@ -162,9 +154,36 @@ EOF
   (cd web && npm run e2e) || rc=1
   if [ "${rc}" -ne 0 ]; then
     tail -n 50 .dev/agent.log .dev/files.log .dev/panel.log
-    die "e2e failed"
   fi
+  stop_stack
+  trap - EXIT
+  [ "${rc}" -eq 0 ] || die "e2e failed"
 }
+
+# stop_stack ends the dev servers of suite_e2e and waits only for them.
+stack_pids=()
+stop_stack() {
+  [ "${#stack_pids[@]}" -gt 0 ] || return 0
+  kill "${stack_pids[@]}" 2> /dev/null || true
+  local p
+  for p in "${stack_pids[@]}"; do
+    for _ in $(seq 1 20); do
+      kill -0 "${p}" 2> /dev/null || break
+      sleep 0.5
+    done
+    kill -9 "${p}" 2> /dev/null || true
+  done
+  wait "${stack_pids[@]}" 2> /dev/null || true
+  stack_pids=()
+}
+
+# One run at a time on the VM, across all copies (the lock is released when this script exits).
+mkdir -p "$(dirname "${VM_LOCK}")"
+exec 9> "${VM_LOCK}"
+if ! flock -n 9; then
+  log "waiting for another test run on this VM"
+  flock 9
+fi
 
 case "${suite}" in
   go) suite_go ;;
