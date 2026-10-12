@@ -46,6 +46,7 @@ type planEntry struct {
 	replaces        string // installed jar this entry replaces (version change, update)
 	replacesEnabled bool
 	replacesSHA512  string // its sha512 when planned: a jar changed since then is not touched
+	replacesVersion string // its version name (audit "from" of a version change)
 }
 
 type alreadyEntry struct {
@@ -151,6 +152,9 @@ func (h *Handler) resolve(ctx context.Context, srv server, gv string, inv invent
 			return already()
 		}
 		root.replaces, root.replacesEnabled, root.replacesSHA512 = j.File, j.Enabled, j.sha512
+		if j.Version != nil {
+			root.replacesVersion = j.Version.Name
+		}
 	}
 	deps, err := p.dependencies(ctx, &res, v, proj.Source, proj.Title)
 	if err != nil {

@@ -61,6 +61,9 @@ type Handler struct {
 	jobs    *jobRegistry
 	updates *upstream.Cache[updatesResult]
 	icons   *iconCache
+	// busyBackoff is the first wait before a job step retries an upload the service refused
+	// as busy (doubled per retry; tests shorten it).
+	busyBackoff time.Duration
 }
 
 func NewHandler(d Deps) *Handler {
@@ -88,7 +91,7 @@ func NewHandler(d Deps) *Handler {
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, files: fc, inst: inst, catalog: cat, up: up, log: log,
 		restart: newRestartTracker(), limit: newUserLimiter(), jobs: newJobRegistry(d.Clock, maxJobs),
 		updates: upstream.NewCache[updatesResult](d.Clock, updatesTTL, upstream.MaxCacheEntries),
-		icons:   newIconCache(d.Clock, up),
+		icons:   newIconCache(d.Clock, up), busyBackoff: busyBackoff,
 	}
 }
 

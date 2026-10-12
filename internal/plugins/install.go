@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
@@ -167,11 +168,16 @@ func (h *Handler) runJob(ctx context.Context, j *job, srv server, tasks []jobTas
 		h.log.WarnContext(ctx, "plugins: create folder", "server_id", srv.ID, "dir", srv.Kind.Dir, "err", err)
 	}
 	failed := map[int]bool{}
+	installed := map[string]bool{} // projects this job installed (a dependency shared by updates)
 	stop := false
 	for i, t := range tasks {
+		key := projectKey(t.entry.Source, t.entry.ProjectID)
 		switch {
 		case stop || failed[t.group]:
 			j.set(i, stepSkipped)
+			continue
+		case t.err == nil && t.from == nil && installed[key]:
+			j.set(i, stepDone) // already installed by an earlier step of this job
 			continue
 		case t.err != nil:
 			h.auditTask(ctx, srv.ID, t, targetName(t.entry), errors.New(t.err.msg))
@@ -180,6 +186,7 @@ func (h *Handler) runJob(ctx context.Context, j *job, srv server, tasks []jobTas
 			j.set(i, stepDownloading)
 			err := h.installTask(ctx, srv, t)
 			if err == nil {
+				installed[key] = true
 				j.set(i, stepDone)
 				continue
 			}
@@ -194,6 +201,13 @@ func (h *Handler) runJob(ctx context.Context, j *job, srv server, tasks []jobTas
 		stop = stopOnError
 	}
 }
+
+const (
+	// busyRetries is how often a step retries an upload the service refused as busy (all
+	// upload slots taken), waiting busyBackoff, then twice that, and so on.
+	busyRetries = 3
+	busyBackoff = 2 * time.Second
+)
 
 // installTask downloads one jar, hands it to the service with its checksum and records it.
 func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err error) {
@@ -226,17 +240,17 @@ func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err e
 			return fmt.Errorf("%w: %s", errFileExists, jar.Name)
 		}
 	}
-	body, err := h.up.Download(ctx, e.file)
-	if err != nil {
-		return err
-	}
-	tr := &trackReader{r: body}
-	resp, err := h.files.UploadChecked(ctx, srv.ID, filesapi.Join(srv.Kind.Dir, target), replaces == target, e.Size, sum, tr)
-	_ = body.Close()
-	if err != nil {
-		if rerr := tr.failure(); rerr != nil {
-			return rerr // the download broke, not the service
+	var resp filesapi.UploadResponse
+	for attempt := 0; ; attempt++ {
+		resp, err = h.transfer(ctx, srv, e, target, replaces == target, sum)
+		if !errors.Is(err, filesapi.ErrBusy) || attempt == busyRetries {
+			break
 		}
+		if werr := wait(ctx, h.busyBackoff<<attempt); werr != nil {
+			return err
+		}
+	}
+	if err != nil {
 		return err
 	}
 	if resp.SHA512 == "" {
@@ -246,7 +260,11 @@ func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err e
 	ctx = context.WithoutCancel(ctx)
 	if replaces != "" && replaces != target {
 		if err := h.files.Delete(ctx, srv.ID, filesapi.Join(srv.Kind.Dir, replaces)); err != nil && !errors.Is(err, filesapi.ErrNotFound) {
-			return err
+			// Never leave both versions loaded: take the new jar back.
+			if rerr := h.files.Delete(ctx, srv.ID, filesapi.Join(srv.Kind.Dir, target)); rerr != nil && !errors.Is(rerr, filesapi.ErrNotFound) {
+				return &stepMsg{err: err, msg: fmt.Sprintf("neither the old jar %s nor the new jar %s could be removed, remove one of them in the files tab", replaces, target)}
+			}
+			return &stepMsg{err: err, msg: fmt.Sprintf("the old jar %s could not be removed, the new version was taken back", replaces)}
 		}
 	}
 	if old := baseOf(e.replaces); e.replaces != "" && old != e.Filename {
@@ -265,6 +283,45 @@ func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err e
 	return nil
 }
 
+// transfer downloads the jar and streams it to the service with its checksum.
+func (h *Handler) transfer(ctx context.Context, srv server, e planEntry, target string, overwrite bool, sum filesapi.Checksum) (filesapi.UploadResponse, error) {
+	body, err := h.up.Download(ctx, e.file)
+	if err != nil {
+		return filesapi.UploadResponse{}, err
+	}
+	defer func() { _ = body.Close() }()
+	tr := &trackReader{r: body}
+	resp, err := h.files.UploadChecked(ctx, srv.ID, filesapi.Join(srv.Kind.Dir, target), overwrite, e.Size, sum, tr)
+	if err != nil {
+		if rerr := tr.failure(); rerr != nil {
+			return filesapi.UploadResponse{}, rerr // the download broke, not the service
+		}
+		return filesapi.UploadResponse{}, err
+	}
+	return resp, nil
+}
+
+// wait sleeps for d (wall time, like the other network deadlines) unless ctx ends first.
+func wait(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// stepMsg gives a failed step its own text; the code still follows the wrapped error.
+type stepMsg struct {
+	err error
+	msg string
+}
+
+func (e *stepMsg) Error() string { return e.msg + ": " + e.err.Error() }
+func (e *stepMsg) Unwrap() error { return e.err }
+
 // auditTask writes plugin.install or plugin.update for one jar; the actor is whoever started
 // the job (its context carries the request's principal).
 func (h *Handler) auditTask(ctx context.Context, serverID int64, t jobTask, target string, err error) {
@@ -273,9 +330,11 @@ func (h *Handler) auditTask(ctx context.Context, serverID int64, t jobTask, targ
 		h.record(ctx, audit.ActionPluginUpdate, serverID, result(err), map[string]any{"file": target, "from": t.from.Name, "to": e.VersionName})
 		return
 	}
-	h.record(ctx, audit.ActionPluginInstall, serverID, result(err), map[string]any{
-		"source": string(e.Source), "project": e.ProjectID, "version": e.VersionID, "file": target,
-	})
+	details := map[string]any{"source": string(e.Source), "project": e.ProjectID, "version": e.VersionID, "file": target}
+	if e.replaces != "" {
+		details["from"] = e.replacesVersion // a version change of an installed project
+	}
+	h.record(ctx, audit.ActionPluginInstall, serverID, result(err), details)
 }
 
 // checksumOf is the digest the service checks before it stores the jar (Modrinth sha512,
@@ -319,6 +378,11 @@ func (t *trackReader) failure() error {
 
 // stepError maps a failed task to its step code (spec §6.4) and a text without host paths.
 func stepError(err error) (code, msg string) {
+	var sm *stepMsg
+	if errors.As(err, &sm) {
+		code, _ = stepError(sm.err)
+		return code, sm.msg
+	}
 	switch {
 	case errors.Is(err, errFileExists), errors.Is(err, filesapi.ErrExists):
 		return codeFileExists, "a file with this name already exists in the folder"
