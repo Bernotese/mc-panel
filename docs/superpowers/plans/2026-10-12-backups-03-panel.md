@@ -29,11 +29,11 @@
 
 ## Was Phase A liefert (Annahmen, in Step 0 von Aufgabe 9 geprüft)
 
-- `internal/files/filesapi` (V1): `BackupClient`, `Snapshot`, `SnapshotKind` (`SnapshotScheduled`, `SnapshotManual`, `SnapshotPreRestore`), `BackupsStatus`, `CreateBackupRequest`, `ForgetRequest` (+ `Validate`), `ForgetPolicy` (+ `Validate`), `ValidSnapshotID`, `ValidNote`, `JobKind` (`JobExtract`, `JobBackup`, `JobRestore`, `JobForget`), `Job.Kind`/`Job.Snapshot`/`Job.Skipped`, `ErrBackupsUnavailable`, dazu die vorhandenen `ErrUnavailable`, `ErrBusy`, `ErrNotFound`, `ErrInvalid`, `ErrInsufficientStorage`, `ErrTooLarge`, `JobRunning`/`JobDone`/`JobFailed`, `Download`.
+- `internal/files/filesapi` (V1): `BackupClient`, `Snapshot`, `SnapshotKind` (`SnapshotScheduled`, `SnapshotManual`, `SnapshotPreRestore`), `BackupsStatus`, `CreateBackupRequest`, `ForgetRequest` (+ `Validate`), `ForgetPolicy` (+ `Validate`), `ValidSnapshotID`, `ValidNote`, `JobKind` (`JobExtract`, `JobBackup`, `JobRestore`, `JobForget`), `Job.Kind`/`Job.Snapshot`/`Job.Skipped`/`Job.Code`, `CodeTooLarge`/`CodeInsufficientStorage`/`CodeBusy`/`CodeUnavailable`, `ErrBackupsUnavailable`, dazu die vorhandenen `ErrUnavailable`, `ErrBusy`, `ErrNotFound`, `ErrInvalid`, `ErrInsufficientStorage`, `ErrTooLarge`, `JobRunning`/`JobDone`/`JobFailed`, `Download`.
 - `store` (V2): `BackupSchedule` mit `ServerID int64, Mode string, IntervalHours, TimeOfDay, Weekday, KeepLast, KeepDaily, KeepWeekly, KeepMonthly int64, NextRunAt, LastRunAt sql.NullInt64, LastStatus, LastError, LastSnapshotID sql.NullString, SaveoffSince sql.NullInt64, UpdatedAt int64`; Queries `BackupsEnsureSchedule(ctx, BackupsEnsureScheduleParams{ServerID, UpdatedAt})`, `BackupsGetSchedule(ctx, serverID)`, `BackupsUpdateSchedule(ctx, BackupsUpdateScheduleParams{Mode, IntervalHours, TimeOfDay, Weekday, KeepLast, KeepDaily, KeepWeekly, KeepMonthly, NextRunAt, UpdatedAt, ServerID})`, `BackupsListDue(ctx, nextRunAt sql.NullInt64)`, `BackupsListEnabled(ctx)`, `BackupsSetNextRun(ctx, BackupsSetNextRunParams{NextRunAt, ServerID})`, `BackupsStartRun(ctx, BackupsStartRunParams{LastRunAt, ServerID})`, `BackupsFinishRun(ctx, BackupsFinishRunParams{LastStatus, LastError, LastSnapshotID, NextRunAt, ServerID})`, `BackupsFailRunning(ctx, lastError sql.NullString)`, `BackupsSetSaveOff(ctx, BackupsSetSaveOffParams{SaveoffSince, ServerID})`, `BackupsListSaveOff(ctx) ([]BackupsListSaveOffRow{ServerID, SaveoffSince}, error)`, `BackupsGetTimezone(ctx) (string, error)`.
 - `httpx.CodeBackupsUnavailable`, `httpx.CodeBackupRunning`; `audit.ActionBackupCreate`, `ActionBackupRestore`, `ActionBackupDelete`, `ActionBackupPin`, `ActionBackupUnpin`, `ActionBackupDownload`, `ActionBackupScheduleUpdate`; `notify.EventBackupFailed`.
 - `internal/backups/handler.go` (Stub nach V4: `Deps`, `Handler`, `NewHandler`, `Routes` mit acht Routen auf einen Stub → `503 backups_unavailable` „backups not implemented yet“, `Run`, `DataJobRunning`, `PurgeBackups`) und `internal/backups/routes_test.go` (Routenvertrag, Stub-Antworten, Rechte, `Run` endet). Diese Phase ersetzt `handler.go` vollständig.
-- `cmd/panel/app.go` (V4): `appDeps.Backups filesapi.BackupClient`, `backupsH := backups.NewHandler(...)`, `servers.Deps{Gate: servers.AnyGate(filesH, backupsH), Backups: backupsH}`, `Reconcile` per Closure auf `serversH.Trigger`, `backupsH.Routes(api)`, `backupsH.Run(ctx)` in `run`; `cmd/panel/main.go` importiert `_ "time/tzdata"` und setzt `Backups` auf denselben `*filesapi.UnixClient` wie `Files`.
+- `cmd/panel/app.go` (V4): `appDeps.Backups filesapi.BackupClient`, `backupsH := backups.NewHandler(...)`, `servers.Deps{Gate: servers.AnyGate(backupsH, filesH), Backups: backupsH}`, `Reconcile` per Closure auf `serversH.Trigger`, `backupsH.Routes(api)`, `backupsH.Run(ctx)` in `run`; `cmd/panel/main.go` importiert `_ "time/tzdata"` und setzt `Backups` auf denselben `*filesapi.UnixClient` wie `Files`.
 
 **Weichen Namen aus Phase A ab, gelten die Namen aus Phase A; Werte (Codes, Aktionen, Pfade, JSON-Felder) aus V1–V4 sind verbindlich.**
 
@@ -96,7 +96,7 @@ func (q *queue) add(base context.Context, s jobSpec) (jobView, error) // errBack
 func (q *queue) get(serverID int64) *jobView
 func (q *queue) busy(serverID int64) bool          // queued or running
 func (q *queue) runningFor(serverID int64) bool
-func (q *queue) restoreRunning(serverID int64) bool
+func (q *queue) restoreHeld(serverID int64) bool     // restore queued or running
 func (q *queue) work(ctx context.Context)
 func (q *queue) drop(serverID int64, wait time.Duration)
 func (q *queue) close()
@@ -110,6 +110,7 @@ func (h *Handler) rcon(ctx context.Context, id int64, cmd string) error
 func (h *Handler) markSaveOff(ctx context.Context, id int64) error
 func (h *Handler) resume(id int64) bool
 func (h *Handler) waitService(ctx context.Context, j *job, id int64, jobID string) (filesapi.Job, error)
+func serviceJobCode(code string) string // filesapi.Job.Code -> BackupJobError (V5)
 func (h *Handler) cancelService(id int64)
 func (h *Handler) runBackup(ctx context.Context, j *job, kind filesapi.SnapshotKind, note string) (string, error)
 
@@ -138,7 +139,7 @@ func newUserSlots(maxPerUser int) *userSlots
 ## Abweichungen und Präzisierungen (begründet)
 
 1. **`save-on` wird wiederholt, bis es klappt:** Spec §5.4 Schritt 3 nennt ein fehlgeschlagenes `save-on` „unschädlich“, weil das meist einen inzwischen gestoppten Server betrifft. Antwortet RCON aber nur kurz nicht (Server läuft weiter), bliebe er ohne Speichern. Deshalb bleibt `saveoff_since` gesetzt, solange `save-on` nicht bestätigt ist (oder der agent `not_running`/`not_found` meldet), und jeder Tick versucht es erneut für Server ohne laufenden Job (Review Focus 1).
-2. **Dienst belegt (`429 busy`) beim Start eines Backups** (z. B. Entpacken im Dateien-Tab): Das Job-Fehler-Enum aus V3 hat keinen eigenen Code; der Job endet mit `internal` und dem Text „the file service is busy with another job for this server …“.
+2. **Dienst belegt (`429 busy`) beim Start eines Backups** (z. B. Entpacken im Dateien-Tab): Der Job endet mit `files_busy` (V3/V5) und dem Text „the file service is busy with another job for this server …“. Scheitert ein Dienst-Job selbst, bildet `waitService` dessen Wire-Code `filesapi.Job.Code` ab (`too_large`, `insufficient_storage`, `files_busy`, `backups_unavailable`, sonst `internal`; `TestServiceJobFailureCodes`).
 3. **Snapshot-Prüfung vor dem Einreihen:** Restore, Delete und Download prüfen die ID gegen die Snapshot-Liste des Dienstes, damit eine unbekannte ID synchron `404 not_found` bekommt statt eines fehlgeschlagenen Jobs. Pin verlässt sich auf den Dienst (`404` bzw. `400` für nicht geplante Snapshots).
 4. **Audit-Zeitpunkt:** `backup.create`, `backup.restore` und `backup.delete` werden am Job-Ende mit Ergebnis geschrieben (Akteur und IP aus dem Kontext der auslösenden Anfrage, wie TP3c). Abgelehnte Anfragen (`400`, `404`, `409`, `429`, `503` vor dem Einreihen) werden nicht auditiert.
 5. **Zeitzonenwechsel bei laufendem panel:** Der Ticker merkt sich die Zeitzone des letzten Ticks und rechnet bei einer Änderung `next_run_at` aller aktiven Zeitpläne neu. Ein Wechsel, während das panel aus war, wirkt erst nach dem nächsten Lauf jedes Zeitplans; ein Neurechnen beim ersten Tick würde verpasste Termine in die Zukunft schieben (Spec §5.2 verlangt, dass sie einmal nachgeholt werden).
@@ -152,8 +153,8 @@ func newUserSlots(maxPerUser int) *userSlots
 ## Review Focus (dieser Teilplan)
 
 - **#1 RCON scheitert / panel stirbt im Backup:** `TestSaveOffFailsStillSendsSaveOn`, `TestFlushFailsStillSendsSaveOn`, `TestSaveOnAfterServiceJobFails`, `TestSaveOnAfterCreateRefused`, `TestSaveOnRetriedByTicker`, `TestShutdownCancelsServiceJobAndResumes`, `TestRecoverAfterCrash`, `TestAgentDownFailsBackup` (Aufgabe 10).
-- **#4 Gleichzeitigkeit:** `TestCreateTwiceConcurrently`, `TestQueueRunsOneJobAtATime` (Aufgabe 10); `TestTickSkipsBusyServer`, `TestTimezoneChangeRecomputes` (Aufgabe 11); `TestRestoreWhileBackupQueued`, `TestGateHoldsWhileStopping`, `TestGateHoldsDuringRestore`, `TestPinWhileJobRunning`, `TestPinTwiceOldIDGone`, `TestPurgeDropsQueuedJob`, `TestPurgeCancelsRunningJob` (Aufgabe 12); `TestBackupsEndToEnd` (Start während Restore → `409`, Aufgabe 13).
-- **#5 Betriebsfehler (panel-Seite):** `TestCreateUnavailable` (restic fehlt, Dienst fehlt), `TestRestoreInsufficientStorage`, `TestServiceLosesJob`, `TestServiceUnreachableWhilePolling` (Aufgaben 10, 12).
+- **#4 Gleichzeitigkeit:** `TestCreateTwiceConcurrently`, `TestQueueRunsOneJobAtATime` (Aufgabe 10); `TestTickSkipsBusyServer`, `TestTimezoneChangeRecomputes` (Aufgabe 11); `TestRestoreWhileBackupQueued`, `TestGateHoldsWhileRestoreQueued`, `TestGateHoldsWhileStopping`, `TestPinWhileServiceBusy`, `TestGateHoldsDuringRestore`, `TestPinWhileJobRunning`, `TestPinTwiceOldIDGone`, `TestPurgeDropsQueuedJob`, `TestPurgeCancelsRunningJob` (Aufgabe 12); `TestBackupsEndToEnd` (Start während Restore → `409`, Aufgabe 13).
+- **#5 Betriebsfehler (panel-Seite):** `TestCreateUnavailable` (restic fehlt, Dienst fehlt), `TestRestoreInsufficientStorage`, `TestServiceLosesJob`, `TestServiceUnreachableWhilePolling`, `TestServiceJobFailureCodes`, `TestSlowRoutesOutliveWriteTimeout`, `TestBackupAndRetentionShareZone` (Aufgaben 10–12).
 
 ## Dateistruktur
 
@@ -198,7 +199,7 @@ cmd/panel/app.go                     (13) Verdrahtung prüfen/ergänzen
 **Files:**
 - Create: `internal/backups/schedule.go`, `internal/backups/store.go`, `internal/backups/schedule_api.go`, `internal/backups/stubs.go`, `internal/backups/export_test.go`, `internal/backups/helpers_test.go`, `internal/backups/fakes_test.go`, `internal/backups/schedule_test.go`, `internal/backups/schedule_api_test.go`
 - Modify (ersetzen): `internal/backups/handler.go`
-- Modify: `internal/backups/routes_test.go` (Phase A; Stub-Test auf `stubbed` umstellen)
+- Modify: `internal/backups/routes_test.go` (Phase A; vollständig auf die neuen Helfer umgestellt, Step 14)
 
 **Interfaces:**
 - Consumes: V1 (`filesapi.BackupClient`, `ForgetPolicy`), V2 (`store.BackupSchedule`, `Backups…`-Queries, `httpx`-Codes, `audit.ActionBackupScheduleUpdate`), V4 (`Deps`).
@@ -218,7 +219,7 @@ grep -n "func Test\|^func \|^var " internal/backups/routes_test.go
 grep -n "backups\." cmd/panel/app.go
 ```
 
-Expected: alle Namen aus „Was Phase A liefert“ vorhanden. Abweichende Namen notieren und im ganzen Plan ersetzen. Helfer in `routes_test.go`, die mit den Namen aus `helpers_test.go` unten kollidieren (`newEnv`, `env`, `admin`, …), in `routes_test.go` auf die neuen Helfer umstellen statt doppelt zu definieren.
+Expected: alle Namen aus „Was Phase A liefert“ vorhanden. Abweichende Namen notieren und im ganzen Plan ersetzen. Phase A definiert in `routes_test.go` eigene Helfer (`t0`, `env` mit `db`/`mux`/`rt`/`h`, `newEnv`, `do`, `expand`, `snap`, `backupsRule`, `wantRoutes`) und die Tests `TestRouteContract`, `TestStubsAnswerNotImplemented`, `TestStubsCheckPermissionAndSudo`, `TestStubGateAndPurge`. Sie kollidieren mit `helpers_test.go` aus Step 5 (`t0`, `env`, `newEnv`, `do`; außerdem legt `newEnvNoRun` den Benutzer `root` schon an, den die Phase-A-Tests ein zweites Mal anlegen würden). Step 14 ersetzt `routes_test.go` deshalb **vollständig**. Damit das Test-Paket zwischen Step 5 und Step 14 kompiliert, in Step 5 zuerst `git rm internal/backups/routes_test.go` (Step 14 legt die neue Fassung an).
 
 - [ ] **Step 1: Zeitplan-Tests schreiben** – `internal/backups/schedule_test.go`
 
@@ -575,7 +576,8 @@ type env struct {
 	notes   *notify.Recording
 	kicks   *atomic.Int32
 	h       *backups.Handler
-	mux     http.Handler
+	mux     *chi.Mux
+	rt      *rbac.Router // registered routes (routes_test.go: route contract)
 	rootID  int64
 	stop    func()
 }
@@ -612,7 +614,8 @@ func newEnvNoRun(t *testing.T, opt func(*backups.Deps)) *env {
 	})
 	backups.SetTickEvery(e.h, time.Hour) // tests tick by hand (backups.Tick)
 	mux := chi.NewRouter()
-	e.h.Routes(rbac.NewRouter(mux, rbac.NewDBChecker(db), e.clk))
+	e.rt = rbac.NewRouter(mux, rbac.NewDBChecker(db), e.clk)
+	e.h.Routes(e.rt)
 	e.mux = mux
 	e.rootID = storetest.CreateUser(t, db, "root", "admin")
 	e.stop = func() {}
@@ -799,7 +802,8 @@ import (
 // fakeFiles is an in-memory mcpanel-files for the backup endpoints. A service job starts as
 // running and ends at the first Job poll, unless hold[plan] is an open channel (then it runs
 // until the channel is closed). plan is the snapshot kind for create ("manual", "scheduled",
-// "pre-restore"), "restore" or "forget". fail[plan] ends such a job as failed with that text.
+// "pre-restore"), "restore" or "forget". fail[plan] ends such a job as failed with that text and
+// failCode[plan] as its wire code (filesapi.Job.Code, "" = none).
 type fakeFiles struct {
 	mu        sync.Mutex
 	clk       *clock.Fake
@@ -808,6 +812,8 @@ type fakeFiles struct {
 	jobs      map[int64]*fakeJob            // last job per instance
 	hold      map[string]chan struct{}
 	fail      map[string]string
+	failCode  map[string]string
+	createTZ  map[int64]string   // Timezone of the last CreateBackup per server
 	errs      map[string]error   // by operation: status, list, create, restore, forget, pin, download, purge, cancel, job
 	errQueue  map[string][]error // used up one per call before errs
 	loseJobs  bool               // Job answers nil (a restarted service)
@@ -831,7 +837,7 @@ func newFakeFiles(clk *clock.Fake) *fakeFiles {
 	return &fakeFiles{
 		clk: clk, status: filesapi.BackupsStatus{Available: true, Version: "0.19.1"},
 		snaps: map[int64][]filesapi.Snapshot{}, jobs: map[int64]*fakeJob{}, hold: map[string]chan struct{}{},
-		fail: map[string]string{}, errs: map[string]error{}, errQueue: map[string][]error{},
+		fail: map[string]string{}, failCode: map[string]string{}, createTZ: map[int64]string{}, errs: map[string]error{}, errQueue: map[string][]error{},
 		zip: []byte("PK\x05\x06" + strings.Repeat("\x00", 18)), // an empty zip archive
 	}
 }
@@ -933,6 +939,7 @@ func (f *fakeFiles) CreateBackup(_ context.Context, req filesapi.CreateBackupReq
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, fmt.Sprintf("create %d %s", req.ID, req.Kind))
+	f.createTZ[req.ID] = req.Timezone
 	if err := f.errFor("create"); err != nil {
 		return filesapi.Job{}, err
 	}
@@ -1097,7 +1104,7 @@ func (f *fakeFiles) Job(_ context.Context, id int64) (*filesapi.Job, error) {
 func (f *fakeFiles) complete(id int64, j *fakeJob) {
 	j.job.FinishedAt = f.clk.Now().UnixMilli()
 	if msg := f.fail[j.plan]; msg != "" {
-		j.job.State, j.job.Error = filesapi.JobFailed, msg
+		j.job.State, j.job.Error, j.job.Code = filesapi.JobFailed, msg, f.failCode[j.plan]
 		return
 	}
 	j.job.State = filesapi.JobDone
@@ -1595,13 +1602,19 @@ var (
 	errNotAvailable     = errors.New("backups are not available on this host (restic is missing)")
 	errTooManyDownloads = errors.New("at most 2 backup downloads at a time, try again when one is done")
 	errNoFiles          = fmt.Errorf("%w: no file service configured", filesapi.ErrUnavailable)
+	// errFilesBusy: the service refused a synchronous call (pin) with 429 busy while no panel
+	// job runs for the server (a download or an extract in the files tab).
+	errFilesBusy = errors.New("the file service is busy with this server (download or extract); try again later")
 )
 
 // classify maps an error to its API answer; ok is false for an internal error.
 func classify(err error) (status int, code, msg string, ok bool) {
 	switch {
-	case errors.Is(err, errBackupRunning), errors.Is(err, filesapi.ErrBusy):
+	case errors.Is(err, errBackupRunning):
 		return http.StatusConflict, httpx.CodeBackupRunning, errBackupRunning.Error(), true
+	case errors.Is(err, filesapi.ErrBusy):
+		// same code as a panel job (V3 knows no other 409 for pin), but a message that says why
+		return http.StatusConflict, httpx.CodeBackupRunning, errFilesBusy.Error(), true
 	case errors.Is(err, errNoInstance):
 		return http.StatusConflict, httpx.CodeConflict, errNoInstance.Error(), true
 	case errors.Is(err, errSnapshotNotFound), errors.Is(err, filesapi.ErrNotFound):
@@ -1748,14 +1761,16 @@ func (h *Handler) location(ctx context.Context) (*time.Location, string, error) 
 	return loc, name, nil
 }
 
-// tzName is the zone sent with every backup (restic stores the snapshot time in it, which
-// sets the buckets of forget); "" (the service's zone) if it cannot be read or is invalid.
+// tzName is the zone sent with every backup and every retention forget: restic stores the
+// snapshot time in the backup's zone and forget buckets days/weeks/months by it, so both must
+// use the same source. An invalid stored name falls back to UTC (location), an unreadable
+// setting too – never "" (the service's own zone), which forget would not accept.
 func (h *Handler) tzName(ctx context.Context) string {
-	loc, name, err := h.location(ctx)
-	if err != nil || loc == time.UTC && name != "UTC" {
-		return ""
+	loc, _, err := h.location(ctx)
+	if err != nil {
+		return time.UTC.String()
 	}
-	return name
+	return loc.String()
 }
 
 // scheduleView is the OpenAPI schema BackupSchedule.
@@ -1901,11 +1916,98 @@ func (h *Handler) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 
 (Import `database/sql` für `sql.NullInt64` ergänzen.)
 
-- [ ] **Step 14: Stub-Test in `routes_test.go` umstellen**
+- [ ] **Step 14: `routes_test.go` auf die neuen Helfer umstellen**
 
-Den Phase-A-Test, der alle acht Routen als Stub erwartet, durch diesen ersetzen (Name des alten Tests aus Step 0; Hilfsfunktionen auf `newEnv`/`e.admin()` umstellen):
+`internal/backups/routes_test.go` (in Step 5 entfernt) mit dieser Fassung neu anlegen. Sie behält den Routenvertrag und die Rechte-/Sudo-Prüfung aus Phase A, nutzt aber `newEnv`/`env`/`do`/`admin` aus `helpers_test.go` (die Routen hängen dort ohne `/api`-Präfix am Router, deshalb fehlt es in `wantRoutes`). `TestStubsAnswerNotImplemented` wird zu `TestRemainingStubs`; `TestStubGateAndPurge` entfällt (`newEnv` startet `Run` bereits und räumt es beim Cleanup ab; Sperre und Purge testet Aufgabe 12).
 
 ```go
+package backups_test
+
+import (
+	"fmt"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store/storetest"
+)
+
+var (
+	backupsRule = rbac.Server(rbac.PermServerBackups, "id")
+	snap        = strings.Repeat("ab", 32)
+)
+
+// wantRoutes are exactly the backups operations of api/openapi.yaml (V3); the test router has
+// no /api prefix.
+var wantRoutes = map[string]rbac.Rule{
+	"GET /servers/{id}/backups":                     backupsRule,
+	"POST /servers/{id}/backups":                    backupsRule,
+	"GET /servers/{id}/backups/job":                 backupsRule,
+	"PUT /servers/{id}/backups/schedule":            backupsRule,
+	"POST /servers/{id}/backups/{snapshot}/pin":     backupsRule,
+	"POST /servers/{id}/backups/{snapshot}/restore": backupsRule.WithSudo(),
+	"DELETE /servers/{id}/backups/{snapshot}":       backupsRule.WithSudo(),
+	"GET /servers/{id}/backups/{snapshot}/download": backupsRule,
+}
+
+func expand(pattern string) string {
+	return strings.NewReplacer("{id}", "1", "{snapshot}", snap).Replace(pattern)
+}
+
+func TestRouteContract(t *testing.T) {
+	e := newEnv(t)
+	got := e.rt.Routes()
+	if len(got) != len(wantRoutes) {
+		t.Errorf("registered %d routes, want %d", len(got), len(wantRoutes))
+	}
+	seen := map[string]bool{}
+	for _, r := range got {
+		key := r.Method + " " + r.Pattern
+		seen[key] = true
+		w, ok := wantRoutes[key]
+		if !ok {
+			t.Errorf("unexpected route %s", key)
+			continue
+		}
+		if w.String() != r.Rule.String() {
+			t.Errorf("%s: rule %s, want %s", key, r.Rule, w)
+		}
+	}
+	for key := range wantRoutes {
+		if !seen[key] {
+			t.Errorf("missing route %s", key)
+		}
+	}
+	if un := rbac.Uncovered(e.mux, got, func(string, string) bool { return false }); len(un) != 0 {
+		t.Fatalf("routes without rbac rule: %v", un)
+	}
+}
+
+// A user without server.backups is refused; restore and delete need sudo even for admins;
+// anonymous requests are 401.
+func TestRoutesCheckPermissionAndSudo(t *testing.T) {
+	e := newEnv(t)
+	bob := userP(storetest.CreateUser(t, e.db, "bob", "user"), "bob")
+	for key := range wantRoutes {
+		method, pattern, _ := strings.Cut(key, " ")
+		if rec := e.do(method, expand(pattern), "{}", &bob); rec.Code != http.StatusForbidden {
+			t.Errorf("%s without server.backups: %d", key, rec.Code)
+		}
+		if rec := e.do(method, expand(pattern), "{}", nil); rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s anonymous: %d", key, rec.Code)
+		}
+	}
+	noSudo := e.admin()
+	for _, key := range []string{"POST /servers/{id}/backups/{snapshot}/restore", "DELETE /servers/{id}/backups/{snapshot}"} {
+		method, pattern, _ := strings.Cut(key, " ")
+		rec := e.do(method, expand(pattern), "{}", &noSudo)
+		if rec.Code != http.StatusForbidden || errCode(t, rec) != "sudo_required" {
+			t.Errorf("%s without sudo: %d %s", key, rec.Code, rec.Body)
+		}
+	}
+}
+
 // stubbed are the routes that still answer 503 backups_unavailable; each task of phase B2
 // removes its routes, task 13 deletes the list and this test.
 var stubbed = []struct{ method, path string }{
@@ -1931,10 +2033,12 @@ func TestRemainingStubs(t *testing.T) {
 }
 ```
 
+(`fmt` braucht nur `TestRemainingStubs`; Aufgabe 13 löscht ihn samt `stubbed` und entfernt dann den Import.)
+
 - [ ] **Step 15: Grün prüfen**
 
 Run: `gofmt -w internal/backups && make check && make test-vm SUITE=go`
-Expected: PASS (`TestNextRun*`, `TestScheduleValidate`, `TestUpdateSchedule*`, `TestRemainingStubs` und die Routen-/Rechte-Tests aus Phase A).
+Expected: PASS (`TestNextRun*`, `TestScheduleValidate`, `TestUpdateSchedule*`, `TestRemainingStubs`, `TestRouteContract`, `TestRoutesCheckPermissionAndSudo`).
 
 - [ ] **Step 16: Commit**
 
@@ -1956,7 +2060,7 @@ Claude-Session: https://claude.ai/code/session_01FujEdLGX6o4icgyMAYek1R"
 
 **Interfaces:**
 - Consumes: Aufgabe 9 (`Handler`, `loadServer`, `record`, `writeError`, `classify`, Sentinels, `nullTime`, `loadSchedule`), V1 (`CreateBackup`, `Job`, `CancelJob`, `BackupsStatus`), `agentapi.ConsoleClient.Rcon`, `agentapi.InstancesClient.Instances`.
-- Produces: `jobView`, `jobError`, `failf`, `jobErrorOf`, `jobSpec`, `job.setStep/setBytes`, `queue` (`add`, `get`, `busy`, `runningFor`, `restoreRunning`, `work`, `drop`, `close`, `idle`), `ready`, `instanceState`, `containerRunning`, `rcon`, `markSaveOff`, `resume`, `waitService`, `cancelService`, `runBackup`, `recover`, `tick`, `retrySaveOn`; Test-Hooks `Tick(ctx, h)`, `WaitIdle(h) bool`.
+- Produces: `jobView`, `jobError`, `failf`, `jobErrorOf`, `jobSpec`, `job.setStep/setBytes`, `queue` (`add`, `get`, `busy`, `runningFor`, `restoreHeld`, `work`, `drop`, `close`, `idle`), `ready`, `instanceState`, `containerRunning`, `rcon`, `markSaveOff`, `resume`, `waitService`, `cancelService`, `runBackup`, `recover`, `tick`, `retrySaveOn`; Test-Hooks `Tick(ctx, h)`, `WaitIdle(h) bool`.
 
 - [ ] **Step 1: Tests schreiben** – `internal/backups/backup_test.go`
 
@@ -2227,6 +2331,29 @@ func TestSaveOnAfterServiceJobFails(t *testing.T) {
 	}
 	if es, _ := e.rec.all(); len(es) != 1 || es[0].Result != audit.ResultFailure {
 		t.Fatalf("audit = %+v", es)
+	}
+}
+
+// A failed service job carries its wire code (filesapi.Job.Code); the panel job maps it (V5).
+func TestServiceJobFailureCodes(t *testing.T) {
+	for _, c := range []struct{ wire, want string }{
+		{filesapi.CodeTooLarge, "too_large"},
+		{filesapi.CodeInsufficientStorage, "insufficient_storage"},
+		{filesapi.CodeBusy, "files_busy"},
+		{filesapi.CodeUnavailable, "backups_unavailable"},
+		{"", "internal"},
+		{"something_new", "internal"},
+	} {
+		t.Run(c.want+"/"+c.wire, func(t *testing.T) {
+			e := newEnv(t)
+			id := e.instance("survival")
+			e.files.fail["manual"] = "the job failed"
+			e.files.failCode["manual"] = c.wire
+			e.create(id, map[string]any{})
+			if j := e.waitJob(id); j.State != "failed" || code(j) != c.want || j.Error != "the job failed" {
+				t.Fatalf("job = %+v, want code %s", j, c.want)
+			}
+		})
 	}
 }
 
@@ -2626,10 +2753,13 @@ func (q *queue) runningFor(serverID int64) bool {
 	return q.running != nil && q.running.spec.serverID == serverID
 }
 
-func (q *queue) restoreRunning(serverID int64) bool {
+// restoreHeld reports whether the server has a restore job that waits or runs: the gate closes
+// with the 202, not only when the worker picks the job up (another server's job may still run).
+func (q *queue) restoreHeld(serverID int64) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.running != nil && q.running.spec.serverID == serverID && q.running.spec.kind == kindRestore
+	j := q.last[serverID]
+	return active(j) && j.spec.kind == kindRestore
 }
 
 // idle reports whether no job waits or runs.
@@ -2902,9 +3032,25 @@ func (h *Handler) waitService(ctx context.Context, j *job, id int64, jobID strin
 		case filesapi.JobDone:
 			return *sj, nil
 		case filesapi.JobFailed:
-			return *sj, failf(codeInternal, "%s", sj.Error)
+			return *sj, failf(serviceJobCode(sj.Code), "%s", sj.Error)
 		}
 	}
+}
+
+// serviceJobCode maps the wire code of a failed service job (filesapi.Job.Code) to a
+// BackupJobError (V5); unknown or empty codes are internal.
+func serviceJobCode(code string) string {
+	switch code {
+	case filesapi.CodeTooLarge:
+		return codeTooLarge
+	case filesapi.CodeInsufficientStorage:
+		return codeStorage
+	case filesapi.CodeBusy:
+		return codeFilesBusy
+	case filesapi.CodeUnavailable:
+		return codeBackups
+	}
+	return codeInternal
 }
 
 // runBackup takes one snapshot of kind; a running server gets save-off/save-all flush before
@@ -3223,6 +3369,26 @@ func TestTickRunsDueSchedule(t *testing.T) {
 	if es, _ := e.rec.all(); len(es) != 1 { // only the schedule update; scheduled runs are no user action
 		t.Fatalf("audit = %v", e.rec.actions())
 	}
+	if tz := e.files.createTZ[id]; tz != "Europe/Berlin" {
+		t.Fatalf("backup timezone = %q", tz)
+	}
+}
+
+// Backup and retention use the same zone, also when the stored one is invalid (both UTC):
+// forget buckets by the zone the snapshot times were stored in.
+func TestBackupAndRetentionShareZone(t *testing.T) {
+	e := newEnv(t)
+	id := e.instance("survival")
+	putSchedule(e, id, scheduleBody("daily", 24, 240, 0))
+	if _, err := e.db.ExecContext(t.Context(), `UPDATE instance_settings SET backup_timezone = 'Mars/Olympus' WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	e.clk.Set(time.Date(2026, 10, 13, 4, 0, 0, 0, time.UTC))
+	e.tick()
+	calls := e.files.callLog()
+	if tz := e.files.createTZ[id]; tz != "UTC" || len(calls) != 2 || !strings.HasSuffix(calls[1], " UTC") {
+		t.Fatalf("backup timezone %q, calls %v", tz, calls)
+	}
 }
 
 func TestRetentionOnlyAfterScheduledSuccess(t *testing.T) {
@@ -3470,12 +3636,9 @@ func (h *Handler) prune(ctx context.Context, j *job) error {
 	if p.Validate() != nil { // switched off meanwhile without retention: nothing to apply
 		return nil
 	}
-	loc, _, err := h.location(ctx)
-	if err != nil {
-		return err
-	}
 	j.setStep(stepPruning)
-	sj, err := h.files.ForgetBackups(ctx, filesapi.ForgetRequest{ID: id, Policy: &p, Timezone: loc.String()})
+	// the same zone as the backups (tzName), so the buckets match the stored snapshot times
+	sj, err := h.files.ForgetBackups(ctx, filesapi.ForgetRequest{ID: id, Policy: &p, Timezone: h.tzName(ctx)})
 	if err != nil {
 		return err
 	}
@@ -3783,6 +3946,33 @@ func TestRestoreRequests(t *testing.T) {
 	}
 }
 
+// Review Focus 4: the gate closes with the 202 although the restore still waits behind another
+// server's backup, so a power start right after the restore request is refused.
+func TestGateHoldsWhileRestoreQueued(t *testing.T) {
+	e := newEnv(t)
+	a := e.instance("alpha")
+	b := e.instance("beta")
+	snap := e.files.add(b, filesapi.SnapshotManual, false, "")
+	release := e.files.holdPlan("manual")
+	e.create(a, map[string]any{})
+	e.waitStep(a, "backing_up")
+	j := e.restore(b, snap)
+	if j.State != "queued" || j.QueuePosition != 1 {
+		t.Fatalf("restore = %+v", j)
+	}
+	if !e.h.DataJobRunning(t.Context(), b) {
+		t.Fatal("gate open while the restore waits")
+	}
+	if e.h.DataJobRunning(t.Context(), a) {
+		t.Fatal("gate closed for the server that only backs up")
+	}
+	release()
+	e.waitJob(b)
+	if e.h.DataJobRunning(t.Context(), b) {
+		t.Fatal("gate still closed after the restore")
+	}
+}
+
 // Review Focus 4: a restore while a backup of the same server waits or runs.
 func TestRestoreWhileBackupQueued(t *testing.T) {
 	e := newEnv(t)
@@ -3972,6 +4162,21 @@ func TestPinWhileJobRunning(t *testing.T) {
 	}
 }
 
+// The service refuses a pin with 429 busy while a download or extract runs: still 409
+// backup_running, but the message names the file service, not a backup job.
+func TestPinWhileServiceBusy(t *testing.T) {
+	e := newEnv(t)
+	id := e.instance("survival")
+	snap := e.files.add(id, filesapi.SnapshotScheduled, false, "")
+	e.files.errs["pin"] = filesapi.ErrBusy
+	a := e.admin()
+	rec := e.do(http.MethodPost, bPath(id, "/"+snap+"/pin"), map[string]any{"pinned": true}, &a)
+	if rec.Code != http.StatusConflict || errCode(t, rec) != "backup_running" ||
+		!strings.Contains(rec.Body.String(), "file service is busy") {
+		t.Fatalf("pin while the service is busy = %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestPurgeDropsQueuedJob(t *testing.T) {
 	e := newEnv(t)
 	a := e.instance("alpha")
@@ -4013,7 +4218,7 @@ func TestPurgeCancelsRunningJob(t *testing.T) {
 func ptr[T any](v T) *T { return &v }
 ```
 
-(`manage_test.go` braucht zusätzlich den Import `time`.)
+(`manage_test.go` braucht zusätzlich die Importe `strings` und `time`.)
 
 - [ ] **Step 3: Rot prüfen**
 
@@ -4127,11 +4332,12 @@ import (
 	"github.com/Bernotese/mc-panel/internal/httpx"
 )
 
-// DataJobRunning is true while the panel runs a restore job for the server, from the stop to
-// the end of the service's restore (servers.DataGate; spec §5.5). The service's own restore
-// job is covered by serverfiles.DataJobRunning, also across a panel restart.
+// DataJobRunning is true while the panel holds a restore job for the server, from the 202 (also
+// while it waits behind another server's job) to the end of the service's restore
+// (servers.DataGate; spec §5.5). The service's own restore job is covered by
+// serverfiles.DataJobRunning, also across a panel restart.
 func (h *Handler) DataJobRunning(_ context.Context, serverID int64) bool {
-	return h.queue.restoreRunning(serverID)
+	return h.queue.restoreHeld(serverID)
 }
 
 // stop stops a running server through the agent (desired_state stays; the gate keeps the
@@ -4343,7 +4549,9 @@ func (h *Handler) handlePin(w http.ResponseWriter, r *http.Request) {
 
 // PurgeBackups ends the server's jobs (a waiting one is dropped, a running one cancelled and
 // awaited) and deletes its repository (servers.BackupPurger, spec §5.6). The service may report
-// busy for a moment after a cancel; the purge is retried a few times.
+// busy for a moment after a cancel; the purge is retried a few times. The waiting before the
+// service call is bounded (purgeWait + 5 × pollEvery ≈ 30 s): servers' DELETE gives the whole
+// purge filesapi.DeleteTimeout + 1 min (context and write deadline, V2).
 func (h *Handler) PurgeBackups(ctx context.Context, serverID int64) error {
 	h.queue.drop(serverID, purgeWait)
 	if h.files == nil {
@@ -4366,18 +4574,76 @@ func (h *Handler) PurgeBackups(ctx context.Context, serverID int64) error {
 
 - [ ] **Step 7: `handler.go` anpassen**
 
-Die Stub-Methoden `DataJobRunning` und `PurgeBackups` aus `handler.go` löschen. Routen:
+Die Stub-Methoden `DataJobRunning` und `PurgeBackups` aus `handler.go` löschen. Übersicht, Pin, Restore und Löschen rufen den Dienst synchron mit `filesapi.BackupCallTimeout` (2 min; restic liest den Repo-Index) auf – länger als die `WriteTimeout` des panels (60 s). Sie bekommen deshalb eine eigene Schreibfrist (Helfer in `handler.go`, `ignoreUnsupported` nutzt Aufgabe 13 mit):
 
 ```go
-	api.Get("/servers/{id}/backups", rule, h.handleOverview)
+// slowWriteTimeout is the write deadline of the routes that wait for a synchronous restic call
+// (overview, pin, restore and delete pre-checks): the client timeout plus a margin.
+const slowWriteTimeout = filesapi.BackupCallTimeout + 30*time.Second
+
+// slow extends the write deadline of a route beyond the server's WriteTimeout (pattern of the
+// serverfiles downloads); recorders without deadline support are fine.
+func (h *Handler) slow(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := ignoreUnsupported(http.NewResponseController(w).SetWriteDeadline(time.Now().Add(slowWriteTimeout))); err != nil {
+			h.log.WarnContext(r.Context(), "backups: extend write deadline", "err", err)
+		}
+		next(w, r)
+	}
+}
+
+func ignoreUnsupported(err error) error {
+	if errors.Is(err, http.ErrNotSupported) {
+		return nil
+	}
+	return err
+}
+```
+
+(`time.Now()` ist hier zulässig: eine Netzwerkfrist, keine Logik – wie `ioClock` im Download; bei Bedarf `h.ioClock` aus Aufgabe 13 vorziehen.) Routen:
+
+```go
+	api.Get("/servers/{id}/backups", rule, h.slow(h.handleOverview))
 	api.Post("/servers/{id}/backups", rule, h.handleCreate)
 	api.Get("/servers/{id}/backups/job", rule, h.handleJob)
 	api.Put("/servers/{id}/backups/schedule", rule, h.handleUpdateSchedule)
-	api.Post("/servers/{id}/backups/{snapshot}/pin", rule, h.handlePin)
-	api.Post("/servers/{id}/backups/{snapshot}/restore", sudo, h.handleRestore)
-	api.Delete("/servers/{id}/backups/{snapshot}", sudo, h.handleDelete)
+	api.Post("/servers/{id}/backups/{snapshot}/pin", rule, h.slow(h.handlePin))
+	api.Post("/servers/{id}/backups/{snapshot}/restore", sudo, h.slow(h.handleRestore))
+	api.Delete("/servers/{id}/backups/{snapshot}", sudo, h.slow(h.handleDelete))
 	api.Get("/servers/{id}/backups/{snapshot}/download", rule, h.notImplemented)
 ```
+
+Test in `manage_test.go` (die Frist selbst lässt sich mit `httptest` nicht beobachten; der Test sichert, dass ein langsamer Dienst-Aufruf über 60 s hinaus nicht an der Route scheitert, über einen echten `http.Server` mit kurzer `WriteTimeout`):
+
+```go
+// The synchronous routes outlive the server's WriteTimeout (here shortened to 50 ms).
+func TestSlowRoutesOutliveWriteTimeout(t *testing.T) {
+	e := newEnv(t)
+	id := e.instance("survival")
+	e.files.add(id, filesapi.SnapshotScheduled, false, "")
+	e.files.delay["list"] = 200 * time.Millisecond
+	a := e.admin()
+	// the same principal and client IP as e.do, but through a real server with a WriteTimeout
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := httpx.WithClientIP(r.Context(), netip.MustParseAddr("203.0.113.7"))
+		e.mux.ServeHTTP(w, r.WithContext(principal.With(ctx, a)))
+	}))
+	srv.Config.WriteTimeout = 50 * time.Millisecond
+	srv.Start()
+	defer srv.Close()
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+bPath(id, ""), nil)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("overview through a short WriteTimeout: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+```
+
+Dafür bekommt `fakeFiles` ein Feld `delay map[string]time.Duration` (by operation, in `newFakeFiles` initialisiert; `Snapshots` schläft `delay["list"]` außerhalb von `f.mu` vor der Antwort). `manage_test.go` importiert dafür zusätzlich `net/http/httptest`, `net/netip`, `internal/httpx` und `internal/principal`. Ohne `slow` bricht der Server die Antwort nach 50 ms ab und der Client sieht einen Fehler (rot).
 
 In `routes_test.go` enthält `stubbed` nur noch den Download-Eintrag.
 
@@ -4557,12 +4823,7 @@ func (u *userSlots) acquire(userID int64) (release func(), ok bool) {
 	}, true
 }
 
-func ignoreUnsupported(err error) error {
-	if errors.Is(err, http.ErrNotSupported) {
-		return nil
-	}
-	return err
-}
+// ignoreUnsupported comes from handler.go (task 12).
 
 // deadlineWriter sets a fresh write deadline before every write and flushes after it (pattern
 // of serverfiles: the server's WriteTimeout does not bound a long download).
@@ -4953,6 +5214,10 @@ func TestBackupsEndToEnd(t *testing.T) {
 	// restore: while it runs, power start answers 409 (servers.AnyGate)
 	release := e.backups.holdPlan("restore")
 	admin.must(202, "POST", base+"/"+snap+"/restore", nil)
+	// right after the 202 (the job may still wait for the worker) the gate is already closed
+	if code, out := admin.do("POST", fmt.Sprintf("/servers/%d/power", id), map[string]string{"action": "start"}); code != http.StatusConflict {
+		t.Fatalf("start right after the restore request = %d %v", code, out)
+	}
 	waitBackup(t, admin, id, "restoring")
 	if code, out := admin.do("POST", fmt.Sprintf("/servers/%d/power", id), map[string]string{"action": "start"}); code != http.StatusConflict {
 		t.Fatalf("start during restore = %d %v", code, out)
@@ -4993,7 +5258,7 @@ Expected (V4; fehlt etwas, genau so ergänzen):
 	})
 	serversH = servers.NewHandler(servers.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Box: box, Instances: d.Instances,
-		Catalog: cat, Gate: servers.AnyGate(filesH, backupsH), Backups: backupsH,
+		Catalog: cat, Gate: servers.AnyGate(backupsH, filesH), Backups: backupsH,
 	})
 ```
 

@@ -176,6 +176,10 @@ type CreateBackupRequest struct {
 	Timezone string       `json:"timezone,omitempty"` // backup_timezone: restic stores the snapshot time in this zone, which sets the day/week/month buckets of forget; "" = the service's zone
 }
 
+// Validate: ID > 0, valid kind, ValidNote (only manual), Timezone "" or ValidTimezone; errors wrap ErrInvalid.
+func (r CreateBackupRequest) Validate() error
+func ValidTimezone(tz string) bool // IANA name ≤ MaxTimezoneLen accepted by time.LoadLocation (not "Local")
+
 type SnapshotRequest struct {
 	ID       int64  `json:"id"`
 	Snapshot string `json:"snapshot"`
@@ -236,7 +240,7 @@ type BackupClient interface {
 var _ BackupClient = (*UnixClient)(nil)
 ```
 
-- `Job` (`types.go`) bekommt drei Felder: `Kind JobKind \`json:"kind"\``, `Snapshot string \`json:"snapshot"\`` (Backup: neue ID nach `done`; Restore: Quelle; sonst ""), `Skipped int64 \`json:"skipped"\``. Extract-Jobs setzen `Kind: JobExtract`.
+- `Job` (`types.go`) bekommt vier Felder: `Kind JobKind \`json:"kind"\``, `Snapshot string \`json:"snapshot"\`` (Backup: neue ID nach `done`; Restore: Quelle; sonst ""), `Skipped int64 \`json:"skipped"\`` und `Code string \`json:"code"\`` (Wire-Code des Fehlers eines `failed`-Jobs, z. B. `too_large`, `insufficient_storage`, `busy`, `unavailable`; "" sonst und bei Fehlern ohne Sentinel). Extract-Jobs setzen `Kind: JobExtract`. Phase A legt die Felder an, der Dienst füllt `Kind` und `Code` ab Phase B1 (`jobs.finish` setzt `Code` über `filesapi.CodeOf(err)`).
 - `errors.go`: `CodeUnavailable = "unavailable"` (503), `ErrBackupsUnavailable = errors.New(CodeUnavailable)`, Eintrag in `codes`. Nicht zu verwechseln mit `ErrUnavailable` (Dienst nicht erreichbar).
 - Client: ungültige IDs, Snapshot-IDs, Notizen, Policies → `ErrInvalid` ohne Aufruf. Zeitlimits: `BackupsStatus` `HealthTimeout`; `Snapshots`, `PinBackup`, `RestoreBackup` `BackupCallTimeout`; `CreateBackup`, `ForgetBackups`, `CancelJob` `CallTimeout`; `PurgeBackups` `DeleteTimeout`; `DownloadBackup` wie `Download` (`DownloadHeaderTimeout`, Body ohne Frist, `Name` = ""). `Snapshots` liefert nie `nil`.
 - `serverfiles` (Aufgabe 1): `ExtractRunning` heißt `DataJobRunning` und meldet nur noch Jobs mit `Kind` ∈ {`""`, `extract`, `restore`} im Zustand `running` (ein laufendes Backup sperrt den Start nicht). Fakes in `internal/serverfiles/helpers_test.go` und `cmd/panel/fakefiles_test.go` setzen `Kind`.
@@ -295,10 +299,10 @@ Dazu in `internal/store/queries/servers.sql`: `-- name: ServersSetBackupTimezone
 - `internal/audit/types.go`: `ActionBackupCreate = "backup.create"`, `ActionBackupRestore = "backup.restore"`, `ActionBackupDelete = "backup.delete"`, `ActionBackupPin = "backup.pin"`, `ActionBackupUnpin = "backup.unpin"`, `ActionBackupDownload = "backup.download"`, `ActionBackupScheduleUpdate = "backup.schedule_update"`.
 - `internal/notify/notify.go`: `EventBackupFailed EventType = "backup.failed"`; `sender.go`: Titel `"Backup failed"` (bzw. das Muster der übrigen Titel).
 - `internal/servers` (Aufgabe 2):
-  - `gate.go`: `ExtractGate` → `DataGate { DataJobRunning(ctx context.Context, serverID int64) bool }`; `func AnyGate(gates ...DataGate) DataGate` (wahr, sobald einer wahr ist; `nil`-Einträge übersprungen). `Deps.Extract` → `Deps.Gate DataGate`. Meldung der Power-`409`: „a file or backup job is running for this server; try again when it is done“.
+  - `gate.go`: `ExtractGate` → `DataGate { DataJobRunning(ctx context.Context, serverID int64) bool }`; `func AnyGate(gates ...DataGate) DataGate` (wahr, sobald einer wahr ist; `nil`-Einträge übersprungen). `Deps.Extract` → `Deps.Gate DataGate`. Meldung der Power-`409`: „a file or backup job is rewriting this server's data; try again when it is done“.
   - `BackupPurger { PurgeBackups(ctx context.Context, serverID int64) error }`, `Deps.Backups BackupPurger` (nil = nichts zu löschen).
-  - `DELETE /servers/{id}?purge_backups=1|true`: nach erfolgreichem Commit `Backups.PurgeBackups`; Erfolg → Audit-Detail `backups_purged: true`, Fehler → Log + `backups_purged: false`, Antwort bleibt `204`. Ohne Parameter fehlt das Detail. Ungültiger Wert → `400 validation_failed`.
-  - Einstellungen: `settingsJSON.BackupTimezone string \`json:"backup_timezone"\``; `updateSettingsRequest.BackupTimezone optional[string]` (fehlt = bleibt; `null` → `400`); Prüfung `time.LoadLocation` und Länge ≤ 64, sonst `400 validation_failed`; Audit im vorhandenen `server.settings_update` mit `backup_timezone: {from, to}`. `internal/servers` importiert `time/tzdata` nicht; das macht `cmd/panel` (Aufgabe 3).
+  - `DELETE /servers/{id}?purge_backups=1|true`: nach erfolgreichem Commit `Backups.PurgeBackups` mit `context.WithoutCancel(r.Context())` und eigener Frist `filesapi.DeleteTimeout + time.Minute` (die Minute deckt das Beenden der Jobs in `backups.PurgeBackups`, ≤ 30 s); vorher setzt der Handler die Schreibfrist der Antwort per `http.NewResponseController(w).SetWriteDeadline` auf jetzt + dieselbe Frist + 10 s (wie die Download-Routen), damit das `204` nicht an der 60-s-`WriteTimeout` verloren geht und ein Client-Abbruch das Löschen nicht mittendrin beendet; Erfolg → Audit-Detail `backups_purged: true`, Fehler → Log + `backups_purged: false`, Antwort bleibt `204`. Ohne Parameter fehlt das Detail. Ungültiger Wert → `400 validation_failed`.
+  - Einstellungen: `settingsJSON.BackupTimezone string \`json:"backup_timezone"\``; `updateSettingsRequest.BackupTimezone optional[string]` (fehlt = bleibt; `null` → `400`); Prüfung `time.LoadLocation` und Länge ≤ 64, sonst `400 validation_failed`; Audit im vorhandenen `server.settings_update` mit `backup_timezone: {old, new}` (wie `base_domain` im selben Eintrag). `internal/servers` importiert `time/tzdata` nicht; das macht `cmd/panel` (Aufgabe 3).
 
 ### V3 – panel-API (Aufgabe 3, `api/openapi.yaml`, Tag `backups`)
 
@@ -307,7 +311,7 @@ Alle Pfade mit Pfad-Parameter `id` (int64); `{snapshot}` ist ein String mit `pat
 | Pfad | Methode | operationId | Request | Antworten |
 |---|---|---|---|---|
 | `/servers/{id}/backups` | get | `getBackups` | – | `200 BackupOverview` |
-| `/servers/{id}/backups` | post | `createBackup` | `CreateBackupRequest` | `202 BackupJobStarted`, 400, 409 (`backup_running`, `conflict`), 503 (`backups_unavailable`, `files_unavailable`) |
+| `/servers/{id}/backups` | post | `createBackup` | `CreateBackupRequest` | `202 BackupJobStarted`, 400, 409 (`backup_running`, `conflict` = Server hat noch keine Instanz), 503 (`backups_unavailable`, `files_unavailable`) |
 | `/servers/{id}/backups/job` | get | `getBackupJob` | – | `200 BackupJobResponse` |
 | `/servers/{id}/backups/schedule` | put | `updateBackupSchedule` | `UpdateBackupScheduleRequest` | `200 BackupScheduleResponse`, 400 |
 | `/servers/{id}/backups/{snapshot}/pin` | post | `pinBackup` | `PinBackupRequest` | `200 BackupSnapshotResponse`, 400, 409 (`backup_running`), 503 |
@@ -384,25 +388,26 @@ func (h *Handler) DataJobRunning(ctx context.Context, serverID int64) bool
 func (h *Handler) PurgeBackups(ctx context.Context, serverID int64) error
 ```
 
-Phase A registriert alle acht Routen mit den Regeln aus V3; bis B2 antworten sie `503 backups_unavailable` („backups not implemented yet“), `getBackups` und `getBackupJob` ebenfalls; `Run` kehrt nach `<-ctx.Done()` zurück, `DataJobRunning` ist `false`, `PurgeBackups` `nil`. `cmd/panel/app.go`: `appDeps.Backups filesapi.BackupClient` (in `main.go` derselbe `*filesapi.UnixClient` wie `Files`), `backupsH := backups.NewHandler(...)`, `servers.Deps{Gate: servers.AnyGate(filesH, backupsH), Backups: backupsH}`, `Reconcile: serversH.Trigger` (nach `serversH` erzeugen; `backupsH` vorher anlegen und `Reconcile` per Closure `func() { serversH.Trigger() }` setzen), `backupsH.Routes(api)`, `backupsH.Run` in `run`. `cmd/panel/main.go` importiert `_ "time/tzdata"`.
+Phase A registriert alle acht Routen mit den Regeln aus V3; bis B2 antworten sie `503 backups_unavailable` („backups not implemented yet“), `getBackups` und `getBackupJob` ebenfalls; `Run` kehrt nach `<-ctx.Done()` zurück, `DataJobRunning` ist `false`, `PurgeBackups` `nil`. `cmd/panel/app.go`: `appDeps.Backups filesapi.BackupClient` (in `main.go` derselbe `*filesapi.UnixClient` wie `Files`), `backupsH := backups.NewHandler(...)`, `servers.Deps{Gate: servers.AnyGate(backupsH, filesH), Backups: backupsH}`, `Reconcile: serversH.Trigger` (nach `serversH` erzeugen; `backupsH` vorher anlegen und `Reconcile` per Closure `func() { serversH.Trigger() }` setzen), `backupsH.Routes(api)`, `backupsH.Run` in `run`. `cmd/panel/main.go` importiert `_ "time/tzdata"`.
 
 ### V5 – Dienst-Verhalten, das das panel voraussetzt (Aufgaben 4–8)
 
-- `BackupsStatus` ist immer erreichbar (auch ohne restic); alle anderen `/v1/backups/*` ohne restic → `503 unavailable`.
+- `BackupsStatus` ist immer erreichbar (auch ohne restic); alle anderen `/v1/backups/*` außer `purge` ohne restic → `503 unavailable`.
 - `CreateBackup` ohne `instances/<id>` → `404 not_found`; mit laufendem Job der Instanz oder vollem `max_backup_jobs` → `429 busy`; zu wenig Platz → `507`. Job läuft bis `done` (dann `Snapshot` gesetzt) oder `failed`.
 - `RestoreBackup`: unbekannter Snapshot → `404`; zu wenig Platz → `507`; sonst `202`. Der Tausch beginnt erst nach vollständigem Entpacken; `CancelJob` wirkt bis dahin.
 - `ForgetBackups` mit `Policy` berücksichtigt nur `kind=scheduled`, behält `pinned`; mit `Snapshots` löscht genau diese (unbekannte ID → `404` vor dem Job).
 - `PinBackup`: nur `kind=scheduled` (sonst `400 invalid`), liefert den Snapshot mit neuer ID; laufender Job der Instanz → `429 busy`.
-- `PurgeBackups` ohne Repo → `204`; laufender Job → `429 busy`.
+- `PurgeBackups` ohne Repo → `204`; laufender Job → `429 busy`. Purge braucht restic nicht: der Dienst löscht `repos/<id>` und `keys/<id>` über ein `os.Root` auf `backups/` auch dann, wenn restic fehlt (kein `503 unavailable`).
+- `CreateBackup` prüft die Anfrage mit `CreateBackupRequest.Validate` (ID, Art, Notiz, Zeitzone) → `400 invalid`.
 - `CancelJob` ohne laufenden Job → `204`; Extract-Job → `400 invalid`.
 - `Job` liefert den letzten Job jeder Art (`Kind` gesetzt).
-- Das panel bildet Dienst-Fehler im Job so ab: `ErrUnavailable` → `files_unavailable`, `ErrBackupsUnavailable` → `backups_unavailable`, `ErrInsufficientStorage` → `insufficient_storage`, `ErrTooLarge` → `too_large`, `ErrBusy` → `files_busy` (z. B. Entpacken läuft), Job `failed` sonst → `internal` mit `job.error` als Text.
+- Das panel bildet Dienst-Fehler im Job so ab: `ErrUnavailable` → `files_unavailable`, `ErrBackupsUnavailable` → `backups_unavailable`, `ErrInsufficientStorage` → `insufficient_storage`, `ErrTooLarge` → `too_large`, `ErrBusy` → `files_busy` (z. B. Entpacken läuft); ein `failed`-Dienst-Job wird über `Job.Code` genauso abgebildet (`too_large`, `insufficient_storage`, `busy` → `files_busy`, `unavailable` → `backups_unavailable`), sonst Job `failed` sonst → `internal` mit `job.error` als Text.
 
 ### V6 – MSW-Mock (Aufgabe 3, `web/src/mocks/handlers/backups.ts`)
 
 - Pro Server im Speicher (`db.backups: Record<serverId, MockBackups>`): `survival` mit sechs Snapshots (vier geplante, davon einer angepinnt; ein manueller mit Notiz „vor Update auf 1.21.11“; ein Pre-Restore), Zeitplan `daily` 04:00, Retention 24/7/4/6, `last_status: ok`; `creative` ohne Snapshots, Zeitplan `off`, `last_status: failed` mit `last_error` „RCON nicht erreichbar“; `modded` mit `available: false`; `lobby` (ohne Instanz) → leere Übersicht.
 - `createBackup` erzeugt einen Job, der über ~4 s `queued` → `saving` → `backing_up` → `resuming` → `done` geht und dann einen manuellen Snapshot anlegt; `restoreBackup` geht `stopping` → `pre_restore` → `restoring` → `done` und legt einen Pre-Restore-Snapshot an; `deleteBackup` `deleting` → `done`. Ein zweiter Job → `409 backup_running`.
 - `pinBackup` vergibt eine neue zufällige 64-Hex-ID; nicht geplante → `400 validation_failed`.
-- `restoreBackup` und `deleteBackup` verlangen Sudo wie die übrigen Sudo-Mocks; `downloadBackup` liefert eine kleine eingebettete Zip (Uint8Array) mit `Content-Type: application/zip`.
-- `updateBackupSchedule` validiert wie V2/Global Constraints und rechnet `next_run_at` grob (nächster Termin ab jetzt) im Browser.
-- Rechte über `serverPermissions` (`server.backups`) wie die übrigen Server-Mocks; `ServerSettings`-Mock bekommt `backup_timezone: 'Europe/Berlin'`, `deleteServer` akzeptiert `purge_backups`.
+- `restoreBackup` und `deleteBackup` verlangen Sudo wie die übrigen Sudo-Mocks; `downloadBackup` liefert eine kleine eingebettete Zip (Uint8Array) mit `Content-Type: application/zip` und einem Dateinamen `<server>-<YYYYMMDD-HHMMSS>.zip` in der panel-Zeitzone (`backup_timezone` der Settings), wie das panel.
+- `updateBackupSchedule` validiert wie V2/Global Constraints und rechnet `next_run_at` im Browser wie das panel: `daily`/`weekly` nächster Termin ab jetzt, `interval` `last_run_at + N h`, falls das nicht in der Zukunft liegt `jetzt + N h`. Audit-Details wie das panel: create `{note, snapshot}`, restore `{snapshot, time, kind}`, pin/unpin `{snapshot: <alte ID>, new_snapshot: <neue ID>}`, schedule_update `{from, to}`.
+- Rechte über `serverPermissions` (`server.backups`) wie die übrigen Server-Mocks; `ServerSettings`-Mock bekommt `backup_timezone: 'Europe/Berlin'` (PUT mit Sudo und Prüfung der Zone), `deleteServer` akzeptiert `purge_backups`.

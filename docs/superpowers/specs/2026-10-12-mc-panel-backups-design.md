@@ -94,7 +94,7 @@ max_backup_entries = 1000000
 max_backup_jobs    = 1              # gleichzeitige restic-Jobs im Dienst (backup, restore, forget)
 ```
 
-- Beim Start ruft der Dienst `restic version` auf (Frist 10 s). Fehlt das Binary oder ist die Version < 0.17, sind die Backup-Endpunkte aus: `GET /v1/backups/status` meldet `{available: false, reason}`, alle anderen `/v1/backups/*` antworten `503 unavailable`. Der übrige Dienst läuft normal (so auch auf dem Mac ohne restic).
+- Beim Start ruft der Dienst `restic version` auf (Frist 10 s). Fehlt das Binary oder ist die Version < 0.17, sind die Backup-Endpunkte aus: `GET /v1/backups/status` meldet `{available: false, reason}`, alle anderen `/v1/backups/*` außer `purge` antworten `503 unavailable` (`purge` löscht nur Verzeichnisse und braucht restic nicht). Der übrige Dienst läuft normal (so auch auf dem Mac ohne restic).
 - `mcpanel-files.service`: `ReadWritePaths` um `<instances_dir>/backups` ergänzt, `MemoryMax=1G` (statt 512M; restic hält Index und Pack-Puffer im Speicher), `TasksMax=512`, neu `IOWeight=50` und `CPUWeight=50`. `RestrictAddressFamilies=AF_UNIX` bleibt: restic braucht für lokale Repos kein Netz.
 - `ensureLayout` im **Dev-Modus**: Der dev-Dateidienst legt `<instances_dir>/backups` selbst an, wenn es fehlt (wie `instances/<id>` in TP3b §3.1).
 
@@ -128,7 +128,7 @@ Wie bisher feste Pfade, `DisallowUnknownFields`, Fehler `{error, code}`.
 | `POST /v1/backups/purge` | `{id}` | `204`; löscht `repos/<id>` und `keys/<id>` |
 | `POST /v1/jobs/cancel` | `{id}` | `204`; bricht den laufenden Job der Instanz ab (§4.5) |
 
-- `GET /v1/jobs` (TP3b) liefert alle Job-Arten. `filesapi.Job` bekommt `kind` (`extract|backup|restore|forget`), `snapshot` (Ergebnis bzw. Quelle) und `skipped` (ausgelassene Einträge); vorhandene Felder bleiben, Extract-Jobs setzen `kind=extract`.
+- `GET /v1/jobs` (TP3b) liefert alle Job-Arten. `filesapi.Job` bekommt `kind` (`extract|backup|restore|forget`), `snapshot` (Ergebnis bzw. Quelle), `skipped` (ausgelassene Einträge) und `code` (Wire-Code des Fehlers eines `failed`-Jobs, z. B. `too_large`, `insufficient_storage`); vorhandene Felder bleiben, Extract-Jobs setzen `kind=extract`.
 - Ein Job pro Instanz über alle Arten (Entpacken, Backup, Restore, Forget schließen sich gegenseitig aus); `pin` und `purge` brauchen eine Instanz ohne Job (sonst `429 busy`). Insgesamt höchstens `max_backup_jobs` restic-Jobs und weiterhin zwei Entpack-Jobs.
 - `create` braucht `instances/<id>` (sonst `404 not_found`); `restore` legt es nicht an.
 - `note`: höchstens 64 Zeichen, gültiges UTF-8, keine Steuerzeichen; als Tag `note=<base64url ohne Padding>`. `pinned` = Tag `pinned`.
@@ -233,7 +233,7 @@ ALTER TABLE instance_settings ADD COLUMN backup_timezone TEXT NOT NULL DEFAULT '
 ### 5.6 Löschen
 
 - Einzelner Snapshot: Job `delete` → Dienst-Job `forget` mit genau dieser ID; auch angepinnte und Pre-Restore-Snapshots.
-- Server löschen (`DELETE /servers/{id}`, vorhanden, Admin + Sudo) bekommt den optionalen Query-Parameter `purge_backups=1`: nach dem Entfernen beim agent ruft das panel `POST /v1/backups/purge` auf (wartende Jobs des Servers werden vorher verworfen, ein laufender abgebrochen). Ohne den Parameter bleibt das Repo verwaist liegen (wie `deleted/`); der Zeitplan verschwindet mit dem Server. Scheitert das Purge, ist der Server trotzdem gelöscht; die Antwort bleibt `204`, das Audit-Detail vermerkt `backups_purged: false`.
+- Server löschen (`DELETE /servers/{id}`, vorhanden, Admin + Sudo) bekommt den optionalen Query-Parameter `purge_backups=1`: nach dem Entfernen beim agent ruft das panel `POST /v1/backups/purge` auf (wartende Jobs des Servers werden vorher verworfen, ein laufender abgebrochen). Ohne den Parameter bleibt das Repo verwaist liegen (wie `deleted/`); der Zeitplan verschwindet mit dem Server. Das Purge läuft unabhängig vom Abbruch der Anfrage (eigene Frist, verlängerte Schreibfrist der Antwort). Scheitert es, ist der Server trotzdem gelöscht; die Antwort bleibt `204`, das Audit-Detail vermerkt `backups_purged: false` (nach Erfolg `true`).
 
 ### 5.7 API
 
