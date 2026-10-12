@@ -40,6 +40,8 @@ const ERROR_CODES = [
   'plugin_source_unavailable',
   'plugin_not_downloadable',
   'plugin_incompatible',
+  'backups_unavailable',
+  'backup_running',
   'internal',
 ]
 

@@ -74,7 +74,7 @@ jobs:
             echo "$1=${v}"
           }
           gomod='^go\.(mod|sum)$'
-          out go "^(cmd|internal|api)/|${gomod}|^sqlc\.yaml$|^\.golangci\.yml$|^Makefile$"
+          out go "^(cmd|internal|api)/|${gomod}|^sqlc\.yaml$|^\.golangci\.yml$|^Makefile$|^scripts/install-restic\.sh$"
           out web '^web/|^api/'
           out preview '^web/Dockerfile\.preview$|^compose\.preview\.yaml$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$'
           out openapi '^api/'
@@ -137,9 +137,16 @@ jobs:
             exit 1
           fi
 
+      # restic for the backup integration tests of the files service (sub-project 4); without
+      # MCPANEL_TEST_RESTIC they skip. Pinned release binary with SHA-256 check.
+      - name: Install restic
+        run: sudo bash scripts/install-restic.sh
+
       # The race run executes every test, so a separate run without -race would only repeat it
       # (the release workflow still runs both).
       - name: Tests (race detector)
+        env:
+          MCPANEL_TEST_RESTIC: /usr/local/bin/restic
         run: make test-race
 
       - name: golangci-lint (incl. gosec, gofmt, goimports)

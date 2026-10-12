@@ -145,7 +145,7 @@ func (f *fakeFiles) Delete(_ context.Context, id int64, p string) error {
 func (f *fakeFiles) Extract(_ context.Context, req filesapi.ExtractRequest) (filesapi.Job, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	j := filesapi.Job{ID: "j1", State: "running", Path: req.Path, Dest: req.Dest}
+	j := filesapi.Job{ID: "j1", Kind: filesapi.JobExtract, State: "running", Path: req.Path, Dest: req.Dest}
 	f.job = &j
 	return j, nil
 }

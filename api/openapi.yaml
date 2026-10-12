@@ -16,6 +16,7 @@ tags:
   - { name: console, description: 'Live console: log stream, RCON commands, players' }
   - { name: files, description: 'File browser of a server: list, edit, upload, download, manage, extract' }
   - { name: plugins, description: 'Plugins and mods of a server: inventory, search in Modrinth and Hangar, install, update, toggle, remove' }
+  - { name: backups, description: 'Backups of a server: restic snapshots, schedule and retention, restore, download' }
   - { name: audit, description: 'Audit log' }
   - { name: security, description: 'Security center: attempts, jails, IP rules, settings, notifiers, agent' }
 paths:
@@ -500,12 +501,15 @@ paths:
       tags: [servers]
       parameters:
         - $ref: '#/components/parameters/IdPath'
+        - { name: purge_backups, in: query, required: false, description: 'true or 1: also delete the restic repository and key of the server (default false: they stay on the host)', schema: { type: boolean } }
         - $ref: '#/components/parameters/CSRF'
       responses:
         '204': { description: No content }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'conflict (a job rewrites the data directory: an archive is extracted or a backup restored)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /servers/{id}/power:
@@ -524,7 +528,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: 'conflict (server not configured, restart of a container that belongs to another server, or an archive is being extracted) or base_domain_missing (restart)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'conflict (server not configured, restart of a container that belongs to another server, or a job rewrites the data directory: an archive is extracted or a backup restored) or base_domain_missing (restart)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /servers/{id}/console/stream:
@@ -1018,6 +1022,141 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '502': { description: 'plugin_source_unavailable (fetch failed, larger than 256 KiB or not a PNG, JPEG, WebP or GIF image)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/{id}/backups:
+    get:
+      operationId: getBackups
+      tags: [backups]
+      summary: Snapshots, current job and schedule of a server
+      description: 'The snapshots come from the restic repository of the server, newest first. Without restic on the host or without the file service, available is false and snapshots is empty (no error).'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/BackupOverview' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createBackup
+      tags: [backups]
+      summary: Queue a manual backup (consistent through save-off/save-all flush/save-on while the server runs; audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateBackupRequest' } } }
+      responses:
+        '202': { description: Job queued, content: { application/json: { schema: { $ref: '#/components/schemas/BackupJobStarted' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'backup_running (a backup, restore or delete job of this server is queued or running) or conflict (the server has no instance yet)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { description: 'backups_unavailable (restic is missing on the host) or files_unavailable (file service)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/{id}/backups/job:
+    get:
+      operationId: getBackupJob
+      tags: [backups]
+      summary: The queued, running or last backup job of the server (null before the first one)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/BackupJobResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /servers/{id}/backups/schedule:
+    put:
+      operationId: updateBackupSchedule
+      tags: [backups]
+      summary: Set schedule and retention of the server (audited)
+      description: 'Times are in the panel time zone (ServerSettings.backup_timezone). The retention applies only to scheduled snapshots; manual, pre-restore and pinned ones stay.'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateBackupScheduleRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/BackupScheduleResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /servers/{id}/backups/{snapshot}:
+    delete:
+      operationId: deleteBackup
+      tags: [backups]
+      summary: Queue deleting one snapshot (also pinned and pre-restore ones; sudo; audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/SnapshotPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '202': { description: Job queued, content: { application/json: { schema: { $ref: '#/components/schemas/BackupJobStarted' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'backup_running (a backup job of this server is queued or running)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { description: 'backups_unavailable or files_unavailable', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/{id}/backups/{snapshot}/pin:
+    post:
+      operationId: pinBackup
+      tags: [backups]
+      summary: Pin or unpin a scheduled snapshot (pinned ones survive the retention; the snapshot gets a new ID; audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/SnapshotPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PinBackupRequest' } } }
+      responses:
+        '200': { description: The snapshot with its new ID, content: { application/json: { schema: { $ref: '#/components/schemas/BackupSnapshotResponse' } } } }
+        '400': { description: 'validation_failed (also: not a scheduled snapshot)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'backup_running (a backup job of this server is queued or running)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { description: 'backups_unavailable or files_unavailable', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/{id}/backups/{snapshot}/restore:
+    post:
+      operationId: restoreBackup
+      tags: [backups]
+      summary: Queue a full restore (stops the server, takes a pre-restore snapshot, restores, starts it again if it should run; sudo; audited)
+      description: 'Starts and restarts of the server answer 409 until the job ends. Not enough disk space shows as error_code insufficient_storage in the job.'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/SnapshotPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '202': { description: Job queued, content: { application/json: { schema: { $ref: '#/components/schemas/BackupJobStarted' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'backup_running (a backup job of this server is queued or running) or conflict (the server has no instance)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { description: 'backups_unavailable, files_unavailable or agent_unavailable', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/{id}/backups/{snapshot}/download:
+    get:
+      operationId: downloadBackup
+      tags: [backups]
+      summary: Download a snapshot as a zip stream (audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/SnapshotPath'
+      responses:
+        '200':
+          description: 'Zip stream with Content-Disposition attachment; filename "<server>-<YYYYMMDD-HHMMSS>.zip"'
+          content:
+            application/zip: { schema: { type: string, format: binary } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { description: 'backups_unavailable or files_unavailable', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /audit:
     get:
       operationId: listAudit
@@ -1230,6 +1369,7 @@ components:
     FilePathQueryRequired: { name: path, in: query, required: true, description: 'Relative path in the data directory', schema: { type: string, minLength: 1, maxLength: 4096 } }
     PluginSourceQuery: { name: source, in: query, required: true, description: 'hangar only for plugins (paper, purpur)', schema: { $ref: '#/components/schemas/PluginSource' } }
     PluginProjectQuery: { name: project, in: query, required: true, description: 'Modrinth project ID or slug, Hangar slug or ID', schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._+-]+$' } }
+    SnapshotPath: { name: snapshot, in: path, required: true, description: 'restic snapshot ID (64 lowercase hex characters)', schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
   responses:
     BadRequest: { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Unauthorized: { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -1246,7 +1386,7 @@ components:
       type: object
       required: [error, message]
       properties:
-        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, files_unavailable, file_exists, file_modified, not_text, not_regular, instance_running, insufficient_storage, plugins_unsupported, plugin_source_unavailable, plugin_not_downloadable, plugin_incompatible, internal] }
+        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, files_unavailable, file_exists, file_modified, not_text, not_regular, instance_running, insufficient_storage, plugins_unsupported, plugin_source_unavailable, plugin_not_downloadable, plugin_incompatible, backups_unavailable, backup_running, internal] }
         message: { type: string }
         request_id: { type: string }
     Role: { type: string, enum: [admin, user] }
@@ -1492,19 +1632,21 @@ components:
           description: "Server name from the mcpanel.name label of the container, not the container name mcpanel-mc-<id>"
     ServerSettings:
       type: object
-      required: [base_domain, curseforge_api_key_set, docker, unknown_containers]
+      required: [base_domain, curseforge_api_key_set, backup_timezone, docker, unknown_containers]
       properties:
         base_domain: { type: [string, 'null'] }
         curseforge_api_key_set: { type: boolean }
+        backup_timezone: { type: string, description: 'IANA time zone of all backup schedules (default Europe/Berlin)' }
         docker: { type: string, enum: [ok, unavailable, unknown] }
         unknown_containers: { type: array, items: { $ref: '#/components/schemas/UnknownContainer' } }
     UpdateServerSettingsRequest:
       type: object
       additionalProperties: false
-      description: Omitted fields stay unchanged; null removes the value.
+      description: 'Omitted fields stay unchanged; null removes the value (not allowed for backup_timezone).'
       properties:
         base_domain: { type: [string, 'null'] }
         curseforge_api_key: { type: [string, 'null'] }
+        backup_timezone: { type: string, minLength: 1, maxLength: 64, description: 'IANA time zone such as Europe/Berlin' }
     ConsoleCommandRequest:
       type: object
       additionalProperties: false
@@ -1851,6 +1993,114 @@ components:
       required: [job]
       properties:
         job: { anyOf: [{ $ref: '#/components/schemas/PluginJob' }, { type: 'null' }] }
+    BackupKind: { type: string, enum: [scheduled, manual, pre-restore] }
+    BackupSnapshot:
+      type: object
+      required: [id, short_id, time, kind, pinned, note, bytes]
+      properties:
+        id: { type: string, pattern: '^[0-9a-f]{64}$' }
+        short_id: { type: string }
+        time: { type: integer, format: int64, description: Unix ms }
+        kind: { $ref: '#/components/schemas/BackupKind' }
+        pinned: { type: boolean, description: 'Only scheduled snapshots can be pinned; pinned ones survive the retention' }
+        note: { type: [string, 'null'] }
+        bytes: { type: integer, format: int64, description: Size of the backed up data }
+    BackupJobKind: { type: string, enum: [backup, restore, delete] }
+    BackupJobTrigger: { type: string, enum: [manual, scheduled] }
+    BackupJobState: { type: string, enum: [queued, running, done, failed] }
+    BackupJobStep: { type: string, enum: [queued, saving, backing_up, resuming, pruning, stopping, pre_restore, restoring, deleting, done] }
+    BackupJobError: { type: string, enum: [rcon_unavailable, agent_unavailable, files_unavailable, files_busy, backups_unavailable, insufficient_storage, too_large, stop_timeout, canceled, internal] }
+    BackupJob:
+      type: object
+      required: [id, kind, trigger, state, step, queue_position, bytes, snapshot, error_code, error, queued_at, started_at, finished_at]
+      properties:
+        id: { type: string }
+        kind: { $ref: '#/components/schemas/BackupJobKind' }
+        trigger: { $ref: '#/components/schemas/BackupJobTrigger' }
+        state: { $ref: '#/components/schemas/BackupJobState' }
+        step: { $ref: '#/components/schemas/BackupJobStep' }
+        queue_position: { type: integer, description: 'Position in the panel-wide queue (1 = next); 0 = not waiting' }
+        bytes: { type: integer, format: int64, description: 'Bytes read (backup) resp. written (restore) so far' }
+        snapshot: { type: [string, 'null'], description: 'Backup: the new snapshot once done; restore and delete: the source snapshot' }
+        error_code: { anyOf: [{ $ref: '#/components/schemas/BackupJobError' }, { type: 'null' }] }
+        error: { type: string }
+        queued_at: { type: integer, format: int64, description: Unix ms }
+        started_at: { type: integer, format: int64, description: 0 while queued }
+        finished_at: { type: integer, format: int64, description: 0 while queued or running }
+    BackupJobResponse:
+      type: object
+      required: [job]
+      properties:
+        job: { anyOf: [{ $ref: '#/components/schemas/BackupJob' }, { type: 'null' }] }
+    BackupJobStarted:
+      type: object
+      required: [job]
+      description: 'Answer of createBackup, restoreBackup and deleteBackup: the queued job'
+      properties:
+        job: { $ref: '#/components/schemas/BackupJob' }
+    BackupScheduleMode: { type: string, enum: ['off', interval, daily, weekly] }
+    BackupLastStatus: { type: string, enum: [ok, failed, running] }
+    BackupSchedule:
+      type: object
+      required: [mode, interval_hours, time_of_day, weekday, keep_last, keep_daily, keep_weekly, keep_monthly, timezone, next_run_at, last_run_at, last_status, last_error, last_snapshot_id]
+      properties:
+        mode: { $ref: '#/components/schemas/BackupScheduleMode' }
+        interval_hours: { type: integer, minimum: 1, maximum: 168 }
+        time_of_day: { type: integer, minimum: 0, maximum: 1439, description: Minutes after midnight in the panel time zone }
+        weekday: { type: integer, minimum: 0, maximum: 6, description: '0 = Sunday' }
+        keep_last: { type: integer, minimum: 0, maximum: 1000 }
+        keep_daily: { type: integer, minimum: 0, maximum: 1000 }
+        keep_weekly: { type: integer, minimum: 0, maximum: 1000 }
+        keep_monthly: { type: integer, minimum: 0, maximum: 1000 }
+        timezone: { type: string, description: 'The panel time zone (ServerSettings.backup_timezone)' }
+        next_run_at: { type: [integer, 'null'], format: int64, description: 'Unix ms; null with mode off' }
+        last_run_at: { type: [integer, 'null'], format: int64, description: 'Start of the last scheduled run, Unix ms' }
+        last_status: { anyOf: [{ $ref: '#/components/schemas/BackupLastStatus' }, { type: 'null' }] }
+        last_error: { type: [string, 'null'] }
+        last_snapshot_id: { type: [string, 'null'] }
+    BackupScheduleResponse:
+      type: object
+      required: [schedule]
+      properties:
+        schedule: { $ref: '#/components/schemas/BackupSchedule' }
+    UpdateBackupScheduleRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, interval_hours, time_of_day, weekday, keep_last, keep_daily, keep_weekly, keep_monthly]
+      description: 'With a mode other than off at least one keep_* value must be > 0.'
+      properties:
+        mode: { $ref: '#/components/schemas/BackupScheduleMode' }
+        interval_hours: { type: integer, minimum: 1, maximum: 168 }
+        time_of_day: { type: integer, minimum: 0, maximum: 1439 }
+        weekday: { type: integer, minimum: 0, maximum: 6 }
+        keep_last: { type: integer, minimum: 0, maximum: 1000 }
+        keep_daily: { type: integer, minimum: 0, maximum: 1000 }
+        keep_weekly: { type: integer, minimum: 0, maximum: 1000 }
+        keep_monthly: { type: integer, minimum: 0, maximum: 1000 }
+    BackupOverview:
+      type: object
+      required: [available, snapshots, job, schedule]
+      properties:
+        available: { type: boolean, description: 'false: restic missing on the host or file service unreachable' }
+        snapshots: { type: array, items: { $ref: '#/components/schemas/BackupSnapshot' } }
+        job: { anyOf: [{ $ref: '#/components/schemas/BackupJob' }, { type: 'null' }] }
+        schedule: { $ref: '#/components/schemas/BackupSchedule' }
+    CreateBackupRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        note: { type: [string, 'null'], maxLength: 64, description: 'At most 64 characters, no control characters; null or empty = no note' }
+    PinBackupRequest:
+      type: object
+      additionalProperties: false
+      required: [pinned]
+      properties:
+        pinned: { type: boolean }
+    BackupSnapshotResponse:
+      type: object
+      required: [snapshot]
+      properties:
+        snapshot: { $ref: '#/components/schemas/BackupSnapshot' }
     PermissionGrant:
       type: object
       required: [server_id, permissions]

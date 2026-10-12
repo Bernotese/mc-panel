@@ -23,6 +23,25 @@ type AuditLog struct {
 	Hash      string
 }
 
+type BackupSchedule struct {
+	ServerID       int64
+	Mode           string
+	IntervalHours  int64
+	TimeOfDay      int64
+	Weekday        int64
+	KeepLast       int64
+	KeepDaily      int64
+	KeepWeekly     int64
+	KeepMonthly    int64
+	NextRunAt      sql.NullInt64
+	LastRunAt      sql.NullInt64
+	LastStatus     sql.NullString
+	LastError      sql.NullString
+	LastSnapshotID sql.NullString
+	SaveoffSince   sql.NullInt64
+	UpdatedAt      int64
+}
+
 type Instance struct {
 	ServerID      int64
 	Type          string
@@ -43,6 +62,7 @@ type InstanceSetting struct {
 	BaseDomain       sql.NullString
 	CurseforgeApiKey []byte
 	UpdatedAt        int64
+	BackupTimezone   string
 }
 
 type IpRule struct {

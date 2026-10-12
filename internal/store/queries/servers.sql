@@ -34,6 +34,9 @@ SELECT * FROM instance_settings WHERE id = 1;
 -- name: ServersUpdateSettings :exec
 UPDATE instance_settings SET base_domain = ?, curseforge_api_key = ?, updated_at = ? WHERE id = 1;
 
+-- name: ServersSetBackupTimezone :exec
+UPDATE instance_settings SET backup_timezone = ?, updated_at = ? WHERE id = 1;
+
 -- name: ServersNextServerID :one
 -- Allocates the ID of a new server: never one that was used before (see migration 00003).
 UPDATE server_ids

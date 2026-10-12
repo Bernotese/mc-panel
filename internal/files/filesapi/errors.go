@@ -16,6 +16,7 @@ const (
 	CodeBusy                = "busy"                 // 429
 	CodeInvalid             = "invalid"              // 400
 	CodeHashMismatch        = "hash_mismatch"        // 400
+	CodeUnavailable         = "unavailable"          // 503: restic is missing or too old (backups only)
 )
 
 var (
@@ -29,6 +30,8 @@ var (
 	ErrBusy                = errors.New(CodeBusy)
 	ErrInvalid             = errors.New(CodeInvalid)
 	ErrHashMismatch        = errors.New(CodeHashMismatch)
+	// ErrBackupsUnavailable: the service runs, but without a usable restic (sub-project 4).
+	ErrBackupsUnavailable = errors.New(CodeUnavailable)
 	// ErrUnavailable: the service is unreachable, broke the protocol or failed internally.
 	ErrUnavailable = errors.New("files service unavailable")
 )
@@ -53,6 +56,7 @@ var codes = []struct {
 	{CodeBusy, codeInfo{ErrBusy, http.StatusTooManyRequests}},
 	{CodeInvalid, codeInfo{ErrInvalid, http.StatusBadRequest}},
 	{CodeHashMismatch, codeInfo{ErrHashMismatch, http.StatusBadRequest}},
+	{CodeUnavailable, codeInfo{ErrBackupsUnavailable, http.StatusServiceUnavailable}},
 }
 
 // ErrorFromCode returns the sentinel of a wire code (nil for unknown codes).

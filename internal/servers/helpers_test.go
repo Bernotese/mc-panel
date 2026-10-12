@@ -46,6 +46,7 @@ type env struct {
 	agent   *fakeAgent
 	catalog *fakeCatalog
 	gate    *fakeGate
+	purger  *fakePurger
 	logs    *bytes.Buffer // reconcile log output
 	h       *servers.Handler
 	mux     http.Handler
@@ -62,11 +63,12 @@ func newEnv(t *testing.T) *env {
 	e := &env{
 		t: t, db: db, clk: clock.NewFake(t0), rec: &audit.MemoryRecorder{}, box: box,
 		agent: newFakeAgent(), catalog: &fakeCatalog{}, logs: &bytes.Buffer{},
-		gate: &fakeGate{running: map[int64]bool{}},
+		gate: &fakeGate{running: map[int64]bool{}}, purger: &fakePurger{},
 	}
 	e.h = servers.NewHandler(servers.Deps{
 		DB: db, Clock: e.clk, Audit: e.rec, Box: box, Instances: e.agent,
-		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog, Extract: e.gate,
+		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog, Gate: e.gate,
+		Backups: e.purger,
 	})
 	mux := chi.NewRouter()
 	e.h.Routes(rbac.NewRouter(mux, rbac.NewDBChecker(db), e.clk))
@@ -292,7 +294,7 @@ func (f *fakeCatalog) Get(_ context.Context, t instancespec.Type) (catalog.Catal
 	return f.cat, f.err
 }
 
-// fakeGate is a servers.ExtractGate with a switch per server.
+// fakeGate is a servers.DataGate with a switch per server.
 type fakeGate struct {
 	mu      sync.Mutex
 	running map[int64]bool
@@ -303,9 +305,40 @@ func (g *fakeGate) set(id int64, on bool) { g.mu.Lock(); g.running[id] = on; g.m
 
 func (g *fakeGate) askedCount() int { g.mu.Lock(); defer g.mu.Unlock(); return g.asked }
 
-func (g *fakeGate) ExtractRunning(_ context.Context, id int64) bool {
+func (g *fakeGate) DataJobRunning(_ context.Context, id int64) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.asked++
 	return g.running[id]
+}
+
+// fakePurger is a servers.BackupPurger that records its calls.
+type fakePurger struct {
+	mu    sync.Mutex
+	calls []int64
+	err   error
+	hook  func(ctx context.Context) // runs during the call (outside the lock); nil = none
+}
+
+func (p *fakePurger) PurgeBackups(ctx context.Context, id int64) error {
+	p.mu.Lock()
+	p.calls = append(p.calls, id)
+	hook, err := p.hook, p.err
+	p.mu.Unlock()
+	if hook != nil {
+		hook(ctx)
+	}
+	return err
+}
+
+func (p *fakePurger) setHook(h func(ctx context.Context)) { p.mu.Lock(); p.hook = h; p.mu.Unlock() }
+
+func (p *fakePurger) setErr(err error) { p.mu.Lock(); p.err = err; p.mu.Unlock() }
+
+func (p *fakePurger) takeCalls() []int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	c := p.calls
+	p.calls = nil
+	return c
 }

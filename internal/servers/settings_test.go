@@ -7,9 +7,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+	_ "time/tzdata" // time zone checks must not depend on the host's zoneinfo
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/store"
 	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
@@ -21,6 +23,7 @@ type unknownResp struct {
 type settingsResp struct {
 	BaseDomain          *string       `json:"base_domain"`
 	CurseForgeAPIKeySet bool          `json:"curseforge_api_key_set"`
+	BackupTimezone      string        `json:"backup_timezone"`
 	Docker              string        `json:"docker"`
 	UnknownContainers   []unknownResp `json:"unknown_containers"`
 }
@@ -48,7 +51,7 @@ func (e *env) putSettings(t *testing.T, body string) settingsResp {
 func TestSettingsDefaultsAndDockerStatus(t *testing.T) {
 	e := newEnv(t)
 	s := e.settings(t)
-	if s.BaseDomain != nil || s.CurseForgeAPIKeySet || s.Docker != "ok" || s.UnknownContainers == nil || len(s.UnknownContainers) != 0 {
+	if s.BaseDomain != nil || s.CurseForgeAPIKeySet || s.Docker != "ok" || s.UnknownContainers == nil || len(s.UnknownContainers) != 0 || s.BackupTimezone != "Europe/Berlin" {
 		t.Fatalf("defaults = %+v", s)
 	}
 	e.agent.setDocker(agentapi.DockerUnavailable)
@@ -170,6 +173,12 @@ func TestUpdateSettingsValidation(t *testing.T) {
 		{`{"curseforge_api_key":"k\nX=1"}`, "validation_failed"},
 		{`{"base_domain":42}`, "bad_request"},
 		{`{"docker":"ok"}`, "bad_request"},
+		{`{"backup_timezone":null}`, "validation_failed"},
+		{`{"backup_timezone":""}`, "validation_failed"},
+		{`{"backup_timezone":"Local"}`, "validation_failed"},
+		{`{"backup_timezone":"Mars/Olympus"}`, "validation_failed"},
+		{`{"backup_timezone":"../../etc/passwd"}`, "validation_failed"},
+		{`{"backup_timezone":5}`, "bad_request"},
 	} {
 		rec := e.do(http.MethodPut, "/servers/settings", json.RawMessage(tc.body), &admin)
 		if rec.Code != http.StatusBadRequest || errCode(t, rec) != tc.code {
@@ -192,5 +201,33 @@ func TestSettingsNeedAdminAndSudo(t *testing.T) {
 	rec := e.do(http.MethodPut, "/servers/settings", json.RawMessage(`{"base_domain":"mc.example.com"}`), &noSudo)
 	if rec.Code != http.StatusForbidden || errCode(t, rec) != "sudo_required" {
 		t.Fatalf("PUT without sudo: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// Backups spec §5.1: the time zone of all backup schedules is a server setting.
+func TestUpdateBackupTimezone(t *testing.T) {
+	e := newEnv(t)
+	s := e.putSettings(t, `{"backup_timezone":"America/New_York"}`)
+	if s.BackupTimezone != "America/New_York" {
+		t.Fatalf("response = %+v", s)
+	}
+	if tz, err := store.New(e.db).BackupsGetTimezone(t.Context()); err != nil || tz != "America/New_York" {
+		t.Fatalf("stored = %q, %v", tz, err)
+	}
+	if len(e.rec.Entries) != 1 {
+		t.Fatalf("audit = %v", e.rec.Actions())
+	}
+	en := e.rec.Entries[0]
+	tz, _ := en.Details["backup_timezone"].(map[string]any)
+	if en.Action != audit.ActionServerSettingsUpdate || tz["old"] != "Europe/Berlin" || tz["new"] != "America/New_York" {
+		t.Fatalf("audit entry = %+v", en)
+	}
+	// unchanged value: no audit entry; other fields stay
+	e.putSettings(t, `{"backup_timezone":"America/New_York"}`)
+	if got := e.putSettings(t, `{"base_domain":"mc.example.com"}`); got.BackupTimezone != "America/New_York" {
+		t.Fatalf("base domain update reset the time zone: %+v", got)
+	}
+	if got := e.rec.Actions(); len(got) != 2 {
+		t.Fatalf("audit = %v, want the time zone and the base domain change", got)
 	}
 }

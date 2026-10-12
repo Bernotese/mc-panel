@@ -2,14 +2,50 @@ package servers
 
 import "context"
 
-// ExtractGate is consulted before a user's power start/restart and by the reconcile loop before
-// it starts a server: while an archive is being extracted into the data directory, the server
-// must not start (files spec §5.1). serverfiles.Handler implements it.
-type ExtractGate interface {
-	ExtractRunning(ctx context.Context, serverID int64) bool
+// DataGate is consulted before a user's power start/restart and by the reconcile loop before
+// it starts a server: while a job rewrites the data directory (an archive is extracted, files
+// spec §5.1, or a backup is restored, backups spec §5.5), the server must not start.
+// serverfiles.Handler and backups.Handler implement it.
+type DataGate interface {
+	DataJobRunning(ctx context.Context, serverID int64) bool
 }
 
-// noGate never blocks (no file service wired).
+// noGate never blocks (nothing wired).
 type noGate struct{}
 
-func (noGate) ExtractRunning(context.Context, int64) bool { return false }
+func (noGate) DataJobRunning(context.Context, int64) bool { return false }
+
+// anyGate holds a start while one of its gates does; the gates are asked in order.
+type anyGate []DataGate
+
+func (g anyGate) DataJobRunning(ctx context.Context, serverID int64) bool {
+	for _, gate := range g {
+		if gate.DataJobRunning(ctx, serverID) {
+			return true
+		}
+	}
+	return false
+}
+
+// AnyGate combines gates (nil entries are skipped). Put cheap gates first: the first one that
+// holds decides, later ones are not asked.
+func AnyGate(gates ...DataGate) DataGate {
+	out := make(anyGate, 0, len(gates))
+	for _, g := range gates {
+		if g != nil {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// BackupPurger deletes the backups of a deleted server (backups spec §5.6); backups.Handler
+// implements it.
+type BackupPurger interface {
+	PurgeBackups(ctx context.Context, serverID int64) error
+}
+
+// noPurger has nothing to delete (no backups wired).
+type noPurger struct{}
+
+func (noPurger) PurgeBackups(context.Context, int64) error { return nil }
