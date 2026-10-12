@@ -71,12 +71,10 @@ need_golangci() {
 }
 
 # restic for the backup integration tests of the files service (sub-project 4); they skip
-# without MCPANEL_TEST_RESTIC. The shared script keeps an installed binary of the pinned version.
+# without MCPANEL_TEST_RESTIC. The shared script pins the version and keeps an installed binary
+# of that version (idempotent).
 need_restic() {
-  if ! /usr/local/bin/restic version 2> /dev/null | grep -q "^restic 0\.19\.1 "; then
-    log "installing restic (scripts/install-restic.sh)"
-    sudo bash scripts/install-restic.sh
-  fi
+  sudo bash scripts/install-restic.sh
   export MCPANEL_TEST_RESTIC=/usr/local/bin/restic
 }
 

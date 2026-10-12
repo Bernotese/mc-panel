@@ -312,7 +312,7 @@ describe('mock behaviour', () => {
     expect(field(bad.body, 'error')).toBe('validation_failed')
     await callApi('PUT', '/servers/settings', { body: { backup_timezone: 'America/New_York' }, csrf: me.csrf_token })
     expect(field(await get(), 'backup_timezone')).toBe('America/New_York')
-    for (const tz of [null, '', 'Mars/Olympus']) {
+    for (const tz of [null, '', 'Mars/Olympus', 'Local', '+01:00', 'europe/berlin']) {
       const res = await callApi('PUT', '/servers/settings', { body: { backup_timezone: tz }, csrf: me.csrf_token })
       expect(field(res.body, 'error')).toBe('validation_failed')
     }
@@ -528,6 +528,24 @@ describe('mock behaviour', () => {
     expect(interval.next_run_at).toBeGreaterThan(Date.now() + 5.9 * 3_600_000)
     expect(interval.next_run_at).toBeLessThan(Date.now() + 6.1 * 3_600_000)
 
+    // daily/weekly in the panel time zone, not the browser's: Kathmandu is UTC+05:45 all year
+    expect(Intl.DateTimeFormat().resolvedOptions().timeZone).not.toBe('Asia/Kathmandu')
+    db.serverSettings.backup_timezone = 'Asia/Kathmandu'
+    const offset = (5 * 60 + 45) * 60_000
+    const daily = field((await put(2, { ...weekly, mode: 'daily', time_of_day: 240 })).body, 'schedule') as BackupOverview['schedule']
+    expect(daily.timezone).toBe('Asia/Kathmandu')
+    const nextDaily = daily.next_run_at ?? 0
+    expect(nextDaily).toBeGreaterThan(Date.now())
+    expect(nextDaily).toBeLessThanOrEqual(Date.now() + 86_400_000)
+    expect((nextDaily + offset) % 86_400_000).toBe(240 * 60_000) // 04:00 in Kathmandu
+    const wk = field((await put(2, { ...weekly, time_of_day: 600, weekday: 3 })).body, 'schedule') as BackupOverview['schedule']
+    const nextWeekly = wk.next_run_at ?? 0
+    expect(nextWeekly).toBeGreaterThan(Date.now())
+    expect(nextWeekly).toBeLessThanOrEqual(Date.now() + 7 * 86_400_000)
+    expect((nextWeekly + offset) % 86_400_000).toBe(600 * 60_000) // 10:00 in Kathmandu
+    expect(new Date(nextWeekly + offset).getUTCDay()).toBe(3) // a Wednesday there
+    db.serverSettings.backup_timezone = 'Europe/Berlin'
+
     expect(((await callApi('GET', '/servers/4/backups')).body as BackupOverview).available).toBe(false)
     expect(field((await callApi('POST', '/servers/4/backups', { body: {}, csrf: me.csrf_token })).body, 'error')).toBe('backups_unavailable')
     expect(field((await callApi('POST', '/servers/3/backups', { body: {}, csrf: me.csrf_token })).body, 'error')).toBe('conflict')
@@ -551,6 +569,16 @@ describe('mock behaviour', () => {
     const me = loginAs('admin', { sudo: true })
     expect(db.backups[1]).toBeDefined()
     expect((await callApi('DELETE', '/servers/1?purge_backups=yes', { csrf: me.csrf_token })).status).toBe(400)
+    // a restore holds the server: no delete until it is done
+    const snap = ((await callApi('GET', '/servers/1/backups')).body as BackupOverview).snapshots[0]
+    expect((await callApi('POST', `/servers/1/backups/${snap.id}/restore`, { csrf: me.csrf_token })).status).toBe(202)
+    const held = await callApi('DELETE', '/servers/1?purge_backups=1', { csrf: me.csrf_token })
+    expect(held.status).toBe(409)
+    expect(field(held.body, 'error')).toBe('conflict')
+    db.backupJobs[1].startedMs -= 60_000
+    // an empty value means no purge (like the panel)
+    expect((await callApi('DELETE', '/servers/2?purge_backups=', { csrf: me.csrf_token })).status).toBe(204)
+    expect(db.backups[2]).toBeDefined()
     expect((await callApi('DELETE', '/servers/1?purge_backups=1', { csrf: me.csrf_token })).status).toBe(204)
     expect(db.backups[1]).toBeUndefined()
     expect(db.audit.at(-1)).toMatchObject({ action: 'server.delete', details: { backups_purged: true } })

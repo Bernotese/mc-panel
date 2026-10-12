@@ -60,7 +60,7 @@ export const de = {
     plugin_source_unavailable: 'Modrinth oder Hangar ist gerade nicht erreichbar.',
     plugin_not_downloadable: 'Diese Version ist nur extern erhältlich und kann nicht direkt installiert werden.',
     plugin_incompatible: 'Für diesen Server gibt es keine kompatible Version (auch nicht für eine Pflicht-Abhängigkeit).',
-    backups_unavailable: 'Backups sind auf diesem Host nicht verfügbar (restic fehlt).',
+    backups_unavailable: 'Backups sind auf diesem Host nicht verfügbar (restic fehlt oder ist zu alt).',
     backup_running: 'Für diesen Server läuft oder wartet bereits ein Backup-Auftrag.',
     internal: 'Interner Serverfehler.',
     network: 'Server nicht erreichbar. Bitte Verbindung prüfen.',

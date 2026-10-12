@@ -62,7 +62,7 @@ export const en: Messages = {
     plugin_source_unavailable: 'Modrinth or Hangar is not reachable right now.',
     plugin_not_downloadable: 'This version is only available externally and cannot be installed directly.',
     plugin_incompatible: 'There is no compatible version for this server (or for a required dependency).',
-    backups_unavailable: 'Backups are not available on this host (restic is missing).',
+    backups_unavailable: 'Backups are not available on this host (restic is missing or too old).',
     backup_running: 'A backup job of this server is already queued or running.',
     internal: 'Internal server error.',
     network: 'Server unreachable. Please check your connection.',

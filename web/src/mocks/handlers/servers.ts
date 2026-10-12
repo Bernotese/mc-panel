@@ -13,6 +13,7 @@ import type {
 import { ALL_PERMISSIONS } from '@/api/types'
 import { javaFor } from '@/features/servers/java'
 import { db, emptyPlayers, nextId, recordAudit, resolveProperties, runningStatus, stoppedStatus, type MockServer } from '../db'
+import { restoreActive } from './backups'
 import { API, apiError, guard, idParam, noContent, op, readJson, serverPermissions, type MockOperation } from './util'
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/
@@ -31,15 +32,10 @@ function validMemory(m: unknown): m is number {
   return typeof m === 'number' && Number.isInteger(m) && m >= 1024 && m <= 32768 && m % 256 === 0
 }
 
-/** Like filesapi.ValidTimezone: an IANA name the browser knows, not empty, at most 64 characters. */
+/** Like filesapi.ValidTimezone: an exact IANA name the browser lists (or UTC), never an offset. */
 function validTimezone(tz: unknown): tz is string {
-  if (typeof tz !== 'string' || tz === '' || tz === 'Local' || tz.length > 64) return false
-  try {
-    new Intl.DateTimeFormat('en', { timeZone: tz })
-    return true
-  } catch {
-    return false
-  }
+  if (typeof tz !== 'string' || tz.length > 64) return false
+  return tz === 'UTC' || Intl.supportedValuesOf('timeZone').includes(tz)
 }
 
 function settingsBody(): ServerSettings {
@@ -240,11 +236,13 @@ export const serverOperations: MockOperation[] = [
       const g = guard(request, { admin: true, sudo: true })
       if (g instanceof Response) return g
       const raw = new URL(request.url).searchParams.get('purge_backups')
-      if (raw !== null && !['1', 'true', '0', 'false'].includes(raw)) return apiError(400, 'validation_failed', 'purge_backups must be true, false, 1 or 0')
+      // like the panel: absent or empty = no
+      if (raw !== null && !['', '1', 'true', '0', 'false'].includes(raw)) return apiError(400, 'validation_failed', 'purge_backups must be true, false, 1 or 0')
       const purge = raw === '1' || raw === 'true'
       const id = idParam(params)
       const server = db.servers.find((s) => s.id === id)
       if (!server) return apiError(404, 'not_found', 'server not found')
+      if (restoreActive(id)) return apiError(409, 'conflict', 'a file or backup job is running for this server; try again when it is done')
       db.servers = db.servers.filter((s) => s.id !== id)
       for (const [userId, grants] of db.grants) db.grants.set(userId, grants.filter((gr) => gr.server_id !== id))
       const details: Record<string, unknown> = { name: server.name }
