@@ -230,7 +230,7 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tasks := h.updateTasks(ctx, srv, gv, inv, selected)
-	view, err := h.jobs.start(srv.ID, jobUpdate, ctx, stepsOf(tasks), func(ctx context.Context, j *job) {
+	view, err := h.jobs.start(ctx, srv.ID, jobUpdate, stepsOf(tasks), func(ctx context.Context, j *job) {
 		h.runJob(ctx, j, srv, tasks, false)
 	})
 	if err != nil {

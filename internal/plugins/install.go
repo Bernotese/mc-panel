@@ -148,7 +148,7 @@ func (h *Handler) handleInstall(w http.ResponseWriter, r *http.Request) {
 	for _, e := range res.Install {
 		tasks = append(tasks, jobTask{entry: e})
 	}
-	view, err := h.jobs.start(srv.ID, jobInstall, ctx, stepsOf(tasks), func(ctx context.Context, j *job) {
+	view, err := h.jobs.start(ctx, srv.ID, jobInstall, stepsOf(tasks), func(ctx context.Context, j *job) {
 		h.runJob(ctx, j, srv, tasks, true)
 	})
 	if err != nil {

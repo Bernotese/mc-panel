@@ -95,7 +95,7 @@ func (v jobView) clone() jobView {
 
 // start runs run in the background as the server's job. base only passes its values (actor,
 // IP) to the job; the job ends with run or when the registry shuts down.
-func (r *jobRegistry) start(serverID int64, kind string, base context.Context, steps []jobStep, run func(ctx context.Context, j *job)) (jobView, error) {
+func (r *jobRegistry) start(base context.Context, serverID int64, kind string, steps []jobStep, run func(ctx context.Context, j *job)) (jobView, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch {

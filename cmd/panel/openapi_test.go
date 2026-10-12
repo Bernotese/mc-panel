@@ -14,6 +14,8 @@ import (
 
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/plugins"
+	"github.com/Bernotese/mc-panel/internal/plugins/upstream"
 	"github.com/Bernotese/mc-panel/internal/serverfiles"
 )
 
@@ -229,6 +231,73 @@ func TestFilesErrorsMatchOpenAPI(t *testing.T) {
 		}
 		for _, e := range o.errs {
 			status, code := serverfiles.ErrorStatus(fmt.Errorf("service: %w", e))
+			want = append(want, answer{status, code})
+		}
+		for _, a := range want {
+			text, ok := responseText(spec, op, a.status)
+			switch {
+			case !ok:
+				t.Errorf("%s: answers %d %s, but declares no %d response", o.id, a.status, a.code, a.status)
+			case strings.Contains(text, a.code):
+			case defaults[strings.SplitN(text, ":", 2)[0]] == a.code:
+			default:
+				t.Errorf("%s: the %d response does not name %s: %s", o.id, a.status, a.code, text)
+			}
+		}
+	}
+}
+
+// Every status and error code a plugin route can answer - the mapped service and upstream
+// errors plus the panel's own checks - is declared by its operation in api/openapi.yaml, and
+// the description names the code (shared responses: BadRequest = validation_failed, NotFound
+// = not_found, TooManyRequests = rate_limited).
+func TestPluginsErrorsMatchOpenAPI(t *testing.T) {
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := string(raw)
+	type answer struct {
+		status int
+		code   string
+	}
+	unsupported := []answer{{404, httpx.CodeNotFound}, {409, httpx.CodePluginsUnsupported}}
+	lookup := []answer{
+		{400, httpx.CodeValidation}, {429, httpx.CodeRateLimited},
+		{502, httpx.CodePluginSourceUnavailable}, {502, httpx.CodeCatalogUnavailable},
+	}
+	ops := []struct {
+		id    string
+		errs  []error
+		extra []answer
+	}{
+		{"listPlugins", []error{filesapi.ErrUnavailable}, unsupported},
+		{"searchPlugins", []error{upstream.ErrUnavailable}, append(slices.Clone(unsupported), lookup...)},
+		{"listPluginVersions", []error{upstream.ErrUnavailable, upstream.ErrNotFound}, append(slices.Clone(unsupported), lookup...)},
+		{"resolvePlugin", []error{upstream.ErrUnavailable, upstream.ErrNotFound, filesapi.ErrUnavailable},
+			append(append(slices.Clone(unsupported), lookup...), answer{409, httpx.CodePluginIncompatible}, answer{409, httpx.CodePluginNotDownloadable})},
+		{"installPlugin", []error{upstream.ErrUnavailable, upstream.ErrNotFound, filesapi.ErrUnavailable},
+			append(slices.Clone(unsupported), answer{400, httpx.CodeValidation}, answer{409, httpx.CodeConflict},
+				answer{409, httpx.CodePluginIncompatible}, answer{409, httpx.CodePluginNotDownloadable}, answer{409, httpx.CodeFileExists},
+				answer{429, httpx.CodeRateLimited}, answer{502, httpx.CodePluginSourceUnavailable}, answer{502, httpx.CodeCatalogUnavailable})},
+		{"getPluginUpdates", []error{upstream.ErrUnavailable, filesapi.ErrUnavailable},
+			append(slices.Clone(unsupported), answer{429, httpx.CodeRateLimited}, answer{502, httpx.CodeCatalogUnavailable})},
+		{"updatePlugins", []error{upstream.ErrUnavailable, filesapi.ErrUnavailable},
+			append(slices.Clone(unsupported), answer{400, httpx.CodeValidation}, answer{409, httpx.CodeConflict},
+				answer{429, httpx.CodeRateLimited}, answer{502, httpx.CodeCatalogUnavailable})},
+		{"togglePlugin", []error{filesapi.ErrNotFound, filesapi.ErrExists, filesapi.ErrInvalid, filesapi.ErrNotRegular, filesapi.ErrUnavailable},
+			append(slices.Clone(unsupported), answer{400, httpx.CodeValidation}, answer{409, httpx.CodeConflict})},
+		{"deletePlugin", []error{filesapi.ErrNotFound, filesapi.ErrInvalid, filesapi.ErrNotRegular, filesapi.ErrUnavailable},
+			append(slices.Clone(unsupported), answer{400, httpx.CodeValidation}, answer{409, httpx.CodeConflict})},
+		{"getPluginJob", nil, unsupported},
+		{"getPluginIcon", nil, []answer{{400, httpx.CodeValidation}, {404, httpx.CodeNotFound}, {502, httpx.CodePluginSourceUnavailable}}},
+	}
+	defaults := map[string]string{"BadRequest": httpx.CodeValidation, "NotFound": httpx.CodeNotFound, "TooManyRequests": httpx.CodeRateLimited}
+	for _, o := range ops {
+		op := openAPIOperation(t, spec, o.id)
+		want := slices.Clone(o.extra)
+		for _, e := range o.errs {
+			status, code := plugins.ErrorStatus(fmt.Errorf("wrapped: %w", e))
 			want = append(want, answer{status, code})
 		}
 		for _, a := range want {
