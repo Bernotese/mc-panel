@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
 	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/rbac"
@@ -363,6 +365,24 @@ func (h *Handler) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
+const (
+	// purgeTimeout bounds purging the backups of a deleted server: removing a large restic
+	// repository takes as long as a large delete in the file browser (filesapi.DeleteTimeout),
+	// plus a minute for ending the server's running backup job first.
+	purgeTimeout = filesapi.DeleteTimeout + time.Minute
+	// purgeAnswerSlack is the time left for the answer after a purge that used all of purgeTimeout.
+	purgeAnswerSlack = 10 * time.Second
+)
+
+// extendWrite gives the answer a write deadline d from now, past the server's WriteTimeout
+// (like the long calls of serverfiles); a ResponseWriter without deadlines is fine.
+func (h *Handler) extendWrite(w http.ResponseWriter, r *http.Request, d time.Duration) {
+	err := http.NewResponseController(w).SetWriteDeadline(h.ioClock.Now().Add(d))
+	if err != nil && !errors.Is(err, http.ErrNotSupported) {
+		h.log.DebugContext(r.Context(), "servers: set write deadline", "err", err)
+	}
+}
+
 // purgeBackupsParam parses ?purge_backups: absent, "0" and "false" = no; "1" and "true" = yes.
 func purgeBackupsParam(r *http.Request) (purge, ok bool) {
 	switch r.URL.Query().Get("purge_backups") {
@@ -395,12 +415,20 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The rows are gone: neither the purge nor the audit entry may be cut short by a client that
+	// goes away.
+	ctx = context.WithoutCancel(ctx)
 	details := map[string]any{"name": s.Name, "configured": configured}
 	if purge {
 		// After the commit and outside the reconcile lock: deleting a large repository can take
-		// minutes. A failure leaves an orphaned repository (as without the option); the server
-		// stays deleted. A client that goes away must not cut the purge short.
-		if err := h.backups.PurgeBackups(context.WithoutCancel(ctx), s.ID); err != nil {
+		// minutes, longer than the server's WriteTimeout. The purge gets its own deadline and the
+		// answer a write deadline past it. A failure leaves an orphaned repository (as without the
+		// option); the server stays deleted.
+		h.extendWrite(w, r, purgeTimeout+purgeAnswerSlack)
+		pctx, cancel := context.WithTimeout(ctx, purgeTimeout)
+		err := h.backups.PurgeBackups(pctx, s.ID)
+		cancel()
+		if err != nil {
 			h.log.Error("servers: delete: purging the backups failed", "server_id", s.ID, "err", err)
 			details["backups_purged"] = false
 		} else {

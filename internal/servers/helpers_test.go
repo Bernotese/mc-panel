@@ -317,14 +317,21 @@ type fakePurger struct {
 	mu    sync.Mutex
 	calls []int64
 	err   error
+	hook  func(ctx context.Context) // runs during the call (outside the lock); nil = none
 }
 
-func (p *fakePurger) PurgeBackups(_ context.Context, id int64) error {
+func (p *fakePurger) PurgeBackups(ctx context.Context, id int64) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.calls = append(p.calls, id)
-	return p.err
+	hook, err := p.hook, p.err
+	p.mu.Unlock()
+	if hook != nil {
+		hook(ctx)
+	}
+	return err
 }
+
+func (p *fakePurger) setHook(h func(ctx context.Context)) { p.mu.Lock(); p.hook = h; p.mu.Unlock() }
 
 func (p *fakePurger) setErr(err error) { p.mu.Lock(); p.err = err; p.mu.Unlock() }
 

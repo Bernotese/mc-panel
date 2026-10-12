@@ -44,6 +44,7 @@ type Handler struct {
 	db      *sql.DB
 	q       *store.Queries
 	clock   clock.Clock
+	ioClock clock.Clock // wall clock for I/O deadlines (always clock.Real)
 	rec     audit.Recorder
 	box     *secretbox.Box
 	inst    agentapi.InstancesClient
@@ -81,7 +82,7 @@ func NewHandler(d Deps) *Handler {
 	}
 	return &Handler{
 		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst, catalog: cat, log: log,
-		gate: gate, backups: purger,
+		gate: gate, backups: purger, ioClock: clock.Real{},
 		power: newPowerLimiter(), kick: make(chan struct{}, 1),
 		reconcile: reconcileState{attempts: map[int64]attempt{}, warned: map[int64]bool{}, foreign: map[int64]bool{}},
 	}
