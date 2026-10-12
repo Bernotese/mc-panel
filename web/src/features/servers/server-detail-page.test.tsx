@@ -35,6 +35,7 @@ describe('ServerDetailPage', () => {
       'Spieler',
       'Dateien',
       'Plugins',
+      'Backups',
       'Einstellungen',
       'Löschen',
     ])
@@ -208,7 +209,7 @@ describe('ServerDetailPage', () => {
   it('lets the tab bar scroll sideways instead of the page on narrow screens', async () => {
     await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
     const tabs = await screen.findByRole('tablist')
-    expect(within(tabs).getAllByRole('tab')).toHaveLength(7)
+    expect(within(tabs).getAllByRole('tab')).toHaveLength(8)
     expect(tabs).toHaveClass('max-w-full', 'justify-start', 'overflow-x-auto')
   })
 
@@ -293,5 +294,17 @@ describe('ServerDetailPage', () => {
       await act(() => vi.advanceTimersByTimeAsync(10_000))
       expect(polls).toBe(seen)
     })
+  })
+
+  it('shows the backups tab only with the backups permission', async () => {
+    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+    await screen.findByRole('heading', { name: 'survival', level: 1 })
+    expect(screen.queryByRole('tab', { name: 'Backups' })).not.toBeInTheDocument()
+  })
+
+  it('shows the backups tab to a user with the backups permission, also on vanilla servers', async () => {
+    db.grants.set(2, [{ server_id: 2, permissions: ['server.view', 'server.backups'] }])
+    await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('alice') })
+    expect(await screen.findByRole('tab', { name: 'Backups' })).toBeInTheDocument()
   })
 })
