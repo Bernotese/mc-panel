@@ -1,8 +1,9 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PluginSearchHit, PluginSource } from '@/api/types'
 import { server } from '@/mocks/node'
+import { SEARCH_DEBOUNCE_MS, searchesKey } from './api'
 import { hit, openDiscover } from './test-utils'
 
 /** Answers searches from a fixed list (20 per page, substring filter like the mock) and records what was asked. */
@@ -22,6 +23,10 @@ function searchMock(all: (source: PluginSource) => PluginSearchHit[]) {
   return calls
 }
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('Discover', () => {
   it('shows popular projects without a search term and switches the source', async () => {
     const calls = searchMock((source) => [hit(source === 'hangar' ? 'ViaBackwards' : 'LuckPerms', { source })])
@@ -40,10 +45,13 @@ describe('Discover', () => {
   })
 
   it('searches after a typing pause instead of on every key', async () => {
+    // Fake timers jump over the typing pause instead of waiting 400 ms of real time.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     const calls = searchMock(() => [hit('ViaVersion'), hit('ViaBackwards'), hit('LuckPerms')])
     const { user, region } = await openDiscover()
     await within(region).findByRole('heading', { name: 'LuckPerms' })
     await user.type(within(region).getByLabelText('Suchen'), 'via')
+    await act(() => vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS))
     expect(await within(region).findByRole('heading', { name: 'Treffer auf Modrinth' })).toBeInTheDocument()
     await waitFor(() => expect(within(region).queryByRole('heading', { name: 'LuckPerms' })).not.toBeInTheDocument())
     expect(within(region).getByRole('heading', { name: 'ViaBackwards' })).toBeInTheDocument()
@@ -107,5 +115,28 @@ describe('Discover', () => {
     fail = false
     await user.click(within(alert).getByRole('button', { name: 'Erneut versuchen' }))
     expect(await within(region).findByRole('heading', { name: 'Chunky' })).toBeInTheDocument()
+  })
+})
+
+describe('Discover – stale results', () => {
+  it('says when refreshing the results failed instead of showing the old ones silently', async () => {
+    let fail = false
+    server.use(
+      http.get('*/api/servers/:id/plugins/search', () =>
+        fail
+          ? HttpResponse.json({ error: 'plugin_source_unavailable', message: 'modrinth: 503' }, { status: 502 })
+          : HttpResponse.json({ hits: [hit('Chunky')], total: 1, offset: 0 }),
+      ),
+    )
+    const { user, region, queryClient } = await openDiscover()
+    await within(region).findByRole('heading', { name: 'Chunky' })
+    fail = true
+    await act(() => queryClient.invalidateQueries({ queryKey: searchesKey(1) }))
+    const alert = await within(region).findByRole('alert')
+    expect(alert).toHaveTextContent('Die Suche ist gerade nicht möglich.')
+    expect(within(region).getByRole('heading', { name: 'Chunky' })).toBeInTheDocument()
+    fail = false
+    await user.click(within(alert).getByRole('button', { name: 'Erneut versuchen' }))
+    await waitFor(() => expect(within(region).queryByRole('alert')).not.toBeInTheDocument())
   })
 })
