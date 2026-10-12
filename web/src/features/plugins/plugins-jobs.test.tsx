@@ -149,6 +149,22 @@ describe('plugin jobs and updates', () => {
     expect(screen.getByRole('region', { name: 'Installation läuft …' })).toBeInTheDocument()
   })
 
+  it('picks up a job started elsewhere when the panel answers 409 conflict', async () => {
+    mockInventory(inventory({ jars: [LP] }))
+    const jobs = jobSequence([job('install', 'running', [step('Chunky', 'Chunky-1.4.28.jar', 'downloading')])])
+    server.use(
+      http.post('*/api/servers/:id/plugins/toggle', () => {
+        jobs.started = true // another browser tab started a job meanwhile
+        return HttpResponse.json({ error: 'conflict', message: 'a plugin job of this server is running' }, { status: 409 })
+      }),
+    )
+    const { user, region } = await openPlugins()
+    await user.click(await within(region).findByRole('switch', { name: 'LuckPerms aktiv' }))
+    expect(await screen.findByText('Für diesen Server läuft gerade schon ein Auftrag. Warte, bis er fertig ist.')).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Installation läuft …' })).toBeInTheDocument()
+    expect(within(region).getByRole('switch', { name: 'LuckPerms aktiv' })).toBeDisabled()
+  })
+
   it('does not show a job that ended before the tab was opened', async () => {
     const old: PluginJob = { ...job('install', 'done', [step('Chunky', 'Chunky-1.4.28.jar', 'done')]), finished_at: Date.now() - 60_000 }
     const jobs = jobSequence([old])

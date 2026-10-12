@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink } from 'lucide-react'
 import { useId, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { formatBytes } from '@/features/files/format'
 import { useFormat } from '@/lib/format'
-import { installPlugin, resolveQueryOptions, versionsQueryOptions } from './api'
+import { installPlugin, refreshJobOnConflict, resolveQueryOptions, versionsQueryOptions } from './api'
 import { installErrorMessage, pluginErrorMessage } from './messages'
 import { canInstall, defaultVersion, externalHref, type InstallTarget } from './model'
 
@@ -40,6 +40,7 @@ function PreviewSection({ title, children }: { title: string; children: ReactNod
 export function InstallDialog({ serverId, dir, target, busy, onClose, onStarted }: InstallDialogProps) {
   const { t } = useTranslation()
   const fmt = useFormat()
+  const queryClient = useQueryClient()
   const group = useId()
   const [chosen, setChosen] = useState<string | null>(null)
   const versions = useQuery(versionsQueryOptions(serverId, target.source, target.project))
@@ -49,6 +50,7 @@ export function InstallDialog({ serverId, dir, target, busy, onClose, onStarted 
   const install = useMutation({
     mutationFn: (version: string) => installPlugin(serverId, { source: target.source, project: target.project, version }),
     onSuccess: (job) => onStarted(job),
+    onError: (err) => refreshJobOnConflict(queryClient, serverId, err),
   })
   const plan = resolve.data
   const blocked = busy || selected === null || !plan || !canInstall(plan) || install.isPending

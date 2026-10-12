@@ -16,6 +16,7 @@ import {
   checkUpdates,
   deletePlugin,
   inventoryQueryOptions,
+  refreshJobOnConflict,
   refreshPluginState,
   startJob,
   togglePlugin,
@@ -43,8 +44,12 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
   const { t } = useTranslation()
   const fmt = useFormat()
   const queryClient = useQueryClient()
-  const notifyError = usePluginErrorToast()
+  const notifyToast = usePluginErrorToast()
   const power = usePower(server)
+  const notifyError = (err: unknown) => {
+    refreshJobOnConflict(queryClient, server.id, err)
+    notifyToast(err)
+  }
   const [view, setView] = useState<View>('installed')
   const [installing, setInstalling] = useState<InstallTarget | null>(null)
   const [removing, setRemoving] = useState<InstalledJar | null>(null)
@@ -97,7 +102,10 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
       startJob(queryClient, server.id, started)
       toast.success(t('plugins.updates.started'))
     },
-    onError: (err) => toast.error(jobStartErrorMessage(err, t)),
+    onError: (err) => {
+      refreshJobOnConflict(queryClient, server.id, err)
+      toast.error(jobStartErrorMessage(err, t))
+    },
   })
 
   // Spec §7.1: while a job runs, installing, updating, toggling and removing are locked (the panel answers 409 anyway).

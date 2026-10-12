@@ -1,6 +1,6 @@
 import { infiniteQueryOptions, queryOptions, type QueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import { unwrap, unwrapVoid } from '@/api/errors'
+import { isApiError, unwrap, unwrapVoid } from '@/api/errors'
 import type {
   InstallPluginRequest,
   PluginInventory,
@@ -127,6 +127,14 @@ export function pluginJobQueryOptions(id: number) {
 /** The 202 answer becomes the job query's data, which starts the 2-s polling (same pattern as extracting in 3b). */
 export function startJob(queryClient: QueryClient, id: number, job: PluginJob): void {
   queryClient.setQueryData<PluginJobResponse>(pluginJobKey(id), { job })
+}
+
+/**
+ * 409 conflict = a job of this server runs that this tab may not know about (another browser tab or user started it):
+ * asking for it again starts the polling, the locks and the reload when it ends.
+ */
+export function refreshJobOnConflict(queryClient: QueryClient, id: number, err: unknown): void {
+  if (isApiError(err, 'conflict')) void queryClient.invalidateQueries({ queryKey: pluginJobKey(id) })
 }
 
 /** After a job, a toggle or a removal the disk changed: inventory, updates, "installiert" badges and previews are stale. */
