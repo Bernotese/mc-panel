@@ -745,7 +745,7 @@ export const de = {
       progress: 'Fortschritt des Auftrags',
       counts: '{{finished}} von {{total}} Jars',
       dismiss: 'Ausblenden',
-      toast_done: 'Fertig. Starte den Server neu, damit die Änderungen wirken.',
+      toast_done: 'Fertig.',
       toast_failed: 'Nicht alles hat geklappt – Details stehen beim Auftrag.',
     },
     step: {
