@@ -42,8 +42,8 @@ func (h *Handler) handleServerPower(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Before the limiter: a refusal costs no token and is not audited.
-	if req.Action != agentapi.PowerStop && h.extract.ExtractRunning(ctx, s.ID) {
-		writeConflict(w, r, "an archive is being extracted into this server; try again when it is done")
+	if req.Action != agentapi.PowerStop && h.gate.DataJobRunning(ctx, s.ID) {
+		writeConflict(w, r, "a file or backup job is rewriting this server's data; try again when it is done")
 		return
 	}
 	p, _ := principal.From(ctx) // guaranteed by the rbac rule

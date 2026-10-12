@@ -3289,7 +3289,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description conflict (server not configured, restart of a container that belongs to another server, or an archive is being extracted) or base_domain_missing (restart) */
+            /** @description conflict (server not configured, restart of a container that belongs to another server, or a job rewrites the data directory: an archive is extracted or a backup restored) or base_domain_missing (restart) */
             409: {
                 headers: {
                     [name: string]: unknown;

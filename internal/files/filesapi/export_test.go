@@ -12,3 +12,6 @@ func SetCallTimeouts(c *UnixClient, call, long time.Duration) {
 
 // SetJarsTimeout sets the timeout of a jars listing.
 func SetJarsTimeout(c *UnixClient, d time.Duration) { c.jarsTimeout = d }
+
+// SetBackupTimeout sets the timeout of list, pin, restore and forget.
+func SetBackupTimeout(c *UnixClient, d time.Duration) { c.backupTimeout = d }
