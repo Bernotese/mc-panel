@@ -80,7 +80,7 @@ jobs:
           out openapi '^api/'
           out e2e "^(cmd|internal|api|web)/|${gomod}"
           out nftables "^internal/(agent|defense|auth)/|^cmd/(agent|panel)/|^scripts/ci-acceptance\.sh$|${gomod}"
-          out instances "^internal/(agent|files|plugins|serverfiles|console|servers|auth|audit|rbac|httpx|store|config)/|^cmd/|^scripts/(ci-instances\.sh|mc-status\.py)$|${gomod}"
+          out instances "^(cmd|internal)/|^scripts/(ci-instances\.sh|mc-status\.py)$|${gomod}"
           out release "^cmd/|^internal/webui/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
 
   go:
