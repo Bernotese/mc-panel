@@ -1015,6 +1015,135 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/servers/{id}/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Snapshots, current job and schedule of a server
+         * @description The snapshots come from the restic repository of the server, newest first. Without restic on the host or without the file service, available is false and snapshots is empty (no error).
+         */
+        get: operations["getBackups"];
+        put?: never;
+        /** Queue a manual backup (consistent through save-off/save-all flush/save-on while the server runs; audited) */
+        post: operations["createBackup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/backups/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The queued, running or last backup job of the server (null before the first one) */
+        get: operations["getBackupJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/backups/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set schedule and retention of the server (audited)
+         * @description Times are in the panel time zone (ServerSettings.backup_timezone). The retention applies only to scheduled snapshots; manual, pre-restore and pinned ones stay.
+         */
+        put: operations["updateBackupSchedule"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/backups/{snapshot}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Queue deleting one snapshot (also pinned and pre-restore ones; sudo; audited) */
+        delete: operations["deleteBackup"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/backups/{snapshot}/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pin or unpin a scheduled snapshot (pinned ones survive the retention; the snapshot gets a new ID; audited) */
+        post: operations["pinBackup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/backups/{snapshot}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue a full restore (stops the server, takes a pre-restore snapshot, restores, starts it again if it should run; sudo; audited)
+         * @description Starts and restarts of the server answer 409 until the job ends. Not enough disk space shows as error_code insufficient_storage in the job.
+         */
+        post: operations["restoreBackup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/backups/{snapshot}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download a snapshot as a zip stream (audited) */
+        get: operations["downloadBackup"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/audit": {
         parameters: {
             query?: never;
@@ -1857,6 +1986,138 @@ export interface components {
         PluginJobResponse: {
             job: components["schemas"]["PluginJob"] | null;
         };
+        /** @enum {string} */
+        BackupKind: "scheduled" | "manual" | "pre-restore";
+        BackupSnapshot: {
+            id: string;
+            short_id: string;
+            /**
+             * Format: int64
+             * @description Unix ms
+             */
+            time: number;
+            kind: components["schemas"]["BackupKind"];
+            /** @description Only scheduled snapshots can be pinned; pinned ones survive the retention */
+            pinned: boolean;
+            note: string | null;
+            /**
+             * Format: int64
+             * @description Size of the backed up data
+             */
+            bytes: number;
+        };
+        /** @enum {string} */
+        BackupJobKind: "backup" | "restore" | "delete";
+        /** @enum {string} */
+        BackupJobTrigger: "manual" | "scheduled";
+        /** @enum {string} */
+        BackupJobState: "queued" | "running" | "done" | "failed";
+        /** @enum {string} */
+        BackupJobStep: "queued" | "saving" | "backing_up" | "resuming" | "pruning" | "stopping" | "pre_restore" | "restoring" | "deleting" | "done";
+        /** @enum {string} */
+        BackupJobError: "rcon_unavailable" | "agent_unavailable" | "files_unavailable" | "files_busy" | "backups_unavailable" | "insufficient_storage" | "too_large" | "stop_timeout" | "canceled" | "internal";
+        BackupJob: {
+            id: string;
+            kind: components["schemas"]["BackupJobKind"];
+            trigger: components["schemas"]["BackupJobTrigger"];
+            state: components["schemas"]["BackupJobState"];
+            step: components["schemas"]["BackupJobStep"];
+            /** @description Position in the panel-wide queue (1 = next); 0 = not waiting */
+            queue_position: number;
+            /**
+             * Format: int64
+             * @description Bytes read (backup) resp. written (restore) so far
+             */
+            bytes: number;
+            /** @description Backup: the new snapshot once done; restore and delete: the source snapshot */
+            snapshot: string | null;
+            error_code: components["schemas"]["BackupJobError"] | null;
+            error: string;
+            /**
+             * Format: int64
+             * @description Unix ms
+             */
+            queued_at: number;
+            /**
+             * Format: int64
+             * @description 0 while queued
+             */
+            started_at: number;
+            /**
+             * Format: int64
+             * @description 0 while queued or running
+             */
+            finished_at: number;
+        };
+        BackupJobResponse: {
+            job: components["schemas"]["BackupJob"] | null;
+        };
+        /** @description Answer of createBackup, restoreBackup and deleteBackup: the queued job */
+        BackupJobStarted: {
+            job: components["schemas"]["BackupJob"];
+        };
+        /** @enum {string} */
+        BackupScheduleMode: "off" | "interval" | "daily" | "weekly";
+        /** @enum {string} */
+        BackupLastStatus: "ok" | "failed" | "running";
+        BackupSchedule: {
+            mode: components["schemas"]["BackupScheduleMode"];
+            interval_hours: number;
+            /** @description Minutes after midnight in the panel time zone */
+            time_of_day: number;
+            /** @description 0 = Sunday */
+            weekday: number;
+            keep_last: number;
+            keep_daily: number;
+            keep_weekly: number;
+            keep_monthly: number;
+            /** @description The panel time zone (ServerSettings.backup_timezone) */
+            timezone: string;
+            /**
+             * Format: int64
+             * @description Unix ms; null with mode off
+             */
+            next_run_at: number | null;
+            /**
+             * Format: int64
+             * @description Start of the last scheduled run, Unix ms
+             */
+            last_run_at: number | null;
+            last_status: components["schemas"]["BackupLastStatus"] | null;
+            last_error: string | null;
+            last_snapshot_id: string | null;
+        };
+        BackupScheduleResponse: {
+            schedule: components["schemas"]["BackupSchedule"];
+        };
+        /** @description With a mode other than off at least one keep_* value must be > 0. */
+        UpdateBackupScheduleRequest: {
+            mode: components["schemas"]["BackupScheduleMode"];
+            interval_hours: number;
+            time_of_day: number;
+            weekday: number;
+            keep_last: number;
+            keep_daily: number;
+            keep_weekly: number;
+            keep_monthly: number;
+        };
+        BackupOverview: {
+            /** @description false: restic missing on the host or file service unreachable */
+            available: boolean;
+            snapshots: components["schemas"]["BackupSnapshot"][];
+            job: components["schemas"]["BackupJob"] | null;
+            schedule: components["schemas"]["BackupSchedule"];
+        };
+        CreateBackupRequest: {
+            /** @description At most 64 characters, no control characters; null or empty = no note */
+            note?: string | null;
+        };
+        PinBackupRequest: {
+            pinned: boolean;
+        };
+        BackupSnapshotResponse: {
+            snapshot: components["schemas"]["BackupSnapshot"];
+        };
         PermissionGrant: {
             /** Format: int64 */
             server_id: number;
@@ -2144,6 +2405,8 @@ export interface components {
         PluginSourceQuery: components["schemas"]["PluginSource"];
         /** @description Modrinth project ID or slug, Hangar slug or ID */
         PluginProjectQuery: string;
+        /** @description restic snapshot ID (64 lowercase hex characters) */
+        SnapshotPath: string;
     };
     requestBodies: never;
     headers: never;
@@ -4395,6 +4658,332 @@ export interface operations {
             404: components["responses"]["NotFound"];
             /** @description plugin_source_unavailable (fetch failed, larger than 256 KiB or not a PNG, JPEG, WebP or GIF image) */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getBackups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupOverview"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createBackup: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBackupRequest"];
+            };
+        };
+        responses: {
+            /** @description Job queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupJobStarted"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description backup_running (a backup, restore or delete job of this server is queued or running) or conflict (the server has no instance yet) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description backups_unavailable (restic is missing on the host) or files_unavailable (file service) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getBackupJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupJobResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateBackupSchedule: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateBackupScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupScheduleResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteBackup: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+                /** @description restic snapshot ID (64 lowercase hex characters) */
+                snapshot: components["parameters"]["SnapshotPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Job queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupJobStarted"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description backup_running (a backup job of this server is queued or running) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description backups_unavailable or files_unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    pinBackup: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+                /** @description restic snapshot ID (64 lowercase hex characters) */
+                snapshot: components["parameters"]["SnapshotPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PinBackupRequest"];
+            };
+        };
+        responses: {
+            /** @description The snapshot with its new ID */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupSnapshotResponse"];
+                };
+            };
+            /** @description validation_failed (also: not a scheduled snapshot) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description backup_running (a backup job of this server is queued or running) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description backups_unavailable or files_unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    restoreBackup: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+                /** @description restic snapshot ID (64 lowercase hex characters) */
+                snapshot: components["parameters"]["SnapshotPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Job queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupJobStarted"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description backup_running (a backup job of this server is queued or running) or conflict (the server has no instance) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description backups_unavailable, files_unavailable or agent_unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    downloadBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+                /** @description restic snapshot ID (64 lowercase hex characters) */
+                snapshot: components["parameters"]["SnapshotPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Zip stream with Content-Disposition attachment; filename "<server>-<YYYYMMDD-HHMMSS>.zip" */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
+            /** @description backups_unavailable or files_unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

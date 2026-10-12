@@ -186,8 +186,8 @@ func TestRouteCoverage(t *testing.T) {
 	if un := rbac.Uncovered(e.app.Mux, e.app.Routes, func(_, p string) bool { return p == "/*" }); len(un) != 0 {
 		t.Fatalf("routes registered without rbac rule: %v", un)
 	}
-	if n := len(e.app.Routes); n != 87 {
-		t.Fatalf("registered %d API routes, OpenAPI defines 87 operations (incl. GET /health)", n)
+	if n := len(e.app.Routes); n != 95 {
+		t.Fatalf("registered %d API routes, OpenAPI defines 95 operations (incl. GET /health)", n)
 	}
 }
 
