@@ -50,7 +50,7 @@ func (h *Handler) prune(ctx context.Context, j *job) error {
 		return err
 	}
 	p := scheduleOf(row).Policy()
-	if p.Validate() != nil { // switched off meanwhile without retention: nothing to apply
+	if !validPolicy(p) { // switched off meanwhile without retention: nothing to apply
 		return nil
 	}
 	j.setStep(stepPruning)
@@ -101,3 +101,6 @@ func (h *Handler) finishScheduled(ctx context.Context, j *job, started time.Time
 		h.alert(ctx, id, j.spec.name, alertBackup, msg)
 	}
 }
+
+// validPolicy reports whether p is a retention the service accepts (at least one keep_* > 0).
+func validPolicy(p filesapi.ForgetPolicy) bool { return p.Validate() == nil }
