@@ -2,6 +2,7 @@ import { queryOptions, type QueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { isApiError, unwrap } from '@/api/errors'
 import type { BackupJob, BackupJobResponse, BackupJobStarted, BackupOverview, BackupSchedule, BackupSnapshot, UpdateBackupScheduleRequest } from '@/api/types'
+import { serverKey } from '@/features/servers/api'
 
 /** The job is polled every 2 s while it is queued or running (spec §6.1). */
 export const JOB_POLL_MS = 2_000
@@ -78,6 +79,14 @@ export function replaceSnapshot(queryClient: QueryClient, id: number, oldId: str
 
 export function setSchedule(queryClient: QueryClient, id: number, schedule: BackupSchedule): void {
   queryClient.setQueryData<BackupOverview>(overviewKey(id), (prev) => (prev ? { ...prev, schedule } : prev))
+}
+
+/**
+ * Queries a finished restore makes stale: everything below serverKey(id) (state, files, plugins, players, backups) as a
+ * prefix, and the file editor contents, which sit outside it (files/api.ts fileContentKey).
+ */
+export function restoredQueryKeys(id: number): readonly (readonly unknown[])[] {
+  return [serverKey(id), ['file-content', id]]
 }
 
 export function refreshBackups(queryClient: QueryClient, id: number): Promise<void> {

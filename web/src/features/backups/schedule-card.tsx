@@ -12,6 +12,7 @@ import { useFormat } from '@/lib/format'
 import { setSchedule, updateBackupSchedule } from './api'
 import { useBackupErrorToast } from './messages'
 import {
+  browserTimeZone,
   draftFromSchedule,
   INTERVAL_MAX_HOURS,
   INTERVAL_MIN_HOURS,
@@ -50,6 +51,9 @@ function ScheduleForm({ serverId, schedule }: { serverId: number; schedule: Back
   const request = scheduleRequest(draft, schedule)
   const unchanged = request !== null && sameSchedule(request, schedule)
   const set = (patch: Partial<ScheduleDraft>) => setDraft((d) => ({ ...d, ...patch }))
+  const keepErrorId = `${id}-keep-message`
+  // Times are formatted in the browser's zone; say so when the schedule runs in another one.
+  const localZone = browserTimeZone()
 
   const save = useMutation({
     mutationFn: () => {
@@ -126,13 +130,24 @@ function ScheduleForm({ serverId, schedule }: { serverId: number; schedule: Back
           {KEEP_FIELDS.map((f) => (
             <FieldRow key={f} id={`${id}-${f}`} label={t(`backups.schedule.${f}`)} error={errors[f]}>
               {(c) => (
-                <Input {...c} type="number" inputMode="numeric" min={0} max={KEEP_MAX} value={draft[f]} onChange={(e) => set({ [f]: e.target.value })} />
+                <Input
+                  {...c}
+                  // The shared "at least one value" error belongs to all four fields.
+                  aria-invalid={c['aria-invalid'] ?? (errors.keep ? true : undefined)}
+                  aria-describedby={[c['aria-describedby'], errors.keep ? keepErrorId : undefined].filter(Boolean).join(' ') || undefined}
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={KEEP_MAX}
+                  value={draft[f]}
+                  onChange={(e) => set({ [f]: e.target.value })}
+                />
               )}
             </FieldRow>
           ))}
         </div>
         {errors.keep ? (
-          <p role="alert" className="text-destructive">
+          <p id={keepErrorId} role="alert" className="text-destructive">
             {t(errors.keep.key)}
           </p>
         ) : null}
@@ -140,15 +155,27 @@ function ScheduleForm({ serverId, schedule }: { serverId: number; schedule: Back
 
       <div className="text-muted-foreground space-y-1">
         <p>{t('backups.schedule.timezone_hint', { timezone: schedule.timezone })}</p>
-        {schedule.mode !== 'off' && schedule.next_run_at !== null ? (
-          <p>{t('backups.schedule.next_run', { when: fmt.dateTime(schedule.next_run_at), relative: fmt.relative(schedule.next_run_at) })}</p>
-        ) : null}
-        {schedule.last_run_at !== null && schedule.last_status !== null ? (
+        {schedule.mode !== 'off' ? (
           <p>
-            {t('backups.schedule.last_run', {
-              when: fmt.dateTime(schedule.last_run_at),
-              status: t(`backups.schedule.last_status.${schedule.last_status}`),
-            })}
+            {schedule.next_run_at === null
+              ? t('backups.schedule.not_scheduled')
+              : localZone !== null && localZone !== schedule.timezone
+                ? t('backups.schedule.next_run_local', {
+                    when: fmt.dateTime(schedule.next_run_at),
+                    zone: localZone,
+                    relative: fmt.relative(schedule.next_run_at),
+                  })
+                : t('backups.schedule.next_run', { when: fmt.dateTime(schedule.next_run_at), relative: fmt.relative(schedule.next_run_at) })}
+          </p>
+        ) : null}
+        {schedule.last_status !== null ? (
+          <p>
+            {schedule.last_run_at !== null
+              ? t('backups.schedule.last_run', {
+                  when: fmt.dateTime(schedule.last_run_at),
+                  status: t(`backups.schedule.last_status.${schedule.last_status}`),
+                })
+              : t('backups.schedule.last_status_only', { status: t(`backups.schedule.last_status.${schedule.last_status}`) })}
           </p>
         ) : null}
         {schedule.last_status === 'failed' && schedule.last_error ? <p className="text-destructive break-words">{schedule.last_error}</p> : null}

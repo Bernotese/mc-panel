@@ -3,15 +3,14 @@ import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { BackupJob } from '@/api/types'
-import { serverKey } from '@/features/servers/api'
-import { backupJobQueryOptions, JOB_POLL_MS, refreshBackups } from './api'
+import { backupJobQueryOptions, JOB_POLL_MS, refreshBackups, restoredQueryKeys } from './api'
 import { isJobActive, jobTitleKey } from './model'
 
 const active = (job: BackupJob | null | undefined) => job?.state === 'queued' || job?.state === 'running'
 
 /**
  * The server's backup job (spec §5.3/§6.1): polled every 2 s while queued or running, otherwise not at all. When a job
- * this tab saw active ends, the snapshots are reloaded (after a restore also the server state) and a toast reports the
+ * this tab saw active ends, the snapshots are reloaded (after a restore also the server and its data) and a toast reports the
  * result. A vanished active job (panel restart) or a new one the tab did not see start reloads without a toast.
  */
 export function useBackupJob(serverId: number): { job: BackupJob | null; active: boolean } {
@@ -32,7 +31,9 @@ export function useBackupJob(serverId: number): { job: BackupJob | null; active:
     if (previous === undefined) return
     const reload = (restore: boolean) => {
       void refreshBackups(queryClient, serverId)
-      if (restore) void queryClient.invalidateQueries({ queryKey: serverKey(serverId), exact: true })
+      // A restore replaced the whole data directory: everything below the server (files, plugins, players) and open
+      // editor contents are stale.
+      if (restore) for (const queryKey of restoredQueryKeys(serverId)) void queryClient.invalidateQueries({ queryKey })
     }
     if (active(previous) && job !== null && job.id === previous?.id) {
       if (active(job)) return

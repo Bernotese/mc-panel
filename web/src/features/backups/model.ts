@@ -174,3 +174,12 @@ export function sameSchedule(req: UpdateBackupScheduleRequest, s: BackupSchedule
     req.keep_monthly === s.keep_monthly
   )
 }
+
+/** The IANA zone the browser formats times in; null if the browser does not tell. */
+export function browserTimeZone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null
+  } catch {
+    return null
+  }
+}

@@ -103,4 +103,40 @@ describe('schedule card', () => {
     expect(within(card).getByText('RCON nicht erreichbar')).toBeInTheDocument()
     expect(within(card).queryByText(/^Nächster Lauf/)).not.toBeInTheDocument()
   })
+
+  it('names the local time zone when the browser runs in another one than the panel', async () => {
+    const local = new Intl.DateTimeFormat().resolvedOptions().timeZone
+    const other = local === 'Pacific/Chatham' ? 'Pacific/Kiritimati' : 'Pacific/Chatham'
+    const { card } = await openSchedule(overview({ schedule: schedule({ timezone: other }) }))
+    expect(within(card).getByText(new RegExp(`^Nächster Lauf: .* in deiner Ortszeit ${local.replace('/', '\\/')} \\(`))).toBeInTheDocument()
+  })
+
+  it('names no zone when the browser runs in the panel time zone', async () => {
+    const local = new Intl.DateTimeFormat().resolvedOptions().timeZone
+    const { card } = await openSchedule(overview({ schedule: schedule({ timezone: local }) }))
+    expect(within(card).getByText(/^Nächster Lauf: /)).toBeInTheDocument()
+    expect(within(card).queryByText(/Ortszeit/)).not.toBeInTheDocument()
+  })
+
+  it('shows the last status without a run time and an enabled schedule without a next run', async () => {
+    const { card } = await openSchedule(
+      overview({ schedule: schedule({ next_run_at: null, last_run_at: null, last_status: 'failed', last_error: 'RCON nicht erreichbar' }) }),
+    )
+    expect(within(card).getByText('Nächster Lauf: noch nicht geplant')).toBeInTheDocument()
+    expect(within(card).getByText('Letzter geplanter Lauf: fehlgeschlagen')).toBeInTheDocument()
+    expect(within(card).getByText('RCON nicht erreichbar')).toBeInTheDocument()
+  })
+
+  it('links the retention error to all four fields', async () => {
+    const { user, card } = await openSchedule()
+    for (const label of ['Letzte behalten', 'Tage behalten', 'Wochen behalten', 'Monate behalten']) {
+      await user.clear(within(card).getByLabelText(label))
+      await user.type(within(card).getByLabelText(label), '0')
+    }
+    for (const label of ['Letzte behalten', 'Tage behalten', 'Wochen behalten', 'Monate behalten']) {
+      const field = within(card).getByLabelText(label)
+      expect(field).toHaveAttribute('aria-invalid', 'true')
+      expect(field).toHaveAccessibleDescription('Mindestens ein Aufbewahrungswert muss größer als 0 sein.')
+    }
+  })
 })

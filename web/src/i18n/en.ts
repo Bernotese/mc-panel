@@ -378,6 +378,7 @@ export const en: Messages = {
       deleted: 'Server “{{name}}” deleted.',
       purge_backups: 'Delete backups too',
       purge_backups_hint: 'Without this option the server’s backups stay on the host and keep using space.',
+      deleting_with_backups: 'Deleting the server and its backups …',
       busy: 'An archive is being extracted or a backup restored for this server. Delete it once the job has finished.',
     },
 
@@ -902,7 +903,10 @@ export const en: Messages = {
       keep_monthly: 'Keep months',
       timezone_hint: 'Times are in the panel’s time zone: {{timezone}}. Administrators change it under Settings.',
       next_run: 'Next run: {{when}} ({{relative}})',
+      next_run_local: 'Next run: {{when}} in your local time {{zone}} ({{relative}})',
+      not_scheduled: 'Next run: not scheduled yet',
       last_run: 'Last scheduled run: {{when}} – {{status}}',
+      last_status_only: 'Last scheduled run: {{status}}',
       last_status: {
         ok: 'successful',
         failed: 'failed',

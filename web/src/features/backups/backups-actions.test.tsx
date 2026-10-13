@@ -148,4 +148,45 @@ describe('snapshot actions', () => {
     expect(await screen.findByText(/Dateidienst ist für diesen Server gerade beschäftigt/)).toBeInTheDocument()
     expect(screen.queryByText(/läuft oder wartet bereits ein Backup-Auftrag/)).not.toBeInTheDocument()
   })
+
+  it('keeps the restore dialog and the typed name when the panel refuses', async () => {
+    mockOverview(overview({ snapshots: [snapshot(3)] }))
+    server.use(
+      http.post('*/api/servers/:id/backups/:snapshot/restore', () =>
+        HttpResponse.json({ error: 'validation_failed', message: 'snapshot must be 64 lowercase hex characters' }, { status: 400 }),
+      ),
+    )
+    const { user } = await openBackups()
+    await openMenu(user)
+    await user.click(await screen.findByRole('menuitem', { name: 'Wiederherstellen' }))
+    const dialog = await screen.findByRole('dialog', { name: /wiederherstellen\?$/ })
+    const name = within(dialog).getByLabelText('Zum Bestätigen den Namen „survival“ eintippen')
+    await user.type(name, 'survival')
+    await user.click(within(dialog).getByRole('button', { name: 'Wiederherstellen' }))
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Wiederherstellen' })).toBeEnabled())
+    expect(screen.getByRole('dialog', { name: /wiederherstellen\?$/ })).toBeInTheDocument()
+    expect(name).toHaveValue('survival')
+  })
+
+  it('locks restore and delete while a pin is in flight', async () => {
+    mockOverview(overview({ snapshots: [snapshot(1)] }))
+    let release: () => void = () => undefined
+    server.use(
+      http.post('*/api/servers/:id/backups/:snapshot/pin', async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+        return HttpResponse.json({ snapshot: snapshot(1, { id: snapshotId(98), pinned: true }) })
+      }),
+    )
+    const { user } = await openBackups()
+    await openMenu(user)
+    await user.click(await screen.findByRole('menuitem', { name: 'Anpinnen' }))
+    await openMenu(user)
+    expect(await screen.findByRole('menuitem', { name: 'Wiederherstellen' })).toHaveAttribute('data-disabled')
+    expect(screen.getByRole('menuitem', { name: 'Löschen' })).toHaveAttribute('data-disabled')
+    expect(screen.getByRole('menuitem', { name: 'Als Zip herunterladen' })).not.toHaveAttribute('data-disabled')
+    release()
+    expect(await screen.findByText('Snapshot angepinnt.')).toBeInTheDocument()
+  })
 })

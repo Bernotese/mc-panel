@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { server } from '@/mocks/node'
@@ -192,5 +192,66 @@ describe('backups tab', () => {
     await waitFor(() => expect(overviewCalls).toBeGreaterThan(before))
     expect(screen.queryByText('Backup abgeschlossen')).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Backup läuft …' })).not.toBeInTheDocument()
+  })
+
+  it('marks the server, its files, plugins, players and open editors stale after a restore', async () => {
+    mockOverview(overview({ snapshots: [snapshot(3)] }))
+    const jobs = jobSequence([backupJob('restore', 'running', { step: 'restoring' }), backupJob('restore', 'done', { snapshot: snapshot(3).id })])
+    jobs.started = true
+    const { queryClient } = await openBackups()
+    const spy = vi.spyOn(queryClient, 'invalidateQueries')
+    await screen.findByRole('region', { name: 'Wiederherstellung läuft …' })
+    await act(() => vi.advanceTimersByTimeAsync(JOB_POLL_MS + 100))
+    expect(await screen.findByRole('region', { name: 'Wiederherstellung abgeschlossen' })).toBeInTheDocument()
+    await waitFor(() => {
+      const keys = spy.mock.calls.map(([filters]) => filters)
+      // A prefix, not exact: the files, plugins and players queries sit below ['servers', id].
+      expect(keys).toContainEqual({ queryKey: ['servers', 1] })
+      expect(keys).toContainEqual({ queryKey: ['file-content', 1] })
+    })
+  })
+
+  it('keeps the dialog and the note when the backup cannot start, and closes it on backup_running', async () => {
+    mockOverview(overview())
+    let status = 503
+    server.use(
+      http.post('*/api/servers/:id/backups', () =>
+        status === 503
+          ? HttpResponse.json({ error: 'backups_unavailable', message: 'restic missing' }, { status: 503 })
+          : HttpResponse.json({ error: 'backup_running', message: 'a job runs' }, { status: 409 }),
+      ),
+    )
+    const { user } = await openBackups()
+    await user.click(await screen.findByRole('button', { name: 'Backup erstellen' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Backup erstellen' })
+    await user.type(within(dialog).getByLabelText('Notiz (optional)'), 'vor Update')
+    await user.click(within(dialog).getByRole('button', { name: 'Backup starten' }))
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Backup starten' })).toBeEnabled())
+    expect(screen.getByRole('dialog', { name: 'Backup erstellen' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Notiz (optional)')).toHaveValue('vor Update')
+    status = 409
+    await user.click(within(dialog).getByRole('button', { name: 'Backup starten' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Backup erstellen' })).not.toBeInTheDocument())
+  })
+
+  it('sends one create request for a double click', async () => {
+    mockOverview(overview())
+    let posts = 0
+    server.use(
+      http.post('*/api/servers/:id/backups', () => {
+        posts += 1
+        return HttpResponse.json({ job: backupJob('backup', 'queued') }, { status: 202 })
+      }),
+    )
+    const { user } = await openBackups()
+    await user.click(await screen.findByRole('button', { name: 'Backup erstellen' }))
+    const submit = within(await screen.findByRole('dialog', { name: 'Backup erstellen' })).getByRole('button', { name: 'Backup starten' })
+    act(() => {
+      fireEvent.click(submit)
+      fireEvent.click(submit)
+    })
+    expect(await screen.findByText('Backup gestartet.')).toBeInTheDocument()
+    await act(() => vi.advanceTimersByTimeAsync(200))
+    expect(posts).toBe(1)
   })
 })

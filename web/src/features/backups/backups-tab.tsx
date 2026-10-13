@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { isApiError } from '@/api/errors'
@@ -48,6 +48,19 @@ export function BackupsTab({ server }: { server: Server }) {
   // A job this tab saw active stays visible when it ends, independent of the panel's clock.
   const [watched, setWatched] = useState<string | null>(null)
   if (active && job !== null && job.id !== watched) setWatched(job.id)
+  // isPending only flips on the next render: a double click must not send a second create, restore or delete.
+  const starting = useRef(false)
+  const startOnce = (run: () => void) => {
+    if (starting.current) return
+    starting.current = true
+    run()
+  }
+  const released = () => {
+    starting.current = false
+  }
+  // A dialog stays open on errors so the note or the typed name survives a retry; only when another job holds the
+  // server (409 backup_running) there is nothing to retry until it ends.
+  const closesDialog = (err: unknown) => isApiError(err, 'backup_running')
 
   const create = useMutation({
     mutationFn: (note: string) => createBackup(server.id, note),
@@ -57,9 +70,10 @@ export function BackupsTab({ server }: { server: Server }) {
       toast.success(t('backups.create.started'))
     },
     onError: (err) => {
-      setCreating(false)
+      if (closesDialog(err)) setCreating(false)
       notifyError(err)
     },
+    onSettled: released,
   })
 
   const pin = useMutation({
@@ -90,9 +104,10 @@ export function BackupsTab({ server }: { server: Server }) {
       toast.success(t('backups.restore.started'))
     },
     onError: (err) => {
-      setRestoring(null)
+      if (closesDialog(err)) setRestoring(null)
       notifyError(err)
     },
+    onSettled: released,
   })
 
   const remove = useMutation({
@@ -103,12 +118,14 @@ export function BackupsTab({ server }: { server: Server }) {
       toast.success(t('backups.delete.started'))
     },
     onError: (err) => {
-      setDeleting(null)
+      if (closesDialog(err)) setDeleting(null)
       notifyError(err)
     },
+    onSettled: released,
   })
 
-  const busy = active || create.isPending || restore.isPending || remove.isPending
+  // A pin rewrites the snapshot ID: restore and delete must not act on the old one meanwhile.
+  const busy = active || create.isPending || restore.isPending || remove.isPending || pin.isPending
   const visibleJob = job !== null && job.id !== dismissed && (active || job.id === watched || job.finished_at >= openedAt) ? job : null
 
   if (overview.isPending) return <p className="text-muted-foreground text-sm">{t('common.loading')}</p>
@@ -150,14 +167,14 @@ export function BackupsTab({ server }: { server: Server }) {
         />
       </SectionCard>
       <ScheduleCard serverId={server.id} schedule={data.schedule} />
-      {creating ? <CreateBackupDialog pending={create.isPending} onClose={() => setCreating(false)} onSubmit={(note) => create.mutate(note)} /> : null}
+      {creating ? <CreateBackupDialog pending={create.isPending} onClose={() => setCreating(false)} onSubmit={(note) => startOnce(() => create.mutate(note))} /> : null}
       {restoring ? (
         <RestoreDialog
           serverName={server.name}
           when={fmt.dateTime(restoring.time)}
           pending={restore.isPending}
           onClose={() => setRestoring(null)}
-          onConfirm={() => restore.mutate(restoring)}
+          onConfirm={() => startOnce(() => restore.mutate(restoring))}
         />
       ) : null}
       {deleting ? (
@@ -169,7 +186,7 @@ export function BackupsTab({ server }: { server: Server }) {
           confirmLabel={t('backups.delete.submit')}
           destructive
           pending={remove.isPending || busy}
-          onConfirm={() => remove.mutate(deleting)}
+          onConfirm={() => startOnce(() => remove.mutate(deleting))}
         />
       ) : null}
     </div>

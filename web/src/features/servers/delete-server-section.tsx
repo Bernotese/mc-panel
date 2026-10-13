@@ -69,10 +69,23 @@ export function DeleteServerSection({ server }: { server: Server }) {
         {server.instance ? (
           <div className="space-y-1">
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" className="accent-primary size-4" checked={purge} onChange={(e) => setPurge(e.target.checked)} />
+              <input
+                type="checkbox"
+                className="accent-primary size-4"
+                checked={purge}
+                aria-describedby={`${id}-purge-hint`}
+                disabled={remove.isPending}
+                onChange={(e) => setPurge(e.target.checked)}
+              />
               {t('servers.delete.purge_backups')}
             </label>
-            <p className="text-muted-foreground text-sm">{t('servers.delete.purge_backups_hint')}</p>
+            <p id={`${id}-purge-hint`} className="text-muted-foreground text-sm">
+              {t('servers.delete.purge_backups_hint')}
+            </p>
+            {/* Purging the repository can take a while (backups spec §5.6). */}
+            <p role="status" className="text-sm">
+              {remove.isPending && purge ? t('servers.delete.deleting_with_backups') : null}
+            </p>
           </div>
         ) : null}
         <Button type="submit" variant="destructive" disabled={!matches || remove.isPending}>
