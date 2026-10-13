@@ -150,7 +150,9 @@ func (s *Service) keyExists(id int64) bool {
 	return err == nil && fi.Mode().IsRegular()
 }
 
-// ensureKey creates the repository key of server id if it does not exist (never replaced).
+// ensureKey creates the repository key of server id if it does not exist (never replaced). The
+// key and the keys/ folder are synced before restic init: a repository whose key was lost in a
+// crash could never be read again.
 func (s *Service) ensureKey(id int64) error {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -166,12 +168,38 @@ func (s *Service) ensureKey(id int64) error {
 	if err != nil {
 		return err
 	}
-	if _, err := f.WriteString(base64.StdEncoding.EncodeToString(b)); err != nil {
-		_ = f.Close()
+	_, err = f.WriteString(base64.StdEncoding.EncodeToString(b))
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = syncDir(filepath.Dir(s.keyFile(id)))
+	}
+	if err != nil {
 		_ = os.Remove(s.keyFile(id))
 		return err
 	}
-	return f.Close()
+	return nil
+}
+
+// syncDir fsyncs a folder, so a new entry in it survives a crash. File systems that cannot
+// sync a folder (EINVAL, ENOTSUP) are accepted.
+func syncDir(dir string) error {
+	d, err := os.Open(dir) //nolint:gosec // G304: <instances_dir>/backups/keys, a fixed folder of the service
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) {
+		return nil
+	}
+	return err
 }
 
 // ensureRepo initialises the repository of server id on its first backup (spec 4 §3.1). A
@@ -205,7 +233,7 @@ func (s *Service) restic(ctx context.Context, id int64, extraEnv []string, args 
 	out := &limitedBuffer{max: resticStdoutMax}
 	p, err := s.runner.Start(ctx, resticCmd{Args: append([]string{"--no-cache"}, args...), Env: s.resticEnv(id, extraEnv...), Stdout: out})
 	if err != nil {
-		return nil, fmt.Errorf("start restic: %w", err)
+		return nil, s.startErr(err)
 	}
 	op := subcommand(args)
 	if err := p.Wait(); err != nil {
@@ -215,6 +243,14 @@ func (s *Service) restic(ctx context.Context, id int64, extraEnv []string, args 
 		return nil, fmt.Errorf("restic %s printed more than %d bytes", op, resticStdoutMax)
 	}
 	return bytes.Clone(out.Bytes()), nil
+}
+
+// startErr: restic could not be started although the start check passed (the binary was
+// removed or replaced meanwhile). The full error (with the binary's path) goes to the log; the
+// answer is the fixed ErrBackupsUnavailable message (job code unavailable, HTTP 503).
+func (s *Service) startErr(err error) error {
+	s.log.Error("files: cannot start restic", "err", err)
+	return fmt.Errorf("%w: restic cannot be started", filesapi.ErrBackupsUnavailable)
 }
 
 // subcommand is the first argument that is not a flag.

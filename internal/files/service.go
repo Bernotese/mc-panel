@@ -74,6 +74,7 @@ type Service struct {
 	instHash      map[int64]*instSlot // one jar pass per instance at a time, on top of hashSlots
 	runner        resticRunner        // nil = no usable binary (runnerWhy says why)
 	runnerWhy     string
+	resticPaths   []string // the configured and the resolved restic binary: publicMessage hides them
 	backupMu      sync.Mutex
 	backupStat    filesapi.BackupsStatus // set by InitBackups
 	// backupHook runs before every entry of a backup stream; swapHook before every rename of
@@ -123,6 +124,12 @@ func New(cfg Config) *Service {
 	s.runner, s.runnerWhy = cfg.runner, ""
 	if s.runner == nil {
 		s.runner, s.runnerWhy = newExecRunner(cfg.ResticBinary)
+	}
+	if strings.ContainsRune(cfg.ResticBinary, '/') {
+		s.resticPaths = append(s.resticPaths, cfg.ResticBinary)
+	}
+	if er, ok := s.runner.(execRunner); ok && er.bin != cfg.ResticBinary {
+		s.resticPaths = append(s.resticPaths, er.bin)
 	}
 	s.backupStat = filesapi.BackupsStatus{Reason: "the restic check has not run yet"}
 	return s
@@ -312,8 +319,12 @@ const pathStart = `(^|[\s"'(=])`
 // up to the instance id is cut, so "write <instances_dir>/instances/1/world/x: …" becomes
 // "write world/x: …" and the data directory itself becomes ".". Any other path starting with
 // instances_dir gets "<instances_dir>" instead. Only paths at a path start (pathStart) are
-// replaced. The log keeps the full message.
+// replaced; the path of the restic binary becomes "restic" anywhere. The log keeps the full
+// message.
 func (s *Service) publicMessage(msg string) string {
+	for _, p := range s.resticPaths {
+		msg = strings.ReplaceAll(msg, p, "restic")
+	}
 	msg = s.dataPathRe.ReplaceAllString(msg, "$1")
 	msg = s.dataDirRe.ReplaceAllString(msg, "$1.")
 	if s.baseDirRe != nil {
