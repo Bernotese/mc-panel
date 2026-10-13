@@ -18,8 +18,8 @@ export function usePower(server: Pick<Server, 'id' | 'name'>) {
       void queryClient.invalidateQueries({ queryKey: serversKey })
     },
     onError: (err, action) => {
-      // 409 on start/restart: the panel refuses while an archive is being extracted.
-      if (isApiError(err, 'conflict') && action !== 'stop') toast.error(t('servers.extracting_lock'))
+      // 409 on start/restart: the panel refuses while an archive is being extracted or a backup is being restored.
+      if (isApiError(err, 'conflict') && action !== 'stop') toast.error(t('servers.data_job_lock'))
       else notifyError(err)
     },
   })
