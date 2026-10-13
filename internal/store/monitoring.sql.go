@@ -268,6 +268,52 @@ func (q *Queries) MonitoringListRaw(ctx context.Context, arg MonitoringListRawPa
 	return items, nil
 }
 
+const monitoringListRawMetric = `-- name: MonitoringListRawMetric :many
+SELECT at, value FROM metrics_raw
+WHERE series = ?1 AND metric = ?2 AND at >= ?3 AND at < ?4
+ORDER BY at
+`
+
+type MonitoringListRawMetricParams struct {
+	Series int64
+	Metric string
+	FromAt int64
+	ToAt   int64
+}
+
+type MonitoringListRawMetricRow struct {
+	At    int64
+	Value float64
+}
+
+func (q *Queries) MonitoringListRawMetric(ctx context.Context, arg MonitoringListRawMetricParams) ([]MonitoringListRawMetricRow, error) {
+	rows, err := q.db.QueryContext(ctx, monitoringListRawMetric,
+		arg.Series,
+		arg.Metric,
+		arg.FromAt,
+		arg.ToAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MonitoringListRawMetricRow{}
+	for rows.Next() {
+		var i MonitoringListRawMetricRow
+		if err := rows.Scan(&i.At, &i.Value); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const monitoringListServerAlerts = `-- name: MonitoringListServerAlerts :many
 SELECT server_id, down_alerts FROM server_alerts ORDER BY server_id
 `

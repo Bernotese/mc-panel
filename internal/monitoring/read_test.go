@@ -136,3 +136,22 @@ func TestSparklineOnlyPlayersAtMost120(t *testing.T) {
 		t.Fatalf("newest point = %v", got[len(got)-1])
 	}
 }
+
+func TestReadRawMetricOneMetricInWindow(t *testing.T) {
+	db := storetest.Open(t)
+	q := store.New(db)
+	for i := range 5 {
+		at := aReadNow.Add(-time.Duration(i) * 10 * time.Minute)
+		aInsertRaw(t, db, 4, MetricPlayers, at, float64(i))
+		aInsertRaw(t, db, 4, MetricTPS, at, 20)
+		aInsertRaw(t, db, 5, MetricPlayers, at, 99)
+	}
+	rows, err := readRawMetric(context.Background(), q, 4, MetricPlayers, aReadNow.Add(-30*time.Minute).UnixMilli(), aReadNow.UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// [now-30m, now): i = 3, 2, 1, oldest first; now itself is excluded
+	if len(rows) != 3 || rows[0].Value != 3 || rows[2].Value != 1 || rows[0].At >= rows[1].At {
+		t.Fatalf("rows = %+v", rows)
+	}
+}
