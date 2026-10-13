@@ -76,7 +76,9 @@ EOF
 }
 
 install_packages() {
-  local pkgs=(ca-certificates curl git jq make xz-utils bzip2 docker.io caddy nftables) missing=()
+  # bzip2: install-restic.sh unpacks the release; tzdata: restic reads the backup time zone from
+  # /usr/share/zoneinfo (it embeds no zone data and silently falls back to UTC without it).
+  local pkgs=(ca-certificates curl git jq make xz-utils bzip2 tzdata docker.io caddy nftables) missing=()
   for p in "${pkgs[@]}"; do
     dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'install ok installed' || missing+=("$p")
   done
