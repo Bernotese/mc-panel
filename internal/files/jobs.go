@@ -49,6 +49,7 @@ type jobs struct {
 	maxRestic int
 	cancels   map[int64]context.CancelFunc
 	committed map[int64]bool // restores in their swap: cancel has no effect any more
+	readers   map[int64]int  // running backup downloads per instance
 	closed    bool           // Close was called: no new jobs (wg.Add only happens under mu)
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -61,7 +62,7 @@ func newJobs(maxRestic int) *jobs {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &jobs{
 		last: map[int64]*filesapi.Job{}, busy: map[int64]filesapi.JobKind{}, maxRestic: max(maxRestic, 1),
-		cancels: map[int64]context.CancelFunc{}, committed: map[int64]bool{}, ctx: ctx, cancel: cancel,
+		cancels: map[int64]context.CancelFunc{}, committed: map[int64]bool{}, readers: map[int64]int{}, ctx: ctx, cancel: cancel,
 	}
 }
 
@@ -98,6 +99,8 @@ func (j *jobs) acquireLocked(id int64, kind filesapi.JobKind) error {
 		return errShuttingDown
 	case j.busy[id] != "":
 		return fmt.Errorf("%w: %s", filesapi.ErrBusy, busyText(j.busy[id]))
+	case (kind == filesapi.JobForget || kind == jobLock) && j.readers[id] > 0:
+		return fmt.Errorf("%w: a backup download is running for this server", filesapi.ErrBusy)
 	case kind == filesapi.JobExtract && j.slots >= maxJobsTotal:
 		return fmt.Errorf("%w: too many archives are being extracted", filesapi.ErrBusy)
 	case isResticKind(kind) && j.restic >= j.maxRestic:
@@ -272,4 +275,34 @@ func (j *jobs) beginCommit(ctx context.Context, id int64) bool {
 	}
 	j.committed[id] = true
 	return true
+}
+
+// lock takes instance id for pin or purge (no job; excludes every job and download).
+func (j *jobs) lock(id int64) (func(), error) {
+	if err := j.acquire(id, jobLock); err != nil {
+		return nil, err
+	}
+	return func() { j.release(id) }, nil
+}
+
+// addReader registers a backup download of instance id (spec 4 §4.4): refused while a forget
+// runs (prune holds an exclusive repository lock); a forget, pin or purge is refused while one
+// runs.
+func (j *jobs) addReader(id int64) (func(), error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	switch {
+	case j.closed:
+		return nil, errShuttingDown
+	case j.busy[id] == filesapi.JobForget || j.busy[id] == jobLock:
+		return nil, fmt.Errorf("%w: %s", filesapi.ErrBusy, busyText(j.busy[id]))
+	}
+	j.readers[id]++
+	return func() {
+		j.mu.Lock()
+		defer j.mu.Unlock()
+		if j.readers[id]--; j.readers[id] <= 0 {
+			delete(j.readers, id)
+		}
+	}, nil
 }
