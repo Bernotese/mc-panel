@@ -61,7 +61,7 @@ func (r *roller) once(ctx context.Context) error {
 	now := r.d.Clock.Now()
 	to5 := now.Truncate(5 * time.Minute)
 	to1 := now.Truncate(time.Hour)
-	from5, err := r.from(ctx, "metrics_raw", r.done5, to5, window5m, 5*time.Minute)
+	from5, err := from(r.done5, to5, window5m, 5*time.Minute, func() (int64, error) { return q.MonitoringEarliestRaw(ctx) })
 	if err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func (r *roller) once(ctx context.Context) error {
 		return err // nothing is pruned before its rollup succeeded
 	}
 	// after the 5-min rollup: a first run also sees the 5-min rows it has just written
-	from1, err := r.from(ctx, "metrics_5m", r.done1, to1, window1h, time.Hour)
+	from1, err := from(r.done1, to1, window1h, time.Hour, func() (int64, error) { return q.MonitoringEarliest5m(ctx) })
 	if err != nil {
 		return err
 	}
@@ -85,23 +85,23 @@ func (r *roller) once(ctx context.Context) error {
 }
 
 // from is the start of the rollup window: min(last end, to) - window, or for the first run
-// the earliest row of the source table rounded up to a full interval.
-func (r *roller) from(ctx context.Context, table string, done, to time.Time, window, step time.Duration) (time.Time, error) {
+// the earliest row of the source table (earliest; sql.ErrNoRows = empty) rounded up to a full
+// interval.
+func from(done, to time.Time, window, step time.Duration, earliest func() (int64, error)) (time.Time, error) {
 	if !done.IsZero() {
 		if done.Before(to) {
 			to = done
 		}
 		return to.Add(-window), nil
 	}
-	var earliest sql.NullInt64
-	// table is one of two constants (metrics_raw, metrics_5m); the store has no query for it
-	if err := r.d.DB.QueryRowContext(ctx, "SELECT min(at) FROM "+table).Scan(&earliest); err != nil { //nolint:gosec // G202: fixed table names
-		return time.Time{}, err
-	}
-	if !earliest.Valid {
+	at, err := earliest()
+	if errors.Is(err, sql.ErrNoRows) {
 		return to, nil // nothing to roll up yet
 	}
-	t := time.UnixMilli(earliest.Int64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	t := time.UnixMilli(at)
 	if c := t.Truncate(step); !c.Equal(t) {
 		t = c.Add(step)
 	}
