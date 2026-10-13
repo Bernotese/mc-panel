@@ -159,7 +159,7 @@ Wie bisher feste Pfade, `DisallowUnknownFields`, Fehler `{error, code}`.
 - `restic dump` → tar-Leser → Zip-Stream (`application/zip`, Dateiname `<server>-<zeit>.zip` setzt das panel), mit denselben Ausschlüssen für Namen, die sich nicht sicher in einer Zip speichern lassen, wie der Ordner-Zip-Download (TP3b §4). Der tar enthält bereits nur Ordner und reguläre Dateien und ein geschwärztes `rcon.password`.
 - Zählt zu den 4 gleichzeitigen Ordner-Zips (TP3b §4.1); läuft für die Instanz ein `forget`-Job, → `429 busy` (Prune hält eine exklusive Sperre). Während eines Backups ist ein Download möglich.
 - Fristen wie beim Ordner-Zip: 60 s pro Lese-/Schreibvorgang, keine Gesamtfrist.
-- Namensgrenze: Der Zip-Stream übernimmt die Grenze des Ordner-Zips von 16 MiB für alle Pfadnamen zusammen (TP3b). Backup und Restore erlauben 64 MiB; ein Snapshot mit mehr als 16 MiB sichtbarer Pfadnamen lässt sich daher wiederherstellen, aber nicht als Zip herunterladen (der Download bricht ab).
+- Namensgrenze: Der Zip-Stream übernimmt die Grenze des Ordner-Zips von 16 MiB für alle Pfadnamen zusammen (TP3b). Backup und Restore erlauben 64 MiB; ein Snapshot mit mehr als 16 MiB sichtbarer Pfadnamen lässt sich daher wiederherstellen, aber nicht als Zip herunterladen (der Download scheitert mit `too_large`).
 
 ### 4.5 Abbrechen und Beenden
 
