@@ -1,7 +1,9 @@
 package agentapi_test
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
@@ -43,5 +45,16 @@ func TestPowerActions(t *testing.T) {
 	}
 	if agentapi.ValidPowerAction("kill") {
 		t.Error("kill must be invalid")
+	}
+}
+
+// TP5 V1: the restart count travels as restart_count.
+func TestInstanceStatusJSONHasRestartCount(t *testing.T) {
+	b, err := json.Marshal(agentapi.InstanceStatus{ID: 1, RestartCount: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"restart_count":3`) {
+		t.Fatalf("json = %s", b)
 	}
 }
