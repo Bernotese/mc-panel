@@ -32,7 +32,7 @@ func (h *Handler) stop(ctx context.Context, id int64) error {
 			return ctx.Err()
 		}
 		h.log.WarnContext(ctx, "backups: read the server state", "server_id", id, "err", err)
-		return failf(codeAgent, "the agent is not reachable, the server state is unknown")
+		return stateError(err)
 	}
 	if !isRunning(st) {
 		return nil
@@ -59,6 +59,8 @@ func (h *Handler) stop(ctx context.Context, id int64) error {
 			return failf(codeStopTimeout, "the server did not stop within %s", h.stopTimeout)
 		case <-time.After(h.pollEvery):
 		}
+		// only an answer with Docker ok counts as stopped; errors (also Docker briefly not
+		// reachable) keep polling until the stop timeout
 		if st, err := h.instanceState(sctx, id); err == nil && !isRunning(st) {
 			return nil
 		}
@@ -85,7 +87,7 @@ func (h *Handler) runRestore(ctx context.Context, j *job, snapshot string) (err 
 	if err != nil {
 		return err
 	}
-	if _, err := h.waitService(ctx, j, id, pre.ID, false); err != nil {
+	if _, err := h.waitService(ctx, j, id, pre.ID, waitBackup); err != nil {
 		return err
 	}
 	if err := h.step(ctx, j, stepRestoring); err != nil {
@@ -96,7 +98,7 @@ func (h *Handler) runRestore(ctx context.Context, j *job, snapshot string) (err 
 		return err
 	}
 	// untilEnd: the gate stays closed until a poll shows that the service's restore ended
-	_, err = h.waitService(ctx, j, id, rj.ID, true)
+	_, err = h.waitService(ctx, j, id, rj.ID, waitRestore)
 	return err
 }
 
@@ -127,7 +129,7 @@ func (h *Handler) handleRestore(w http.ResponseWriter, r *http.Request) {
 		serverID: srv.ID, name: srv.Name, kind: kindRestore, trigger: triggerManual, snapshot: snap,
 		after: h.reconcile, // the gate is open again: start the server if it should run
 		run: func(ctx context.Context, j *job) (string, error) {
-			err := h.runRestore(ctx, j, snap)
+			err := h.deletedOr(ctx, srv.ID, h.runRestore(ctx, j, snap))
 			if errors.Is(err, errServerDeleted) {
 				return snap, err
 			}

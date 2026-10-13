@@ -52,7 +52,9 @@ const (
 	rconMargin = 10 * time.Second
 	// stallTimeout fails a service job whose byte count did not change for that long (logic
 	// time, h.clock).
-	stallTimeout   = 10 * time.Minute
+	stallTimeout = 10 * time.Minute
+	// forgetTimeout bounds a forget job (it reports no byte progress; logic time, h.clock).
+	forgetTimeout  = 2 * time.Hour
 	cleanupTimeout = 10 * time.Second
 	ioTimeout      = 60 * time.Second
 	maxPollMisses  = 5

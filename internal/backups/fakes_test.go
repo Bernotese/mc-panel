@@ -362,6 +362,8 @@ type fakeAgent struct {
 	err      error  // Instances and Power fail
 	powerErr error  // only Power fails
 	docker   string // Docker status of Instances ("" = DockerOK)
+	// blipAfterStop: after a stop, that many Instances calls answer Docker unavailable
+	blipAfterStop, blips int
 }
 
 func newFakeAgent() *fakeAgent { return &fakeAgent{state: map[int64]agentapi.ContainerState{}} }
@@ -385,6 +387,10 @@ func (a *fakeAgent) Instances(context.Context) (agentapi.InstancesResponse, erro
 		return agentapi.InstancesResponse{}, a.err
 	}
 	out := agentapi.InstancesResponse{Docker: agentapi.DockerOK}
+	if a.blips > 0 {
+		a.blips--
+		return agentapi.InstancesResponse{Docker: agentapi.DockerUnavailable}, nil
+	}
 	if a.docker != "" {
 		out.Docker = a.docker
 		return out, nil // no Docker: no instances
@@ -406,6 +412,9 @@ func (a *fakeAgent) Power(_ context.Context, id int64, action agentapi.PowerActi
 	}
 	if a.powerErr != nil {
 		return a.powerErr
+	}
+	if action == agentapi.PowerStop {
+		a.blips = a.blipAfterStop
 	}
 	if action == agentapi.PowerStop && !a.stuck {
 		a.state[id] = agentapi.StateExited

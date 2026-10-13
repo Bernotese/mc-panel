@@ -10,9 +10,9 @@ import (
 )
 
 // retrySaveOn repeats save-on for servers whose last attempt failed (Review Focus 1). A server
-// with a queued or running job is skipped (its job sends save-on itself), and so is one whose
-// save lock is held: a job that was taken right after the busy check holds it from its mark
-// to its save-on, so the retry never answers a fresh save-off.
+// whose save lock is held is skipped: a job holds it from before its mark to after its
+// save-on, so the retry never answers a fresh save-off. A job that only waits does not hold
+// it and does not delay the save-on.
 func (h *Handler) retrySaveOn(ctx context.Context) {
 	rows, err := h.q.BackupsListSaveOff(ctx)
 	if err != nil {
@@ -24,9 +24,6 @@ func (h *Handler) retrySaveOn(ctx context.Context) {
 	for _, r := range rows {
 		if ctx.Err() != nil {
 			return // the marks stay, the next tick or start retries
-		}
-		if h.queue.busy(r.ServerID) {
-			continue
 		}
 		lock := h.saveLocks.get(r.ServerID)
 		if !lock.TryLock() {

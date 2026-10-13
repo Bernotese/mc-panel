@@ -44,9 +44,10 @@ const (
 	codeCanceled    = "canceled"
 	codeInternal    = "internal"
 
-	msgCanceled = "the job was canceled (the panel shut down or the server was deleted)"
-	msgStalled  = "the backup made no progress for 10 minutes"
-	msgInternal = "internal error (details are in the panel log)"
+	msgCanceled      = "the job was canceled (the panel shut down or the server was deleted)"
+	msgStalled       = "the backup made no progress for 10 minutes"
+	msgForgetTimeout = "deleting snapshots did not finish within 2 hours"
+	msgInternal      = "internal error (details are in the panel log)"
 )
 
 // errServerDeleted ends a job whose server was deleted while the job waited or between two
@@ -113,8 +114,9 @@ func jobErrorOf(err error) (code, msg string) {
 
 // canceledOr returns ctx's error when ctx ended and err is set: a step that failed because the
 // panel shut down (or the job was dropped) is a cancel, not an RCON, agent or service error.
+// errServerDeleted stays (it is a cancel too, but one without audit entry).
 func canceledOr(ctx context.Context, err error) error {
-	if err != nil && ctx.Err() != nil {
+	if err != nil && ctx.Err() != nil && !errors.Is(err, errServerDeleted) {
 		return ctx.Err()
 	}
 	return err
