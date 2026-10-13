@@ -76,7 +76,7 @@ func (r execRunner) Start(ctx context.Context, c resticCmd) (resticProc, error) 
 	stderr := &tailBuffer{max: resticStderrMax}
 	cmd.Stderr = stderr
 	cmd.Stdout = c.Stdout
-	p := &execProc{cmd: cmd, stderr: stderr}
+	p := &execProc{cmd: cmd, stderr: stderr, done: make(chan struct{})}
 	if c.Stdin {
 		w, err := cmd.StdinPipe()
 		if err != nil {
@@ -84,16 +84,19 @@ func (r execRunner) Start(ctx context.Context, c resticCmd) (resticProc, error) 
 		}
 		p.stdin = w
 	}
-	if err := cmd.Start(); err != nil {
+	if err := startProcess(cmd, p.done); err != nil {
+		close(p.done)
 		return nil, err
 	}
 	return p, nil
 }
 
 type execProc struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stderr *tailBuffer
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	stderr   *tailBuffer
+	done     chan struct{} // closed once the process has been reaped (startProcess)
+	doneOnce sync.Once
 }
 
 func (p *execProc) Stdin() io.WriteCloser { return p.stdin }
@@ -102,6 +105,7 @@ func (p *execProc) Kill() { _ = p.cmd.Process.Kill() }
 
 func (p *execProc) Wait() error {
 	err := p.cmd.Wait()
+	p.doneOnce.Do(func() { close(p.done) })
 	var ee *exec.ExitError
 	switch {
 	case err == nil:
