@@ -8,10 +8,12 @@ import { BackupTimezoneCard } from './backup-timezone-card'
 import { BaseDomainCard } from './base-domain-card'
 import { CurseForgeCard } from './curseforge-card'
 import { InstanceStatusCard } from './instance-status-card'
+import { MonitoringCard } from './monitoring-card'
 
 export function SettingsPage() {
   const { t } = useTranslation()
   const headingId = useId()
+  const monitoringHeadingId = useId()
   const settings = useQuery(serverSettingsQueryOptions)
 
   let content: ReactNode
@@ -42,6 +44,15 @@ export function SettingsPage() {
           {t('settings.minecraft.title')}
         </h2>
         {content}
+      </section>
+      {/* Loads on its own: a failure of the server settings does not hide it. */}
+      <section aria-labelledby={monitoringHeadingId} className="mt-8 space-y-4">
+        <h2 id={monitoringHeadingId} className="text-lg font-semibold">
+          {t('settings.monitoring_section.title')}
+        </h2>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <MonitoringCard />
+        </div>
       </section>
     </>
   )

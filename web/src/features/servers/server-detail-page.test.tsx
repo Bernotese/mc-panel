@@ -31,6 +31,7 @@ describe('ServerDetailPage', () => {
     expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       'Übersicht',
+      'Monitoring',
       'Konsole',
       'Spieler',
       'Dateien',
@@ -94,10 +95,10 @@ describe('ServerDetailPage', () => {
     await waitFor(() => expect(screen.queryByText('Neustart nötig')).not.toBeInTheDocument())
   })
 
-  it('shows a restricted user only the overview', async () => {
+  it('shows a restricted user only the overview and monitoring', async () => {
     await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('alice') })
     expect(await screen.findByRole('heading', { name: 'creative', level: 1 })).toBeInTheDocument()
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Übersicht'])
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Übersicht', 'Monitoring'])
     expect(screen.queryByRole('group', { name: 'Steuerung für creative' })).not.toBeInTheDocument()
     expect(screen.getByText('Keine Berechtigung für Start/Stopp.')).toBeInTheDocument()
   })
@@ -209,7 +210,7 @@ describe('ServerDetailPage', () => {
   it('lets the tab bar scroll sideways instead of the page on narrow screens', async () => {
     await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
     const tabs = await screen.findByRole('tablist')
-    expect(within(tabs).getAllByRole('tab')).toHaveLength(8)
+    expect(within(tabs).getAllByRole('tab')).toHaveLength(9)
     expect(tabs).toHaveClass('max-w-full', 'justify-start', 'overflow-x-auto')
   })
 

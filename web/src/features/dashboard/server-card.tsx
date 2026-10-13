@@ -1,16 +1,17 @@
 import { Link } from '@tanstack/react-router'
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { Server } from '@/api/types'
+import type { OverviewServer, Server } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { AddressLine } from '@/features/servers/address-line'
 import { describeInstance, formatGiB } from '@/features/servers/format'
 import { PowerButtons } from '@/features/servers/power-buttons'
 import { StatusBadge } from '@/features/servers/status-badge'
+import { ServerMetrics } from '@/features/monitoring/server-metrics'
 import { useFormat } from '@/lib/format'
 
-export function ServerCard({ server }: { server: Server }) {
+export function ServerCard({ server, metrics }: { server: Server; metrics?: OverviewServer }) {
   const { t } = useTranslation()
   const fmt = useFormat()
   const headingId = useId()
@@ -38,6 +39,7 @@ export function ServerCard({ server }: { server: Server }) {
         </CardHeader>
         <CardContent className="space-y-3">
           {instance ? <AddressLine address={server.address} /> : null}
+          {instance ? <ServerMetrics server={server} metrics={metrics} /> : null}
           {showMemory ? (
             <p className="text-muted-foreground text-sm tabular-nums">
               {t('servers.memory_usage', { used: formatGiB(status.memory_bytes, fmt.locale), limit: formatGiB(status.memory_limit_bytes, fmt.locale) })}

@@ -12,6 +12,7 @@ import { ConsoleTab } from '@/features/console/console-tab'
 import { leaveTexts, type FilesBusy } from '@/features/files/busy'
 import { FilesTab } from '@/features/files/files-tab'
 import { isExtracting, useFileJob } from '@/features/files/use-file-job'
+import { MonitoringTab } from '@/features/monitoring/monitoring-tab'
 import { PlayersTab } from '@/features/players/players-tab'
 import { pluginKindOf } from '@/features/plugins/model'
 import { PluginsTab } from '@/features/plugins/plugins-tab'
@@ -24,7 +25,7 @@ import { ServerSettingsTab } from './server-settings-tab'
 import { detailPollInterval } from './status'
 import { StatusBadge } from './status-badge'
 
-type DetailTab = 'overview' | 'console' | 'players' | 'files' | 'plugins' | 'backups' | 'settings' | 'delete'
+type DetailTab = 'overview' | 'monitoring' | 'console' | 'players' | 'files' | 'plugins' | 'backups' | 'settings' | 'delete'
 
 /** Keyed by id: the router reuses the component when only the :id parameter changes, but tab and console must reset. */
 export function ServerDetailPage({ serverId }: { serverId: number }) {
@@ -96,7 +97,8 @@ function ServerDetail({ serverId }: { serverId: number }) {
   const pluginsKind = server.permissions.includes('server.plugins') ? pluginKindOf(instance.type) : null
   // Backups spec §6.1: every instance type has backups; the tab needs server.backups.
   const canBackups = server.permissions.includes('server.backups')
-  const available: DetailTab[] = ['overview']
+  // Monitoring spec §7.2: everyone with server.view (and an instance) sees the tab.
+  const available: DetailTab[] = ['overview', 'monitoring']
   if (canConsole) available.push('console', 'players')
   if (canFiles) available.push('files')
   if (pluginsKind) available.push('plugins')
@@ -117,9 +119,10 @@ function ServerDetail({ serverId }: { serverId: number }) {
     <>
       {header}
       <Tabs value={active} onValueChange={(value) => changeTab(value as DetailTab)}>
-        {/* Up to eight tabs are wider than a phone: the bar scrolls, not the page. */}
+        {/* Up to nine tabs are wider than a phone: the bar scrolls, not the page. */}
         <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="overview">{t('servers.detail.tabs.overview')}</TabsTrigger>
+          <TabsTrigger value="monitoring">{t('servers.detail.tabs.monitoring')}</TabsTrigger>
           {canConsole ? <TabsTrigger value="console">{t('servers.detail.tabs.console')}</TabsTrigger> : null}
           {canConsole ? <TabsTrigger value="players">{t('servers.detail.tabs.players')}</TabsTrigger> : null}
           {canFiles ? <TabsTrigger value="files">{t('servers.detail.tabs.files')}</TabsTrigger> : null}
@@ -132,6 +135,9 @@ function ServerDetail({ serverId }: { serverId: number }) {
         </TabsList>
         <TabsContent value="overview" className="pt-4">
           <ServerOverview server={server} instance={instance} extracting={extracting} />
+        </TabsContent>
+        <TabsContent value="monitoring" className="pt-4">
+          <MonitoringTab server={server} />
         </TabsContent>
         {canConsole ? (
           <TabsContent value="console" className="pt-4">
