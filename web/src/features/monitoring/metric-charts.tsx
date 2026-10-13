@@ -1,12 +1,18 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import type { MetricsRange } from '@/api/types'
+import type { MetricsRange, MetricsSeries } from '@/api/types'
 import { LineChart, type ChartAxis } from '@/components/charts/line-chart'
 import { formatCpu, formatGiB } from '@/features/servers/format'
 import { errorMessage } from '@/lib/error-message'
 import { useFormat } from '@/lib/format'
 import { metricsPollMs, serverMetricsQueryOptions } from './api'
 import { formatDecimal, lastValue, metricPoints, RANGE_MS } from './model'
+
+function newestPoint(data: MetricsSeries): number {
+  let newest = 0
+  for (const points of Object.values(data.series)) if (points.length > 0) newest = Math.max(newest, points[points.length - 1][0])
+  return newest
+}
 
 /** The four charts of the tab (spec §7.2); 24 h and more show the average with a min–max band. */
 export function MetricCharts({ serverId, range }: { serverId: number; range: MetricsRange }) {
@@ -21,7 +27,9 @@ export function MetricCharts({ serverId, range }: { serverId: number; range: Met
       </p>
     )
   const data = query.data
-  const to = query.dataUpdatedAt || Date.now()
+  // The window ends when the answer arrived (render stays pure: no Date.now()); placeholder data of the previous
+  // range has no update time of its own, so its newest point stands in until the new range is loaded.
+  const to = query.dataUpdatedAt > 0 ? query.dataUpdatedAt : newestPoint(data)
   const from = to - RANGE_MS[range]
   const band = range !== '1h'
   const long = range === '7d' || range === '30d'
