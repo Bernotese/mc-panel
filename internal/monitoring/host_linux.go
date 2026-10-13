@@ -14,13 +14,18 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// statfsBytes: free = blocks available to non-root users (spec §3.4).
+// statfsBytes: free = blocks available to non-root users (spec §3.4). Block counts are in
+// fragment size units (f_frsize); Bsize is only the preferred I/O size.
 func statfsBytes(dir string) (free, total uint64, err error) {
 	var st unix.Statfs_t
 	if err := unix.Statfs(dir, &st); err != nil {
 		return 0, 0, err
 	}
-	return st.Bavail * uint64(st.Bsize), st.Blocks * uint64(st.Bsize), nil
+	unit := uint64(st.Frsize)
+	if unit == 0 {
+		unit = uint64(st.Bsize)
+	}
+	return st.Bavail * unit, st.Blocks * unit, nil
 }
 
 // readSmall reads a /proc file (they are small; 64 KiB is plenty).
