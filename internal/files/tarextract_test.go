@@ -22,10 +22,23 @@ type tarEntry struct {
 	linkname string
 }
 
-// makeTar builds a tar exactly as given (lying sizes are written with tar.Writer's raw header
-// and a short body: the stream then ends early).
+// makeTar builds a backup stream exactly as given, followed by the end entry with the counts of
+// its folders and regular files (lying sizes are written with tar.Writer's raw header and a short
+// body: the stream then ends early, without an end entry).
 func makeTar(t *testing.T, entries ...tarEntry) []byte {
 	t.Helper()
+	return buildTar(t, true, entries...)
+}
+
+// makeTarNoEnd is makeTar without the end entry (a stream restic got cut).
+func makeTarNoEnd(t *testing.T, entries ...tarEntry) []byte {
+	t.Helper()
+	return buildTar(t, false, entries...)
+}
+
+func buildTar(t *testing.T, withEnd bool, entries ...tarEntry) []byte {
+	t.Helper()
+	var counted backupEnd
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	for _, e := range entries {
@@ -52,6 +65,15 @@ func makeTar(t *testing.T, entries ...tarEntry) []byte {
 		}
 		if size > int64(len(e.body)) {
 			return buf.Bytes() // cut: the declared rest never comes
+		}
+		if e.typ == tar.TypeReg || e.typ == tar.TypeDir {
+			counted.Entries++
+			counted.Bytes += h.Size
+		}
+	}
+	if withEnd {
+		if err := writeBackupEnd(tw, counted); err != nil {
+			t.Fatal(err)
 		}
 	}
 	if err := tw.Close(); err != nil {
