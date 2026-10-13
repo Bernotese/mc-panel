@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
@@ -24,6 +25,12 @@ const (
 	MaxCommandBytes    = 1000
 	MaxLogLineBytes    = 8 << 10
 	MaxRconOutputBytes = 64 << 10
+
+	// DefaultRconTimeout bounds one console command when RconRequest.TimeoutMS is 0.
+	DefaultRconTimeout = 10 * time.Second
+	// MaxRconTimeoutMS is the longest timeout a caller may ask for (backups send save-off and
+	// save-all flush with 60 s: flushing a large world takes longer than 10 s).
+	MaxRconTimeoutMS = 120_000
 
 	StreamOut = "out"
 	StreamErr = "err"
@@ -71,13 +78,41 @@ type LogLine struct {
 type RconRequest struct {
 	ID      int64  `json:"id"`
 	Command string `json:"command"`
+	// TimeoutMS bounds the command in the agent: 0 = DefaultRconTimeout, else 1..MaxRconTimeoutMS.
+	TimeoutMS int64 `json:"timeout_ms,omitempty"`
 }
 
 func (r RconRequest) Validate() error {
 	if r.ID <= 0 {
 		return fmt.Errorf("%w: id: must be > 0", instancespec.ErrInvalid)
 	}
+	if r.TimeoutMS < 0 || r.TimeoutMS > MaxRconTimeoutMS {
+		return fmt.Errorf("%w: timeout_ms: must be 0..%d", instancespec.ErrInvalid, MaxRconTimeoutMS)
+	}
 	return ValidateCommand(r.Command)
+}
+
+// Timeout is the agent's bound of the command (DefaultRconTimeout for TimeoutMS 0).
+func (r RconRequest) Timeout() time.Duration {
+	if r.TimeoutMS == 0 {
+		return DefaultRconTimeout
+	}
+	return time.Duration(r.TimeoutMS) * time.Millisecond
+}
+
+// RconTimeoutClient runs a console command with its own timeout in the agent (0 = the default);
+// *agent.Client implements it next to ConsoleClient.Rcon.
+type RconTimeoutClient interface {
+	RconTimeout(ctx context.Context, id int64, command string, timeout time.Duration) (string, error)
+}
+
+// RconTimeoutMS converts a timeout for RconRequest.TimeoutMS: 0 stays 0, anything else is
+// rounded up to whole milliseconds (so 1 ns does not become the default).
+func RconTimeoutMS(timeout time.Duration) int64 {
+	if timeout <= 0 {
+		return 0
+	}
+	return int64((timeout + time.Millisecond - 1) / time.Millisecond)
 }
 
 type RconResponse struct {
