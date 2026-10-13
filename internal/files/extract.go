@@ -45,7 +45,7 @@ func (s *Service) Extract(ctx context.Context, req filesapi.ExtractRequest) (fil
 		return filesapi.Job{}, fmt.Errorf("%w: the destination must not contain the archive", filesapi.ErrInvalid)
 	}
 	// The slot is taken before the archive is parsed: pre-checks are throttled like jobs.
-	if err := s.jobs.acquire(req.ID); err != nil {
+	if err := s.jobs.acquire(req.ID, filesapi.JobExtract); err != nil {
 		return filesapi.Job{}, err
 	}
 	ownSlot := true
@@ -101,16 +101,17 @@ func (s *Service) Extract(ctx context.Context, req filesapi.ExtractRequest) (fil
 		return filesapi.Job{}, err
 	}
 	ownSlot = false // start owns the slot from here on (it gives it back on error)
-	job, err := s.jobs.start(req.ID, src, dest, plan, s.clock.Now, func(jctx context.Context) error {
-		defer root.Close()
-		defer f.Close()
-		defer res.release()
-		err := s.extract(jctx, root, zr, req.ID, dest, res)
-		if err != nil {
-			s.log.Warn("files: extract failed", "id", req.ID, "archive", src, "dest", dest, "err", err)
-		}
-		return err
-	})
+	job, err := s.jobs.start(req.ID, jobSpec{kind: filesapi.JobExtract, path: src, dest: dest, totalBytes: plan.bytes, totalEntries: plan.entries},
+		s.clock.Now, func(jctx context.Context) error {
+			defer root.Close()
+			defer f.Close()
+			defer res.release()
+			err := s.extract(jctx, root, zr, req.ID, dest, res)
+			if err != nil {
+				s.log.Warn("files: extract failed", "id", req.ID, "archive", src, "dest", dest, "err", err)
+			}
+			return err
+		})
 	if err != nil {
 		res.release()
 		return filesapi.Job{}, err

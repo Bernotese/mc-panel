@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { PageHeader } from '@/components/page-header'
 import { serverSettingsQueryOptions } from '@/features/servers/api'
 import { errorMessage } from '@/lib/error-message'
+import { BackupTimezoneCard } from './backup-timezone-card'
 import { BaseDomainCard } from './base-domain-card'
 import { CurseForgeCard } from './curseforge-card'
 import { InstanceStatusCard } from './instance-status-card'
@@ -27,6 +28,7 @@ export function SettingsPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <BaseDomainCard settings={settings.data} />
         <CurseForgeCard settings={settings.data} />
+        <BackupTimezoneCard settings={settings.data} />
         <InstanceStatusCard settings={settings.data} />
       </div>
     )
