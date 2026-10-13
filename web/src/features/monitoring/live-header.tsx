@@ -8,8 +8,11 @@ import { useFormat } from '@/lib/format'
 import { LIVE_POLL_MS, liveMetricsQueryOptions } from './api'
 import { formatDecimal, tpsSourceKey } from './model'
 
-/** Polled every 5 s while mounted; Radix unmounts the inactive tab, which ends the polling (spec §6.2). */
-export function LiveHeader({ serverId }: { serverId: number }) {
+/**
+ * Polled every 5 s while mounted; Radix unmounts the inactive tab, which ends the polling (spec §6.2).
+ * `running`: the container runs; otherwise there is no TPS source to name, only "stopped".
+ */
+export function LiveHeader({ serverId, running }: { serverId: number; running: boolean }) {
   const { t } = useTranslation()
   const fmt = useFormat()
   const id = useId()
@@ -26,7 +29,7 @@ export function LiveHeader({ serverId }: { serverId: number }) {
     )
   else {
     const m = live.data
-    const tps = m.tps_source === 'none' ? t('monitoring.tps_source.none') : m.tps === null ? missing : formatDecimal(m.tps, fmt.locale)
+    const tps = running && m.tps_source === 'none' ? t('monitoring.tps_source.none') : m.tps === null ? missing : formatDecimal(m.tps, fmt.locale)
     const items: [string, string][] = [
       [t('monitoring.players'), m.players === null ? missing : t('monitoring.players_value', { players: m.players, max: m.players_max ?? missing })],
       [t('monitoring.tps'), tps],
@@ -41,7 +44,7 @@ export function LiveHeader({ serverId }: { serverId: number }) {
     ]
     body = (
       <div className="space-y-3">
-        {m.up === false ? (
+        {running && m.up === false ? (
           <p role="status" className="text-destructive text-sm">
             {t('monitoring.live.unreachable')}
           </p>
@@ -54,7 +57,11 @@ export function LiveHeader({ serverId }: { serverId: number }) {
             </div>
           ))}
         </dl>
-        {m.tps_source !== 'none' ? <p className="text-muted-foreground text-xs">{t(tpsSourceKey(m.tps_source))}</p> : null}
+        {!running ? (
+          <p className="text-muted-foreground text-xs">{t('monitoring.live.stopped')}</p>
+        ) : m.tps_source !== 'none' ? (
+          <p className="text-muted-foreground text-xs">{t(tpsSourceKey(m.tps_source))}</p>
+        ) : null}
         {m.player_names.length > 0 ? (
           <ul aria-label={t('monitoring.live.player_names')} className="flex flex-wrap gap-2 text-sm">
             {m.player_names.map((name) => (

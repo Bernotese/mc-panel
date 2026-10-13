@@ -970,6 +970,7 @@ export const de = {
       agent_unavailable: 'Der Agent ist gerade nicht erreichbar; es gibt keine aktuellen Werte.',
       no_players: 'Niemand online.',
       player_names: 'Online-Spieler',
+      stopped: 'Server gestoppt',
     },
     tps_source: {
       tick_query: 'Quelle: tick query',

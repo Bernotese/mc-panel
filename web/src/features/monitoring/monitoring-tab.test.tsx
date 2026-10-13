@@ -2,12 +2,13 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { MetricsRange } from '@/api/types'
 import { ServerDetailPage } from '@/features/servers/server-detail-page'
 import { loginAs } from '@/mocks/db'
 import { server } from '@/mocks/node'
 import { renderWithProviders } from '@/test/render'
 import { LIVE_POLL_MS } from './api'
-import { liveMetrics, mockLive, mockMetrics } from './test-utils'
+import { liveMetrics, metricsSeries, mockLive, mockMetrics } from './test-utils'
 
 async function openMonitoring(serverId = 1, username = 'admin') {
   const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
@@ -109,5 +110,29 @@ describe('MonitoringTab', () => {
     await openMonitoring(1, 'alice')
     await screen.findByRole('region', { name: 'Jetzt' })
     expect(screen.queryByRole('switch', { name: 'Down-Alerts für diesen Server' })).not.toBeInTheDocument()
+  })
+
+  it('says "stopped" instead of a TPS source for a stopped server', async () => {
+    mockLive(liveMetrics({ up: null, players: null, player_names: [], tps: null, mspt: null, cpu_percent: null, memory_bytes: null, memory_limit_bytes: null, tps_source: 'none' }))
+    mockMetrics()
+    await openMonitoring(2)
+    const now = await screen.findByRole('region', { name: 'Jetzt' })
+    expect(await within(now).findByText('Server gestoppt')).toBeInTheDocument()
+    expect(within(now).queryByText(/Quelle|nicht verfügbar|ermittelt/)).not.toBeInTheDocument()
+  })
+
+  it('tells in the TPS chart that this version has no TPS', async () => {
+    mockLive(liveMetrics({ tps: null, mspt: null, tps_source: 'none' }))
+    server.use(
+      http.get('*/api/servers/:id/metrics', ({ request }) => {
+        const range = (new URL(request.url).searchParams.get('range') ?? '1h') as MetricsRange
+        return HttpResponse.json(metricsSeries(range, ['up', 'players', 'players_max', 'cpu_percent', 'memory_bytes', 'memory_limit_bytes']))
+      }),
+    )
+    await openMonitoring()
+    await screen.findByRole('img', { name: 'Spieler' })
+    const figure = screen.getByText('TPS und MSPT').closest('figure')
+    expect(figure).not.toBeNull()
+    expect(await within(figure as HTMLElement).findByText('TPS für diese Version nicht verfügbar')).toBeInTheDocument()
   })
 })
