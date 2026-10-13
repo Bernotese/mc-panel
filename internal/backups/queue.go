@@ -142,12 +142,6 @@ func (q *queue) busy(serverID int64) bool {
 	return active(q.last[serverID])
 }
 
-func (q *queue) runningFor(serverID int64) bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.running != nil && q.running.spec.serverID == serverID
-}
-
 // restoreHeld reports whether the server has a restore job that waits or runs: the gate closes
 // with the 202, not only when the worker picks the job up (another server's job may still run).
 func (q *queue) restoreHeld(serverID int64) bool {
