@@ -58,11 +58,12 @@ export const SETTINGS_LIMITS: Record<SettingsField, readonly [number, number]> =
   crash_window_min: [1, 120],
 }
 
-export function draftFromSettings(s: MonitoringSettings): SettingsDraft {
-  const gib = s.disk_min_bytes / GIB
+/** The stored settings as form text; GiB with at most two decimals in the locale's notation ("1,25" in German). */
+export function draftFromSettings(s: MonitoringSettings, locale = 'en'): SettingsDraft {
+  const gib = new Intl.NumberFormat(locale, { maximumFractionDigits: 2, useGrouping: false }).format(s.disk_min_bytes / GIB)
   return {
     disk_min_percent: String(s.disk_min_percent),
-    disk_min_gib: Number.isInteger(gib) ? String(gib) : String(Math.round(gib * 100) / 100),
+    disk_min_gib: gib,
     down_after_min: String(s.down_after_min),
     crash_restarts: String(s.crash_restarts),
     crash_window_min: String(s.crash_window_min),
@@ -101,6 +102,27 @@ export function validateSettings(d: SettingsDraft): SettingsValidation {
       crash_window_min: values.crash_window_min!,
     },
   }
+}
+
+/** "1,50" and "1.5" are the same entry; text that is no number stays as it is. */
+function normalizedEntry(text: string): string {
+  const raw = text.trim().replace(',', '.')
+  return /^\d+(\.\d+)?$/.test(raw) ? String(Number(raw)) : raw
+}
+
+/** Whether the form differs from the stored values, compared as entered (not via bytes recomputed from GiB). */
+export function draftChanged(draft: SettingsDraft, initial: SettingsDraft): boolean {
+  return SETTINGS_FIELDS.some((f) => normalizedEntry(draft[f]) !== normalizedEntry(initial[f]))
+}
+
+/**
+ * The request for a changed, valid form, or null. An untouched GiB field keeps the stored bytes, so saving
+ * another field does not round an odd threshold (1.333 GiB shown as "1.33") to two decimals.
+ */
+export function settingsRequest(draft: SettingsDraft, initial: SettingsDraft, s: MonitoringSettings): UpdateMonitoringSettingsRequest | null {
+  const { request } = validateSettings(draft)
+  if (request === null || !draftChanged(draft, initial)) return null
+  return normalizedEntry(draft.disk_min_gib) === normalizedEntry(initial.disk_min_gib) ? { ...request, disk_min_bytes: s.disk_min_bytes } : request
 }
 
 export function sameSettings(req: UpdateMonitoringSettingsRequest, s: MonitoringSettings): boolean {

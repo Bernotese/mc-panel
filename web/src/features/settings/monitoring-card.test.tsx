@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
@@ -75,5 +75,35 @@ describe('MonitoringCard', () => {
     const { card } = await openCard()
     expect(await within(card).findByText('Es ist keine aktive Benachrichtigung eingerichtet – Alerts werden erkannt, aber nicht verschickt.')).toBeInTheDocument()
     expect(within(card).getByRole('link', { name: 'Benachrichtigungen öffnen' })).toHaveAttribute('href', '/security')
+  })
+
+  it('does not count an odd stored GiB value as a change', async () => {
+    const stored = Math.round(1.333 * GIB)
+    mockMonitoringSettings(monitoringSettings({ disk_min_bytes: stored }))
+    let body: unknown = null
+    server.use(
+      http.put('*/api/monitoring/settings', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json(monitoringSettings({ disk_min_bytes: stored, down_after_min: 5 }))
+      }),
+    )
+    const { user, card } = await openCard()
+    expect(await within(card).findByLabelText('oder unter (GiB)')).toHaveValue('1,33')
+    const save = within(card).getByRole('button', { name: 'Einstellungen speichern' })
+    expect(save).toBeDisabled()
+    await user.clear(within(card).getByLabelText('Server down nach (Minuten)'))
+    await user.type(within(card).getByLabelText('Server down nach (Minuten)'), '5')
+    await user.click(save)
+    // The toast of the previous test may still be on screen: wait for the request instead.
+    await waitFor(() => expect(body).toMatchObject({ disk_min_bytes: stored, down_after_min: 5 }))
+  })
+
+  it('writes the limits in the error in the locale notation', async () => {
+    mockMonitoringSettings(monitoringSettings())
+    const { user, card } = await openCard()
+    const field = await within(card).findByLabelText('oder unter (GiB)')
+    await user.clear(field)
+    await user.type(field, '20000')
+    expect(within(card).getByText('Erlaubt sind 1 bis 10.240.')).toBeInTheDocument()
   })
 })
