@@ -642,7 +642,7 @@ export const en: Messages = {
       },
       too_large: 'The archive is too large or has too many entries.',
       too_large_detail: 'The archive is too large or has too many entries ({{detail}}).',
-      busy: 'An extraction is already running.',
+      busy: 'An extract or backup job is already running for this server. Try again later.',
       dest_not_empty: 'The target folder is not empty.',
     },
   },
