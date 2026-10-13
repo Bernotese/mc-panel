@@ -16,8 +16,10 @@ import (
 )
 
 const (
-	// RconTimeout covers the agent's own 10 s exec timeout plus the round trip.
-	RconTimeout = 15 * time.Second
+	// RconTimeout covers the agent's own default exec timeout (10 s) plus the round trip.
+	RconTimeout = agentapi.DefaultRconTimeout + rconRoundTrip
+	// rconRoundTrip is added to the agent's timeout of a command for the client's deadline.
+	rconRoundTrip = 5 * time.Second
 	// PlayersTimeout bounds reading the three small list files.
 	PlayersTimeout = 5 * time.Second
 	// LogsHeaderTimeout bounds the wait for the logs response headers; the stream itself
@@ -66,12 +68,18 @@ func (c *Client) Logs(ctx context.Context, req agentapi.LogsRequest) (agentapi.L
 }
 
 func (c *Client) Rcon(ctx context.Context, id int64, command string) (string, error) {
-	req := agentapi.RconRequest{ID: id, Command: command}
+	return c.RconTimeout(ctx, id, command, 0)
+}
+
+// RconTimeout runs a console command that the agent bounds by timeout (0 = its default of
+// 10 s, at most agentapi.MaxRconTimeoutMS); the client waits timeout + 5 s for the answer.
+func (c *Client) RconTimeout(ctx context.Context, id int64, command string, timeout time.Duration) (string, error) {
+	req := agentapi.RconRequest{ID: id, Command: command, TimeoutMS: agentapi.RconTimeoutMS(timeout)}
 	if err := req.Validate(); err != nil {
 		return "", fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	var out agentapi.RconResponse
-	if err := c.doTimeout(ctx, RconTimeout, http.MethodPost, agentapi.PathInstanceRcon, req, &out); err != nil {
+	if err := c.doTimeout(ctx, req.Timeout()+rconRoundTrip, http.MethodPost, agentapi.PathInstanceRcon, req, &out); err != nil {
 		return "", err
 	}
 	return out.Output, nil
@@ -165,3 +173,5 @@ func readLine(r *bufio.Reader, limit int) ([]byte, error) {
 		}
 	}
 }
+
+var _ agentapi.RconTimeoutClient = (*Client)(nil)

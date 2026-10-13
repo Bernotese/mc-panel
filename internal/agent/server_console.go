@@ -21,8 +21,9 @@ const (
 	MaxParallelPlayers = 2
 	// streamWriteTimeout is the deadline of every write of a log stream (spec §5.2).
 	streamWriteTimeout = 30 * time.Second
-	// rconWriteTimeout covers one console command (instances.RconTimeout = 10 s) plus margin.
-	rconWriteTimeout = 20 * time.Second
+	// rconWriteMargin is added to the command's timeout (agentapi.RconRequest.Timeout) for the
+	// write deadline of the answer.
+	rconWriteMargin = 10 * time.Second
 )
 
 // Console is the console backend of the server (*instances.Manager).
@@ -32,7 +33,8 @@ type Console interface {
 	// emit for every line until the log ends (nil), ctx ends or emit fails. A stopped
 	// container delivers its history and the stream ends.
 	Logs(ctx context.Context, req agentapi.LogsRequest, start func(running bool), emit func(agentapi.LogLine) error) error
-	Rcon(ctx context.Context, id int64, command string) (string, error)
+	// RconTimeout runs one console command; timeout 0 is the backend's default.
+	RconTimeout(ctx context.Context, id int64, command string, timeout time.Duration) (string, error)
 	Players(ctx context.Context, id int64) (agentapi.PlayersResponse, error)
 }
 
@@ -141,10 +143,14 @@ func (s *Server) rcon(w http.ResponseWriter, r *http.Request) {
 		s.reject(w, r, http.StatusBadRequest, err)
 		return
 	}
-	longRequest(w, rconWriteTimeout)
+	longRequest(w, req.Timeout()+rconWriteMargin)
 	ctx, done := s.consoleCtx(r)
 	defer done()
-	out, err := s.console.Rcon(ctx, req.ID, req.Command)
+	var timeout time.Duration // 0: the backend's default
+	if req.TimeoutMS > 0 {
+		timeout = req.Timeout()
+	}
+	out, err := s.console.RconTimeout(ctx, req.ID, req.Command, timeout)
 	if err != nil {
 		s.consoleError(w, r, "rcon", req.ID, err)
 		return
@@ -227,7 +233,7 @@ func (noConsole) Logs(context.Context, agentapi.LogsRequest, func(bool), func(ag
 	return agentapi.ErrDockerUnavailable
 }
 
-func (noConsole) Rcon(context.Context, int64, string) (string, error) {
+func (noConsole) RconTimeout(context.Context, int64, string, time.Duration) (string, error) {
 	return "", agentapi.ErrDockerUnavailable
 }
 
