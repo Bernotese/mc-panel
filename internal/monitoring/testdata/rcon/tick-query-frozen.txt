@@ -1,0 +1,2 @@
+The game is frozenTarget tick rate: 20.0 per second.
+[0mAverage time per tick: 0.2ms (Target: 50.0ms)Percentiles: P50: 0.2ms P95: 0.3ms P99: 0.4ms. Sample: 100
