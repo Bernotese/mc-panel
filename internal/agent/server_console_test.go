@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -41,10 +42,11 @@ type stubConsoleConfig struct {
 
 // stubConsole is a configurable Console; set changes it between requests.
 type stubConsole struct {
-	mu    sync.Mutex
-	cfg   stubConsoleConfig
-	calls []string
-	reqs  []agentapi.LogsRequest
+	mu       sync.Mutex
+	cfg      stubConsoleConfig
+	calls    []string
+	reqs     []agentapi.LogsRequest
+	timeouts []time.Duration // per RconTimeout call (0 = the default)
 }
 
 var _ agent.Console = (*stubConsole)(nil)
@@ -124,8 +126,17 @@ func (s *stubConsole) Logs(ctx context.Context, req agentapi.LogsRequest, start 
 	return cfg.afterErr
 }
 
-func (s *stubConsole) Rcon(ctx context.Context, _ int64, command string) (string, error) {
+func (s *stubConsole) rconTimeouts() []time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]time.Duration(nil), s.timeouts...)
+}
+
+func (s *stubConsole) RconTimeout(ctx context.Context, _ int64, command string, timeout time.Duration) (string, error) {
 	cfg := s.enter("rcon " + command)
+	s.mu.Lock()
+	s.timeouts = append(s.timeouts, timeout)
+	s.mu.Unlock()
 	if cfg.rconDelay > 0 {
 		if err := waitCtx(ctx, cfg.rconDelay); err != nil {
 			return "", err
@@ -273,6 +284,10 @@ func TestServerRejectsInvalidConsoleRequests(t *testing.T) {
 		{"rcon short option", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"-h"}`, 400},
 		{"rcon option after slash", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"/--host=attacker.example"}`, 400},
 		{"rcon unknown field", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"list","user":"root"}`, 400},
+		{"rcon negative timeout", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"list","timeout_ms":-1}`, 400},
+		{"rcon timeout too long", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"list","timeout_ms":120001}`, 400},
+		{"rcon fractional timeout", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"list","timeout_ms":1.5}`, 400},
+		{"rcon timeout as string", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"list","timeout_ms":"60000"}`, 400},
 		{"rcon too large", "POST", agentapi.PathInstanceRcon, jsonCT, `{"id":1,"command":"` + strings.Repeat("a", 17<<10) + `"}`, 413},
 		{"players id 0", "POST", agentapi.PathInstancePlayers, jsonCT, `{"id":0}`, 400},
 		{"players negative", "POST", agentapi.PathInstancePlayers, jsonCT, `{"id":-3}`, 400},
@@ -647,5 +662,24 @@ func TestClientConsoleEndToEnd(t *testing.T) {
 	st.set(func(c *stubConsoleConfig) { c.logsErr = agentapi.ErrNotFound })
 	if _, err := c.Logs(ctx, agentapi.LogsRequest{ID: 1, Tail: 10}); !errors.Is(err, agentapi.ErrNotFound) {
 		t.Fatalf("Logs of a missing container = %v, want ErrNotFound before any line", err)
+	}
+}
+
+// timeout_ms reaches the backend (0 = its default); the largest allowed value is accepted.
+func TestServerRconTimeout(t *testing.T) {
+	st := newStubConsole(stubConsoleConfig{running: true, rconOut: "ok"})
+	srv := newConsoleServer(st)
+	for _, body := range []string{
+		`{"id":1,"command":"save-off","timeout_ms":60000}`,
+		`{"id":1,"command":"list"}`,
+		`{"id":1,"command":"save-all flush","timeout_ms":120000}`,
+	} {
+		if rec := serve(srv, http.MethodPost, agentapi.PathInstanceRcon, jsonCT, body); rec.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	want := []time.Duration{time.Minute, 0, 2 * time.Minute}
+	if got := st.rconTimeouts(); !slices.Equal(got, want) {
+		t.Fatalf("timeouts = %v, want %v", got, want)
 	}
 }
