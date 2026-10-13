@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
+	"log/slog"
 	"slices"
 	"sync"
 	"time"
@@ -60,6 +62,7 @@ type queue struct {
 	// gone reports whether the server was deleted; a taken job of such a server ends as
 	// errServerDeleted without running (nil = never).
 	gone func(ctx context.Context, serverID int64) bool
+	log  *slog.Logger // nil = slog.Default()
 }
 
 func newQueue(clk clock.Clock) *queue {
@@ -208,6 +211,15 @@ func (q *queue) finish(j *job, snapshot string, err error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	j.view.FinishedAt = q.clock.Now().UnixMilli()
+	err = canceledOr(j.ctx, err) // dropped or shut down: never an RCON or agent error
+	if err != nil && !errors.Is(err, context.Canceled) {
+		log := q.log
+		if log == nil {
+			log = slog.Default()
+		}
+		// the full error (it may name host paths) goes only to the log, the job shows a summary
+		log.Warn("backups: job failed", "server_id", j.spec.serverID, "kind", j.spec.kind, "err", err)
+	}
 	if snapshot != "" {
 		s := snapshot
 		j.view.Snapshot = &s

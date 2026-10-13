@@ -9,18 +9,31 @@ import (
 	"github.com/Bernotese/mc-panel/internal/store"
 )
 
-// retrySaveOn repeats save-on for servers whose last attempt failed (Review Focus 1); a server
-// with a running job is skipped, its job sends save-on itself.
+// retrySaveOn repeats save-on for servers whose last attempt failed (Review Focus 1). A server
+// with a queued or running job is skipped (its job sends save-on itself), and so is one whose
+// save lock is held: a job that was taken right after the busy check holds it from its mark
+// to its save-on, so the retry never answers a fresh save-off.
 func (h *Handler) retrySaveOn(ctx context.Context) {
 	rows, err := h.q.BackupsListSaveOff(ctx)
 	if err != nil {
-		h.log.ErrorContext(ctx, "backups: list save-off marks", "err", err)
+		if ctx.Err() == nil {
+			h.log.ErrorContext(ctx, "backups: list save-off marks", "err", err)
+		}
 		return
 	}
 	for _, r := range rows {
-		if !h.queue.runningFor(r.ServerID) {
-			h.resume(r.ServerID)
+		if ctx.Err() != nil {
+			return // the marks stay, the next tick or start retries
 		}
+		if h.queue.busy(r.ServerID) {
+			continue
+		}
+		lock := h.saveLocks.get(r.ServerID)
+		if !lock.TryLock() {
+			continue
+		}
+		h.resume(ctx, r.ServerID)
+		lock.Unlock()
 	}
 }
 
@@ -70,6 +83,9 @@ func (h *Handler) checkTimezone(ctx context.Context, now time.Time) {
 // enqueueDue queues a scheduled run for every due schedule; a server with a queued or running
 // job is skipped and checked again on the next tick.
 func (h *Handler) enqueueDue(ctx context.Context, now time.Time) {
+	if h.files == nil {
+		return // no file service: nothing can run (the schedules stay due)
+	}
 	rows, err := h.q.BackupsListDue(ctx, nullTime(now))
 	if err != nil {
 		h.log.ErrorContext(ctx, "backups: list due schedules", "err", err)

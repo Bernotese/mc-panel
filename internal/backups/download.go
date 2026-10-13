@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"sync"
 	"time"
@@ -81,6 +82,17 @@ func (i *idleReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// contentDisposition names the zip <server>-<YYYYMMDD-HHMMSS>.zip (time in the panel zone).
+// Server names are DNS labels, but the header is built by mime.FormatMediaType anyway; should
+// it refuse the name, the file is called server-<id>-….zip.
+func contentDisposition(srv server, t time.Time) string {
+	stamp := t.Format("20060102-150405")
+	if v := mime.FormatMediaType("attachment", map[string]string{"filename": fmt.Sprintf("%s-%s.zip", srv.Name, stamp)}); v != "" {
+		return v
+	}
+	return mime.FormatMediaType("attachment", map[string]string{"filename": fmt.Sprintf("server-%d-%s.zip", srv.ID, stamp)})
+}
+
 var errDownloadIdle = errors.New("the file service sent nothing for too long")
 
 func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
@@ -143,10 +155,8 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		loc = time.UTC
 	}
-	// Server names are lowercase DNS labels (instancespec.ValidName): safe in the header as is.
-	name := fmt.Sprintf("%s-%s.zip", srv.Name, time.UnixMilli(s.Time).In(loc).Format("20060102-150405"))
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.Header().Set("Content-Disposition", contentDisposition(srv, time.UnixMilli(s.Time).In(loc)))
 	w.WriteHeader(http.StatusOK)
 	idle := &idleReader{r: d.Body, timer: time.AfterFunc(h.ioTimeout, func() { cancel(errDownloadIdle) }), timeout: h.ioTimeout}
 	idle.timer.Stop()

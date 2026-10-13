@@ -20,7 +20,7 @@ func TestDownload(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "application/zip" {
 		t.Fatalf("content type %q", ct)
 	}
-	if cd := rec.Header().Get("Content-Disposition"); cd != `attachment; filename="survival-20261012-120000.zip"` {
+	if cd := rec.Header().Get("Content-Disposition"); cd != `attachment; filename=survival-20261012-120000.zip` /* mime.FormatMediaType quotes only when needed */ {
 		t.Fatalf("content disposition %q", cd)
 	}
 	if !bytes.Equal(rec.Body.Bytes(), e.files.zip) {

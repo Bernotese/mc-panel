@@ -26,9 +26,12 @@ func (h *Handler) recover(ctx context.Context) {
 	for _, r := range rows {
 		if h.files != nil {
 			if sj, err := h.files.Job(ctx, r.ServerID); err == nil && sj != nil && sj.State == filesapi.JobRunning && sj.Kind == filesapi.JobBackup {
-				h.cancelService(r.ServerID)
+				h.cancelService(ctx, r.ServerID)
 			}
 		}
-		h.resume(r.ServerID)
+		h.resume(ctx, r.ServerID) // Run's context: a hanging agent does not delay a shutdown
+		if ctx.Err() != nil {
+			return // the marks stay, the next start retries
+		}
 	}
 }

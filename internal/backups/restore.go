@@ -28,13 +28,25 @@ func (h *Handler) stop(ctx context.Context, id int64) error {
 	}
 	st, err := h.instanceState(ctx, id)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		h.log.WarnContext(ctx, "backups: read the server state", "server_id", id, "err", err)
 		return failf(codeAgent, "the agent is not reachable, the server state is unknown")
 	}
 	if !isRunning(st) {
 		return nil
 	}
 	if err := h.inst.Power(ctx, id, agentapi.PowerStop); err != nil {
-		return failf(codeAgent, "stopping the server failed: %v", err)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// the agent's error may name its socket path: log it, show a fixed text
+		h.log.WarnContext(ctx, "backups: stop the server for a restore", "server_id", id, "err", err)
+		if errors.Is(err, agentapi.ErrUnavailable) {
+			return failf(codeAgent, "the agent is not reachable")
+		}
+		return failf(codeAgent, "stopping the server failed")
 	}
 	sctx, cancel := context.WithTimeout(ctx, h.stopTimeout)
 	defer cancel()
@@ -54,7 +66,11 @@ func (h *Handler) stop(ctx context.Context, id int64) error {
 }
 
 // runRestore is the restore flow of spec §5.5; the queue holds the gate while it runs.
-func (h *Handler) runRestore(ctx context.Context, j *job, snapshot string) error {
+func (h *Handler) runRestore(ctx context.Context, j *job, snapshot string) (err error) {
+	defer func() { err = canceledOr(ctx, err) }()
+	if h.files == nil {
+		return errNoFiles
+	}
 	id := j.spec.serverID
 	if err := h.step(ctx, j, stepStopping); err != nil {
 		return err
@@ -69,7 +85,7 @@ func (h *Handler) runRestore(ctx context.Context, j *job, snapshot string) error
 	if err != nil {
 		return err
 	}
-	if _, err := h.waitService(ctx, j, id, pre.ID); err != nil {
+	if _, err := h.waitService(ctx, j, id, pre.ID, false); err != nil {
 		return err
 	}
 	if err := h.step(ctx, j, stepRestoring); err != nil {
@@ -79,7 +95,8 @@ func (h *Handler) runRestore(ctx context.Context, j *job, snapshot string) error
 	if err != nil {
 		return err
 	}
-	_, err = h.waitService(ctx, j, id, rj.ID)
+	// untilEnd: the gate stays closed until a poll shows that the service's restore ended
+	_, err = h.waitService(ctx, j, id, rj.ID, true)
 	return err
 }
 

@@ -57,17 +57,23 @@ func (h *Handler) step(ctx context.Context, j *job, step string) error {
 	return nil
 }
 
-// instanceState asks the agent for the container state; no agent counts as stopped.
+// instanceState asks the agent for the container state; no agent client counts as stopped.
+// Without a Docker daemon no container runs: the state is StateMissing (a backup needs no
+// save-off, a restore no stop; dev without Docker, spec §7). An agent that does not answer is
+// an error (agent_unavailable).
 func (h *Handler) instanceState(ctx context.Context, id int64) (agentapi.ContainerState, error) {
 	if h.inst == nil {
 		return agentapi.StateMissing, nil
 	}
 	resp, err := h.inst.Instances(ctx)
+	if errors.Is(err, agentapi.ErrDockerUnavailable) {
+		return agentapi.StateMissing, nil
+	}
 	if err != nil {
 		return "", err
 	}
 	if resp.Docker != agentapi.DockerOK {
-		return "", agentapi.ErrDockerUnavailable
+		return agentapi.StateMissing, nil
 	}
 	for _, s := range resp.Instances {
 		if s.ID == id {
@@ -86,18 +92,44 @@ func isRunning(s agentapi.ContainerState) bool {
 func (h *Handler) containerRunning(ctx context.Context, id int64) (bool, error) {
 	st, err := h.instanceState(ctx, id)
 	if err != nil {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		h.log.WarnContext(ctx, "backups: read the server state", "server_id", id, "err", err)
 		return false, failf(codeAgent, "the agent is not reachable, the server state is unknown")
 	}
 	return isRunning(st), nil
 }
 
-func (h *Handler) rcon(ctx context.Context, id int64, cmd string) error {
-	ctx, cancel := context.WithTimeout(ctx, h.rconTimeout)
+// sendRcon runs one console command with the agent-side timeout rconTimeout (60 s: save-off
+// and save-all flush of a large world take longer than the agent's default of 10 s).
+func (h *Handler) sendRcon(ctx context.Context, id int64, cmd string) error {
+	ctx, cancel := context.WithTimeout(ctx, h.rconTimeout+rconMargin)
 	defer cancel()
-	if _, err := h.console.Rcon(ctx, id, cmd); err != nil {
-		return failf(codeRcon, "RCON command %q failed: %v", cmd, err)
+	var err error
+	if h.rconT != nil {
+		_, err = h.rconT.RconTimeout(ctx, id, cmd, h.rconTimeout)
+	} else {
+		_, err = h.console.Rcon(ctx, id, cmd)
 	}
-	return nil
+	return err
+}
+
+// rcon sends cmd for a job step. The job error has a fixed text (the agent's error may name
+// its socket path); the original error goes to the log.
+func (h *Handler) rcon(ctx context.Context, id int64, cmd string) error {
+	err := h.sendRcon(ctx, id, cmd)
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	h.log.WarnContext(ctx, "backups: RCON command failed", "server_id", id, "command", cmd, "err", err)
+	if errors.Is(err, agentapi.ErrUnavailable) {
+		return failf(codeAgent, "the agent is not reachable")
+	}
+	return failf(codeRcon, "RCON command %s failed", cmd)
 }
 
 // markSaveOff records that the panel is about to send save-off (spec §5.4, crash recovery).
@@ -109,16 +141,21 @@ func (h *Handler) markSaveOff(ctx context.Context, id int64) error {
 }
 
 // resume sends save-on. It clears saveoff_since once the server saves again or is no longer
-// running; otherwise the mark stays and the ticker retries (Review Focus 1). It never uses a
-// job's context: it must also run after a cancel.
-func (h *Handler) resume(id int64) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), h.rconTimeout)
-	defer cancel()
-	_, err := h.console.Rcon(ctx, id, "save-on")
+// running; otherwise the mark stays and the ticker retries (Review Focus 1). A job passes a
+// context without its cancel (save-on must follow a cancelled job too); the ticker and the
+// recovery pass Run's context, so a hanging agent does not delay the shutdown (the mark stays).
+func (h *Handler) resume(parent context.Context, id int64) bool {
+	err := h.sendRcon(parent, id, "save-on")
 	if err != nil && !errors.Is(err, agentapi.ErrNotRunning) && !errors.Is(err, agentapi.ErrNotFound) {
-		h.log.WarnContext(ctx, "backups: save-on failed, the next tick retries", "server_id", id, "err", err)
+		if parent.Err() != nil {
+			h.log.InfoContext(parent, "backups: save-on interrupted by the shutdown, the next start retries", "server_id", id)
+			return false
+		}
+		h.log.WarnContext(parent, "backups: save-on failed, the next tick retries", "server_id", id, "err", err)
 		return false
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), cleanupTimeout)
+	defer cancel()
 	if err := h.q.BackupsSetSaveOff(ctx, store.BackupsSetSaveOffParams{ServerID: id}); err != nil {
 		h.log.ErrorContext(ctx, "backups: clear saveoff_since", "server_id", id, "err", err)
 		return false
@@ -126,9 +163,13 @@ func (h *Handler) resume(id int64) bool {
 	return true
 }
 
-// cancelService asks the service to cancel the server's running job (best effort).
-func (h *Handler) cancelService(id int64) {
-	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+// cancelService asks the service to cancel the server's running job (best effort, bounded by
+// cleanupTimeout and parent).
+func (h *Handler) cancelService(parent context.Context, id int64) {
+	if h.files == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, cleanupTimeout)
 	defer cancel()
 	if err := h.files.CancelJob(ctx, id); err != nil {
 		h.log.WarnContext(ctx, "backups: cancel the service job", "server_id", id, "err", err)
@@ -136,37 +177,61 @@ func (h *Handler) cancelService(id int64) {
 }
 
 // waitService polls the service job jobID of the server until it ended; progress goes to j.
-// A cancelled ctx cancels the service job.
-func (h *Handler) waitService(ctx context.Context, j *job, id int64, jobID string) (filesapi.Job, error) {
+// A cancelled ctx cancels the service job. A job whose byte count does not change for
+// stallTimeout (h.clock) is cancelled and fails with msgStalled. With untilEnd (the restoring
+// step, which holds the start gate) poll errors never end the wait and a stalled job is waited
+// for after its cancel: the wait ends only when a successful poll shows the job ended (or ctx
+// ends), so the gate does not open while the service may still swap the data directory.
+func (h *Handler) waitService(ctx context.Context, j *job, id int64, jobID string, untilEnd bool) (filesapi.Job, error) {
+	if h.files == nil {
+		return filesapi.Job{}, errNoFiles
+	}
 	misses := 0
+	lastBytes, lastChange := int64(0), h.clock.Now() // a new job starts at 0 bytes
+	stalled := false
 	for {
 		select {
 		case <-ctx.Done():
-			h.cancelService(id)
+			h.cancelService(context.WithoutCancel(ctx), id)
 			return filesapi.Job{}, ctx.Err()
 		case <-time.After(h.pollEvery):
 		}
 		sj, err := h.files.Job(ctx, id)
-		if err != nil {
-			if ctx.Err() != nil {
-				continue // the select above cancels
-			}
+		switch {
+		case err != nil && ctx.Err() != nil:
+			continue // the select above cancels
+		case err != nil && !untilEnd:
 			if misses++; misses >= maxPollMisses {
-				h.cancelService(id)
+				h.cancelService(ctx, id)
 				return filesapi.Job{}, fmt.Errorf("poll the service job: %w", err)
 			}
-			continue
-		}
-		misses = 0
-		if sj == nil || sj.ID != jobID {
+		case err != nil:
+			// untilEnd: keep polling, the gate stays closed until the end is seen
+		case sj == nil || sj.ID != jobID:
 			return filesapi.Job{}, failf(codeFiles, "the file service lost the job (was it restarted?)")
+		default:
+			misses = 0
+			if sj.Bytes != lastBytes {
+				lastBytes, lastChange = sj.Bytes, h.clock.Now()
+			}
+			j.setBytes(sj.Bytes)
+			switch sj.State {
+			case filesapi.JobDone:
+				return *sj, nil
+			case filesapi.JobFailed:
+				if stalled {
+					return *sj, failf(codeInternal, msgStalled)
+				}
+				return *sj, failf(serviceJobCode(sj.Code), "%s", sj.Error)
+			}
 		}
-		j.setBytes(sj.Bytes)
-		switch sj.State {
-		case filesapi.JobDone:
-			return *sj, nil
-		case filesapi.JobFailed:
-			return *sj, failf(serviceJobCode(sj.Code), "%s", sj.Error)
+		if !stalled && h.clock.Now().Sub(lastChange) >= stallTimeout {
+			h.log.WarnContext(ctx, "backups: the service job made no progress, cancelling it", "server_id", id, "job", jobID)
+			h.cancelService(ctx, id)
+			if !untilEnd {
+				return filesapi.Job{}, failf(codeInternal, msgStalled)
+			}
+			stalled = true
 		}
 	}
 }
@@ -190,6 +255,10 @@ func serviceJobCode(code string) string {
 // runBackup takes one snapshot of kind; a running server gets save-off/save-all flush before
 // and save-on after it, in every path (spec §5.4).
 func (h *Handler) runBackup(ctx context.Context, j *job, kind filesapi.SnapshotKind, note string) (snapshot string, err error) {
+	defer func() { err = canceledOr(ctx, err) }() // runs last: after save-on
+	if h.files == nil {
+		return "", errNoFiles
+	}
 	id := j.spec.serverID
 	running, err := h.containerRunning(ctx, id)
 	if err != nil {
@@ -199,12 +268,16 @@ func (h *Handler) runBackup(ctx context.Context, j *job, kind filesapi.SnapshotK
 		if err := h.step(ctx, j, stepSaving); err != nil {
 			return "", err
 		}
+		// Held from the mark to save-on: a tick that retries save-on skips the server meanwhile.
+		lock := h.saveLocks.get(id)
+		lock.Lock()
+		defer lock.Unlock()
 		if err := h.markSaveOff(ctx, id); err != nil {
 			return "", err
 		}
 		defer func() {
 			j.setStep(stepResuming)
-			h.resume(id)
+			h.resume(context.WithoutCancel(ctx), id)
 		}()
 		if err := h.rcon(ctx, id, "save-off"); err != nil {
 			return "", err
@@ -220,7 +293,7 @@ func (h *Handler) runBackup(ctx context.Context, j *job, kind filesapi.SnapshotK
 	if err != nil {
 		return "", err
 	}
-	done, err := h.waitService(ctx, j, id, sj.ID)
+	done, err := h.waitService(ctx, j, id, sj.ID, false)
 	if err != nil {
 		return "", err
 	}

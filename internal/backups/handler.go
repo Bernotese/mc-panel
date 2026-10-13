@@ -42,11 +42,17 @@ type Deps struct {
 // Timings (spec §5, Global Constraints). The waits use wall time; clock.Clock only drives
 // logic (schedules, timestamps, the notification throttle). Tests shorten them.
 const (
-	tickEvery      = time.Minute
-	pollEvery      = 2 * time.Second
-	rconTimeout    = 60 * time.Second
-	stopTimeout    = 120 * time.Second
-	shutdownWait   = 20 * time.Second
+	tickEvery    = time.Minute
+	pollEvery    = 2 * time.Second
+	rconTimeout  = 60 * time.Second
+	stopTimeout  = 120 * time.Second
+	shutdownWait = 20 * time.Second
+	// rconMargin is added to rconTimeout for the panel side of a console command (the agent
+	// client itself waits the agent's timeout plus 5 s).
+	rconMargin = 10 * time.Second
+	// stallTimeout fails a service job whose byte count did not change for that long (logic
+	// time, h.clock).
+	stallTimeout   = 10 * time.Minute
 	cleanupTimeout = 10 * time.Second
 	ioTimeout      = 60 * time.Second
 	maxPollMisses  = 5
@@ -60,13 +66,16 @@ type Handler struct {
 	files     filesapi.BackupClient    // nil = no service
 	inst      agentapi.InstancesClient // nil = no agent
 	console   agentapi.ConsoleClient
+	rconT     agentapi.RconTimeoutClient // the console with per-command timeouts (*agent.Client); nil = Rcon with the agent's 10 s
+	saveLocks keyedLocks                 // per server: save-off ... save-on of a job vs. the save-on retry of a tick
 	reconcile func()
 	log       *slog.Logger
 	queue     *queue
 	tickMu    sync.Mutex // serialises ticks (Run and tests)
 	alerts    *alerts
 	downloads *userSlots
-	lastTZ    string // panel time zone of the previous tick ("" before the first; guarded by tickMu)
+	lastTZ    string        // panel time zone of the previous tick ("" before the first; guarded by tickMu)
+	ticked    chan struct{} // closed after the first tick of Run (tests wait for it)
 
 	tickEvery, pollEvery, rconTimeout, stopTimeout, shutdownWait, ioTimeout time.Duration
 	ioClock                                                                 clock.Clock // wall clock for I/O deadlines (always clock.Real)
@@ -95,7 +104,10 @@ func NewHandler(d Deps) *Handler {
 		tickEvery: tickEvery, pollEvery: pollEvery, rconTimeout: rconTimeout, stopTimeout: stopTimeout,
 		shutdownWait: shutdownWait, ioTimeout: ioTimeout, ioClock: clock.Real{},
 	}
+	h.ticked = make(chan struct{})
+	h.rconT, _ = con.(agentapi.RconTimeoutClient)
 	h.queue.gone = h.serverGone
+	h.queue.log = log
 	return h
 }
 
@@ -110,12 +122,13 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Post("/servers/{id}/backups/{snapshot}/pin", rule, h.slow(h.handlePin))
 	api.Post("/servers/{id}/backups/{snapshot}/restore", sudo, h.slow(h.handleRestore))
 	api.Delete("/servers/{id}/backups/{snapshot}", sudo, h.slow(h.handleDelete))
-	api.Get("/servers/{id}/backups/{snapshot}/download", rule, h.handleDownload)
+	api.Get("/servers/{id}/backups/{snapshot}/download", rule, h.slow(h.handleDownload))
 }
 
 // Run blocks until ctx is done: recovery first, then the worker and the ticker. On ctx.Done it
-// refuses new jobs, cancels the running one (which cancels its service job and sends save-on)
-// and waits up to shutdownWait for it.
+// refuses new jobs at once (also while a tick still waits for the agent), cancels the running
+// job (which cancels its service job and sends save-on) and waits up to shutdownWait for the
+// worker and the ticker.
 func (h *Handler) Run(ctx context.Context) {
 	h.recover(ctx)
 	workDone := make(chan struct{})
@@ -123,22 +136,35 @@ func (h *Handler) Run(ctx context.Context) {
 		defer close(workDone)
 		h.queue.work(ctx)
 	}()
-	t := time.NewTicker(h.tickEvery)
-	defer t.Stop()
-	for {
-		h.tick(ctx)
-		select {
-		case <-ctx.Done():
-			h.queue.close()
-			wait := time.NewTimer(h.shutdownWait)
-			defer wait.Stop()
-			select {
-			case <-workDone:
-			case <-wait.C:
-				h.log.Warn("backups: the running job did not end within the shutdown wait")
+	tickDone := make(chan struct{})
+	go func() {
+		defer close(tickDone)
+		t := time.NewTicker(h.tickEvery)
+		defer t.Stop()
+		first := true
+		for {
+			h.tick(ctx)
+			if first {
+				first = false
+				close(h.ticked)
 			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+		}
+	}()
+	<-ctx.Done()
+	h.queue.close()
+	wait := time.NewTimer(h.shutdownWait)
+	defer wait.Stop()
+	for _, done := range []chan struct{}{workDone, tickDone} {
+		select {
+		case <-done:
+		case <-wait.C:
+			h.log.Warn("backups: the running job or tick did not end within the shutdown wait")
 			return
-		case <-t.C:
 		}
 	}
 }
@@ -311,4 +337,24 @@ func ignoreUnsupported(err error) error {
 		return nil
 	}
 	return err
+}
+
+// keyedLocks is a mutex per server id (entries are kept: one per server ever backed up).
+type keyedLocks struct {
+	mu sync.Mutex
+	m  map[int64]*sync.Mutex
+}
+
+func (k *keyedLocks) get(id int64) *sync.Mutex {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.m == nil {
+		k.m = map[int64]*sync.Mutex{}
+	}
+	l := k.m[id]
+	if l == nil {
+		l = &sync.Mutex{}
+		k.m[id] = l
+	}
+	return l
 }
