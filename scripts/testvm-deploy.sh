@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Deploys mc-panel from a git ref onto the internal test VM (Ubuntu 26.04, no inbound internet):
 # installs the toolchain and runtime packages on first use, clones/fetches the repo with the
-# VM's GitHub deploy key, builds panel, agent and files, installs them with systemd units and puts
-# Caddy in front with its internal CA (no Let's Encrypt). Names resolve through sslip.io:
-# panel.<ip>.sslip.io for the UI, <server>.mc.<ip>.sslip.io for Minecraft (dots as dashes).
+# VM's GitHub deploy key, builds panel, agent and files, installs them (and the pinned restic)
+# with systemd units and puts Caddy in front with its internal CA (no Let's Encrypt). Names
+# resolve through sslip.io: panel.<ip>.sslip.io for the UI, <server>.mc.<ip>.sslip.io for
+# Minecraft (dots as dashes).
 #
 # Usage on the Mac:   make deploy-testvm [REF=<branch|tag|sha>] [TESTVM=user@host]
 # Usage on the VM:    bash scripts/testvm-deploy.sh [REF]          (default: main)
@@ -59,6 +60,7 @@ main() {
   checkout "$ref"
   install_go "$arch"
   install_node "$node_arch"
+  install_restic
   build
   install_system "$panel_host" "$ip"
   restart_and_check "$panel_host"
@@ -74,7 +76,7 @@ EOF
 }
 
 install_packages() {
-  local pkgs=(ca-certificates curl git jq make xz-utils docker.io caddy nftables) missing=()
+  local pkgs=(ca-certificates curl git jq make xz-utils bzip2 docker.io caddy nftables) missing=()
   for p in "${pkgs[@]}"; do
     dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'install ok installed' || missing+=("$p")
   done
@@ -142,6 +144,13 @@ install_node() {
   export PATH="$NODE_ROOT/bin:$PATH"
 }
 
+# install_restic: the pinned restic release for the files service's backups (spec 4 §7), from
+# the checked-out tree (the script is read after the checkout).
+install_restic() {
+  log "restic"
+  quiet sudo bash "$SRC/scripts/install-restic.sh"
+}
+
 build() {
   log "build"
   local lock_sum
@@ -169,6 +178,10 @@ install_system() {
   # Spec 3b §3.3: the files service (mcpanel-mc) may enter instances/, never write it; the
   # agent enforces the same owner and mode at start.
   sudo install -d -m 0750 -o root -g mcpanel-mc /srv/mc-panel/instances
+  # Spec 4 §3.1: restic repos and their keys belong to mcpanel-mc alone (the agent enforces the
+  # same owner and mode at start). It must exist before the files service starts: systemd sets
+  # up ReadWritePaths only for existing paths.
+  sudo install -d -m 0700 -o mcpanel-mc -g mcpanel-mc /srv/mc-panel/backups
 
   sudo tee /etc/mc-panel/agent.toml >/dev/null <<EOF
 socket = "/run/mc-panel/agent.sock"
@@ -187,6 +200,7 @@ EOF
 socket = "/run/mc-panel-files/files.sock"
 panel_uid = $(id -u mcpanel)
 instances_dir = "/srv/mc-panel"
+restic_binary = "/usr/local/bin/restic"
 EOF
   sudo chown root:mcpanel-mc /etc/mc-panel-files/files.toml
   sudo chmod 0640 /etc/mc-panel-files/files.toml
@@ -241,8 +255,9 @@ RemoveOnStop=yes
 WantedBy=sockets.target
 EOF
 
-  # MemoryMax/TasksMax: defense in depth against crafted archives (zip parsing); the service
-  # streams, so 512M is ample.
+  # MemoryMax/TasksMax: defense in depth against crafted archives (zip parsing); 1G and 512
+  # tasks leave room for restic (index and pack buffers, spec 4 §3.2). IOWeight/CPUWeight keep
+  # backups behind the Minecraft servers and the panel. No network: local repos only.
   sudo tee /etc/systemd/system/mcpanel-files.service >/dev/null <<'EOF'
 [Unit]
 Description=mc-panel files service (unprivileged, Minecraft data)
@@ -260,15 +275,17 @@ NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
 ProtectSystem=strict
-ReadWritePaths=/srv/mc-panel/instances
+ReadWritePaths=/srv/mc-panel/instances /srv/mc-panel/backups
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
 RestrictAddressFamilies=AF_UNIX
 SystemCallArchitectures=native
 UMask=0027
-MemoryMax=512M
-TasksMax=256
+MemoryMax=1G
+TasksMax=512
+IOWeight=50
+CPUWeight=50
 
 [Install]
 WantedBy=multi-user.target
@@ -321,7 +338,8 @@ EOF
 
 # check_files_service: socket unit and service active, socket mcpanel-mc:mcpanel 0660; the
 # service runs as mcpanel-mc without supplementary groups, without capabilities and with
-# no_new_privs (spec 3b §3.1); prints what is wrong otherwise.
+# no_new_privs (spec 3b §3.1); backups available (restic) and /srv/mc-panel/backups
+# mcpanel-mc 0700 (spec 4 §3); prints what is wrong otherwise.
 check_files_service() {
   local pid uid status
   if ! sudo systemctl is-active --quiet mcpanel-files.socket || ! sudo systemctl is-active --quiet mcpanel-files.service; then
@@ -343,6 +361,15 @@ check_files_service() {
     grep -P '^Groups:' <<<"$status" | grep -qw "$(getent group mcpanel | cut -d: -f3)"; then
     echo "testvm-deploy: mcpanel-files runs with unexpected credentials:" >&2
     grep -E '^(Uid|Gid|Groups|CapEff|NoNewPrivs):' <<<"$status" >&2
+    return 1
+  fi
+  if ! sudo -u mcpanel curl -fsS --max-time 10 --unix-socket /run/mc-panel-files/files.sock \
+    http://files/v1/backups/status | grep -q '"available":true'; then
+    echo "testvm-deploy: backups unavailable in mcpanel-files (restic?): $(sudo -u mcpanel curl -sS --unix-socket /run/mc-panel-files/files.sock http://files/v1/backups/status 2>&1)" >&2
+    return 1
+  fi
+  if [ "$(sudo stat -c '%U:%G %a' /srv/mc-panel/backups)" != "mcpanel-mc:mcpanel-mc 700" ]; then
+    echo "testvm-deploy: /srv/mc-panel/backups: $(sudo stat -c '%U:%G %a' /srv/mc-panel/backups)" >&2
     return 1
   fi
 }
