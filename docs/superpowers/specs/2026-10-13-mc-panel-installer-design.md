@@ -77,7 +77,7 @@ deploy/
 └── nftables/mcpanel_fw.nft                      Firewall-Vorlage
 ```
 
-- `make installer` fügt `lib.sh`, die Schritt-Dateien und `main.sh` zu `dist/install.sh` zusammen und bettet die Vorlagen aus `deploy/` als Heredocs ein; die Release-Version wird als `MCPANEL_VERSION` eingetragen. goreleaser hängt `install.sh` als Release-Asset an und nimmt es in `checksums.txt` auf; der Release-Tarball enthält zusätzlich `deploy/`.
+- `make installer` fügt `lib.sh`, die Schritt-Dateien und `main.sh` zu `build/install.sh` zusammen (nicht `dist/`, das goreleaser leert) und bettet die Vorlagen aus `deploy/` als Heredocs ein; die Release-Version wird als `MCPANEL_VERSION` eingetragen. goreleaser hängt `install.sh` als Release-Asset an und nimmt es in `checksums.txt` auf; der Release-Tarball enthält zusätzlich `deploy/`.
 - Logging nach `/var/log/mc-panel-install.log` (0600) und knapp auf stdout; jeder Schritt meldet „ok / geändert / übersprungen“. Fehler beenden mit Exit-Code ≠ 0 und Verweis auf das Log.
 - Alle Schritte sind idempotent: sie prüfen den Ist-Zustand und ändern nur Abweichungen.
 
@@ -95,11 +95,11 @@ root; `/etc/os-release` = Ubuntu 26.04 (sonst Abbruch, außer Override); Archite
 
 ### 4.2 Pakete
 
-`apt-get install` (nur fehlende): `docker.io`, `caddy`, `nftables`, `restic`, `tzdata`, `sqlite3`, `unattended-upgrades`, `curl`, `ca-certificates`, `bzip2`. Danach Versionsprüfungen: restic ≥ 0.17 (TP4), Docker-Daemon erreichbar. Docker bekommt `/etc/docker/daemon.json` nur, wenn es fehlt: `{"log-driver": "json-file", "log-opts": {"max-size": "10m", "max-file": "3"}, "live-restore": true}`.
+`apt-get install` (nur fehlende): `docker.io` (übersprungen, wenn `docker info` bereits antwortet, z. B. vorinstalliertes Docker CE), `caddy`, `nftables`, `restic`, `tzdata`, `sqlite3`, `unattended-upgrades`, `curl`, `ca-certificates`, `bzip2`. Danach Versionsprüfungen: restic ≥ 0.17 (TP4), Docker-Daemon erreichbar. Docker bekommt `/etc/docker/daemon.json` nur, wenn es fehlt: `{"log-driver": "json-file", "log-opts": {"max-size": "10m", "max-file": "3"}, "live-restore": true}`. Docker wird dafür nur neu gestartet, wenn keine mcpanel-Container laufen; sonst `[warn]`, dass die Einstellung beim nächsten Docker-Neustart greift. `restic_binary` ist der Pfad aus `command -v restic` (Version ≥ 0.17, sonst Abbruch mit Hinweis auf ein neueres restic).
 
 ### 4.3 Benutzer und Verzeichnisse
 
-Wie die Spezifikationen und `testvm-deploy.sh` heute: Systembenutzer `mcpanel` und `mcpanel-mc` (keine Shell, kein Home-Login); `/etc/mc-panel` `root:mcpanel 0750`, `/etc/mc-panel-files` `root:mcpanel-mc 0750`, `/var/lib/mc-panel` `mcpanel:mcpanel 0700`, `/srv/mc-panel` `root:root 0755`. Unterverzeichnisse von `/srv/mc-panel` legt der agent an (TP2 §3.3, TP3b §3.3, TP4 §3.1).
+Wie die Spezifikationen und `testvm-deploy.sh` heute: Systembenutzer `mcpanel` und `mcpanel-mc` (keine Shell, kein Home-Login); `/etc/mc-panel` `root:mcpanel 0750`, `/etc/mc-panel-files` `root:mcpanel-mc 0750`, `/var/lib/mc-panel` `mcpanel:mcpanel 0700`, `/srv/mc-panel` `root:root 0755`. Zusätzlich legt der Installer `/srv/mc-panel/instances` (`root:mcpanel-mc 0750`) und `/srv/mc-panel/backups` (`mcpanel-mc:mcpanel-mc 0700`) an, bevor die Units starten: `mcpanel-files.service` nennt beide in `ReadWritePaths`, und systemd verlangt, dass sie existieren (sonst `226/NAMESPACE`). Die weiteren Unterverzeichnisse legt der agent an (TP2 §3.3, TP3b §3.3, TP4 §3.1).
 
 ### 4.4 Binaries
 
@@ -107,7 +107,7 @@ Tarball `mc-panel_<version>_linux_<arch>.tar.gz` und `checksums.txt` desselben R
 
 ### 4.5 Konfiguration
 
-`panel.toml`, `agent.toml`, `files.toml` werden aus den Vorlagen angelegt, wenn sie fehlen: Sockets, `panel_uid` (UID von `mcpanel`), `instances_dir`, `restic_binary = "/usr/bin/restic"`, `monitoring_ping_addr`, Origin `https://<domain>`, `listen = "unix:/run/mc-panel-web/panel.sock"` (§4.6). Vorhandene Dateien bleiben unverändert; fehlen darin Pflichtschlüssel, ergänzt `install`/`update` nur diese Schlüssel am Ende (mit Kommentar „ergänzt von install.sh <version>“) und ändert nie bestehende Werte. Rechte: `root:mcpanel 0640` bzw. `root:mcpanel-mc 0640`.
+`panel.toml`, `agent.toml`, `files.toml` werden aus den Vorlagen angelegt, wenn sie fehlen: Sockets, `panel_uid` (UID von `mcpanel`), `instances_dir`, `restic_binary` (§4.2), `monitoring_ping_addr`, `public_url = "https://<domain>"`, `listen = "unix:/run/mc-panel-web/panel.sock"` (§4.6). Vorhandene Dateien bleiben unverändert; fehlen darin Pflichtschlüssel, ergänzt `install`/`update` nur diese Schlüssel am Ende (mit Kommentar „ergänzt von install.sh <version>“) und ändert nie bestehende Werte. Rechte: `panel.toml` `root:mcpanel 0640`, `agent.toml` `root:root 0600` (der agent läuft als root, niemand sonst muss sie lesen), `files.toml` `root:mcpanel-mc 0640`.
 
 ### 4.6 systemd
 
@@ -119,7 +119,7 @@ Units aus `deploy/systemd/`: `mcpanel-agent.service`, `mcpanel-files.socket` + `
 
 ### 4.8 Firewall
 
-Eigene Tabelle `inet mcpanel_fw` (nie `inet mcpanel` des agent) aus `deploy/nftables/mcpanel_fw.nft`: Kette `input` (Hook input, Priorität 0, Policy drop) erlaubt `iif lo`, `ct state established,related`, ICMP/ICMPv6 (inkl. Neighbor Discovery), TCP auf SSH-Port, 80, 443, 25565 und UDP 443 (HTTP/3 von Caddy). Weitergeleiteter Verkehr (Docker) ist nicht betroffen. `mcpanel-fw.service` (oneshot, `After=network-pre.target`, `RemainAfterExit`) lädt die Tabelle beim Booten; `ExecStop` entfernt sie. Vor dem Aktivieren prüft der Installer, dass der SSH-Port der aktuellen Sitzung (`$SSH_CONNECTION`) in der Regel enthalten ist, sonst Abbruch. `--no-firewall` überspringt den Schritt; `doctor` warnt dann.
+Eigene Tabelle `inet mcpanel_fw` (nie `inet mcpanel` des agent) aus `deploy/nftables/mcpanel_fw.nft`: Kette `input` (Hook input, Priorität 0, Policy drop) erlaubt `iif lo`, `ct state established,related`, ICMP/ICMPv6 (inkl. Neighbor Discovery), TCP auf SSH-Port, 80, 443, 25565 und UDP 443 (HTTP/3 von Caddy). Weitergeleiteter Verkehr (Docker) ist nicht betroffen. `mcpanel-fw.service` (oneshot, `Before=network-pre.target` und `Wants=network-pre.target`, damit die Regeln vor dem Netz stehen, `RemainAfterExit`) lädt die Tabelle beim Booten; `ExecStop` entfernt sie. Vor dem Aktivieren prüft der Installer, dass der SSH-Port der aktuellen Sitzung (`$SSH_CONNECTION`) in der Regel enthalten ist, sonst Abbruch. `--no-firewall` überspringt den Schritt (die Unit wird geschrieben, aber nie aktiviert); `doctor` warnt dann.
 
 ### 4.9 Sicherheitsupdates
 
@@ -131,16 +131,16 @@ Gibt es noch keinen Admin (`panel admin list`, neu und lesend, oder Prüfung üb
 
 ## 5. `update`
 
-1. Zielversion: `--version` oder die neueste Release (GitHub-API `releases/latest`); `--check` gibt nur „aktuell / neuere Version X“ aus. Gleiche Version ohne `--force` → Ende.
+1. Zielversion: `--version`, mit `--from-dir` die Version des Builds (`panel version`, ohne Netz), sonst die neueste Release (GitHub-API `releases/latest`; Tag immer `v<version>`); `--check` gibt nur „aktuell / neuere Version X“ aus. Gleiche Version ohne `--force` → Ende.
 2. Das `install.sh` der Zielversion wird mit geladen (und geprüft) und übernimmt ab hier (`exec`), damit die Update-Logik zur neuen Version passt.
-3. Sicherung nach `/var/lib/mc-panel/rollback/<alte-version>-<zeit>/` (0700): DB per `sqlite3 <db> ".backup '<ziel>'"` (konsistent im laufenden Betrieb), die drei Binaries, die Unit-Dateien. Die drei neuesten Sicherungen bleiben.
+3. Sicherung nach `/var/lib/mc-panel-rollback/<alte-version>-<zeit>/` (`root:root 0700`, bewusst außerhalb von `/var/lib/mc-panel`, das `mcpanel` gehört: ein kompromittiertes panel darf dort nichts ablegen, was root beim Rollback installiert): die drei Binaries, die Unit-Dateien und die DB. Die DB-Kopie erstellt `mcpanel` selbst (`runuser -u mcpanel -- sqlite3 <db> ".backup '<data_dir>/.rollback-<zeit>.db'"`, konsistent im laufenden Betrieb); root prüft die Zwischendatei (reguläre Datei, kein Symlink, Besitzer `mcpanel`), liest sie per `cat` ins Rollback-Verzeichnis, danach löscht `mcpanel` sie. Root schreibt nie in `/var/lib/mc-panel`. Die drei neuesten Sicherungen bleiben (Sicherungen eines gescheiterten Rollbacks nie gelöscht).
 4. Neue Binaries und Units installieren, fehlende Konfigurationsschlüssel ergänzen (§4.5), `daemon-reload`, Neustart agent → files → panel. Minecraft-Container laufen weiter (Neustart des agent stoppt keine Container; `live-restore` deckt einen Docker-Neustart durch Paket-Updates ab).
 5. Health-Check (höchstens 90 s): alle Units `active`, `panel version`/`agent -version`/`files -version` melden die Zielversion, `GET /api/health` über den Socket `200`, agent- und files-Socket antworten (`/v1/health`).
-6. Rollback bei Fehlschlag: Dienste stoppen, alte Binaries, Units und DB-Kopie zurück, `daemon-reload`, starten, Health-Check der alten Version; Meldung mit Ursache und Log-Verweis, Exit-Code 3. Scheitert auch das, bleibt alles gestoppt mit klarer Anleitung (Exit-Code 4).
+6. Rollback bei Fehlschlag: Dienste stoppen, alte Binaries und Units zurück, die DB-Kopie liest root aus dem Rollback-Verzeichnis und gibt sie per Pipe an `runuser -u mcpanel -- sh -c 'cat > <data_dir>/panel.db.restore && mv -f <data_dir>/panel.db.restore <data_dir>/panel.db'` (root folgt dort keinen Symlinks), `daemon-reload`, starten, Health-Check der alten Version; Meldung mit Ursache und Log-Verweis, Exit-Code 3. Scheitert auch das, bleibt alles gestoppt mit klarer Anleitung (Exit-Code 4).
 
 ## 6. `doctor`
 
-Prüfungen mit ✓ / ! / ✗ und einem Satz Abhilfe; Exit-Code 0 (alles ok), 1 (Warnungen), 2 (Fehler); `--json` für Skripte.
+Prüfungen mit ✓ / ! / ✗ und einem Satz Abhilfe; Exit-Code 0 (alles ok), 1 (Warnungen), 2 (Fehler); `--json` für Skripte mit dem festen Schema `{"status": "ok|warn|fail", "checks": [{"id", "status", "message", "hint"}]}`. Ohne root laufen nur die Prüfungen, die keine root-Rechte brauchen. Die Pflichtschlüssel der Konfiguration sind dieselben Listen, die `install` ergänzt.
 
 - Dienste: Units aktiv, Sockets mit erwartetem Besitzer und Modus, Prozess von `files` als `mcpanel-mc` ohne Capabilities und mit `no_new_privs` (wie heute in `testvm-deploy.sh`).
 - Versionen: drei Binaries gleich; neuere Release verfügbar (!, nur mit Netz).
@@ -154,14 +154,14 @@ Prüfungen mit ✓ / ! / ✗ und einem Satz Abhilfe; Exit-Code 0 (alles ok), 1 (
 ## 7. `uninstall`
 
 - Entfernt: Units (stoppen, deaktivieren, löschen), Binaries, `/etc/caddy/mc-panel.caddy` und die Import-Zeile (danach Caddy-Reload), die nftables-Tabellen `inet mcpanel_fw` und `inet mcpanel`, alle Container mit Label `mcpanel.instance`, den Container `mcpanel-router` und das Netz `mcpanel-mc` (direkt per `docker`, der agent ist dann gestoppt), die Sockets.
-- Bleiben: `/srv/mc-panel` (Welten, Backups, Schlüssel), `/var/lib/mc-panel` (DB, Rollback-Sicherungen), `/etc/mc-panel*`, Benutzer `mcpanel`/`mcpanel-mc`, alle Pakete (der Installer entfernt nie Pakete).
+- Bleiben: `/srv/mc-panel` (Welten, Backups, Schlüssel), `/var/lib/mc-panel` (DB), `/var/lib/mc-panel-rollback` (Sicherungen; `--purge` entfernt es), `/etc/mc-panel*`, Benutzer `mcpanel`/`mcpanel-mc`, alle Pakete (der Installer entfernt nie Pakete).
 - `--purge`: zusätzlich Daten, Konfiguration und Benutzer; verlangt das Abtippen der Panel-Domain (bzw. „mc-panel“ bei `tls internal`), auch mit `--yes`.
 - Eine spätere Neuinstallation findet DB, Konfiguration und Daten wieder und läuft wie ein Update auf demselben Stand.
 
 ## 8. Test-VM und CI
 
 - **Test-VM:** `scripts/testvm-deploy.sh` baut wie bisher auf der VM und ruft danach `install.sh` aus dem Build auf: `install --from-dir <build> --tls internal --domain panel.192-168-1-117.sslip.io --no-firewall --yes` beim ersten Mal, sonst `update --from-dir <build> --force`. Die Heredocs für Units, Konfiguration und Caddy entfallen dort. Die VM behält ihre Firewall wie bisher (`--no-firewall`, die VM ist intern).
-- **CI-Job `installer`** (Ubuntu-24.04-Runner, root, `MCPANEL_INSTALL_ALLOW_UNSUPPORTED=1`, Artefakte aus dem Build-Job, `--tls internal`): `install` → `doctor` (keine ✗) → zweites `install` (keine Änderung gemeldet) → Login über Caddy mit dem angelegten Admin → `update` auf denselben Build mit erhöhter Version → `update` mit einem absichtlich defekten `panel` (Health-Check scheitert) → Rollback, alte Version läuft, DB unverändert → `uninstall` (Daten bleiben, Dienste und Tabellen weg) → `install` findet die Daten wieder → `uninstall --purge`. Let's Encrypt lässt sich in der CI nicht testen (manuelle Abnahme auf dem VPS).
+- **CI-Job `installer`** (Ubuntu-24.04-Runner, root, `MCPANEL_INSTALL_ALLOW_UNSUPPORTED=1`, Artefakte aus dem Build-Job, `--tls internal`): `install` → `doctor` (keine ✗) → zweites `install` (keine Änderung gemeldet) → Login über Caddy mit dem angelegten Admin → `update --from-dir` auf denselben Build mit erhöhter Version (Zielversion aus `panel version` des Builds, ohne Netz) → `update` mit einem absichtlich defekten `panel` (Health-Check scheitert) → Rollback, alte Version läuft, DB unverändert → `uninstall` (Daten bleiben, Dienste und Tabellen weg) → `install` findet die Daten wieder → `uninstall --purge`. Let's Encrypt lässt sich in der CI nicht testen (manuelle Abnahme auf dem VPS).
 - **Lint:** shellcheck für `scripts/install/*.sh` und das zusammengefügte `install.sh` im Lint-Job.
 
 ## 9. Tests

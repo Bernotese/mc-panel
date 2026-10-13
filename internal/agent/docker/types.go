@@ -82,10 +82,13 @@ func (c ContainerSummary) HasName(name string) bool {
 
 // ContainerInfo is the subset of GET /containers/{id}/json that mc-panel reads.
 type ContainerInfo struct {
-	ID     string         `json:"Id"`
-	Name   string         `json:"Name"` // with leading "/"
-	State  ContainerState `json:"State"`
-	Config InfoConfig     `json:"Config"`
+	ID    string         `json:"Id"`
+	Name  string         `json:"Name"` // with leading "/"
+	State ContainerState `json:"State"`
+	// RestartCount counts restarts by the restart policy since the container was created
+	// (Docker inspect "RestartCount"; TP5 crash-loop detection).
+	RestartCount int        `json:"RestartCount"`
+	Config       InfoConfig `json:"Config"`
 }
 
 type ContainerState struct {

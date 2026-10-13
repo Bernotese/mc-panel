@@ -67,6 +67,7 @@ function toServer(s: MockServer, permissions: Permission[], admin = true): Serve
     address: s.instance && base ? `${s.name}.${base}` : null,
     instance: s.instance,
     status: admin ? s.status : { ...s.status, last_error: '' },
+    down_alerts: admin ? (db.monitoring.downAlerts[s.id] ?? true) : null,
   }
 }
 

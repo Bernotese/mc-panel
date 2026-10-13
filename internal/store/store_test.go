@@ -16,7 +16,8 @@ func TestMigrateIsIdempotentAndCreatesTables(t *testing.T) {
 		t.Fatalf("second Migrate: %v", err)
 	}
 	for _, table := range []string{"users", "webauthn_credentials", "recovery_codes", "sessions", "servers",
-		"permissions", "audit_log", "login_attempts", "jails", "ip_rules", "settings", "notifiers", "plugin_installs", "backup_schedules"} {
+		"permissions", "audit_log", "login_attempts", "jails", "ip_rules", "settings", "notifiers", "plugin_installs", "backup_schedules",
+		"metrics_raw", "metrics_5m", "metrics_1h", "monitoring_settings", "server_alerts", "alert_state"} {
 		var n int
 		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&n); err != nil || n != 1 {
 			t.Errorf("table %s missing (n=%d err=%v)", table, n, err)
