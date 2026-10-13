@@ -40,7 +40,8 @@ func TestBackupsEndToEnd(t *testing.T) {
 	id := int64(srv["id"].(float64))
 	base := fmt.Sprintf("/servers/%d/backups", id)
 
-	if ov := admin.must(200, "GET", base, nil); ov["available"] != true || len(ov["snapshots"].([]any)) != 0 || ov["job"] != nil {
+	ov := admin.must(200, "GET", base, nil)
+	if avail, _ := ov["available"].(bool); !avail || len(ov["snapshots"].([]any)) != 0 || ov["job"] != nil {
 		t.Fatalf("overview = %v", ov)
 	}
 
