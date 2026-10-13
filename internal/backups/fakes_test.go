@@ -34,6 +34,7 @@ type fakeFiles struct {
 	errQueue  map[string][]error       // used up one per call before errs
 	delay     map[string]time.Duration // by operation, slept outside mu before the answer (list)
 	loseJobs  bool                     // Job answers nil (a restarted service)
+	stall     bool                     // running jobs keep their byte count (the stall watchdog)
 	calls     []string
 	seq       int
 	zip       []byte
@@ -304,7 +305,9 @@ func (f *fakeFiles) Job(_ context.Context, id int64) (*filesapi.Job, error) {
 		return nil, nil
 	}
 	if j.job.State == filesapi.JobRunning {
-		j.job.Bytes += 1024
+		if !f.stall {
+			j.job.Bytes += 1024
+		}
 		held := false
 		if ch, ok := f.hold[j.plan]; ok {
 			select {
@@ -352,11 +355,13 @@ var _ filesapi.BackupClient = (*fakeFiles)(nil)
 // fakeAgent is the agent's instance API: states per server, stop takes effect at once unless
 // stuck.
 type fakeAgent struct {
-	mu     sync.Mutex
-	state  map[int64]agentapi.ContainerState
-	powers []string
-	stuck  bool
-	err    error
+	mu       sync.Mutex
+	state    map[int64]agentapi.ContainerState
+	powers   []string
+	stuck    bool
+	err      error  // Instances and Power fail
+	powerErr error  // only Power fails
+	docker   string // Docker status of Instances ("" = DockerOK)
 }
 
 func newFakeAgent() *fakeAgent { return &fakeAgent{state: map[int64]agentapi.ContainerState{}} }
@@ -380,6 +385,10 @@ func (a *fakeAgent) Instances(context.Context) (agentapi.InstancesResponse, erro
 		return agentapi.InstancesResponse{}, a.err
 	}
 	out := agentapi.InstancesResponse{Docker: agentapi.DockerOK}
+	if a.docker != "" {
+		out.Docker = a.docker
+		return out, nil // no Docker: no instances
+	}
 	for id, s := range a.state {
 		out.Instances = append(out.Instances, agentapi.InstanceStatus{ID: id, State: s})
 	}
@@ -395,6 +404,9 @@ func (a *fakeAgent) Power(_ context.Context, id int64, action agentapi.PowerActi
 	if a.err != nil {
 		return a.err
 	}
+	if a.powerErr != nil {
+		return a.powerErr
+	}
 	if action == agentapi.PowerStop && !a.stuck {
 		a.state[id] = agentapi.StateExited
 	}
@@ -405,13 +417,51 @@ func (a *fakeAgent) Remove(context.Context, int64) error { return nil }
 
 // fakeConsole records RCON commands as "<id> <command>"; errs[command] is used up one per call.
 type fakeConsole struct {
-	mu    sync.Mutex
-	cmds  []string
-	errs  map[string][]error
-	onCmd func(cmd string) // called before the answer, without mu (set before the job starts)
+	mu       sync.Mutex
+	cmds     []string
+	timeouts []time.Duration // agent-side timeout of every RconTimeout call
+	errs     map[string][]error
+	onCmd    func(cmd string) // called before the answer, without mu (set before the job starts)
+	// hang[cmd]: the command waits until its context ends and then fails like the agent
+	// client does (an ErrUnavailable whose text names the socket path).
+	hang map[string]bool
+	// gate[cmd]: the command waits until the channel is closed (or its context ends).
+	gate map[string]chan struct{}
 }
 
-func newFakeConsole() *fakeConsole { return &fakeConsole{errs: map[string][]error{}} }
+func newFakeConsole() *fakeConsole {
+	return &fakeConsole{errs: map[string][]error{}, hang: map[string]bool{}, gate: map[string]chan struct{}{}}
+}
+
+func (c *fakeConsole) setHang(cmd string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.hang[cmd] = true
+}
+
+// hold makes cmd wait; the returned func releases it.
+func (c *fakeConsole) hold(cmd string) func() {
+	ch := make(chan struct{})
+	c.mu.Lock()
+	c.gate[cmd] = ch
+	c.mu.Unlock()
+	var once sync.Once
+	return func() { once.Do(func() { close(ch) }) }
+}
+
+func (c *fakeConsole) rconTimeouts() []time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.timeouts)
+}
+
+// RconTimeout is agentapi.RconTimeoutClient: the backups handler uses it for every command.
+func (c *fakeConsole) RconTimeout(ctx context.Context, id int64, cmd string, timeout time.Duration) (string, error) {
+	c.mu.Lock()
+	c.timeouts = append(c.timeouts, timeout)
+	c.mu.Unlock()
+	return c.Rcon(ctx, id, cmd)
+}
 
 func (c *fakeConsole) failNext(cmd string, errs ...error) {
 	c.mu.Lock()
@@ -425,13 +475,27 @@ func (c *fakeConsole) sent() []string {
 	return slices.Clone(c.cmds)
 }
 
-func (c *fakeConsole) Rcon(_ context.Context, id int64, cmd string) (string, error) {
+func (c *fakeConsole) Rcon(ctx context.Context, id int64, cmd string) (string, error) {
 	if c.onCmd != nil {
 		c.onCmd(cmd)
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.cmds = append(c.cmds, fmt.Sprintf("%d %s", id, cmd))
+	hang, gate := c.hang[cmd], c.gate[cmd]
+	c.mu.Unlock()
+	if hang {
+		<-ctx.Done()
+		return "", fmt.Errorf("%w: Post \"http://agent/v1/instances/rcon\": dial unix /run/mcpanel/agent.sock: %w", agentapi.ErrUnavailable, ctx.Err())
+	}
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if q := c.errs[cmd]; len(q) > 0 {
 		c.errs[cmd] = q[1:]
 		return "", q[0]

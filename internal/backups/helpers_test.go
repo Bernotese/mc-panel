@@ -92,8 +92,18 @@ func newEnvNoRun(t *testing.T, opt func(*backups.Deps)) *env {
 	return e
 }
 
-// run starts Run in the background; stop (also at cleanup) cancels it and waits.
+// run starts Run in the background and waits for its first tick (recovery and the first
+// save-on retry are done then); stop (also at cleanup) cancels Run and waits.
 func (e *env) run() {
+	e.t.Helper()
+	e.runNoWait()
+	if !backups.WaitFirstTick(e.h) {
+		e.t.Fatal("Run did not tick")
+	}
+}
+
+// runNoWait is run without waiting for the first tick (recovery may hang on purpose).
+func (e *env) runNoWait() {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { e.h.Run(ctx); close(done) }()

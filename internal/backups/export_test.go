@@ -42,3 +42,13 @@ func JobOf(h *Handler, serverID int64) (state, code string, ok bool) {
 	}
 	return v.State, code, true
 }
+
+// WaitFirstTick waits up to 5 s for the first tick of Run (it runs concurrently with requests).
+func WaitFirstTick(h *Handler) bool {
+	select {
+	case <-h.ticked:
+		return true
+	case <-time.After(5 * time.Second):
+		return false
+	}
+}

@@ -40,7 +40,11 @@ func (h *Handler) runScheduled(ctx context.Context, j *job) (string, error) {
 
 // prune applies the server's retention to its scheduled snapshots (forget --keep-*, pinned
 // ones stay; manual and pre-restore snapshots are never touched).
-func (h *Handler) prune(ctx context.Context, j *job) error {
+func (h *Handler) prune(ctx context.Context, j *job) (err error) {
+	defer func() { err = canceledOr(ctx, err) }()
+	if h.files == nil {
+		return errNoFiles
+	}
 	id := j.spec.serverID
 	if h.serverGone(ctx, id) { // a step of its own: the server may be deleted meanwhile
 		return errServerDeleted
@@ -59,7 +63,7 @@ func (h *Handler) prune(ctx context.Context, j *job) error {
 	if err != nil {
 		return err
 	}
-	_, err = h.waitService(ctx, j, id, sj.ID)
+	_, err = h.waitService(ctx, j, id, sj.ID, false)
 	return err
 }
 

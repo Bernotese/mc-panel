@@ -45,6 +45,8 @@ const (
 	codeInternal    = "internal"
 
 	msgCanceled = "the job was canceled (the panel shut down or the server was deleted)"
+	msgStalled  = "the backup made no progress for 10 minutes"
+	msgInternal = "internal error (details are in the panel log)"
 )
 
 // errServerDeleted ends a job whose server was deleted while the job waited or between two
@@ -106,5 +108,14 @@ func jobErrorOf(err error) (code, msg string) {
 	case errors.Is(err, agentapi.ErrUnavailable), errors.Is(err, agentapi.ErrDockerUnavailable):
 		return codeAgent, "the agent is not reachable"
 	}
-	return codeInternal, err.Error()
+	return codeInternal, msgInternal // the error itself may name host paths; the queue logs it
+}
+
+// canceledOr returns ctx's error when ctx ended and err is set: a step that failed because the
+// panel shut down (or the job was dropped) is a cancel, not an RCON, agent or service error.
+func canceledOr(ctx context.Context, err error) error {
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
