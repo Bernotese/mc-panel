@@ -102,7 +102,7 @@ func tarToZip(ctx context.Context, r io.Reader, w io.Writer, lim config.FilesLim
 			break
 		}
 		seen++
-		nameBytes += int64(len(hdr.Name))
+		nameBytes += int64(len(strings.TrimSuffix(hdr.Name, "/"))) // as the writer counts (backupBudget.name)
 		switch {
 		case seen > lim.MaxBackupEntries:
 			return fmt.Errorf("%w: the snapshot has more than %d entries", filesapi.ErrTooLarge, lim.MaxBackupEntries)

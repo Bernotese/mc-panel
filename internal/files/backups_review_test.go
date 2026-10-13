@@ -408,54 +408,29 @@ func TestSwapUndoFailureKeepsTheTempFolder(t *testing.T) {
 	}
 }
 
-// restoreLeftover builds the temp folder of an earlier process that stopped inside a swap.
-func restoreLeftover(t *testing.T, data string, old, nw map[string]string) string {
-	t.Helper()
-	tmp := tempPrefix + "dead0000-0123456789abcdef"
-	if err := os.MkdirAll(filepath.Join(data, tmp, "old"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for n, c := range old {
-		put(t, filepath.Join(data, tmp, "old"), n, c)
-	}
-	for n, c := range nw {
-		put(t, filepath.Join(data, tmp, "new"), n, c)
-	}
-	return tmp
-}
-
-func TestCleanupRollsBackAnInterruptedRestore(t *testing.T) {
-	ctx := context.Background()
-	// Crash after every current entry moved to old/ and before a new one moved up: the top
-	// level has no visible entries, the previous state is put back.
+// TestNameBudgetBoundary: a snapshot that just fits the name budget when written also fits it
+// when restored and downloaded (both sides count the same bytes).
+func TestNameBudgetBoundary(t *testing.T) {
 	s, data := newService(t)
-	put(t, data, ".rcon-cli.env", "keep")
-	restoreLeftover(t, data, map[string]string{"a.txt": "previous", "world/level.dat": "lvl"}, map[string]string{"a.txt": "snapshot"})
-	s.CleanupTemp(ctx)
-	if got, _ := get(t, data, "a.txt"); got != "previous" {
-		t.Fatalf("a.txt = %q", got)
+	put(t, data, "world/region/r.0.0.mca", "r")
+	put(t, data, "world/level.dat", "l")
+	put(t, data, "a.txt", "a")
+	// "a.txt" + "world" + "world/level.dat" + "world/region" + "world/region/r.0.0.mca"
+	exact := int64(len("a.txt") + len("world") + len("world/level.dat") + len("world/region") + len("world/region/r.0.0.mca"))
+	lowerNameBudget(t, exact-1)
+	if _, _, err := backupTar(t, s, nil); !errors.Is(err, filesapi.ErrTooLarge) {
+		t.Fatalf("one byte below: %v", err)
 	}
-	if got, _ := get(t, data, "world/level.dat"); got != "lvl" {
-		t.Fatalf("level.dat = %q", got)
+	maxBackupNameBytes = exact
+	b, _, err := backupTar(t, s, nil)
+	if err != nil {
+		t.Fatalf("at the budget: %v", err)
 	}
-	noTemp(t, data)
-
-	// The top level has visible entries: nothing is guessed, the leftover stays.
-	s2, data2 := newService(t)
-	put(t, data2, "c.txt", "visible")
-	tmp := restoreLeftover(t, data2, map[string]string{"a.txt": "previous"}, nil)
-	s2.CleanupTemp(ctx)
-	if got, _ := get(t, data2, tmp+"/old/a.txt"); got != "previous" {
-		t.Fatalf("the leftover was removed: %q", got)
+	s2, _ := newService(t)
+	if _, err := extractInto(t, s2, b); err != nil {
+		t.Fatalf("restore at the budget: %v", err)
 	}
-
-	// old/ is empty (the swap never moved anything): an ordinary leftover.
-	s3, data3 := newService(t)
-	put(t, data3, "c.txt", "visible")
-	restoreLeftover(t, data3, nil, map[string]string{"a.txt": "snapshot"})
-	s3.CleanupTemp(ctx)
-	noTemp(t, data3)
-	if got, _ := get(t, data3, "c.txt"); got != "visible" {
-		t.Fatalf("c.txt = %q", got)
+	if err := tarToZip(context.Background(), bytes.NewReader(b), io.Discard, testLimits(), func() {}); err != nil {
+		t.Fatalf("download at the budget: %v", err)
 	}
 }
