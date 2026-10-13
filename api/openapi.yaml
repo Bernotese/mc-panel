@@ -1564,7 +1564,7 @@ components:
         cpu_percent: { type: number }
     Server:
       type: object
-      required: [id, name, permissions, address, instance, status]
+      required: [id, name, permissions, address, instance, status, down_alerts]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
@@ -1572,6 +1572,7 @@ components:
         address: { type: [string, 'null'], description: '<name>.<base_domain>; null without base domain' }
         instance: { anyOf: [{ $ref: '#/components/schemas/InstanceConfig' }, { type: 'null' }] }
         status: { $ref: '#/components/schemas/ServerStatus' }
+        down_alerts: { type: [boolean, 'null'], description: 'Down/crash-loop alerts for this server (TP5); admins only, null for other users' }
     CreateServerRequest:
       type: object
       additionalProperties: false

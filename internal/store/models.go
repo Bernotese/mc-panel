@@ -8,6 +8,14 @@ import (
 	"database/sql"
 )
 
+type AlertState struct {
+	Key          string
+	Firing       int64
+	Since        int64
+	LastNotified int64
+	Detail       string
+}
+
 type AuditLog struct {
 	ID        int64
 	Ts        int64
@@ -103,6 +111,43 @@ type LoginAttempt struct {
 	Country   string
 }
 
+type Metrics1h struct {
+	Series  int64
+	Metric  string
+	At      int64
+	Avg     float64
+	Min     float64
+	Max     float64
+	Samples int64
+}
+
+type Metrics5m struct {
+	Series  int64
+	Metric  string
+	At      int64
+	Avg     float64
+	Min     float64
+	Max     float64
+	Samples int64
+}
+
+type MetricsRaw struct {
+	Series int64
+	Metric string
+	At     int64
+	Value  float64
+}
+
+type MonitoringSetting struct {
+	ID             int64
+	DiskMinPercent int64
+	DiskMinBytes   int64
+	DownAfterMin   int64
+	CrashRestarts  int64
+	CrashWindowMin int64
+	UpdatedAt      int64
+}
+
 type Notifier struct {
 	ID        int64
 	Kind      string
@@ -145,6 +190,11 @@ type Server struct {
 	ID        int64
 	Name      string
 	CreatedAt int64
+}
+
+type ServerAlert struct {
+	ServerID   int64
+	DownAlerts int64
 }
 
 type ServerID struct {

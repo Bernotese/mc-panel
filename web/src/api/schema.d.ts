@@ -1570,6 +1570,8 @@ export interface components {
             address: string | null;
             instance: components["schemas"]["InstanceConfig"] | null;
             status: components["schemas"]["ServerStatus"];
+            /** @description Down/crash-loop alerts for this server (TP5); admins only, null for other users */
+            down_alerts: boolean | null;
         };
         CreateServerRequest: {
             name: string;
