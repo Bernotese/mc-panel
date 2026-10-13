@@ -116,18 +116,30 @@ func (a *alerter) Evaluate(ctx context.Context, s Snapshot) {
 	if now.IsZero() {
 		now = a.clock.Now()
 	}
-	if s.Agent && s.Docker {
+	serversKnown := s.Agent && s.Docker
+	if serversKnown {
 		if err := a.evalServers(ctx, now, set, s.Servers); err != nil {
 			a.log.ErrorContext(ctx, "monitoring: evaluate server alerts", "err", err)
 		}
 	}
 	a.evalDisk(ctx, now, set, s.Host)
-	a.remind(ctx, now)
+	gated := map[int64]bool{}
+	for _, srv := range s.Servers {
+		if srv.Gated {
+			gated[srv.ID] = true
+		}
+	}
+	a.remind(ctx, now, serversKnown, gated)
 }
 
 // evalServers applies the server rules. A server deleted while the pass ran is still in the
 // snapshot but no longer in the database (its alert_state rows went with it): it is treated
 // like a server missing from the pass, so it neither fires nor leaves state behind.
+//
+// Remaining race: a server deleted between RbacListServers and the alert_state write below can
+// still fire once and leave an orphaned row. The next pass no longer lists the server, so
+// forgetMissing drops the row and the memory state; server IDs are never reused (server_ids),
+// so the orphan can never be attributed to a new server.
 func (a *alerter) evalServers(ctx context.Context, now time.Time, set alertSettings, samples []ServerSample) error {
 	off, err := a.downAlertsOff(ctx)
 	if err != nil {
@@ -222,14 +234,18 @@ func (a *alerter) evalDown(ctx context.Context, now time.Time, set alertSettings
 		}
 		return
 	}
+	if srv.StartedAt > 0 && now.Sub(started) < startGrace {
+		// every (re)start opens a new grace period: the count starts again afterwards, also for a
+		// start without ping that is not yet noPingStable old
+		delete(a.downSince, srv.ID)
+		return
+	}
+	// Known limit: an image pull or container recreation that takes longer than down_after_min
+	// counts as down (the container is missing meanwhile). A later agent operation state could
+	// act as a gate like restore and extract.
 	down := !running || srv.Up != nil && !*srv.Up // restarting and exited count as down
 	if !down {
 		return // running without ping, started less than noPingStable ago
-	}
-	if srv.StartedAt > 0 && now.Sub(started) < startGrace {
-		// every (re)start opens a new grace period: the count starts again afterwards
-		delete(a.downSince, srv.ID)
-		return
 	}
 	if _, crashing := a.firing[alertKey(alertCrashLoop, srv.ID)]; crashing {
 		delete(a.downSince, srv.ID) // a crash loop is already reported: no extra "down" (V5)
@@ -299,13 +315,18 @@ func (a *alerter) evalDisk(ctx context.Context, now time.Time, set alertSettings
 }
 
 // remind repeats every alert that has been firing for remindEvery since its last message.
-func (a *alerter) remind(ctx context.Context, now time.Time) {
+// Server alerts are only repeated in passes that know the servers (agent and Docker answered)
+// and not while the server is gated; host alerts always.
+func (a *alerter) remind(ctx context.Context, now time.Time, serversKnown bool, gated map[int64]bool) {
 	for _, key := range slices.Sorted(maps.Keys(a.firing)) {
 		st := a.firing[key]
 		if now.Sub(st.lastNotified) < remindEvery {
 			continue
 		}
 		kind, id := parseKey(key)
+		if id != 0 && (!serversKnown || gated[id]) {
+			continue
+		}
 		ev := notify.Event{Type: kindEvent[kind], Message: fmt.Sprintf("Active since %s. %s", st.since.UTC().Format(time.RFC3339), st.detail)}
 		switch kind {
 		case alertServerDown:

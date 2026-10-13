@@ -521,3 +521,51 @@ func TestPassWithDeletedServerLeavesNoState(t *testing.T) {
 		t.Fatalf("memory state left: down %v restarts %v names %v", e.a.downSince, e.a.restarts, e.a.names)
 	}
 }
+
+// A start without ping (not yet noPingStable old) is a new grace period: the outage before it
+// does not count towards the next one.
+func TestStartWithoutPingResetsDownCount(t *testing.T) {
+	e := newAlertEnv(t)
+	id := e.server("survival")
+	e.pass(0, aExited(aSample(id, "survival")))
+	e.pass(time.Minute, aExited(aSample(id, "survival")))
+	back := aSample(id, "survival") // Up nil: no ping configured
+	back.StartedAt = alertT0.Add(2 * time.Minute).UnixMilli()
+	e.pass(2*time.Minute, back)
+	e.pass(3*time.Minute, back) // running for 1 min: neither reachable nor down
+	for m := 4; m <= 6; m++ {
+		e.pass(time.Duration(m)*time.Minute, aExited(aSample(id, "survival")))
+	}
+	aWantEvents(t, e.events()) // the count starts at minute 4
+	e.pass(7*time.Minute, aExited(aSample(id, "survival")))
+	aWantEvents(t, e.events(), notify.EventServerDown)
+}
+
+// Server reminders need a pass that knows the servers and an ungated server; host reminders
+// are always sent.
+func TestServerRemindersNeedKnownUngatedServers(t *testing.T) {
+	e := newAlertEnv(t)
+	id := e.server("survival")
+	free, total := aGib, 100*aGib
+	host := HostSample{DiskFree: &free, DiskTotal: &total}
+	for m := 0; m <= 3; m++ {
+		e.a.Evaluate(context.Background(), Snapshot{At: alertT0.Add(time.Duration(m) * time.Minute), Agent: true, Docker: true,
+			Servers: []ServerSample{aExited(aSample(id, "survival"))}, Host: host})
+	}
+	aWantEvents(t, e.events(), notify.EventHostDiskLow, notify.EventServerDown)
+
+	day := 24 * time.Hour
+	e.a.Evaluate(context.Background(), Snapshot{At: alertT0.Add(day + 3*time.Minute), Host: host}) // no agent
+	aWantEvents(t, e.events(), notify.EventHostDiskLow, notify.EventServerDown, notify.EventHostDiskLow)
+
+	gated := aExited(aSample(id, "survival"))
+	gated.Gated = true
+	e.pass(day+4*time.Minute, gated)
+	aWantEvents(t, e.events(), notify.EventHostDiskLow, notify.EventServerDown, notify.EventHostDiskLow)
+
+	e.pass(day+5*time.Minute, aExited(aSample(id, "survival")))
+	aWantEvents(t, e.events(), notify.EventHostDiskLow, notify.EventServerDown, notify.EventHostDiskLow, notify.EventServerDown)
+	if ev := e.notes.Events[3]; !strings.HasPrefix(ev.Title, "Server still down") {
+		t.Fatalf("reminder = %+v", ev)
+	}
+}
