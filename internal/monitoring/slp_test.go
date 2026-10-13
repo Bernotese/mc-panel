@@ -125,10 +125,8 @@ func TestSLPPingRejectsHostileAnswers(t *testing.T) {
 		"truncated":       {raw: appendVarInt(nil, 100)},
 		"not json":        {raw: cStatusPacket(`nope`)},
 		"json bomb":       {raw: cStatusPacket(deep)},
-		"negative online": {raw: cStatusPacket(`{"players":{"max":20,"online":-1}}`)},
-		"huge max":        {raw: cStatusPacket(`{"players":{"max":100001,"online":1}}`)},
-		"string online":   {raw: cStatusPacket(`{"players":{"max":20,"online":"3"}}`)},
-		"float online":    {raw: cStatusPacket(`{"players":{"max":20,"online":2.5}}`)},
+		"top-level array": {raw: cStatusPacket(`[]`)},
+		"top-level null":  {raw: cStatusPacket(`null`)},
 		"closed":          {drop: true},
 	}
 	for name, a := range cases {
@@ -137,6 +135,39 @@ func TestSLPPingRejectsHostileAnswers(t *testing.T) {
 			ps.set("a.example.com", a)
 			if _, err := slpPing(context.Background(), ps.addr(), "a.example.com"); !errors.Is(err, errSLP) {
 				t.Fatalf("err = %v, want errSLP", err)
+			}
+		})
+	}
+}
+
+// Valid JSON with odd fields is still an answer (up = 1); the odd values are nil or skipped.
+func TestSLPPingToleratesOddFields(t *testing.T) {
+	cases := []struct {
+		name, json  string
+		online, max *int
+		names       string
+	}{
+		{"whole float", `{"players":{"max":20.0,"online":5.0}}`, cIntp(5), cIntp(20), ""},
+		{"negative max", `{"players":{"max":-1,"online":3}}`, cIntp(3), nil, ""},
+		{"huge max", `{"players":{"max":100001,"online":1}}`, cIntp(1), nil, ""},
+		{"fraction", `{"players":{"max":20,"online":2.5}}`, nil, cIntp(20), ""},
+		{"string online", `{"players":{"max":20,"online":"3"}}`, nil, cIntp(20), ""},
+		{"null online", `{"players":{"max":20,"online":null}}`, nil, cIntp(20), ""},
+		{"name as number", `{"players":{"max":20,"online":2,"sample":[{"name":42},{"name":"Bob"},"x",null]}}`, cIntp(2), cIntp(20), "Bob"},
+		{"sample as object", `{"players":{"max":20,"online":2,"sample":{"name":"Alice"}}}`, cIntp(2), cIntp(20), ""},
+		{"players as string", `{"players":"many"}`, nil, nil, ""},
+	}
+	eq := func(a, b *int) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ps := newPingServer(t)
+			ps.set("a.example.com", pingAnswer{json: c.json})
+			res, err := slpPing(context.Background(), ps.addr(), "a.example.com")
+			if err != nil {
+				t.Fatalf("err = %v, valid JSON must count as an answer", err)
+			}
+			if !eq(res.Online, c.online) || !eq(res.Max, c.max) || strings.Join(res.Names, ",") != c.names {
+				t.Fatalf("res = %v/%v %v", res.Online, res.Max, res.Names)
 			}
 		})
 	}
