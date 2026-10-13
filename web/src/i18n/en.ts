@@ -167,6 +167,16 @@ export const en: Messages = {
       backups: 'Backups',
     },
   },
+  charts: {
+    show_table: 'Show as table',
+    hide_table: 'Hide table',
+    time: 'Time',
+    no_data: 'No data in this period.',
+    summary: '{{label}}: currently {{current}}, minimum {{min}}, maximum {{max}}',
+    summary_empty: '{{label}}: no data',
+    band: '{{value}} ({{min}} – {{max}})',
+    keyboard_hint: 'Use the arrow keys to step through the values, Esc closes the readout.',
+  },
   dashboard: {
     title: 'Servers',
     description: 'Your Minecraft servers at a glance.',

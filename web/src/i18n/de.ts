@@ -165,6 +165,16 @@ export const de = {
       backups: 'Backups',
     },
   },
+  charts: {
+    show_table: 'Als Tabelle anzeigen',
+    hide_table: 'Tabelle ausblenden',
+    time: 'Zeit',
+    no_data: 'Keine Daten in diesem Zeitraum.',
+    summary: '{{label}}: aktuell {{current}}, Minimum {{min}}, Maximum {{max}}',
+    summary_empty: '{{label}}: keine Daten',
+    band: '{{value}} ({{min}} – {{max}})',
+    keyboard_hint: 'Mit den Pfeiltasten durch die Werte gehen, Esc schließt die Anzeige.',
+  },
   dashboard: {
     title: 'Server',
     description: 'Deine Minecraft-Server auf einen Blick.',
