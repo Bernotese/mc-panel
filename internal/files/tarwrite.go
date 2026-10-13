@@ -61,19 +61,26 @@ func skipCause(err error) error {
 	return nil
 }
 
+// maxBackupDepth bounds the folder depth of a backup: the walk holds one open folder per level
+// (an *os.Root each). Deeper folders are left out with their content (counted in skipped).
+const maxBackupDepth = 256
+
 // writeBackupTar streams the data directory of root as a PAX tar (spec 4 §4.2): a sorted
-// depth-first walk that never follows a symlink (readDirSorted opens folders with openDir,
-// files go through openRegular), only folders and regular files, names relative to the root,
-// no owners, and the end entry backupEndName last. Symlinks, special files, hidden entries,
-// names that filesapi.CleanPath refuses, entries that cannot be read and entries that vanish
-// or are swapped during the walk are left out (onSkip, with skipCause of the error). Only the
-// data directory itself must be readable. server.properties at the top level is redacted.
-// hook (tests) runs before each entry; onEntry reports each written entry with its content
-// size.
+// depth-first walk that never follows a symlink, only folders and regular files, names relative
+// to the root, no owners, and the end entry backupEndName last. The walk keeps an *os.Root on
+// every folder on its way down (openSubdir: Lstat, open, os.SameFile), so every entry costs a
+// constant number of system calls however deep it lies, and a folder swapped for a symlink
+// after it was opened does not change what is read (the open handle stays on the real folder).
+// Symlinks, special files, hidden entries, names that filesapi.CleanPath refuses, entries that
+// cannot be read, folders deeper than maxBackupDepth and entries that vanish or are swapped
+// during the walk are left out (onSkip, with skipCause of the error). Only the data directory
+// itself must be readable. server.properties at the top level is redacted. hook (tests) runs
+// before each entry; onEntry reports each written entry with its content size.
 func writeBackupTar(ctx context.Context, root *os.Root, w io.Writer, lim config.FilesLimits, hook func(string), onEntry func(int64), onSkip func(p string, cause error)) error {
 	tw := tar.NewWriter(w)
 	b := &backupBudget{lim: lim}
-	if err := walkBackup(ctx, root, "", tw, b, hook, onEntry, onSkip); err != nil {
+	wk := &backupWalk{ctx: ctx, tw: tw, b: b, hook: hook, onEntry: onEntry, onSkip: onSkip}
+	if err := wk.folder(root, "", 0); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -85,71 +92,112 @@ func writeBackupTar(ctx context.Context, root *os.Root, w io.Writer, lim config.
 	return tw.Close()
 }
 
-func walkBackup(ctx context.Context, root *os.Root, dir string, tw *tar.Writer, b *backupBudget, hook func(string), onEntry func(int64), onSkip func(string, error)) error {
-	entries, err := readDirSorted(root, dir, b)
+// backupWalk is the state of one writeBackupTar.
+type backupWalk struct {
+	ctx     context.Context
+	tw      *tar.Writer
+	b       *backupBudget
+	hook    func(string)
+	onEntry func(int64)
+	onSkip  func(string, error)
+}
+
+// folder writes the entries of folder d (path dir, at the given depth; the data directory is 0).
+func (wk *backupWalk) folder(d *os.Root, dir string, depth int) error {
+	names, err := readDirSorted(d, dir, wk.b)
 	if err != nil {
-		if dir != "" && (errors.Is(err, filesapi.ErrNotFound) || errors.Is(err, filesapi.ErrNotRegular) || errors.Is(err, fs.ErrPermission)) {
-			onSkip(dir, skipCause(err)) // the folder vanished, was swapped or cannot be read
+		if dir != "" && (errors.Is(err, filesapi.ErrNotFound) || errors.Is(err, fs.ErrPermission)) {
+			wk.onSkip(dir, skipCause(err)) // the folder cannot be read
 			return nil
 		}
 		return err
 	}
-	for _, name := range entries {
-		if err := ctx.Err(); err != nil {
+	for _, name := range names {
+		if err := wk.ctx.Err(); err != nil {
 			return err
 		}
 		p := filesapi.Join(dir, name)
-		if hook != nil {
-			hook(p)
+		if wk.hook != nil {
+			wk.hook(p)
 		}
 		if clean, cerr := filesapi.CleanPath(p); cerr != nil || clean != p || filesapi.IsHidden(p) {
-			onSkip(p, nil)
+			wk.onSkip(p, nil)
 			continue
 		}
-		// lstat, not root.Lstat: a parent folder swapped for a symlink (even one that stays
-		// inside the root) is refused, never followed.
-		info, err := lstat(root, p)
+		// One component relative to the open folder: nothing on the way can be a symlink.
+		info, err := d.Lstat(name)
 		if err != nil {
-			onSkip(p, skipCause(err)) // vanished or swapped meanwhile
+			wk.onSkip(p, skipCause(err)) // vanished meanwhile
 			continue
 		}
 		switch {
 		case info.IsDir():
-			if err := b.add(0); err != nil {
-				return err
+			if depth+1 > maxBackupDepth {
+				wk.onSkip(p, nil)
+				continue
 			}
-			if err := tw.WriteHeader(tarHeader(p+"/", tar.TypeDir, info, 0)); err != nil {
-				return err
+			sub, err := openSubdir(d, name, info)
+			if err != nil {
+				wk.onSkip(p, skipCause(err)) // swapped meanwhile or cannot be read
+				continue
 			}
-			onEntry(0)
-			if err := walkBackup(ctx, root, p, tw, b, hook, onEntry, onSkip); err != nil {
+			err = wk.dirEntry(sub, p, info, depth+1)
+			_ = sub.Close()
+			if err != nil {
 				return err
 			}
 		case info.Mode().IsRegular():
-			n, err := writeTarFile(tw, root, p, b)
+			n, err := writeTarFile(wk.tw, d, name, p, info, wk.b)
 			if errors.Is(err, errSkipEntry) {
-				onSkip(p, skipCause(err))
+				wk.onSkip(p, skipCause(err))
 				continue
 			}
 			if err != nil {
 				return err
 			}
-			onEntry(n)
+			wk.onEntry(n)
 		default:
-			onSkip(p, nil) // symlink, FIFO, device, socket
+			wk.onSkip(p, nil) // symlink, FIFO, device, socket
 		}
 	}
 	return nil
 }
 
-// readDirSorted reads all names of a real folder (openDir: no symlink, no FIFO) and closes it
-// before returning, so a deep walk keeps one folder open at a time. Every name counts against
-// the budget (b.name) as soon as it is read, so a folder with too many names ends the walk with
-// ErrTooLarge before the next batch.
-func readDirSorted(root *os.Root, dir string, b *backupBudget) ([]string, error) {
-	f, _, err := openDir(root, dir)
+// dirEntry writes the header of folder p and then its content.
+func (wk *backupWalk) dirEntry(sub *os.Root, p string, info fs.FileInfo, depth int) error {
+	if err := wk.b.add(0); err != nil {
+		return err
+	}
+	if err := wk.tw.WriteHeader(tarHeader(p+"/", tar.TypeDir, info, 0)); err != nil {
+		return err
+	}
+	wk.onEntry(0)
+	return wk.folder(sub, p, depth)
+}
+
+// openSubdir opens folder name of d as an *os.Root, accepting it only if it is the very folder
+// the Lstat fi describes (os.Root.OpenRoot would follow a symlink swapped in meanwhile as long as
+// it stays inside the root; os.SameFile refuses it).
+func openSubdir(d *os.Root, name string, fi fs.FileInfo) (*os.Root, error) {
+	sub, err := d.OpenRoot(name)
 	if err != nil {
-		return nil, err
+		return nil, fsErr(err)
+	}
+	st, err := sub.Stat(".")
+	if err != nil || !st.IsDir() || !os.SameFile(fi, st) {
+		_ = sub.Close()
+		return nil, fmt.Errorf("%w: %s changed while it was opened", filesapi.ErrNotRegular, name)
+	}
+	return sub, nil
+}
+
+// readDirSorted reads all names of the open folder d (path dir) and closes the listing before
+// returning. Every name counts against the budget (b.name) as soon as it is read, so a folder
+// with too many names ends the walk with ErrTooLarge before the next batch.
+func readDirSorted(d *os.Root, dir string, b *backupBudget) ([]string, error) {
+	f, err := d.Open(".")
+	if err != nil {
+		return nil, fsErr(err)
 	}
 	defer f.Close()
 	var names []string
@@ -172,13 +220,13 @@ func readDirSorted(root *os.Root, dir string, b *backupBudget) ([]string, error)
 	return names, nil
 }
 
-// writeTarFile writes one regular file: exactly the size its Stat after the open reported
-// (a file that shrinks is padded with zeros, one that grows is cut), server.properties
-// redacted. A file that vanished, was swapped, cannot be read or cannot be redacted is
-// errSkipEntry (wrapping the cause when it cannot be read).
-func writeTarFile(tw *tar.Writer, root *os.Root, p string, b *backupBudget) (int64, error) {
+// writeTarFile writes regular file name of folder d (path p, Lstat info): exactly the size its
+// Stat after the open reported (a file that shrinks is padded with zeros, one that grows is
+// cut), server.properties redacted. A file that vanished, was swapped, cannot be read or cannot
+// be redacted is errSkipEntry (wrapping the cause when it cannot be read).
+func writeTarFile(tw *tar.Writer, d *os.Root, name, p string, info fs.FileInfo, b *backupBudget) (int64, error) {
 	if isServerProps(p) {
-		data, st, err := readSmall(root, p, b.lim.MaxTextBytes)
+		data, st, err := readSmall(d, name, b.lim.MaxTextBytes)
 		if errors.Is(err, filesapi.ErrNotFound) || errors.Is(err, filesapi.ErrNotRegular) || errors.Is(err, filesapi.ErrTooLarge) {
 			return 0, errSkipEntry
 		}
@@ -198,7 +246,7 @@ func writeTarFile(tw *tar.Writer, root *os.Root, p string, b *backupBudget) (int
 		_, err = io.WriteString(tw, red)
 		return int64(len(red)), err
 	}
-	f, st, err := openRegular(root, p, os.O_RDONLY)
+	f, st, err := openChecked(d, name, info, os.O_RDONLY)
 	if errors.Is(err, filesapi.ErrNotFound) || errors.Is(err, filesapi.ErrNotRegular) {
 		return 0, errSkipEntry
 	}

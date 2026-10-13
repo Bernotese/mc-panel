@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 )
@@ -245,9 +246,10 @@ func TestBackupTarLimits(t *testing.T) {
 	}
 }
 
-// TestBackupTarSwappedFolderInsideRootIsSkipped: a parent folder swapped for a symlink that
-// stays inside the data directory is not followed either (lstat checks every component).
-func TestBackupTarSwappedFolderInsideRootIsSkipped(t *testing.T) {
+// TestBackupTarSwappedFolderInsideRootIsNotFollowed: a parent folder swapped for a symlink
+// that stays inside the data directory is not followed either: the walk keeps reading the folder
+// it opened (now world-old), never the symlink's target.
+func TestBackupTarSwappedFolderInsideRootIsNotFollowed(t *testing.T) {
 	s, data := newService(t)
 	put(t, data, "world/a/inner.txt", "inner")
 	put(t, data, "zz/a/other.txt", "other")
@@ -261,16 +263,81 @@ func TestBackupTarSwappedFolderInsideRootIsSkipped(t *testing.T) {
 			}
 		}
 	}
-	b, skipped, err := backupTar(t, s, hook)
+	b, _, err := backupTar(t, s, hook)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, it := range readTar(t, b) {
-		if strings.HasPrefix(it.name, "world/a") {
+		if strings.HasPrefix(it.name, "world/") && (strings.Contains(it.name, "other") || it.body == "other") {
 			t.Fatalf("followed the swapped-in symlink: %+v", it)
 		}
 	}
-	if skipped == 0 {
-		t.Fatal("the swapped folder was not counted as skipped")
+}
+
+// TestBackupDeepChain: every entry costs O(1) system calls (folder handles), folders deeper than
+// maxBackupDepth are left out.
+func TestBackupDeepChain(t *testing.T) {
+	s, data := newService(t, func(c *Config) { c.Limits.MaxBackupEntries = 10_000 })
+	parts := make([]string, maxBackupDepth+40)
+	for i := range parts {
+		parts[i] = "d"
+	}
+	if err := os.MkdirAll(filepath.Join(data, filepath.Join(parts...)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	put(t, data, filepath.ToSlash(filepath.Join(parts[:maxBackupDepth]...))+"/f.txt", "deep")
+	start := time.Now()
+	b, skipped, err := backupTar(t, s, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := readTar(t, b)
+	dirs, files := 0, 0
+	for _, it := range items {
+		if strings.HasSuffix(it.name, "/") {
+			dirs++
+		} else {
+			files++
+		}
+	}
+	if dirs != maxBackupDepth || files != 1 || skipped != 1 {
+		t.Fatalf("%d folders, %d files, %d skipped; want %d, 1, 1", dirs, files, skipped, maxBackupDepth)
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Fatalf("took %v", d)
+	}
+}
+
+// TestBackupTarSwappedMiddleFolder: a folder in the middle of the path is swapped for a symlink
+// to the neighbour instance while the walk is below it; the walk stays on the folder it opened.
+func TestBackupTarSwappedMiddleFolder(t *testing.T) {
+	s, data := newService(t)
+	other := filepath.Join(s.cfg.InstancesDir, "instances", "2")
+	put(t, other, "c/secret.txt", "other server")
+	put(t, data, "a/b/c/x.txt", "mine")
+	put(t, data, "a/b/c/y.txt", "mine too")
+	hook := func(p string) {
+		if p == "a/b/c/y.txt" {
+			if err := os.Rename(filepath.Join(data, "a/b"), filepath.Join(data, "a/b-old")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(other, filepath.Join(data, "a/b")); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	b, _, err := backupTar(t, s, hook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, it := range readTar(t, b) {
+		if strings.Contains(it.body, "other server") || strings.Contains(it.name, "secret") {
+			t.Fatalf("the neighbour's data is in the backup: %+v", it)
+		}
+		got[it.name] = it.body
+	}
+	if got["a/b/c/y.txt"] != "mine too" {
+		t.Fatalf("entries = %v", got)
 	}
 }

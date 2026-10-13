@@ -33,7 +33,7 @@ func TestBackupSkipsUnreadableEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(tarNames(readTar(t, b)), ","); got != "a.txt,closed/" || skipped != 2 {
+	if got := strings.Join(tarNames(readTar(t, b)), ","); got != "a.txt" || skipped != 2 {
 		t.Fatalf("entries %s, skipped %d", got, skipped)
 	}
 
