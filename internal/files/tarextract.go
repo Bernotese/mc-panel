@@ -17,14 +17,15 @@ import (
 
 // extractBackupTar unpacks a backup stream into folder dir of root (a fresh temp folder of the
 // restore, spec 4 §4.3) with the rules of the zip extract (spec 3b §4.2): clean relative names
-// only, no hidden names, only folders and regular files, no duplicates, sizes re-counted
-// against max_backup_bytes / max_backup_entries, files 0644 (0755 with an execute bit), folders
-// 0755, times from the stream. Every violation is ErrInvalid or ErrTooLarge; the caller removes
-// the temp folder.
+// only, no hidden names, only folders and regular files, no duplicate files (O_EXCL; a folder
+// that appears twice is harmless), sizes re-counted against max_backup_bytes /
+// max_backup_entries and the names against maxBackupNameBytes, files 0644 (0755 with an execute
+// bit), folders 0755, times from the stream. The stream must end with the end entry
+// (backupEndName) and its counts must match, otherwise the snapshot is incomplete. Every
+// violation is ErrInvalid or ErrTooLarge; the caller removes the temp folder.
 func extractBackupTar(ctx context.Context, root *os.Root, dir string, r io.Reader, lim config.FilesLimits, res *reservation, onEntry func(int64)) error {
 	tr := tar.NewReader(r)
-	seen := map[string]bool{}
-	var entries, total int64
+	var entries, total, nameBytes int64
 	type dirTime struct {
 		path string
 		t    time.Time
@@ -42,14 +43,27 @@ func extractBackupTar(ctx context.Context, root *os.Root, dir string, r io.Reade
 		}
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			break
+			return errIncomplete // no end entry: the stream was cut
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return errIncomplete
 		}
 		if err != nil {
 			return fmt.Errorf("%w: the backup stream is damaged: %w", filesapi.ErrInvalid, err)
 		}
+		if hdr.Name == backupEndName {
+			if err := checkBackupEnd(tr, hdr, backupEnd{Entries: entries, Bytes: total}); err != nil {
+				return err
+			}
+			break
+		}
 		entries++
-		if entries > lim.MaxBackupEntries {
+		nameBytes += int64(len(hdr.Name))
+		switch {
+		case entries > lim.MaxBackupEntries:
 			return fmt.Errorf("%w: the snapshot has more than %d entries", filesapi.ErrTooLarge, lim.MaxBackupEntries)
+		case nameBytes > maxBackupNameBytes:
+			return fmt.Errorf("%w: the names in the snapshot take more than %d bytes", filesapi.ErrTooLarge, maxBackupNameBytes)
 		}
 		name := strings.TrimSuffix(hdr.Name, "/")
 		clean, cerr := filesapi.CleanPath(name)
@@ -60,10 +74,7 @@ func extractBackupTar(ctx context.Context, root *os.Root, dir string, r io.Reade
 			return fmt.Errorf("%w: entry %q is not a clean relative path", filesapi.ErrInvalid, hdr.Name)
 		case filesapi.IsHidden(clean):
 			return fmt.Errorf("%w: entry %q uses a reserved name", filesapi.ErrInvalid, hdr.Name)
-		case seen[clean]:
-			return fmt.Errorf("%w: entry %q appears twice", filesapi.ErrInvalid, hdr.Name)
 		}
-		seen[clean] = true
 		target := dir + "/" + clean
 		switch hdr.Typeflag {
 		case tar.TypeDir:
@@ -93,10 +104,10 @@ func extractBackupTar(ctx context.Context, root *os.Root, dir string, r io.Reade
 			switch {
 			case errors.Is(err, errShuttingDown):
 				return ctx.Err()
+			case errors.Is(err, io.ErrUnexpectedEOF), err == nil && n != hdr.Size:
+				return errIncomplete // the stream ends inside this entry
 			case err != nil:
 				return invalid(hdr.Name, err)
-			case n != hdr.Size:
-				return fmt.Errorf("%w: entry %q is cut off", filesapi.ErrInvalid, hdr.Name)
 			case cerr != nil:
 				return fsErr(cerr)
 			}

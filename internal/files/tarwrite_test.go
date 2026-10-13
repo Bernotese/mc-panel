@@ -21,14 +21,27 @@ type tarItem struct {
 	mode int64
 }
 
+// readTar reads a backup stream; it checks that the stream ends with the end entry and that
+// its counts match, and returns the entries before it.
 func readTar(t *testing.T, b []byte) []tarItem {
 	t.Helper()
 	tr := tar.NewReader(bytes.NewReader(b))
 	var out []tarItem
+	var counted backupEnd
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
+			t.Fatalf("the stream has no end entry: %v", tarNames(out))
+		}
+		if err == nil && h.Name == backupEndName {
+			if err := checkBackupEnd(tr, h, counted); err != nil {
+				t.Fatalf("end entry: %v", err)
+			}
 			return out
+		}
+		if err == nil {
+			counted.Entries++
+			counted.Bytes += h.Size
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -59,7 +72,7 @@ func backupTar(t *testing.T, s *Service, hook func(string)) ([]byte, int, error)
 	defer root.Close()
 	var buf bytes.Buffer
 	skipped := 0
-	err = writeBackupTar(context.Background(), root, &buf, s.cfg.Limits, hook, func(int64) {}, func() { skipped++ })
+	err = writeBackupTar(context.Background(), root, &buf, s.cfg.Limits, hook, func(int64) {}, func(string, error) { skipped++ })
 	return buf.Bytes(), skipped, err
 }
 

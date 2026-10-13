@@ -1,7 +1,6 @@
 package files
 
 import (
-	"bufio"
 	"bytes"
 	"cmp"
 	"context"
@@ -12,6 +11,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
@@ -117,15 +117,25 @@ func (s *Service) runBackup(ctx context.Context, root *os.Root, req filesapi.Cre
 	if req.Note != "" {
 		args = append(args, "--tag", noteTag(req.Note))
 	}
-	out := &limitedBuffer{max: resticStdoutMax}
+	// restic prints a status line every second for the whole run: only the summary is kept.
+	out := &summaryWriter{}
 	// TZ: restic stores the snapshot time in this zone; forget buckets days/weeks/months by it.
 	p, err := s.runner.Start(ctx, resticCmd{Args: args, Env: append(s.resticEnv(req.ID), tzEnv(req.Timezone)...), Stdin: true, Stdout: out})
 	if err != nil {
-		return fmt.Errorf("start restic: %w", err)
+		return s.startErr(err)
 	}
 	stdin := p.Stdin()
 	werr := writeBackupTar(ctx, root, stdin, s.cfg.Limits, s.backupHook,
-		func(n int64) { s.jobs.progress(req.ID, n) }, func() { s.jobs.skip(req.ID) })
+		func(n int64) { s.jobs.progress(req.ID, n) },
+		func(rel string, cause error) {
+			s.jobs.skip(req.ID)
+			if cause != nil {
+				s.log.Warn("files: backup left out an entry it cannot read", "id", req.ID, "path", rel, "err", s.publicMessage(cause.Error()))
+			}
+		})
+	if werr == nil && ctx.Err() != nil {
+		werr = ctx.Err() // cancelled after the last entry: restic must still not see the end
+	}
 	if werr != nil {
 		p.Kill() // first: restic must not see the end of the stream
 		perr := p.Wait()
@@ -147,7 +157,7 @@ func (s *Service) runBackup(ctx context.Context, root *os.Root, req filesapi.Cre
 	if err := p.Wait(); err != nil {
 		return s.ctxErr(ctx, s.resticErr("backup", err))
 	}
-	sid, err := backupSnapshotID(out.Bytes())
+	sid, err := backupSnapshotID(out.Summary())
 	if err != nil {
 		return err
 	}
@@ -163,23 +173,79 @@ func (s *Service) ctxErr(ctx context.Context, err error) error {
 	return err
 }
 
-// backupSnapshotID reads the summary line of `restic backup --json`.
-func backupSnapshotID(out []byte) (string, error) {
-	sc := bufio.NewScanner(bytes.NewReader(out))
-	sc.Buffer(make([]byte, 64<<10), 1<<20)
-	for sc.Scan() {
-		var m struct {
-			MessageType string `json:"message_type"`
-			SnapshotID  string `json:"snapshot_id"`
-		}
-		if json.Unmarshal(sc.Bytes(), &m) == nil && m.MessageType == "summary" {
-			if !filesapi.ValidSnapshotID(m.SnapshotID) {
-				return "", errors.New("restic finished without a snapshot")
-			}
-			return m.SnapshotID, nil
-		}
+// backupSnapshotID reads the summary line of `restic backup --json` (summaryWriter.Summary).
+func backupSnapshotID(summary []byte) (string, error) {
+	if summary == nil {
+		return "", errors.New("restic printed no backup summary")
 	}
-	return "", errors.New("restic printed no backup summary")
+	var m struct {
+		SnapshotID string `json:"snapshot_id"`
+	}
+	if err := json.Unmarshal(summary, &m); err != nil || !filesapi.ValidSnapshotID(m.SnapshotID) {
+		return "", errors.New("restic finished without a snapshot")
+	}
+	return m.SnapshotID, nil
+}
+
+// maxResticLine bounds one line of restic's JSON output that summaryWriter looks at; longer
+// lines are dropped (status and summary lines are a few hundred bytes).
+const maxResticLine = 1 << 20
+
+// summaryWriter takes the stdout of `restic backup --json` line by line and keeps only the
+// last summary line, so a backup that runs for days holds no growing buffer.
+type summaryWriter struct {
+	mu       sync.Mutex
+	line     []byte // the current, unfinished line
+	overlong bool   // the current line exceeded maxResticLine
+	summary  []byte
+}
+
+func (w *summaryWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n := len(p)
+	for len(p) > 0 {
+		i := bytes.IndexByte(p, '\n')
+		if i < 0 {
+			w.add(p)
+			break
+		}
+		w.add(p[:i])
+		w.endLine()
+		p = p[i+1:]
+	}
+	return n, nil
+}
+
+func (w *summaryWriter) add(b []byte) {
+	if w.overlong {
+		return
+	}
+	if len(w.line)+len(b) > maxResticLine {
+		w.overlong, w.line = true, w.line[:0]
+		return
+	}
+	w.line = append(w.line, b...)
+}
+
+func (w *summaryWriter) endLine() {
+	var m struct {
+		MessageType string `json:"message_type"`
+	}
+	if !w.overlong && json.Unmarshal(w.line, &m) == nil && m.MessageType == "summary" {
+		w.summary = bytes.Clone(w.line)
+	}
+	w.line, w.overlong = w.line[:0], false
+}
+
+// Summary returns the last summary line (also one without a final newline), or nil.
+func (w *summaryWriter) Summary() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.line) > 0 {
+		w.endLine()
+	}
+	return w.summary
 }
 
 // resticSnapshot is one element of `restic snapshots --json`.
