@@ -23,9 +23,14 @@ func aInsertRaw(t *testing.T, db *sql.DB, series int64, metric string, at time.T
 
 func aInsertAgg(t *testing.T, db *sql.DB, table string, series int64, metric string, at time.Time, avg, lo, hi float64) {
 	t.Helper()
-	if _, err := db.ExecContext(context.Background(), //nolint:gosec // G202: table is one of two fixed test names
-		`INSERT INTO `+table+` (series, metric, at, avg, min, max, samples) VALUES (?, ?, ?, ?, ?, ?, 10)`,
-		series, metric, at.UnixMilli(), avg, lo, hi); err != nil {
+	query := map[string]string{
+		"metrics_5m": `INSERT INTO metrics_5m (series, metric, at, avg, min, max, samples) VALUES (?, ?, ?, ?, ?, ?, 10)`,
+		"metrics_1h": `INSERT INTO metrics_1h (series, metric, at, avg, min, max, samples) VALUES (?, ?, ?, ?, ?, ?, 10)`,
+	}[table]
+	if query == "" {
+		t.Fatalf("unknown table %q", table)
+	}
+	if _, err := db.ExecContext(context.Background(), query, series, metric, at.UnixMilli(), avg, lo, hi); err != nil {
 		t.Fatal(err)
 	}
 }
