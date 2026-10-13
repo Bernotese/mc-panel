@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"regexp"
 	"time"
@@ -113,38 +114,49 @@ func readStatus(br *bufio.Reader) ([]byte, error) {
 	return p[len(p)-int(sl):], nil
 }
 
+// parseStatus reads only what it needs and is lenient below the top level: a server that
+// answers with valid JSON is up, even if players, online, max or a sample entry has an
+// unexpected type or range (that value is then nil or skipped). Only JSON that is broken or
+// not an object at the top level is an error.
 func parseStatus(payload []byte) (slpResult, error) {
-	var st struct {
-		Players *struct {
-			Max    *int `json:"max"`
-			Online *int `json:"online"`
-			Sample []struct {
-				Name string `json:"name"`
-			} `json:"sample"`
-		} `json:"players"`
-	}
-	if err := json.Unmarshal(payload, &st); err != nil {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &top); err != nil {
 		return slpResult{}, fmt.Errorf("%w: json: %w", errSLP, err)
 	}
+	if top == nil {
+		return slpResult{}, fmt.Errorf("%w: json: not an object", errSLP)
+	}
 	var res slpResult
-	if st.Players == nil {
+	var players map[string]json.RawMessage
+	if json.Unmarshal(top["players"], &players) != nil {
 		return res, nil
 	}
-	for _, v := range []*int{st.Players.Max, st.Players.Online} {
-		if v != nil && (*v < 0 || *v > slpMaxCount) {
-			return slpResult{}, fmt.Errorf("%w: player count %d out of range", errSLP, *v)
-		}
+	res.Online, res.Max = slpCount(players["online"]), slpCount(players["max"])
+	var sample []json.RawMessage
+	if json.Unmarshal(players["sample"], &sample) != nil {
+		return res, nil
 	}
-	res.Online, res.Max = st.Players.Online, st.Players.Max
-	for _, s := range st.Players.Sample {
+	for _, raw := range sample {
 		if len(res.Names) == slpMaxNames {
 			break
 		}
-		if slpNameRe.MatchString(s.Name) {
-			res.Names = append(res.Names, s.Name)
+		var entry map[string]json.RawMessage
+		var name string
+		if json.Unmarshal(raw, &entry) == nil && json.Unmarshal(entry["name"], &name) == nil && slpNameRe.MatchString(name) {
+			res.Names = append(res.Names, name)
 		}
 	}
 	return res, nil
+}
+
+// slpCount accepts a whole number (also written as 5.0) in 0–slpMaxCount; anything else is nil.
+func slpCount(raw json.RawMessage) *int {
+	var f float64
+	if len(raw) == 0 || string(raw) == "null" || json.Unmarshal(raw, &f) != nil || f < 0 || f > slpMaxCount || f != math.Trunc(f) {
+		return nil
+	}
+	n := int(f)
+	return &n
 }
 
 func appendVarInt(b []byte, v int32) []byte {
