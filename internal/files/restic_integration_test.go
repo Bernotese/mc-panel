@@ -273,3 +273,90 @@ func TestResticErrorsHideHostPaths(t *testing.T) {
 	}
 	noTemp(t, data)
 }
+
+// TestResticCanceledBackupLeavesNoSnapshot (review): a backup cancelled while restic reads its
+// stdin (SIGINT) and one killed before the end of the stream (too large) create no snapshot.
+func TestResticCanceledBackupLeavesNoSnapshot(t *testing.T) {
+	ctx := context.Background()
+	s, data := newRealService(t)
+	put(t, data, "a.txt", "a")
+	put(t, data, "b.txt", "b")
+	entered, proceed := make(chan struct{}), make(chan struct{})
+	s.backupHook = func(p string) {
+		if p == "b.txt" {
+			close(entered)
+			<-proceed
+		}
+	}
+	if _, err := s.CreateBackup(ctx, filesapi.CreateBackupRequest{ID: 1, Kind: filesapi.SnapshotManual}); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	if err := s.CancelJob(1); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond) // restic gets its SIGINT while the stream is still open
+	close(proceed)
+	if job := waitJob(t, s, 1); job.State != jobFailed || job.Error != "the job was canceled" {
+		t.Fatalf("canceled job = %+v", job)
+	}
+	if list, err := s.Snapshots(ctx, 1); err != nil || len(list) != 0 {
+		t.Fatalf("snapshots after a cancel = %+v %v", list, err)
+	}
+
+	s.backupHook = nil
+	s.cfg.Limits.MaxBackupBytes = 1 << 10
+	put(t, data, "big.bin", strings.Repeat("x", 4<<10))
+	if _, err := s.CreateBackup(ctx, filesapi.CreateBackupRequest{ID: 1, Kind: filesapi.SnapshotManual}); err != nil {
+		t.Fatal(err)
+	}
+	if job := waitJob(t, s, 1); job.State != jobFailed || job.Code != filesapi.CodeTooLarge {
+		t.Fatalf("too large job = %+v", job)
+	}
+	if list, err := s.Snapshots(ctx, 1); err != nil || len(list) != 0 {
+		t.Fatalf("snapshots after a killed backup = %+v %v", list, err)
+	}
+}
+
+// TestResticIncompleteSnapshotIsRefused (review): a snapshot of a stream without the end entry
+// (restic committed a cut stdin) is neither restored nor downloaded as a valid zip.
+func TestResticIncompleteSnapshotIsRefused(t *testing.T) {
+	bin := realRestic(t)
+	ctx := context.Background()
+	s, data := newRealService(t)
+	put(t, data, "a.txt", "current")
+	backupNow(t, s, filesapi.SnapshotManual, "") // creates the repository and its key
+	cut := makeTarNoEnd(t, reg("a.txt", "old"))
+	cmd := exec.CommandContext(t.Context(), bin, "--no-cache", "--json", "backup", "--stdin", "--stdin-filename", "data.tar", //nolint:gosec // G204: test binary from MCPANEL_TEST_RESTIC
+		"--host", "mcpanel", "--tag", "mcpanel", "--tag", "kind=manual")
+	cmd.Env = s.resticEnv(1)
+	cmd.Stdin = bytes.NewReader(cut)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("restic backup: %v", err)
+	}
+	w := &summaryWriter{}
+	_, _ = w.Write(out)
+	sid, err := backupSnapshotID(w.Summary())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RestoreBackup(ctx, filesapi.SnapshotRequest{ID: 1, Snapshot: sid}); err != nil {
+		t.Fatal(err)
+	}
+	job := waitJob(t, s, 1)
+	if job.State != jobFailed || job.Code != filesapi.CodeInvalid || !strings.Contains(job.Error, "the snapshot is incomplete") {
+		t.Fatalf("job = %+v", job)
+	}
+	if got, _ := get(t, data, "a.txt"); got != "current" {
+		t.Fatalf("a.txt = %q", got)
+	}
+	noTemp(t, data)
+	var zipBuf bytes.Buffer
+	if err := s.DownloadBackup(ctx, 1, sid, func() {}, &zipBuf); err == nil || !strings.Contains(err.Error(), "incomplete") {
+		t.Fatalf("download = %v", err)
+	}
+	if _, err := zip.NewReader(bytes.NewReader(zipBuf.Bytes()), int64(zipBuf.Len())); err == nil {
+		t.Fatal("the incomplete snapshot downloaded as a valid zip")
+	}
+}
