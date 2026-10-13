@@ -87,6 +87,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, geteuid f
 
 	svc := files.New(files.Config{InstancesDir: cfg.InstancesDir, Limits: cfg.Limits, Dev: cfg.Dev, Clock: clock.Real{}, Log: log,
 		ResticBinary: cfg.ResticBinary})
+	// Spec 4 §4.3: a restore swap that an earlier run did not finish is finished or undone from
+	// the restore journal before anything else touches the data directories (cheap: only the
+	// journal entries are looked at).
+	if n := svc.RecoverRestores(); n > 0 {
+		log.Warn("files: recovered interrupted restores", "count", n)
+	}
 	// Spec 4 §3.2: one restic check at start; without restic the backup endpoints answer 503
 	// and everything else works.
 	svc.InitBackups(ctx)
