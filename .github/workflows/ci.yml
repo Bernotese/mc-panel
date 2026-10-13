@@ -368,7 +368,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.instances == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 70
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -393,6 +393,13 @@ jobs:
       - name: Install restic
         run: sudo bash scripts/install-restic.sh
 
+      # The monitoring part drops the panel's pings with an nftables rule (server.down).
+      - name: Install nftables
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends nftables
+          sudo nft --version
+
       # Real agent + Docker + itzg Paper server: routing by hostname, hardening, console
       # (rcon, log stream, player lists, planted player files), automatic restart after a
       # crash, removal; the files service as mcpanel-mc (peer UID, os.Root limits,
@@ -401,7 +408,11 @@ jobs:
       # ViaBackwards with its dependency ViaVersion from Hangar (real upstreams, one retry),
       # the server loads them after a restart, a disabled jar is not loaded; and backups with
       # a real restic: manual backup with save-off/save-on, restore with sudo, zip download,
-      # a schedule firing in the panel's time zone, pin, delete, purge with the server.
+      # a schedule firing in the panel's time zone, pin, delete, purge with the server; and
+      # monitoring: history, live and host values, RCON noise, the alerts server.down/recovered
+      # (pings dropped by nftables; none with the switch off), server.crash_loop and
+      # host.disk_low/ok delivered to the notify dispatcher (ntfy to https://ntfy.invalid,
+      # checked in the panel log), audit.
       - name: Instance acceptance
         run: sudo scripts/ci-instances.sh bin/agent bin/files bin/panel
 

@@ -214,6 +214,8 @@ data_dir = "/var/lib/mc-panel"
 agent_socket = "/run/mc-panel/agent.sock"
 files_socket = "/run/mc-panel-files/files.sock"
 trusted_proxies = ["127.0.0.1/32"]
+monitoring_ping_addr = "127.0.0.1:25565"
+instances_dir = "/srv/mc-panel"
 EOF
   sudo chown root:mcpanel /etc/mc-panel/panel.toml
   sudo chmod 0640 /etc/mc-panel/panel.toml
