@@ -22,8 +22,8 @@ import (
 
 const msgStalled = "the backup made no progress for 10 minutes"
 
-// socketErr is an agent client error as it really looks: it names the socket path.
-var socketErr = fmt.Errorf("%w: Post \"http://agent/v1/instances/rcon\": dial unix /run/mcpanel/agent.sock: connect: no such file or directory", agentapi.ErrUnavailable)
+// errSocket is an agent client error as it really looks: it names the socket path.
+var errSocket = fmt.Errorf("%w: Post \"http://agent/v1/instances/rcon\": dial unix /run/mcpanel/agent.sock: connect: no such file or directory", agentapi.ErrUnavailable)
 
 func setStall(e *env, on bool) {
 	e.files.mu.Lock()
@@ -187,7 +187,7 @@ func TestJobErrorsHideHostPaths(t *testing.T) {
 		e := newEnv(t)
 		id := e.instance("survival")
 		e.agent.set(id, agentapi.StateRunning)
-		e.console.failNext("save-off", socketErr)
+		e.console.failNext("save-off", errSocket)
 		e.create(id, map[string]any{})
 		j := e.waitJob(id)
 		if code(j) != "agent_unavailable" || j.Error != "the agent is not reachable" {
@@ -215,7 +215,7 @@ func TestJobErrorsHideHostPaths(t *testing.T) {
 		e := newEnv(t)
 		id := e.instance("survival")
 		e.agent.set(id, agentapi.StateRunning)
-		e.agent.powerErr = socketErr
+		e.agent.powerErr = errSocket
 		snap := e.files.add(id, filesapi.SnapshotManual, false, "")
 		e.restore(id, snap)
 		j := e.waitJob(id)
@@ -413,7 +413,7 @@ func TestAgentGoneFailsRestore(t *testing.T) {
 	e := newEnv(t)
 	id := e.instance("survival")
 	snap := e.files.add(id, filesapi.SnapshotManual, false, "")
-	e.agent.err = socketErr
+	e.agent.err = errSocket
 	e.restore(id, snap)
 	j := e.waitJob(id)
 	if code(j) != "agent_unavailable" {
