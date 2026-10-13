@@ -67,4 +67,14 @@ describe('UserPermissionsPage', () => {
     expect(await screen.findByText('Administratoren haben automatisch alle Rechte auf allen Servern.')).toBeInTheDocument()
     expect(screen.queryByText(/erlaubt Code-Ausführung/)).not.toBeInTheDocument()
   })
+
+  it('warns before granting backup access', async () => {
+    const user = userEvent.setup()
+    await renderWithProviders(<UserPermissionsPage userId={2} />, { me: loginAs('admin', { sudo: true }) })
+    await screen.findByRole('heading', { name: 'Rechte von alice' })
+    expect(screen.queryByText(/„Backups“ erlaubt/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: 'survival: Backups' }))
+    expect(screen.getByText(/„Backups“ erlaubt, alle Dateien des Servers herunterzuladen/)).toBeInTheDocument()
+    expect(screen.queryByText(/„Dateien“ erlaubt/)).not.toBeInTheDocument()
+  })
 })
