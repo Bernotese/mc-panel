@@ -1318,10 +1318,22 @@ jcheck "$po/rsnap.json" "restic tags, host and path" '
   [(s["id"], sorted(s["tags"]), s["hostname"], s["paths"] in (["/data.tar"], ["data.tar"])) for s in d]
   == [(a[0], sorted(["mcpanel", "kind=manual", a[1]]), "mcpanel", True)]' "$snap_manual" "$note_tag"
 brestic dump "$snap_manual" /data.tar >"$po/snap.tar" || fail "restic dump"
+# Every backup stream ends with the service's own entry .mcpanel-end (entries and content bytes
+# before it, JSON); restore and download accept a snapshot only with it. It is checked here and
+# is the only hidden name allowed in the tar.
 python3 -I -c '
-import sys, tarfile
+import json, sys, tarfile
 t = tarfile.open(sys.argv[1])
-members = {m.name.removeprefix("./").rstrip("/"): m for m in t.getmembers()}
+all_members = t.getmembers()
+end = all_members[-1] if all_members else None
+if end is None or end.name != ".mcpanel-end" or not end.isfile():
+    sys.exit("snapshot tar: last entry %r, want the end entry .mcpanel-end" % (end.name if end else None,))
+counts = json.loads(t.extractfile(end).read())
+body = all_members[:-1]
+if counts != {"entries": len(body), "bytes": sum(m.size for m in body if m.isfile())}:
+    sys.exit("snapshot tar: end entry %r does not match %d entries, %d bytes"
+             % (counts, len(body), sum(m.size for m in body if m.isfile())))
+members = {m.name.removeprefix("./").rstrip("/"): m for m in body}
 special = sorted(n for n, m in members.items() if not (m.isfile() or m.isdir()))
 escape = sorted(n for n in members if n.startswith("/") or n == ".." or n.startswith("../") or "/../" in n)
 missing = [n for n in ("world/ci-backup-marker.txt", "server.properties") if n not in members]
@@ -1332,9 +1344,9 @@ pw = [l for l in t.extractfile(members["server.properties"]).read().decode().spl
 marker = t.extractfile(members["world/ci-backup-marker.txt"]).read().decode()
 if pw != ["rcon.password=********"] or marker != "ci backup marker: before\n":
     sys.exit("snapshot tar: password lines %r, marker %r" % (pw, marker))
-print("snapshot tar: %d entries" % len(members))' "$po/snap.tar" || fail "snapshot content"
+print("snapshot tar: %d entries and the end entry" % len(members))' "$po/snap.tar" || fail "snapshot content"
 rm -f "$po/snap.tar"
-echo "OK: repo and key (mcpanel-mc, 0600), tags mcpanel/kind=manual/note, tar without symlink, hidden files or RCON password"
+echo "OK: repo and key (mcpanel-mc, 0600), tags mcpanel/kind=manual/note, tar without symlink, hidden files or RCON password, end entry matches"
 
 echo "== backups: restore with sudo (start refused meanwhile, pre-restore snapshot, data back, server runs again)"
 printf 'ci backup marker: after\n' >"$pmarker"
