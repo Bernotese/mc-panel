@@ -116,10 +116,10 @@ func TestFailAnswersWithoutHostPaths(t *testing.T) {
 
 func TestJobErrorHasNoHostPath(t *testing.T) {
 	s, data := newService(t)
-	if err := s.jobs.acquire(1); err != nil {
+	if err := s.jobs.acquire(1, filesapi.JobExtract); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.jobs.start(1, "w.zip", "w", archivePlan{}, s.clock.Now, func(context.Context) error {
+	_, err := s.jobs.start(1, jobSpec{kind: filesapi.JobExtract, path: "w.zip", dest: "w"}, s.clock.Now, func(context.Context) error {
 		return fmt.Errorf("%w: write %s/.mcpanel-tmp-x/region/r.mca: no space left on device", filesapi.ErrInsufficientStorage, data)
 	})
 	if err != nil {

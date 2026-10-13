@@ -181,6 +181,7 @@ func TestStatusFor(t *testing.T) {
 		{filesapi.ErrBusy, http.StatusTooManyRequests, filesapi.CodeBusy},
 		{filesapi.ErrInvalid, http.StatusBadRequest, filesapi.CodeInvalid},
 		{filesapi.ErrHashMismatch, http.StatusBadRequest, filesapi.CodeHashMismatch},
+		{filesapi.ErrBackupsUnavailable, http.StatusServiceUnavailable, filesapi.CodeUnavailable},
 		{errors.New("boom"), http.StatusInternalServerError, ""},
 	} {
 		status, code := statusFor(fsErr(c.err))
