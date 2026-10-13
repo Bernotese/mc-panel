@@ -357,8 +357,8 @@ func TestPassForgetsDeletedServers(t *testing.T) {
 	e.c.pass(context.Background())
 	e.c.mu.Lock()
 	defer e.c.mu.Unlock()
-	if len(e.c.detectors)+len(e.c.tps)+len(e.c.lastTPS)+len(e.c.watch) != 0 {
-		t.Fatalf("state of a deleted server kept: %v %v %v %v", e.c.detectors, e.c.tps, e.c.lastTPS, e.c.watch)
+	if len(e.c.detectors)+len(e.c.tps)+len(e.c.lastTPS)+len(e.c.watch)+len(e.c.rconLocks) != 0 {
+		t.Fatalf("state of a deleted server kept: %v %v %v %v %v", e.c.detectors, e.c.tps, e.c.lastTPS, e.c.watch, e.c.rconLocks)
 	}
 }
 
@@ -489,5 +489,96 @@ func TestRunStopsWithTheContext(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after cancel")
+	}
+}
+
+// cPeakConsole counts RCON calls in flight over all servers (fakeConsole counts per server).
+type cPeakConsole struct {
+	agentapi.ConsoleClient
+	cur, peak atomic.Int32
+}
+
+func (c *cPeakConsole) Rcon(ctx context.Context, id int64, cmd string) (string, error) {
+	n := c.cur.Add(1)
+	defer c.cur.Add(-1)
+	for {
+		p := c.peak.Load()
+		if n <= p || c.peak.CompareAndSwap(p, n) {
+			break
+		}
+	}
+	return c.ConsoleClient.Rcon(ctx, id, cmd)
+}
+
+func TestPassResourcesNeedStats(t *testing.T) {
+	e := newCEnv(t)
+	e.agent.set(agentapi.InstanceStatus{ID: e.ids["survival"], State: agentapi.StateRunning, Revision: 1}) // no stats
+	sv := e.sample(e.c.pass(context.Background()), "survival")
+	if sv.CPUPercent != nil || sv.MemoryBytes != nil || sv.MemoryLimit != nil {
+		t.Fatalf("no stats must mean unknown, not 0: %v %v %v", sv.CPUPercent, sv.MemoryBytes, sv.MemoryLimit)
+	}
+	if n := cCountMetric(t, e.db, e.ids["survival"], MetricCPU); n != 0 {
+		t.Fatalf("cpu rows = %d", n)
+	}
+}
+
+func TestPassTPSToleratesAnEarlyTick(t *testing.T) {
+	e := newCEnv(t)
+	e.c.pass(context.Background())
+	e.clk.Advance(30 * time.Second)
+	e.c.pass(context.Background())
+	e.clk.Advance(28 * time.Second) // the ticker fired 2 s early
+	e.c.pass(context.Background())
+	if n := e.rconCalls(); n != 2 {
+		t.Fatalf("rcon calls = %d, a pass 58 s after the last question must ask again", n)
+	}
+}
+
+func TestRCONLimitIsSharedByPassAndLive(t *testing.T) {
+	e := newCEnv(t)
+	inst := []agentapi.InstanceStatus{{ID: e.ids["survival"], State: agentapi.StateRunning, Revision: 1}}
+	for i := range 7 {
+		id := cAddInstance(t, e.db, fmt.Sprintf("srv-%d", i), "vanilla")
+		inst = append(inst, agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, Revision: 1})
+		e.console.reply(id, cmdTickQuery, cTickAnswer, nil)
+	}
+	e.agent.set(inst...)
+	e.c.ping = func(context.Context, string, string) (slpResult, error) { return slpResult{}, nil }
+	pc := &cPeakConsole{ConsoleClient: e.console}
+	e.c.d.Console = pc
+	e.console.setDelay(40 * time.Millisecond)
+	e.c.pass(context.Background())
+	e.clk.Advance(tpsEvery)
+	for _, st := range inst {
+		e.c.Watch(st.ID)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); e.c.pass(context.Background()) }()
+	go func() { defer wg.Done(); e.c.liveTick(context.Background()) }()
+	wg.Wait()
+	if p := pc.peak.Load(); p > maxParallelRcon || p < 2 {
+		t.Fatalf("peak RCON calls in flight = %d, want 2..%d", p, maxParallelRcon)
+	}
+	if n := e.rconCalls(); n != 3*len(inst) {
+		t.Fatalf("rcon calls = %d, want %d", n, 3*len(inst))
+	}
+}
+
+func TestNewRevisionDropsTheCarriedTPS(t *testing.T) {
+	e := newCEnv(t)
+	id := e.ids["survival"]
+	e.c.pass(context.Background()) // reading of revision 1
+	e.agent.set(agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, Revision: 2, MemoryLimitBytes: 1 << 30})
+	e.clk.Advance(30 * time.Second) // not due: only the carry could fill TPS
+	if sv := e.sample(e.c.pass(context.Background()), "survival"); sv.TPS != nil {
+		t.Fatalf("a new container must not inherit the old reading: %v", *sv.TPS)
+	}
+	if sv, _ := e.c.Live(id); sv.TPS != nil {
+		t.Fatal("Live must not show the old container's reading")
+	}
+	e.clk.Advance(30 * time.Second)
+	if sv := e.sample(e.c.pass(context.Background()), "survival"); sv.TPS == nil || sv.Revision != 2 {
+		t.Fatalf("revision 2 asked again: tps=%v rev=%d", sv.TPS, sv.Revision)
 	}
 }

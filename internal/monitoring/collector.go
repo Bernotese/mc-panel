@@ -17,7 +17,9 @@ const (
 	rconTimeout     = 10 * time.Second
 	liveFresh       = 10 * time.Second // a 5-s live reading counts as current this long
 	tpsCarry        = 90 * time.Second // the last valid TPS/MSPT is carried this long (V5)
-	maxParallelRcon = 4                // TPS questions to different servers at once
+	maxParallelRcon = 4                // RCON calls at once, pass and live loop together
+	// tpsDue tolerates ticker jitter: a pass a little early after tpsEvery still asks.
+	tpsDue = tpsEvery - collectEvery/2
 )
 
 // collector runs the passes of spec §3.1. All state is guarded by mu; RCON per server is
@@ -38,12 +40,14 @@ type collector struct {
 	tps       map[int64]tpsSample // last valid reading (pass or live)
 	watch     map[int64]time.Time // live mode until
 	rconLocks map[int64]*sync.Mutex
+	rconSem   chan struct{} // shared by pass and live loop, taken before the server lock
 }
 
 type tpsSample struct {
-	at     time.Time
-	r      tpsReading
-	source string
+	at       time.Time
+	r        tpsReading
+	source   string
+	revision int64 // container revision of the reading: a new container does not inherit it
 }
 
 type instRow struct {
@@ -65,11 +69,13 @@ func newCollector(d Deps) *collector {
 		every: collectEvery, rconTimeout: rconTimeout,
 		known: map[int64]instRow{}, detectors: map[int64]*tpsDetector{}, lastTPS: map[int64]time.Time{},
 		tps: map[int64]tpsSample{}, watch: map[int64]time.Time{}, rconLocks: map[int64]*sync.Mutex{},
+		rconSem: make(chan struct{}, maxParallelRcon),
 	}
 }
 
 // Run passes every collectEvery (one right away) and runs the live loop; it returns when ctx
-// ends. Waits run on wall time; the clock only stamps the samples.
+// ends. The waits run on time.Ticker (clock.Clock only has Now); the clock stamps the samples
+// and drives the TPS and live-mode intervals.
 func (c *collector) Run(ctx context.Context, onPass func(context.Context, Snapshot)) {
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -140,7 +146,7 @@ func (c *collector) carryLocked(s *Snapshot, now time.Time) {
 		if sv.TPS != nil || sv.Up == nil || !*sv.Up {
 			continue
 		}
-		if t, ok := c.tps[sv.ID]; ok && !now.Before(t.at) && now.Sub(t.at) <= tpsCarry {
+		if t, ok := c.tps[sv.ID]; ok && t.revision == sv.Revision && !now.Before(t.at) && now.Sub(t.at) <= tpsCarry {
 			tps, mspt := t.r.TPS, t.r.MSPT
 			sv.TPS, sv.MSPT = &tps, &mspt
 		}
@@ -177,6 +183,8 @@ func (c *collector) servers(ctx context.Context, now time.Time) ([]ServerSample,
 	}
 	rows, err := c.listInstances(ctx)
 	if err != nil {
+		// Without the server list the pass cannot tell which samples belong to which server, so
+		// it reports Agent=false like a missing agent: B2 then evaluates no server alerts.
 		if ctx.Err() == nil {
 			c.log.ErrorContext(ctx, "monitoring: list instances", "err", err)
 		}
@@ -207,12 +215,12 @@ func (c *collector) servers(ctx context.Context, now time.Time) ([]ServerSample,
 			if st.Revision > 0 { // the running container's revision (label), not the desired one
 				sv.Revision = st.Revision
 			}
-			if st.State == agentapi.StateRunning {
+			// The agent sets the memory limit only when it got container stats; without them CPU
+			// and RAM are unknown, not 0. Known limit: the first sample after a start can report
+			// CPU 0 (Docker has no previous reading to diff against yet).
+			if st.State == agentapi.StateRunning && st.MemoryLimitBytes > 0 {
 				cpu, mem, lim := st.CPUPercent, st.MemoryBytes, st.MemoryLimitBytes
-				sv.CPUPercent, sv.MemoryBytes = &cpu, &mem
-				if lim > 0 {
-					sv.MemoryLimit = &lim
-				}
+				sv.CPUPercent, sv.MemoryBytes, sv.MemoryLimit = &cpu, &mem, &lim
 			}
 		}
 		out[i] = sv
@@ -234,8 +242,16 @@ func (c *collector) servers(ctx context.Context, now time.Time) ([]ServerSample,
 	return out, true, docker
 }
 
-// forgetLocked drops the state of deleted servers.
+// forgetLocked drops the state of deleted servers. An RCON lock is dropped only while free;
+// a deleted server is never asked again, so a caller that fetched the old lock just before
+// cannot race a new one.
 func (c *collector) forgetLocked(known map[int64]instRow) {
+	for id, l := range c.rconLocks {
+		if _, ok := known[id]; !ok && l.TryLock() {
+			delete(c.rconLocks, id)
+			l.Unlock()
+		}
+	}
 	for _, m := range []map[int64]time.Time{c.lastTPS, c.watch} {
 		for id := range m {
 			if _, ok := known[id]; !ok {
@@ -299,14 +315,14 @@ func (c *collector) tpsAll(ctx context.Context, rows []instRow, out []ServerSamp
 		if out[i].Up == nil || !*out[i].Up {
 			continue
 		}
-		if last, ok := c.lastTPS[r.id]; ok && now.Sub(last) < tpsEvery && !now.Before(last) {
+		if last, ok := c.lastTPS[r.id]; ok && now.Sub(last) < tpsDue && !now.Before(last) {
 			continue
 		}
 		c.lastTPS[r.id] = now
 		idx = append(idx, i)
 	}
 	c.mu.Unlock()
-	parallel(idx, maxParallelRcon, func(i int) {
+	parallel(idx, len(idx), func(i int) { // askTPS limits the RCON calls (rconSem)
 		if reading, ok := c.askTPS(ctx, rows[i].id, rows[i].typ, out[i].Revision); ok {
 			t, m := reading.TPS, reading.MSPT
 			out[i].TPS, out[i].MSPT = &t, &m
@@ -327,10 +343,18 @@ func (c *collector) lockFor(id int64) *sync.Mutex {
 
 // askTPS sends the detector's next command; a valid answer also feeds the live view. RCON
 // errors (timeout, server still starting) neither count for the detection nor are retried.
+// The semaphore (shared by pass and live loop) is taken before the server lock; a call that
+// waits for a busy server keeps its slot for at most one RCON deadline.
 func (c *collector) askTPS(ctx context.Context, id int64, typ string, revision int64) (tpsReading, bool) {
 	if c.d.Console == nil {
 		return tpsReading{}, false
 	}
+	select {
+	case c.rconSem <- struct{}{}:
+	case <-ctx.Done():
+		return tpsReading{}, false
+	}
+	defer func() { <-c.rconSem }()
 	lock := c.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
@@ -339,6 +363,9 @@ func (c *collector) askTPS(ctx context.Context, id int64, typ string, revision i
 	if !ok {
 		det = &tpsDetector{}
 		c.detectors[id] = det
+	}
+	if t, ok := c.tps[id]; ok && t.revision != revision {
+		delete(c.tps, id) // a new container: the old reading is not carried
 	}
 	cmd, ok := det.command(typ, revision)
 	c.mu.Unlock()
@@ -355,7 +382,7 @@ func (c *collector) askTPS(ctx context.Context, id int64, typ string, revision i
 	defer c.mu.Unlock()
 	reading, good := det.observe(cmd, out)
 	if good {
-		c.tps[id] = tpsSample{at: c.d.Clock.Now(), r: reading, source: det.source()}
+		c.tps[id] = tpsSample{at: c.d.Clock.Now(), r: reading, source: det.source(), revision: revision}
 	}
 	return reading, good
 }
@@ -392,7 +419,7 @@ func (c *collector) liveTick(ctx context.Context) {
 	for i := range jobs {
 		idx[i] = i
 	}
-	parallel(idx, maxParallelRcon, func(i int) { c.askTPS(ctx, jobs[i].r.id, jobs[i].r.typ, jobs[i].rev) })
+	parallel(idx, len(idx), func(i int) { c.askTPS(ctx, jobs[i].r.id, jobs[i].r.typ, jobs[i].rev) })
 }
 
 func findSample(s Snapshot, id int64) (ServerSample, bool) {
@@ -420,7 +447,7 @@ func (c *collector) Live(id int64) (ServerSample, bool) {
 	if !ok {
 		return ServerSample{}, false
 	}
-	if t, ok := c.tps[id]; ok && sv.Up != nil && *sv.Up {
+	if t, ok := c.tps[id]; ok && t.revision == sv.Revision && sv.Up != nil && *sv.Up {
 		if age := c.d.Clock.Now().Sub(t.at); age >= 0 && age <= liveFresh {
 			tps, mspt := t.r.TPS, t.r.MSPT
 			sv.TPS, sv.MSPT, sv.TPSSource = &tps, &mspt, t.source
