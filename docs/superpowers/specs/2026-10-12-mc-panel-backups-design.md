@@ -73,7 +73,7 @@ Browser ─/api/servers/{id}/backups/*─▶ panel: internal/backups
 ├── backups/                       mcpanel-mc 0700  (neu, vom agent angelegt)
 │   ├── repos/<id>/                restic-Repo des Servers
 │   ├── keys/<id>                  Repo-Passwort (32 Zufallsbytes, base64), 0600
-│   └── restore-journal/<id>       Journal eines laufenden Tauschs (§4.3), nur während des Tauschs
+│   └── restore-journal/<id>       Restore-Journal (§4.3): nur während des Tauschs oder bei `stuck`
 └── deleted/                       unverändert
 ```
 
@@ -150,7 +150,9 @@ Wie bisher feste Pfade, `DisallowUnknownFields`, Fehler `{error, code}`.
 1. Vorprüfung in der Anfrage: Snapshot gehört zum Repo; freier Platz auf `instances/<id>` ≥ `bytes` des Snapshots + `reserve_bytes` (sonst `507`).
 2. Temp-Ordner `instances/<id>/.mcpanel-tmp-<token>-<zufall>/new` per `root.Mkdir`; `restic dump` → tar-Leser → Entpacken mit den Regeln aus TP3b §4.2: Pfadregeln, keine verborgenen Namen, nur Ordner und reguläre Dateien (andere tar-Typen → Job `failed`), keine doppelten Namen, Bytes und Einträge neu gezählt gegen `max_backup_bytes`/`max_backup_entries`, Dateien 0644 (0755, wenn im tar ein Ausführbit gesetzt ist), Ordner 0755, umask 0027 des Dienstes wirkt zusätzlich, mtime aus dem tar. Fehler → Temp-Ordner löschen, Datenverzeichnis unverändert.
 3. Tausch der obersten Ebene (nur `rename` über das `os.Root`, kein Kopieren): alle sichtbaren Einträge des Datenverzeichnisses nach `<tmp>/old/`, dann alle Einträge aus `<tmp>/new/` nach oben, dann `<tmp>` rekursiv löschen. Verborgene Einträge (`.rcon-cli.*`, `.mcpanel-*`) bleiben an Ort und Stelle.
-4. Abbrechen (§4.5) wirkt nur bis zum Beginn des Tauschs; der Tausch selbst läuft ohne Abbruchpunkt durch. Vor dem ersten `rename` schreibt der Dienst ein Restore-Journal nach `backups/restore-journal/<id>` (außerhalb des Datenverzeichnisses, das der Container kontrolliert) und löscht es nach dem Tausch. Stirbt der Dienst mitten im Tausch, wertet er das Journal beim nächsten Start synchron aus, bevor er Anfragen annimmt: Der Tausch wird je nach Stand zurückgerollt (alter Stand wieder oben) oder zu Ende geführt, erst danach entfernt die Temp-Bereinigung (TP3b §3.3) den Rest. Der Pre-Restore-Snapshot des panels (§5.5) bleibt die Rückfallebene.
+4. Abbrechen (§4.5) wirkt nur bis zum Beginn des Tauschs; der Tausch selbst läuft ohne Abbruchpunkt durch. Nur während der Umbenennungen führt der Dienst ein Restore-Journal in `backups/restore-journal/<id>` (außerhalb des Datenverzeichnisses, das der Container kontrolliert; Inhalt: `<tmp>` und die Phase `old_moving`, `new_moving` oder `stuck`, jeweils atomar geschrieben). Stirbt der Dienst mitten im Tausch, schließt er die Umbenennungen beim nächsten Start synchron ab, bevor er Anfragen annimmt: bei `old_moving` zurück (der vorige Stand kommt aus `<tmp>/old` wieder nach oben), bei `new_moving` vorwärts (der Rest aus `<tmp>/new`; der Snapshot war vollständig geprüft). Danach verschwinden `<tmp>` (Temp-Bereinigung, TP3b §3.3) und der Journal-Eintrag. Ein Temp-Ordner ohne Journal-Eintrag ist ein gewöhnlicher Rest und wird nur gelöscht, nie zurückgerollt.
+   - **Phase `stuck`:** Scheitert der Tausch und auch der Rücktausch (oder die Wiederherstellung beim Start), bleibt `<tmp>` mit dem vorigen Stand in `old/` liegen, die Temp-Bereinigung lässt ihn in Ruhe, und der Eintrag bleibt mit Phase `stuck`. Neue Restores dieses Servers lehnt der Dienst ab, bis ein Betreiber den Fall gelöst hat (Runbook in `docs/dev/README.md`: Log lesen, `<tmp>` prüfen, Inhalte von Hand zurückverschieben, dann den Eintrag löschen). Server löschen mit `purge_backups` entfernt den Eintrag ebenfalls.
+   - Der Pre-Restore-Snapshot des panels (§5.5) bleibt die Rückfallebene.
 
 ### 4.4 Download
 
