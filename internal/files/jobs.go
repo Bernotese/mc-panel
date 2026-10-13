@@ -241,3 +241,35 @@ func (j *jobs) get(id int64) *filesapi.Job {
 
 // Job returns a copy of the last job (any kind) of server id, or nil.
 func (s *Service) Job(id int64) *filesapi.Job { return s.jobs.get(id) }
+
+// cancelJob cancels the running job of instance id (spec 4 §4.5): nothing running is fine; an
+// extract cannot be cancelled; a restore that started its swap is not interrupted any more.
+func (j *jobs) cancelJob(id int64) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	job := j.last[id]
+	switch {
+	case job == nil || job.State != jobRunning:
+		return nil
+	case job.Kind == filesapi.JobExtract:
+		return fmt.Errorf("%w: an extract job cannot be canceled", filesapi.ErrInvalid)
+	case j.committed[id]:
+		return nil
+	}
+	if c := j.cancels[id]; c != nil {
+		c()
+	}
+	return nil
+}
+
+// beginCommit marks the restore of instance id as swapping: from now on cancelJob has no
+// effect. false = it was cancelled (or the service shuts down) before.
+func (j *jobs) beginCommit(ctx context.Context, id int64) bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if ctx.Err() != nil {
+		return false
+	}
+	j.committed[id] = true
+	return true
+}

@@ -3,6 +3,7 @@ package files
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
@@ -61,3 +62,26 @@ func TestServerBackupsCreateAndList(t *testing.T) {
 		t.Fatalf("list without restic: %d %s", status, body)
 	}
 }
+
+func TestServerRestoreAndCancel(t *testing.T) {
+	s, data, f := newBackupService(t)
+	put(t, data, "a.txt", "now")
+	sid := snapshotOf(t, s, f, makeTar(t, reg("a.txt", "then")))
+	ts := startHTTP(t, NewServer(s, "test", discardLog()))
+	status, body := postJSON(t, ts, filesapi.PathBackupsRestore, filesapi.SnapshotRequest{ID: 1, Snapshot: sid})
+	if status != http.StatusAccepted {
+		t.Fatalf("restore: %d %s", status, body)
+	}
+	waitJob(t, s, 1)
+	if got, _ := get(t, data, "a.txt"); got != "then" {
+		t.Fatalf("a.txt = %q", got)
+	}
+	status, body = postJSON(t, ts, filesapi.PathBackupsRestore, filesapi.SnapshotRequest{ID: 1, Snapshot: strings.Repeat("b", 64)})
+	if status != http.StatusNotFound || errCode(t, body) != filesapi.CodeNotFound {
+		t.Fatalf("unknown snapshot: %d %s", status, body)
+	}
+	if status, body = postJSON(t, ts, filesapi.PathJobsCancel, filesapi.IDRequest{ID: 1}); status != http.StatusNoContent {
+		t.Fatalf("cancel without job: %d %s", status, body)
+	}
+}
+
