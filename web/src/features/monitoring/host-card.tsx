@@ -28,7 +28,19 @@ export function HostCard({ host }: { host: HostSnapshot }) {
         <CardContent className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div className="space-y-1">
             <p className="text-muted-foreground text-xs">{t('monitoring.host.cpu')}</p>
-            <p className="tabular-nums">{host.cpu_percent === null ? missing : t('monitoring.percent', { value: formatCpu(host.cpu_percent, fmt.locale) })}</p>
+            {host.cpu_percent !== null ? (
+              <>
+                <p className="tabular-nums">{t('monitoring.percent', { value: formatCpu(host.cpu_percent, fmt.locale) })}</p>
+                <Meter
+                  label={t('monitoring.host.cpu')}
+                  value={Math.min(100, Math.max(0, host.cpu_percent))}
+                  max={100}
+                  valueText={t('monitoring.percent', { value: formatCpu(host.cpu_percent, fmt.locale) })}
+                />
+              </>
+            ) : (
+              <p>{missing}</p>
+            )}
           </div>
           <div className="space-y-1">
             <p className="text-muted-foreground text-xs">{t('monitoring.host.load')}</p>

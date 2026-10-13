@@ -53,7 +53,7 @@ export function ServerMetrics({ server, metrics }: { server: Server; metrics: Ov
         />
       ) : null}
       {spark.length >= 2 ? (
-        <Sparkline points={spark} label={t('monitoring.sparkline', { current: spark[spark.length - 1][1], max: sparkMax })} />
+        <Sparkline points={spark} spanMs={3_600_000} label={t('monitoring.sparkline', { current: spark[spark.length - 1][1], max: sparkMax })} />
       ) : null}
       {metrics.alerts.length > 0 ? (
         <div className="flex flex-wrap gap-1">

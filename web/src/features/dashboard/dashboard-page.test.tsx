@@ -149,6 +149,8 @@ describe('DashboardPage', () => {
     expect(within(host).getByText('5 GiB frei von 100 GiB')).toBeInTheDocument()
     expect(within(host).getByText('Der freie Platz liegt unter der Alert-Schwelle.')).toBeInTheDocument()
     expect(within(host).getByRole('meter', { name: 'Platte' })).toHaveAttribute('aria-valuenow', String(95 * GIB))
+    expect(within(host).getByRole('meter', { name: 'CPU' })).toHaveAttribute('aria-valuenow', '23.4')
+    expect(within(host).getByText('0,52')).toBeInTheDocument()
     expect(within(host).getByRole('link', { name: 'Monitoring-Einstellungen' })).toHaveAttribute('href', '/settings')
   })
 
