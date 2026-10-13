@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next'
 import { PageHeader } from '@/components/page-header'
 import { Button } from '@/components/ui/button'
 import { useMe } from '@/features/auth/me'
+import { monitoringOverviewQueryOptions, OVERVIEW_POLL_MS } from '@/features/monitoring/api'
+import { HostCard } from '@/features/monitoring/host-card'
 import { serverSettingsQueryOptions, serversQueryOptions } from '@/features/servers/api'
 import { pollInterval } from '@/features/servers/status'
 import { errorMessage } from '@/lib/error-message'
@@ -19,6 +21,10 @@ export function DashboardPage() {
   // Only admins may read the instance settings; without a base domain no server can be created.
   const settings = useQuery({ ...serverSettingsQueryOptions, enabled: isAdmin })
   const baseDomainMissing = isAdmin && settings.data?.base_domain === null
+  // Monitoring values are an extra: a failed overview leaves the cards as they are (spec §7.1).
+  const monitoring = useQuery({ ...monitoringOverviewQueryOptions, refetchInterval: OVERVIEW_POLL_MS })
+  const metricsById = new Map((monitoring.data?.servers ?? []).map((m) => [m.id, m]))
+  const host = isAdmin ? (monitoring.data?.host ?? null) : null
 
   let content: ReactNode
   if (servers.isPending) {
@@ -36,7 +42,7 @@ export function DashboardPage() {
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {servers.data.map((server) => (
           <li key={server.id}>
-            <ServerCard server={server} />
+            <ServerCard server={server} metrics={metricsById.get(server.id)} />
           </li>
         ))}
       </ul>
@@ -69,6 +75,7 @@ export function DashboardPage() {
           </Link>
         </div>
       ) : null}
+      {host ? <HostCard host={host} /> : null}
       {content}
     </>
   )

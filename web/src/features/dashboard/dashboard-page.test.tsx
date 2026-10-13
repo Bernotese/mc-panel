@@ -1,7 +1,10 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
+import { hostSnapshot, mockOverview, overviewServer } from '@/features/monitoring/test-utils'
 import { db, loginAs } from '@/mocks/db'
+import { server } from '@/mocks/node'
 import { renderWithProviders } from '@/test/render'
 import { DashboardPage } from './dashboard-page'
 
@@ -112,5 +115,53 @@ describe('DashboardPage', () => {
     const survival = await screen.findByRole('article', { name: 'survival' })
     expect(within(survival).getByRole('link', { name: 'survival' })).toHaveAttribute('href', '/servers/1')
     expect(screen.queryByRole('button', { name: 'lobby löschen' })).not.toBeInTheDocument()
+  })
+
+  it('shows players, TPS, CPU, reachability and a sparkline from the monitoring overview', async () => {
+    const now = Date.now()
+    mockOverview({
+      servers: [overviewServer(1, { players: 3, players_max: 20, tps: 19.8, cpu_percent: 12.5, sparkline: [[now - 60_000, 1], [now, 3]] })],
+      host: null,
+    })
+    await renderWithProviders(<DashboardPage />, { me: loginAs('alice') })
+    const card = await screen.findByRole('article', { name: 'survival' })
+    expect(await within(card).findByText('3/20')).toBeInTheDocument()
+    expect(within(card).getByText('19,8')).toBeInTheDocument()
+    expect(within(card).getByText('12,5 %')).toBeInTheDocument()
+    expect(within(card).getByText('Erreichbar')).toBeInTheDocument()
+    expect(within(card).getByRole('img', { name: 'Spieler in der letzten Stunde: aktuell 3, höchstens 3' })).toBeInTheDocument()
+  })
+
+  it('marks an unreachable server and its alerts', async () => {
+    mockOverview({ servers: [overviewServer(1, { up: false, players: null, tps: null, alerts: ['server.down'] })], host: null })
+    await renderWithProviders(<DashboardPage />, { me: loginAs('alice') })
+    const card = await screen.findByRole('article', { name: 'survival' })
+    expect(await within(card).findByText('Nicht erreichbar')).toBeInTheDocument()
+    expect(within(card).getByText('Server down')).toBeInTheDocument()
+    expect(within(card).getAllByText('–').length).toBeGreaterThanOrEqual(2)
+    expect(within(card).queryByText('NaN')).not.toBeInTheDocument()
+  })
+
+  it('shows admins a host card with a disk warning', async () => {
+    mockOverview({ servers: [], host: hostSnapshot({ disk_free: 5 * GIB, disk_total: 100 * GIB, alerts: ['host.disk_low'] }) })
+    await renderWithProviders(<DashboardPage />, { me: loginAs('admin') })
+    const host = await screen.findByRole('region', { name: 'Host' })
+    expect(within(host).getByText('5 GiB frei von 100 GiB')).toBeInTheDocument()
+    expect(within(host).getByText('Der freie Platz liegt unter der Alert-Schwelle.')).toBeInTheDocument()
+    expect(within(host).getByRole('meter', { name: 'Platte' })).toHaveAttribute('aria-valuenow', String(95 * GIB))
+    expect(within(host).getByRole('link', { name: 'Monitoring-Einstellungen' })).toHaveAttribute('href', '/settings')
+  })
+
+  it('shows no host card to other users', async () => {
+    await renderWithProviders(<DashboardPage />, { me: loginAs('alice') })
+    await screen.findByRole('article', { name: 'survival' })
+    expect(screen.queryByRole('region', { name: 'Host' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the cards when the monitoring overview fails', async () => {
+    server.use(http.get('*/api/monitoring/overview', () => HttpResponse.json({ error: 'internal', message: 'boom' }, { status: 500 })))
+    await renderWithProviders(<DashboardPage />, { me: loginAs('alice') })
+    const card = await screen.findByRole('article', { name: 'survival' })
+    expect(within(card).queryByText('Erreichbar')).not.toBeInTheDocument()
   })
 })
