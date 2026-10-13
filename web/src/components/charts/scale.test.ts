@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { niceTicks, timeTicks } from './scale'
+import { niceTicks, tickDecimals, timeTicks } from './scale'
 
 describe('niceTicks', () => {
   it('uses 1/2/5 × 10^n steps that cover the range', () => {
@@ -24,6 +24,20 @@ describe('niceTicks', () => {
     expect(t.min).toBe(0)
     expect(t.max).toBeGreaterThanOrEqual(5 * gib)
     expect(t.values.length).toBeLessThanOrEqual(6)
+  })
+})
+
+describe('minStep and tickDecimals', () => {
+  it('keeps whole-number axes at steps of at least 1', () => {
+    expect(niceTicks(0, 1, 4, 1)).toEqual({ min: 0, max: 1, step: 1, values: [0, 1] })
+    expect(niceTicks(0, 0, 4, 1).values).toEqual([0, 1])
+  })
+
+  it('needs as many decimals as the step', () => {
+    expect(tickDecimals(5)).toBe(0)
+    expect(tickDecimals(0.5)).toBe(1)
+    expect(tickDecimals(0.02)).toBe(2)
+    expect(tickDecimals(0)).toBe(0)
   })
 })
 

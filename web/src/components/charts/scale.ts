@@ -8,13 +8,18 @@ export interface Ticks {
 /** Tolerance for float noise (0.8 / 4 = 0.20000000000000018). */
 const EPS = 1e-9
 
-function decimals(step: number): number {
-  return Math.max(0, -Math.floor(Math.log10(step)))
+/** Decimals a tick label needs for a step (0.2 → 1, 0.02 → 2, 5 → 0). */
+export function tickDecimals(step: number): number {
+  if (!(step > 0) || !Number.isFinite(step)) return 0
+  return Math.max(0, -Math.floor(Math.log10(step) + EPS))
 }
 
-/** "Nice" y-axis ticks: steps of 1/2/5 × 10^n that cover [lo, hi] in about `count` intervals. */
-export function niceTicks(lo: number, hi: number, count = 4): Ticks {
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return niceTicks(0, 1, count)
+/**
+ * "Nice" y-axis ticks: steps of 1/2/5 × 10^n that cover [lo, hi] in about `count` intervals.
+ * `minStep` (e.g. 1 for player counts) keeps the step from getting finer than that.
+ */
+export function niceTicks(lo: number, hi: number, count = 4, minStep = 0): Ticks {
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return niceTicks(0, 1, count, minStep)
   if (hi < lo) [lo, hi] = [hi, lo]
   if (hi === lo) {
     if (hi === 0) hi = 1
@@ -28,8 +33,8 @@ export function niceTicks(lo: number, hi: number, count = 4): Ticks {
   const exp = 10 ** Math.floor(Math.log10(raw))
   const f = raw / exp
   const nice = f <= 1 + EPS ? 1 : f <= 2 + EPS ? 2 : f <= 5 + EPS ? 5 : 10
-  const step = nice * exp
-  const d = decimals(step)
+  const step = Math.max(nice * exp, minStep)
+  const d = tickDecimals(step)
   const round = (v: number) => Number(v.toFixed(d))
   const min = round(Math.floor(lo / step + EPS) * step)
   const max = round(Math.ceil(hi / step - EPS) * step)

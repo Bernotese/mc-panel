@@ -99,4 +99,48 @@ describe('LineChart', () => {
     const { container } = render(<LineChart {...base} series={series} band />)
     expect(container.querySelector('[data-testid="chart-band"]')).not.toBeNull()
   })
+
+  it('steps a whole-number axis by at least 1', () => {
+    const { container } = render(<LineChart {...base} series={[players([0, 1, 0])]} integer />)
+    expect(Array.from(container.querySelectorAll('[data-axis="left"]')).map((n) => n.textContent)).toEqual(['0', '1'])
+  })
+
+  it('derives the tick decimals from the step', () => {
+    const fmt = (v: number, _axis: string, digits?: number) => v.toFixed(digits ?? 1)
+    const cpu: ChartSeries = { id: 'cpu', label: 'CPU', tone: 'primary', points: pts([0.01, 0.08, 0.03]) }
+    const { container } = render(<LineChart {...base} formatValue={fmt} series={[cpu]} />)
+    expect(Array.from(container.querySelectorAll('[data-axis="left"]')).map((n) => n.textContent)).toEqual(['0.00', '0.02', '0.04', '0.06', '0.08'])
+  })
+
+  it('names min and max of the band in the summary and the table', async () => {
+    const user = userEvent.setup()
+    const series: ChartSeries[] = [{ id: 'tps', label: 'TPS', tone: 'primary', points: [{ t: 0, v: 19, min: 15, max: 20 }, { t: STEP, v: 19.5, min: 19, max: 20 }] }]
+    render(<LineChart {...base} series={series} band />)
+    expect(screen.getByRole('img', { name: 'Spieler' })).toHaveAccessibleDescription(/TPS: aktuell 19.5, Minimum 15, Maximum 20/)
+    await user.click(screen.getByRole('button', { name: 'Als Tabelle anzeigen' }))
+    expect(screen.getByRole('table', { name: 'Spieler' })).toHaveTextContent('19 (15 – 20)')
+  })
+
+  it('leaves out points outside the window', () => {
+    const series: ChartSeries[] = [{ id: 'players', label: 'Spieler', tone: 'primary', points: [{ t: -5 * STEP, v: 99, min: 99, max: 99 }, ...pts([1, 2])] }]
+    render(<LineChart {...base} series={series} />)
+    expect(screen.getByRole('img', { name: 'Spieler' })).toHaveAccessibleDescription(/Maximum 2/)
+  })
+
+  it('announces the readout only for keyboard use', async () => {
+    const user = userEvent.setup()
+    render(<LineChart {...base} series={[players([1, 5, 3])]} />)
+    const chart = screen.getByRole('img', { name: 'Spieler' })
+    vi.spyOn(chart, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 640, height: 200, right: 640, bottom: 200, x: 0, y: 0, toJSON: () => ({}) })
+    fireEvent.mouseMove(chart, { clientX: 112, clientY: 50 })
+    expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'off')
+    chart.focus()
+    await user.keyboard('{End}')
+    expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
+  })
+
+  it('shows a custom text when there is no data', () => {
+    render(<LineChart {...base} series={[players([])]} emptyText="TPS für diese Version nicht verfügbar" />)
+    expect(screen.getByText('TPS für diese Version nicht verfügbar')).toBeInTheDocument()
+  })
 })
