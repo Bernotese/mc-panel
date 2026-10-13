@@ -58,7 +58,7 @@ func extractBackupTar(ctx context.Context, root *os.Root, dir string, r io.Reade
 			break
 		}
 		entries++
-		nameBytes += int64(len(hdr.Name))
+		nameBytes += int64(len(strings.TrimSuffix(hdr.Name, "/"))) // as the writer counts (backupBudget.name)
 		switch {
 		case entries > lim.MaxBackupEntries:
 			return fmt.Errorf("%w: the snapshot has more than %d entries", filesapi.ErrTooLarge, lim.MaxBackupEntries)

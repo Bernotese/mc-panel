@@ -24,8 +24,11 @@ const (
 
 // maxBackupNameBytes bounds the sum of all path bytes of one backup stream, when it is written
 // (names read from the data directory, also the ones left out) and when it is read back
-// (restore, download): a snapshot that holds more could not be restored. A variable so tests
-// can lower it.
+// (restore, download). Both sides count the path without a trailing "/", and the reader sees
+// no more names than the writer read, so every snapshot the writer accepted can be restored.
+// A download is further bounded by the zip's own maxZipNameBytes (16 MiB, the central
+// directory is held in memory): a snapshot with more names restores, but its zip download
+// fails with too_large. A variable so tests can lower it.
 var maxBackupNameBytes int64 = 64 << 20
 
 // errIncomplete: the end entry is missing, damaged or does not match the stream before it.
