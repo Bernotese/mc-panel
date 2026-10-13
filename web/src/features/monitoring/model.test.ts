@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { MonitoringSettings, OverviewServer, Server } from '@/api/types'
 import {
   alertKey,
+  draftChanged,
   draftFromSettings,
   GIB,
   lastValue,
@@ -9,6 +10,7 @@ import {
   percent,
   reachability,
   sameSettings,
+  settingsRequest,
   toChartPoints,
   tpsSourceKey,
   validateSettings,
@@ -79,5 +81,22 @@ describe('monitoring model', () => {
 
   it('shows odd byte values with two decimals', () => {
     expect(draftFromSettings({ ...settings, disk_min_bytes: 1.25 * GIB }).disk_min_gib).toBe('1.25')
+  })
+
+  it('writes GiB with a decimal comma in German', () => {
+    expect(draftFromSettings({ ...settings, disk_min_bytes: 1.25 * GIB }, 'de').disk_min_gib).toBe('1,25')
+    expect(draftFromSettings({ ...settings, disk_min_bytes: 10_240 * GIB }, 'de').disk_min_gib).toBe('10240')
+  })
+
+  it('compares the form as entered, not via recomputed bytes', () => {
+    const odd = { ...settings, disk_min_bytes: Math.round(1.333 * GIB) }
+    const initial = draftFromSettings(odd, 'de')
+    expect(initial.disk_min_gib).toBe('1,33')
+    expect(draftChanged(initial, initial)).toBe(false)
+    expect(draftChanged({ ...initial, disk_min_gib: '1.330' }, initial)).toBe(false)
+    expect(settingsRequest(initial, initial, odd)).toBeNull()
+    // Another field changes: the untouched GiB threshold keeps its stored bytes.
+    expect(settingsRequest({ ...initial, down_after_min: '5' }, initial, odd)).toEqual({ ...validateSettings(initial).request, down_after_min: 5, disk_min_bytes: odd.disk_min_bytes })
+    expect(settingsRequest({ ...initial, disk_min_gib: '2' }, initial, odd)?.disk_min_bytes).toBe(2 * GIB)
   })
 })

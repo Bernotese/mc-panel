@@ -9,7 +9,7 @@ import type { MonitoringSettings } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { monitoringSettingsKey, monitoringSettingsQueryOptions, updateMonitoringSettings } from '@/features/monitoring/api'
-import { alertKey, draftFromSettings, sameSettings, SETTINGS_FIELDS, validateSettings, type SettingsDraft, type SettingsField } from '@/features/monitoring/model'
+import { alertKey, draftFromSettings, SETTINGS_FIELDS, settingsRequest, validateSettings, type SettingsDraft, type SettingsField } from '@/features/monitoring/model'
 import { notifiersKey } from '@/features/security/security-key'
 import { FieldRow } from '@/features/servers/field-row'
 import { errorMessage, useErrorToast } from '@/lib/error-message'
@@ -37,8 +37,8 @@ export function MonitoringCard() {
   else
     body = (
       <>
-        {/* Keyed by the stored values: after a save the form starts from the new state. */}
-        <MonitoringForm key={JSON.stringify(draftFromSettings(settings.data))} settings={settings.data} />
+        {/* Keyed by the stored values and the locale: after a save (or a language switch) the form starts anew. */}
+        <MonitoringForm key={`${fmt.locale}:${JSON.stringify(draftFromSettings(settings.data))}`} settings={settings.data} />
         <div className="space-y-2">
           <h4 id={firingId} className="font-medium">
             {t('monitoring.settings.firing')}
@@ -81,10 +81,14 @@ function MonitoringForm({ settings }: { settings: MonitoringSettings }) {
   const id = useId()
   const queryClient = useQueryClient()
   const notifyError = useErrorToast()
-  const initial = draftFromSettings(settings)
+  const fmt = useFormat()
+  const initial = draftFromSettings(settings, fmt.locale)
   const [draft, setDraft] = useState<SettingsDraft>(initial)
   const v = validateSettings(draft)
-  const changed = v.request !== null && !sameSettings(v.request, settings)
+  // Compared as entered: the GiB text is not turned back into bytes for the comparison (an odd stored value
+  // would otherwise count as changed); an untouched GiB field also keeps the stored bytes when saving.
+  const request = settingsRequest(draft, initial, settings)
+  const changed = request !== null
   const save = useMutation({
     mutationFn: updateMonitoringSettings,
     onSuccess: (result) => {
@@ -100,13 +104,15 @@ function MonitoringForm({ settings }: { settings: MonitoringSettings }) {
       noValidate
       onSubmit={(e) => {
         e.preventDefault()
-        if (v.request && changed && !save.isPending) save.mutate(v.request)
+        if (request && !save.isPending) save.mutate(request)
       }}
     >
       {SETTINGS_FIELDS.map((field) => {
         const hint = HINTS[field]
         // Errors show for edited fields only; untouched fields hold the stored, valid value.
-        const error = draft[field] !== initial[field] ? v.errors[field] : undefined
+        const raw = draft[field] !== initial[field] ? v.errors[field] : undefined
+        // The limits in the message in the locale's notation (10.240, not 10240).
+        const error = raw?.params ? { ...raw, params: Object.fromEntries(Object.entries(raw.params).map(([k, n]) => [k, typeof n === 'number' ? fmt.number(n) : n])) } : raw
         return (
           <FieldRow key={field} id={`${id}-${field}`} label={t(`monitoring.settings.${field}`)} hint={hint ? t(hint) : undefined} error={error}>
             {(c) => <Input {...c} inputMode={field === 'disk_min_gib' ? 'decimal' : 'numeric'} value={draft[field]} onChange={(e) => setDraft({ ...draft, [field]: e.target.value })} />}
