@@ -82,7 +82,7 @@ Muster wie TP2 §5.1: feste Pfade, `POST` mit JSON-Body, IDs im Body, `DisallowU
 | Methode, Pfad | Body | Antwort |
 |---|---|---|
 | `POST /v1/instances/logs` | `{id, tail, since}` | `200`, Stream `application/x-ndjson` |
-| `POST /v1/instances/rcon` | `{id, command}` | `200 {output}` |
+| `POST /v1/instances/rcon` | `{id, command}`, ab TP4 optional `timeout_ms` (§5.3) | `200 {output}` |
 | `POST /v1/instances/players` | `{id}` | `200 {ops, whitelist, bans, errors}` |
 
 Fehler wie bisher als `agentapi.ErrorResponse` (`{error, code}`); neue Werte für `code` als Konstanten in `agentapi`: `400` (Validierung, ohne Code), `404` mit `not_found` (Container `mcpanel-mc-<id>` bzw. Datenverzeichnis fehlt), `409` mit `not_running` (Container läuft nicht; nur `rcon`), `429` mit `busy` (Limit, vorhandener Code), `503` mit `docker_unavailable` (vorhanden), `503` mit `rcon_unavailable` (nur `rcon`).
@@ -101,9 +101,10 @@ Fehler wie bisher als `agentapi.ErrorResponse` (`{error, code}`); neue Werte fü
 - `id` > 0; `command`: 1–1000 Bytes, gültiges UTF-8, kein Zeichen < `0x20` und kein `0x7f` (also auch kein Zeilenumbruch oder Tab), nicht nur Leerzeichen, und kein führendes `-` (nach optionalen Leerzeichen und höchstens einem `/`), damit der Befehl nie als Option von `rcon-cli` gelesen wird.
 - Ablauf: Container inspizieren (fehlt er → `404 not_found`, läuft er nicht → `409 not_running`), `POST /containers/{id}/exec` mit `{"Cmd": ["rcon-cli", "--", command], "User": "<uid>:<gid>", "WorkingDir": "/data", "Env": ["HOME=/data"], "AttachStdout": true, "AttachStderr": true, "AttachStdin": false, "Tty": false}`, dann `POST /exec/{id}/start` mit `{"Detach": false, "Tty": false}` (Antwort-Body ist der Multiplex-Stream, kein Hijack), danach `GET /exec/{id}/json` für den Exit-Code.
 - `uid:gid` ist `mcpanel-mc` (wie der Container selbst). `rcon-cli` steht fest im Code; nur die Integrationstests tauschen es über die Manager-Konfiguration (`RconCommand`, Default `rcon-cli`) gegen ein busybox-Programm.
-- Timeout 10 s für den gesamten Ablauf; Ausgabe (stdout und stderr zusammen) höchstens 64 KiB, danach abgeschnitten mit Hinweis `[… gekürzt]`.
+- Timeout 10 s für den gesamten Ablauf (Nachtrag TP4: einstellbar über `timeout_ms`, siehe unten); Ausgabe (stdout und stderr zusammen) höchstens 64 KiB, danach abgeschnitten mit Hinweis `[… gekürzt]`.
 - Exit-Code ≠ 0 (z. B. RCON während des Starts noch nicht bereit) → `503` mit Code `rcon_unavailable` und den ersten 500 Zeichen der Ausgabe in `error`. Exit-Code 0 → `200 {output}` mit der Ausgabe als Text (Minecraft-`§`-Formatcodes bleiben erhalten).
 - RCON-Aufrufe laufen nicht über die serielle Warteschlange der Instanz (TP2 §5.1), weil sie den Container-Zustand nicht ändern. Höchstens 4 gleichzeitige Aufrufe pro Instanz, sonst `429`. Beim Herunterfahren bricht der agent laufende Konsolen-Aufrufe und Spielerlisten-Lesungen ab (das panel sieht eine abgebrochene Verbindung und meldet `503 agent_unavailable`).
+- **Nachtrag TP4 (Backups):** Der Body nimmt optional `timeout_ms` an (Ganzzahl; fehlt oder `0` = 10 s wie bisher, sonst 1–120000, strikt geprüft: andere Werte → `400`). Er begrenzt den ganzen Ablauf im agent; der Client des panels wartet die Frist plus 5 s. Die Konsole des panels sendet keinen Wert (10 s); Backups senden 60 s für `save-off`, `save-all flush` und `save-on` (`save-all flush` kann bei großen Welten länger als 10 s dauern). Spec: `2026-10-12-mc-panel-backups-design.md`.
 
 ### 5.4 Spielerlisten
 
