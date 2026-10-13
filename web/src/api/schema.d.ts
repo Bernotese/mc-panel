@@ -1144,6 +1144,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/servers/{id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** History of a server (1h raw 30 s, 24h 5-min, 7d/30d 1-h averages) */
+        get: operations["getServerMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/metrics/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current values of a server; each call keeps TPS sampling at 5 s for 30 s */
+        get: operations["getServerLiveMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Switch the down and crash-loop alerts of one server (admin; audited) */
+        put: operations["updateServerAlerts"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/monitoring/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Compact values of every server the caller can view; host values for admins only */
+        get: operations["getMonitoringOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/monitoring/host": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** History of the host (admin) */
+        get: operations["getHostMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/monitoring/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Alert thresholds and the alerts firing right now (admin) */
+        get: operations["getMonitoringSettings"];
+        /** Set the alert thresholds (admin, sudo; audited) */
+        put: operations["updateMonitoringSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/audit": {
         parameters: {
             query?: never;
@@ -2120,6 +2223,108 @@ export interface components {
         BackupSnapshotResponse: {
             snapshot: components["schemas"]["BackupSnapshot"];
         };
+        /** @enum {string} */
+        MetricsRange: "1h" | "24h" | "7d" | "30d";
+        /** @description [at (Unix ms), avg, min, max]; for 1h min = max = avg */
+        MetricPoint: number[];
+        MetricsSeries: {
+            range: components["schemas"]["MetricsRange"];
+            /**
+             * Format: int64
+             * @description 30000 (1h), 300000 (24h), 3600000 (7d, 30d)
+             */
+            step_ms: number;
+            /** @description Per metric (server: up, players, players_max, tps, mspt, cpu_percent, memory_bytes, memory_limit_bytes; host: cpu_percent, memory_used, memory_total, load1, disk_free, disk_total); missing values are gaps */
+            series: {
+                [key: string]: components["schemas"]["MetricPoint"][];
+            };
+        };
+        /** @enum {string} */
+        TpsSource: "tick_query" | "paper" | "none" | "unknown";
+        LiveMetrics: {
+            /** Format: int64 */
+            at: number | null;
+            up: boolean | null;
+            players: number | null;
+            players_max: number | null;
+            player_names: string[];
+            tps: number | null;
+            mspt: number | null;
+            cpu_percent: number | null;
+            /** Format: int64 */
+            memory_bytes: number | null;
+            /** Format: int64 */
+            memory_limit_bytes: number | null;
+            tps_source: components["schemas"]["TpsSource"];
+        };
+        /** @enum {string} */
+        AlertKind: "server.down" | "server.crash_loop" | "host.disk_low";
+        /** @description [at (Unix ms), players] */
+        SparklinePoint: number[];
+        OverviewServer: {
+            /** Format: int64 */
+            id: number;
+            up: boolean | null;
+            players: number | null;
+            players_max: number | null;
+            tps: number | null;
+            cpu_percent: number | null;
+            /** Format: int64 */
+            memory_bytes: number | null;
+            /** Format: int64 */
+            memory_limit_bytes: number | null;
+            sparkline: components["schemas"]["SparklinePoint"][];
+            alerts: components["schemas"]["AlertKind"][];
+        };
+        HostSnapshot: {
+            /** Format: int64 */
+            at: number | null;
+            cpu_percent: number | null;
+            load1: number | null;
+            /** Format: int64 */
+            memory_used: number | null;
+            /** Format: int64 */
+            memory_total: number | null;
+            /** Format: int64 */
+            disk_free: number | null;
+            /** Format: int64 */
+            disk_total: number | null;
+            alerts: components["schemas"]["AlertKind"][];
+        };
+        MonitoringOverview: {
+            servers: components["schemas"]["OverviewServer"][];
+            /** @description null for non-admins */
+            host: components["schemas"]["HostSnapshot"] | null;
+        };
+        FiringAlert: {
+            kind: components["schemas"]["AlertKind"];
+            /** Format: int64 */
+            server_id: number | null;
+            server_name: string | null;
+            /** Format: int64 */
+            since: number;
+            detail: string;
+        };
+        MonitoringSettings: {
+            disk_min_percent: number;
+            /** Format: int64 */
+            disk_min_bytes: number;
+            down_after_min: number;
+            crash_restarts: number;
+            crash_window_min: number;
+            alerts: components["schemas"]["FiringAlert"][];
+        };
+        UpdateMonitoringSettingsRequest: {
+            disk_min_percent: number;
+            /** Format: int64 */
+            disk_min_bytes: number;
+            down_after_min: number;
+            crash_restarts: number;
+            crash_window_min: number;
+        };
+        UpdateServerAlertsRequest: {
+            down_alerts: boolean;
+        };
         PermissionGrant: {
             /** Format: int64 */
             server_id: number;
@@ -2409,6 +2614,7 @@ export interface components {
         PluginProjectQuery: string;
         /** @description restic snapshot ID (64 lowercase hex characters) */
         SnapshotPath: string;
+        MetricsRangeQuery: components["schemas"]["MetricsRange"];
     };
     requestBodies: never;
     headers: never;
@@ -5002,6 +5208,187 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    getServerMetrics: {
+        parameters: {
+            query: {
+                range: components["parameters"]["MetricsRangeQuery"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricsSeries"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getServerLiveMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveMetrics"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateServerAlerts: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateServerAlertsRequest"];
+            };
+        };
+        responses: {
+            /** @description Saved */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getMonitoringOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitoringOverview"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getHostMetrics: {
+        parameters: {
+            query: {
+                range: components["parameters"]["MetricsRangeQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricsSeries"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getMonitoringSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitoringSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateMonitoringSettings: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMonitoringSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitoringSettings"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listAudit: {
