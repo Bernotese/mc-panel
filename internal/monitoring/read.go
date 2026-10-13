@@ -55,12 +55,14 @@ func readSeries(ctx context.Context, q *store.Queries, series int64, rg metricsR
 	from, to := now.Add(-rg.span).UnixMilli(), now.UnixMilli()+1
 	switch rg.step {
 	case 30 * time.Second:
-		rows, err := q.MonitoringListRaw(ctx, store.MonitoringListRawParams{Series: series, FromAt: from, ToAt: to})
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range rows {
-			add(r.Metric, point{float64(r.At), r.Value, r.Value, r.Value})
+		for _, m := range allowed { // one indexed range per metric, never the other metrics' rows
+			rows, err := readRawMetric(ctx, q, series, m, from, to)
+			if err != nil {
+				return nil, err
+			}
+			for _, r := range rows {
+				add(m, point{float64(r.At), r.Value, r.Value, r.Value})
+			}
 		}
 	case 5 * time.Minute:
 		rows, err := q.MonitoringList5m(ctx, store.MonitoringList5mParams{Series: series, FromAt: from, ToAt: to})
@@ -85,20 +87,21 @@ func readSeries(ctx context.Context, q *store.Queries, series int64, rg metricsR
 // readSparkline returns the players of the last hour as [at, players], oldest first, at most
 // maxSparkline points (the newest).
 func readSparkline(ctx context.Context, q *store.Queries, id int64, now time.Time) ([][2]float64, error) {
-	rows, err := q.MonitoringListRaw(ctx, store.MonitoringListRawParams{
-		Series: id, FromAt: now.Add(-sparklineSpan).UnixMilli(), ToAt: now.UnixMilli() + 1,
-	})
+	rows, err := readRawMetric(ctx, q, id, MetricPlayers, now.Add(-sparklineSpan).UnixMilli(), now.UnixMilli()+1)
 	if err != nil {
 		return nil, err
 	}
-	out := [][2]float64{}
-	for _, r := range rows {
-		if r.Metric == MetricPlayers {
-			out = append(out, [2]float64{float64(r.At), r.Value})
-		}
+	if len(rows) > maxSparkline {
+		rows = rows[len(rows)-maxSparkline:]
 	}
-	if len(out) > maxSparkline {
-		out = out[len(out)-maxSparkline:]
+	out := make([][2]float64, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, [2]float64{float64(r.At), r.Value})
 	}
 	return out, nil
+}
+
+// readRawMetric reads one metric of a series from metrics_raw in [from, to), oldest first.
+func readRawMetric(ctx context.Context, q *store.Queries, series int64, metric string, from, to int64) ([]store.MonitoringListRawMetricRow, error) {
+	return q.MonitoringListRawMetric(ctx, store.MonitoringListRawMetricParams{Series: series, Metric: metric, FromAt: from, ToAt: to})
 }

@@ -6,6 +6,11 @@ SELECT metric, at, value FROM metrics_raw
 WHERE series = sqlc.arg(series) AND at >= sqlc.arg(from_at) AND at < sqlc.arg(to_at)
 ORDER BY metric, at;
 
+-- name: MonitoringListRawMetric :many
+SELECT at, value FROM metrics_raw
+WHERE series = sqlc.arg(series) AND metric = sqlc.arg(metric) AND at >= sqlc.arg(from_at) AND at < sqlc.arg(to_at)
+ORDER BY at;
+
 -- name: MonitoringList5m :many
 SELECT metric, at, avg, min, max FROM metrics_5m
 WHERE series = sqlc.arg(series) AND at >= sqlc.arg(from_at) AND at < sqlc.arg(to_at)
