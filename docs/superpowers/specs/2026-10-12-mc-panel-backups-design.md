@@ -1,7 +1,7 @@
 # mc-panel – Teilprojekt 4: Backups (Design-Spec)
 
 - **Datum:** 2026-10-12
-- **Status:** entworfen
+- **Status:** umgesetzt (PRs #52–#57, 2026-10-13); Offsite-Backends zurückgestellt
 - **Autor:** Jannes Göbel (mit Claude)
 - **Baut auf:** `2026-10-08-mc-panel-foundation-design.md` (TP1), `2026-10-10-mc-panel-instances-design.md` (TP2), `2026-10-11-mc-panel-console-players-design.md` (TP3a), `2026-10-11-mc-panel-files-design.md` (TP3b), `2026-10-12-mc-panel-plugins-design.md` (TP3c)
 

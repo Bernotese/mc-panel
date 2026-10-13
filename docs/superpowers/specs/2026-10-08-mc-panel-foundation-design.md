@@ -19,9 +19,9 @@ Entwickelt wird lokal auf macOS; das fertige Produkt wird später per Installer 
 | 3a | Live-Betrieb: Konsole (umgesetzt, Spec `2026-10-11-mc-panel-console-players-design.md`) | Konsole (SSE + RCON), Live-Log, Spieler-Verwaltung |
 | 3b | Live-Betrieb: Dateien (umgesetzt, Spec `2026-10-11-mc-panel-files-design.md`) | Dateibrowser über eigenen Dienst `mcpanel-files` |
 | 3c | Live-Betrieb: Plugins/Mods (umgesetzt, Spec `2026-10-12-mc-panel-plugins-design.md`) | Plugins/Mods (Modrinth, Hangar) |
-| 4 | Backups | Zeitpläne, Retention, Offsite via restic, konsistente Snapshots, Restore |
-| 5 | Monitoring + Alerts | Spieler, TPS/MSPT, Ressourcen, Historie, Alerts (Discord, ntfy) |
-| 6 | Installer-CLI | `install`/`update`/`doctor`/`uninstall`, Caddy + Let's Encrypt, VPS-Härtung |
+| 4 | Backups (umgesetzt, Spec `2026-10-12-mc-panel-backups-design.md`; Offsite zurückgestellt) | Zeitpläne, Retention, lokale restic-Repos, konsistente Snapshots, Restore, Zip-Download |
+| 5 | Monitoring + Alerts (Spec `2026-10-13-mc-panel-monitoring-design.md`) | Spieler, TPS/MSPT, Ressourcen, Historie, Alerts (Discord, ntfy) |
+| 6 | Installer (Spec `2026-10-13-mc-panel-installer-design.md`) | `install`/`update`/`doctor`/`uninstall`, Caddy + Let's Encrypt, VPS-Härtung |
 
 Jedes Teilprojekt hat einen eigenen Zyklus Spec → Plan → Umsetzung. **Dieses Dokument spezifiziert nur Teilprojekt 1.**
 
