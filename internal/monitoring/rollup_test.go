@@ -178,8 +178,9 @@ func TestPruneKeepsWindows(t *testing.T) {
 	if _, _, _, _, ok := cAgg(t, db, "metrics_5m", now-23*60*cMinute); !ok {
 		t.Error("the kept raw sample must be rolled up")
 	}
-	if n := cCount(t, db, "SELECT count(*) FROM metrics_1h WHERE metric = 'cpu_percent'"); n != 1 {
-		t.Errorf("1h rows from the kept 5m row = %d, want 1", n)
+	// the first run starts at the earliest 5-min row: both cpu rows (-8 d before its prune, -6 d)
+	if n := cCount(t, db, "SELECT count(*) FROM metrics_1h WHERE metric = 'cpu_percent'"); n != 2 {
+		t.Errorf("1h rows from the 5m rows = %d, want 2", n)
 	}
 }
 
@@ -232,5 +233,79 @@ func TestRunRollupStopsWithTheContext(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("runRollup did not return after cancel")
+	}
+}
+
+// cRawEvery5m inserts one players sample (value i) at the start of every 5-min interval.
+func cRawEvery5m(t *testing.T, db *sql.DB, from int64, n int) {
+	t.Helper()
+	for i := range n {
+		cInsertRaw(t, db, from+int64(i)*5*cMinute, float64(i))
+	}
+}
+
+func cCheck5m(t *testing.T, db *sql.DB, from int64, n int) {
+	t.Helper()
+	for i := range n {
+		if avg, _, _, _, ok := cAgg(t, db, "metrics_5m", from+int64(i)*5*cMinute); !ok || avg != float64(i) {
+			t.Fatalf("5-min interval %d: %v %v", i, avg, ok)
+		}
+	}
+}
+
+func TestRollupAfterALongPause(t *testing.T) {
+	db := storetest.Open(t)
+	fc := clock.NewFake(time.UnixMilli(cBase))
+	r := newRoller(Deps{DB: db, Clock: fc})
+	if err := r.once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cRawEvery5m(t, db, cBase, 36)         // 10:00–12:55
+	fc.Advance(3*time.Hour + time.Minute) // the process slept far beyond the 30-min window
+	if err := r.once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cCheck5m(t, db, cBase, 36)
+	for h := range int64(3) {
+		if _, _, _, n, ok := cAgg(t, db, "metrics_1h", cBase+h*60*cMinute); !ok || n != 12 {
+			t.Fatalf("hour %d: %d samples %v", h, n, ok)
+		}
+	}
+}
+
+func TestRollupAfterAClockJumpBackAndForth(t *testing.T) {
+	db := storetest.Open(t)
+	fc := clock.NewFake(time.UnixMilli(cBase + 10*cMinute))
+	r := newRoller(Deps{DB: db, Clock: fc})
+	_ = r.once(context.Background())
+	fc.Set(time.UnixMilli(cBase - 60*cMinute)) // back an hour
+	_ = r.once(context.Background())
+	cRawEvery5m(t, db, cBase+5*cMinute, 5)       // 10:05–10:25
+	fc.Set(time.UnixMilli(cBase + 2*60*cMinute)) // and two hours forward
+	if err := r.once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cCheck5m(t, db, cBase+5*cMinute, 5)
+	if _, _, _, n, ok := cAgg(t, db, "metrics_1h", cBase); !ok || n != 5 {
+		t.Fatalf("hour 10:00: %d samples %v", n, ok)
+	}
+}
+
+func TestRollupRestartAfterMoreThanADay(t *testing.T) {
+	db := storetest.Open(t)
+	now := cBase + 30*60*cMinute
+	start := cBase // 30 h ago; the panel was down from 25 h ago until now
+	cRawEvery5m(t, db, start, 60)
+	if err := newRoller(Deps{DB: db, Clock: clock.NewFake(time.UnixMilli(now))}).once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cCheck5m(t, db, start, 60)
+	if n := cCount(t, db, "SELECT count(*) FROM metrics_raw"); n != 0 {
+		t.Fatalf("raw rows = %d, all older than 24 h", n)
+	}
+	for h := range int64(5) {
+		if _, _, _, n, ok := cAgg(t, db, "metrics_1h", start+h*60*cMinute); !ok || n != 12 {
+			t.Fatalf("hour %d: %d samples %v", h, n, ok)
+		}
 	}
 }
