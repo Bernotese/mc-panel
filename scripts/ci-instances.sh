@@ -1,27 +1,35 @@
 #!/usr/bin/env bash
-# Instance acceptance for a Linux CI runner with Docker (sub-project 2, spec §12 criteria 2,
-# 6, 7, 8 on the agent path; sub-project 3a, spec §10 criteria 2 and 4 on the agent path;
+# Instance acceptance for a Linux CI runner with Docker (sub-project 2, spec §12 criteria 2, 6,
+# 7, 8 on the agent path; sub-project 3a, spec §10 criteria 2 and 4 on the agent path;
 # sub-project 3b, spec §9 criteria 2-4 on the files-service path; sub-project 3c, spec §10
-# criteria 2 and 5 on the panel/files-service path): starts the real agent as root and the
-# files service as mcpanel-mc, creates a Paper server through the agent socket, waits until it
-# answers a status ping routed by hostname through mc-router, checks the container hardening,
-# the console endpoints and the files service (credentials, peer UID, upload, redaction,
-# editing, symlinks, directory zip), crashes it, waits for Docker's restart, checks the console
-# on the stopped server, planted player files and archive extraction (incl. zip slip), and
-# removes it. Then it starts the panel in production mode as mcpanel, signs in (password,
-# mandatory TOTP, sudo), creates a second Paper server through the panel API and installs
-# plugins from the real Modrinth and Hangar (Chunky; ViaBackwards with its required dependency
-# ViaVersion), checks inventory, checksums, icon proxy, loading after a restart, disabling,
-# removal and the audit log. On the same server it checks backups (sub-project 4, spec §9
+# criteria 2 and 5 on the panel/files-service path; sub-project 5, spec §10 criteria 1-6 on the
+# panel path): starts the real agent as root and the files service as mcpanel-mc, creates a
+# Paper server through the agent socket, waits until it answers a status ping routed by hostname
+# through mc-router, checks the container hardening, the console endpoints and the files service
+# (credentials, peer UID, upload, redaction, editing, symlinks, directory zip), crashes it,
+# waits for Docker's restart, checks the console on the stopped server, planted player files and
+# archive extraction (incl. zip slip), and removes it. Then it starts the panel in production
+# mode as mcpanel, signs in (password, mandatory TOTP, sudo), creates a second Paper server
+# through the panel API and installs plugins from the real Modrinth and Hangar (Chunky;
+# ViaBackwards with its required dependency ViaVersion), checks inventory, checksums, icon
+# proxy, loading after a restart, disabling, removal and the audit log. On the same server it
+# then checks monitoring (history, live values, host values, RCON noise without a viewer) and
+# the alerts server.down/recovered (the panel's pings dropped by an nftables rule),
+# server.crash_loop (three crashes, no down alert; stable again after a window without restarts)
+# and host.disk_low/ok through the notify dispatcher (an ntfy notifier to https://ntfy.invalid:
+# every event ends in one "delivery failed" line of the panel log), the per-server switch (no
+# down alert while it is off) and the audit log. Last it checks backups (sub-project 4, spec §9
 # criteria 1-5 and 9): a manual backup of the running server with save-off/save-all
 # flush/save-on, the restic repo as mcpanel-mc (tags, tar content without symlinks, hidden files
-# or the RCON password), a restore with sudo (start refused meanwhile, pre-restore snapshot, data
-# back, server running again), the zip download, a daily schedule firing in the panel's time
-# zone, pinning, deleting a snapshot, deleting the server with purge_backups=1 and the audit log.
+# or the RCON password), a restore with sudo (start refused meanwhile, pre-restore snapshot,
+# data back, server running again), the zip download, a daily schedule firing in the panel's
+# time zone, pinning, deleting a snapshot, deleting the server with purge_backups=1 and the
+# audit log.
 #
 # Usage (as root): scripts/ci-instances.sh AGENT_BINARY FILES_BINARY PANEL_BINARY
-# Changes the host (users, Docker containers/network, ports 25565 and 8080) and needs internet
-# (Mojang, PaperMC, Modrinth, Hangar): disposable CI runners only.
+# Changes the host (users, Docker containers/network, ports 25565 and 8080, nftables table
+# inet mcpanel_citest) and needs internet (Mojang, PaperMC, Modrinth, Hangar): disposable CI
+# runners only.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -59,6 +67,11 @@ p_started=""  # started_at (Unix ms) after the last restart
 bjob=""       # id of the backup job being waited for
 bjob_state="" # its last seen state
 restic_bin="/usr/local/bin/restic"
+# Monitoring part (sub-project 5), on the plugins server before the backups part.
+mo="$work/mout"     # monitoring outputs
+mon_nft=""          # set while the ping-blocking nftables table exists
+mon_puts=0          # successful PUT /monitoring/settings (audit check)
+mon_before=""       # started_at (Unix ms) before a crash
 
 cleanup() {
   if [ -n "$panel_pid" ]; then
@@ -72,6 +85,9 @@ cleanup() {
   if [ -n "$agent_pid" ]; then
     kill "$agent_pid" 2>/dev/null || true
     wait "$agent_pid" 2>/dev/null || true
+  fi
+  if [ -n "$mon_nft" ]; then
+    nft delete table inet mcpanel_citest 2>/dev/null || true
   fi
   ids="$(docker ps -aq --filter label=mcpanel.instance; docker ps -aq --filter label=mcpanel.router)"
   if [ -n "$ids" ]; then
@@ -452,6 +468,70 @@ print((n.hour * 60 + n.minute + int(sys.argv[2])) % 1440)' "$1" "$2"
 }
 
 p_gone() { [ "$(inst_field "$psrv" i)" = absent ] && ! docker inspect "mcpanel-mc-$psrv" >/dev/null 2>&1; }
+
+# mon_settings <json body>: PUT /monitoring/settings with a fresh sudo (the route needs sudo);
+# fails on != 200, counts the successful updates for the audit check.
+mon_settings() {
+  p_sudo
+  papi PUT /monitoring/settings "$mo/settings.json" "$1"
+  [ "$pcode" = 200 ] || fail "monitoring settings: HTTP $pcode $(cat "$mo/settings.json")"
+  mon_puts=$((mon_puts + 1))
+}
+
+# mon_firing <kind> [server id]: true if the alert is in the firing list of /monitoring/settings
+# (server_id null for host.disk_low). Never call it in a subshell (papi).
+mon_firing() {
+  papi GET /monitoring/settings "$mo/alerts.json"
+  [ "$pcode" = 200 ] || fail "monitoring settings: HTTP $pcode $(cat "$mo/alerts.json")"
+  python3 -I -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+want = int(sys.argv[3]) if len(sys.argv) > 3 else None
+sys.exit(0 if any(a["kind"] == sys.argv[2] and a["server_id"] == want for a in d["alerts"]) else 1)' \
+    "$mo/alerts.json" "$@"
+}
+mon_not_firing() { ! mon_firing "$@"; }
+
+# mon_up: the overview shows the plugins server as reachable (last ping answered).
+mon_up() {
+  papi GET /monitoring/overview "$mo/overview.json"
+  [ "$pcode" = 200 ] || fail "overview: HTTP $pcode $(cat "$mo/overview.json")"
+  [ "$(jget "$mo/overview.json" 'any(s["id"] == int(a[0]) and s["up"] is True for s in d["servers"])' "$psrv")" = True ]
+}
+
+# notified_count <event type>: delivery attempts of that event type in the panel log. The CI
+# notifier points at https://ntfy.invalid (never resolves, RFC 6761), so every event that
+# reaches the dispatcher ends in exactly one "notify: delivery failed" line (JSON log, after
+# the retries).
+notified_count() {
+  python3 -I -c '
+import json, sys
+n = 0
+for line in open(sys.argv[1], errors="replace"):
+    try:
+        e = json.loads(line)
+    except ValueError:
+        continue
+    if isinstance(e, dict) and e.get("msg") == "notify: delivery failed" and e.get("type") == sys.argv[2]:
+        n += 1
+print(n)' "$work/panel.log" "$1"
+}
+# notified <event type> <count>: the panel log has at least <count> delivery attempts of it.
+notified() { [ "$(notified_count "$1")" -ge "$2" ]; }
+
+# p_crash: stops Paper from inside (rcon-cli stop) and waits until Docker restarted it and RCON
+# answers again (restart policy unless-stopped, same path as the crash test of sub-project 2).
+p_restarted_since() {
+  local a
+  a="$(inst_field "$psrv" 'i["started_at"]')"
+  [ "$a" != 0 ] && [ "$a" != "$mon_before" ] && p_running
+}
+p_crash() {
+  mon_before="$(inst_field "$psrv" 'i["started_at"]')" || fail "crash: agent instance list"
+  docker exec "mcpanel-mc-$psrv" rcon-cli stop >/dev/null
+  pwait_for 300 "plugins server restarted by Docker" p_restarted_since
+  pwait_for 300 "rcon on the plugins server after the crash" p_rcon_ready
+}
 
 # check_players <file> <python expression on d>: exit 1 with the lists if the expression is false.
 check_players() {
@@ -1004,6 +1084,8 @@ data_dir = "$work/pdata"
 agent_socket = "$sock"
 files_socket = "$fsock"
 geoip_path = "$work/pdata/none.mmdb"
+monitoring_ping_addr = "127.0.0.1:25565"
+instances_dir = "$work/mc"
 EOF
 chmod 0644 "$work/panel.toml"
 setpriv --reuid=mcpanel --regid=mcpanel --init-groups \
@@ -1255,6 +1337,203 @@ setpriv --reuid=mcpanel --regid=mcpanel --init-groups \
   fail "panel audit verify: $(cat "$po/verify.txt")"
 echo "OK: plugin.install x3 (incl. the dependency), plugin.toggle x2, plugin.remove x1 on server:$psrv by ci-admin; audit verify OK"
 
+echo "== monitoring: history, live values and host values"
+install -d -m 0755 "$mo"
+# The collector samples every 30 s and asks for TPS once a minute; a live call switches TPS to
+# 5 s for 30 s. The panel has been sampling since the plugins part, so the TPS source (three
+# valid answers) is known; the wait gives the live mode and the history fresh points.
+papi GET "/servers/$psrv/metrics/live" "$mo/live.json"
+[ "$pcode" = 200 ] || fail "live: HTTP $pcode $(cat "$mo/live.json")"
+sleep 75
+papi GET "/servers/$psrv/metrics/live" "$mo/live.json"
+[ "$pcode" = 200 ] || fail "live: HTTP $pcode $(cat "$mo/live.json")"
+jcheck "$mo/live.json" "live values of a running Paper server" '
+  d["at"] is not None and d["up"] is True and d["players"] == 0 and d["players_max"] == 20 and d["player_names"] == []
+  and d["tps_source"] in ("tick_query", "paper") and 15 <= d["tps"] <= 20.5 and 0 <= d["mspt"] < 1000
+  and d["cpu_percent"] is not None and d["memory_bytes"] > 0 and d["memory_limit_bytes"] > d["memory_bytes"]'
+papi GET "/servers/$psrv/metrics?range=1h" "$mo/m1h.json"
+[ "$pcode" = 200 ] || fail "metrics 1h: HTTP $pcode $(cat "$mo/m1h.json")"
+jcheck "$mo/m1h.json" "1 h history" '
+  d["range"] == "1h" and d["step_ms"] == 30000
+  and len(d["series"]["up"]) >= 2 and all(p[1] == 1 for p in d["series"]["up"][-2:])
+  and d["series"]["players"][-1][1] == 0 and d["series"]["players_max"][-1][1] == 20
+  and 15 <= d["series"]["tps"][-1][1] <= 20.5 and d["series"]["memory_bytes"][-1][1] > 0
+  and all(len(p) == 4 and p[1] == p[2] == p[3] for m in d["series"].values() for p in m)'
+papi GET "/servers/$psrv/metrics?range=30d" "$mo/m30d.json"
+[ "$pcode" = 200 ] || fail "metrics 30d: HTTP $pcode $(cat "$mo/m30d.json")"
+jcheck "$mo/m30d.json" "30 d history answers (the hourly rollup may still be empty)" '
+  d["range"] == "30d" and d["step_ms"] == 3600000 and all(len(m) <= 721 for m in d["series"].values())'
+papi GET "/servers/$psrv/metrics?range=2h" "$mo/bad.json"
+is_perror "$mo/bad.json" "$pcode" 400 validation_failed || fail "range=2h: HTTP $pcode $(cat "$mo/bad.json")"
+papi GET /monitoring/overview "$mo/overview.json"
+[ "$pcode" = 200 ] || fail "overview: HTTP $pcode $(cat "$mo/overview.json")"
+jcheck "$mo/overview.json" "overview with the plugins server and host values (admin)" '
+  any(s["id"] == int(a[0]) and s["up"] is True and s["players"] == 0 and s["players_max"] == 20
+      and len(s["sparkline"]) >= 2 and s["alerts"] == [] for s in d["servers"])
+  and d["host"] is not None and d["host"]["disk_total"] > 0 and 0 < d["host"]["disk_free"] <= d["host"]["disk_total"]
+  and d["host"]["memory_total"] > 0 and d["host"]["cpu_percent"] is not None and d["host"]["load1"] is not None' "$psrv"
+papi GET "/monitoring/host?range=1h" "$mo/host.json"
+[ "$pcode" = 200 ] || fail "host metrics: HTTP $pcode $(cat "$mo/host.json")"
+jcheck "$mo/host.json" "host history" '
+  d["range"] == "1h" and len(d["series"]["disk_free"]) >= 1 and len(d["series"]["memory_used"]) >= 1
+  and len(d["series"]["cpu_percent"]) >= 1'
+echo "OK: up, players 0/20, TPS $(jget "$mo/live.json" 'd["tps"]') ($(jget "$mo/live.json" 'd["tps_source"]')), CPU/RAM, history 1h/30d, overview, host values"
+
+echo "== monitoring: RCON noise without a viewer"
+# The live call above keeps TPS at 5 s for 30 s; wait until that ended, then count the RCON
+# lines Paper writes in two minutes in which this script sends no RCON command itself.
+sleep 160 # 40 s for the live mode to end, then the 120 s window
+rcon_lines="$(docker logs --since 120s "mcpanel-mc-$psrv" 2>&1 | grep -c 'RCON Client' || true)"
+tps_source="$(jget "$mo/live.json" 'd["tps_source"]')"
+# tick_query and the paper fallback (mspt only) send one command per minute; Paper logs two
+# lines per RCON connection ("started", "shutting down"): 4 in 120 s, 6 leaves room for one
+# pass on the window edge.
+max_lines=6
+[ "$rcon_lines" -le "$max_lines" ] || fail "RCON noise: $rcon_lines lines in 120 s (source $tps_source, max $max_lines)"
+echo "OK: $rcon_lines RCON log lines in 120 s without a viewer (source $tps_source)"
+
+echo "== monitoring: notifier (unreachable on purpose) and short alert windows"
+# Spec §8 names 5 min for the crash window; 10 min leave three Paper restarts on a slow runner
+# enough room. Disk thresholds at the minimum: runners often have less than 10 GiB free.
+mon_settings '{"disk_min_percent": 1, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": 10}'
+jcheck "$mo/settings.json" "settings stored, no server alert so far" '
+  d["disk_min_percent"] == 1 and d["disk_min_bytes"] == 1073741824 and d["down_after_min"] == 1
+  and d["crash_restarts"] == 3 and d["crash_window_min"] == 10
+  and [x for x in d["alerts"] if x["kind"] != "host.disk_low"] == []'
+# The sudo of mon_settings still holds for the notifier and the refused update.
+papi POST /security/notifiers "$mo/notifier.json" \
+  '{"kind": "ntfy", "name": "ci-monitoring", "enabled": true, "url": "https://ntfy.invalid", "topic": "citest"}'
+[ "$pcode" = 201 ] || fail "notifier: HTTP $pcode $(cat "$mo/notifier.json")"
+papi PUT /monitoring/settings "$mo/bad.json" '{"disk_min_percent": 0, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": 10}'
+is_perror "$mo/bad.json" "$pcode" 400 validation_failed || fail "disk_min_percent 0: HTTP $pcode $(cat "$mo/bad.json")"
+papi PUT /monitoring/settings "$mo/bad.json" '{"disk_min_percent": 1, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": 10, "x": 1}'
+is_perror "$mo/bad.json" "$pcode" 400 bad_request || fail "unknown field: HTTP $pcode $(cat "$mo/bad.json")"
+echo "OK: ntfy notifier to https://ntfy.invalid, down after 1 min, crash loop 3 restarts in 10 min, invalid values refused"
+
+echo "== monitoring: server unreachable (pings of the panel dropped) -> server.down -> server.recovered"
+command -v nft >/dev/null || fail "nft missing (CI step \"Install nftables\")"
+down0="$(notified_count server.down)"
+rec0="$(notified_count server.recovered)"
+mon_nft=1
+nft add table inet mcpanel_citest
+nft add chain inet mcpanel_citest output '{ type filter hook output priority 0; policy accept; }'
+nft add rule inet mcpanel_citest output meta skuid mcpanel tcp dport 25565 drop
+# rest of the start grace (5 min after the last restart) + down_after_min + one pass
+pwait_for 420 "server.down firing" mon_firing server.down "$psrv"
+pwait_for 60 "server.down delivered to the dispatcher" notified server.down $((down0 + 1))
+p_running || fail "the container must keep running while only the pings are dropped"
+papi GET /monitoring/overview "$mo/overview.json"
+[ "$pcode" = 200 ] || fail "overview: HTTP $pcode $(cat "$mo/overview.json")"
+jcheck "$mo/overview.json" "overview: unreachable with alert" '
+  any(s["id"] == int(a[0]) and s["up"] is False and "server.down" in s["alerts"] for s in d["servers"])' "$psrv"
+jcheck "$mo/alerts.json" "firing alert names the server" '
+  any(x["kind"] == "server.down" and x["server_id"] == int(a[0]) and x["server_name"] == "ciplugins"
+      and x["since"] > 0 and x["detail"] != "" for x in d["alerts"])' "$psrv"
+nft delete table inet mcpanel_citest
+mon_nft=""
+pwait_for 120 "server.down resolved" mon_not_firing server.down "$psrv"
+pwait_for 60 "server.recovered delivered" notified server.recovered $((rec0 + 1))
+[ "$(notified_count server.down)" = $((down0 + 1)) ] ||
+  fail "server.down delivered $(($(notified_count server.down) - down0)) times, want exactly 1"
+echo "OK: pings dropped -> server.down once (container still running), pings back -> server.recovered"
+
+echo "== monitoring: three crashes within the window -> server.crash_loop, no server.down (grace)"
+down0="$(notified_count server.down)"
+crash0="$(notified_count server.crash_loop)"
+rc_before="$(inst_field "$psrv" 'i["restart_count"]')"
+for n in 1 2 3; do
+  p_crash
+  echo "crash $n done (restart_count $(inst_field "$psrv" 'i["restart_count"]'))"
+done
+rc_after="$(inst_field "$psrv" 'i["restart_count"]')"
+[ "$((rc_after - rc_before))" -ge 3 ] || fail "restart_count $rc_before -> $rc_after, want +3"
+pwait_for 120 "server.crash_loop firing" mon_firing server.crash_loop "$psrv"
+pwait_for 60 "server.crash_loop delivered" notified server.crash_loop $((crash0 + 1))
+mon_not_firing server.down "$psrv" || fail "server.down must not fire while the crash loop fires (and within the start grace)"
+# Resolving needs a full window without restarts: shorten it to 1 min instead of waiting 10.
+rec0="$(notified_count server.recovered)"
+mon_settings '{"disk_min_percent": 1, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": 1}'
+pwait_for 180 "server.crash_loop resolved after a window without restarts" mon_not_firing server.crash_loop "$psrv"
+pwait_for 60 "server.recovered (stable again) delivered" notified server.recovered $((rec0 + 1))
+mon_not_firing server.down "$psrv" || fail "server.down must not fire after the crash loop (start grace)"
+[ "$(notified_count server.down)" = "$down0" ] || fail "server.down delivered during the crash loop"
+echo "OK: restart_count +$((rc_after - rc_before)), server.crash_loop fired and delivered, no server.down; server.recovered after a window without restarts"
+
+echo "== monitoring: disk threshold above the free space -> host.disk_low -> host.disk_ok"
+disk_dir="$work/mc" # instances_dir of the acceptance panel.toml
+free_b="$(df -B1 --output=avail "$disk_dir" | tail -1 | tr -d ' ')"
+size_b="$(df -B1 --output=size "$disk_dir" | tail -1 | tr -d ' ')"
+# host.disk_ok needs the lowest thresholds (1 GiB, 1 %) plus the hysteresis (2 GiB, 2 points)
+if [ "$free_b" -lt $((3 << 30)) ] || [ $((free_b * 100 / size_b)) -lt 3 ]; then
+  echo "SKIP: disk thresholds - only $((free_b >> 20)) MiB free on $disk_dir; host.disk_ok needs 3 GiB and 3 % (hysteresis)"
+else
+  if mon_firing host.disk_low; then
+    # fired with the defaults before the thresholds were lowered: let it resolve first
+    pwait_for 90 "host.disk_low from the defaults resolved" mon_not_firing host.disk_low
+    sleep 10 # its host.disk_ok delivery attempt (retries) lands in the log before the baseline
+  fi
+  low0="$(notified_count host.disk_low)"
+  ok0="$(notified_count host.disk_ok)"
+  mon_settings '{"disk_min_percent": 50, "disk_min_bytes": 10995116277760, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": 10}'
+  pwait_for 90 "host.disk_low firing" mon_firing host.disk_low
+  pwait_for 60 "host.disk_low delivered" notified host.disk_low $((low0 + 1))
+  papi GET /monitoring/overview "$mo/overview.json"
+  [ "$pcode" = 200 ] || fail "overview: HTTP $pcode $(cat "$mo/overview.json")"
+  jcheck "$mo/overview.json" "host card shows the alert" '"host.disk_low" in d["host"]["alerts"]'
+  mon_settings '{"disk_min_percent": 1, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": 10}'
+  pwait_for 90 "host.disk_low resolved" mon_not_firing host.disk_low
+  pwait_for 60 "host.disk_ok delivered" notified host.disk_ok $((ok0 + 1))
+  echo "OK: host.disk_low fired and delivered above the free space, host.disk_ok after lowering the thresholds"
+fi
+
+echo "== monitoring: down alerts switched off -> no server.down while unreachable"
+papi PUT "/servers/$psrv/alerts" "$mo/switch.json" '{"down_alerts": false}'
+[ "$pcode" = 204 ] || fail "down alerts off: HTTP $pcode $(cat "$mo/switch.json")"
+papi GET "/servers/$psrv" "$mo/detail.json"
+[ "$pcode" = 200 ] || fail "server detail: HTTP $pcode $(cat "$mo/detail.json")"
+jcheck "$mo/detail.json" "detail shows down_alerts false for the admin" 'd["down_alerts"] is False'
+down0="$(notified_count server.down)"
+mon_nft=1
+nft add table inet mcpanel_citest
+nft add chain inet mcpanel_citest output '{ type filter hook output priority 0; policy accept; }'
+nft add rule inet mcpanel_citest output meta skuid mcpanel tcp dport 25565 drop
+# Stay unreachable past the start grace of the last crash + down_after_min + three passes, and
+# at least 150 s: with the switch on, server.down would fire within that time.
+started_s=$(($(inst_field "$psrv" 'i["started_at"]') / 1000))
+quiet_until=$((started_s + 300 + 60 + 90))
+[ "$quiet_until" -ge $((EPOCHSECONDS + 150)) ] || quiet_until=$((EPOCHSECONDS + 150))
+while [ "$EPOCHSECONDS" -lt "$quiet_until" ]; do
+  mon_not_firing server.down "$psrv" || fail "server.down fired although down alerts are off"
+  sleep 10
+done
+p_running || fail "the container must keep running while only the pings are dropped"
+papi GET /monitoring/overview "$mo/overview.json"
+[ "$pcode" = 200 ] || fail "overview: HTTP $pcode $(cat "$mo/overview.json")"
+jcheck "$mo/overview.json" "overview: unreachable without alert" '
+  any(s["id"] == int(a[0]) and s["up"] is False and s["alerts"] == [] for s in d["servers"])' "$psrv"
+nft delete table inet mcpanel_citest
+mon_nft=""
+pwait_for 90 "plugins server reachable again" mon_up
+papi PUT "/servers/$psrv/alerts" "$mo/switch.json" '{"down_alerts": true}'
+[ "$pcode" = 204 ] || fail "down alerts on: HTTP $pcode $(cat "$mo/switch.json")"
+papi GET "/servers/$psrv" "$mo/detail.json"
+[ "$pcode" = 200 ] || fail "server detail: HTTP $pcode $(cat "$mo/detail.json")"
+jcheck "$mo/detail.json" "detail shows down_alerts true again" 'd["down_alerts"] is True'
+[ "$(notified_count server.down)" = "$down0" ] || fail "server.down delivered although down alerts were off"
+echo "OK: down alerts off -> unreachable for $((quiet_until - started_s)) s after the last start without server.down"
+
+echo "== monitoring: audit"
+papi GET "/audit?action=monitoring.&limit=50" "$mo/audit.json"
+[ "$pcode" = 200 ] || fail "audit: HTTP $pcode $(cat "$mo/audit.json")"
+jcheck "$mo/audit.json" "monitoring.settings_update x$mon_puts by ci-admin" '
+  len([e for e in d["items"] if e["action"] == "monitoring.settings_update" and e["result"] == "success"
+       and e["actor_name"] == "ci-admin" and "from" in e["details"] and "to" in e["details"]]) == int(a[0])' "$mon_puts"
+papi GET "/audit?action=server.alerts_update&limit=10" "$mo/audit2.json"
+[ "$pcode" = 200 ] || fail "audit: HTTP $pcode $(cat "$mo/audit2.json")"
+jcheck "$mo/audit2.json" "server.alerts_update x2 on server:<id>" '
+  sorted(e["details"]["down_alerts"] for e in d["items"]) == [False, True]
+  and all(e["target"] == "server:" + a[0] and e["actor_name"] == "ci-admin" for e in d["items"])' "$psrv"
+echo "OK: server.alerts_update x2 and monitoring.settings_update x$mon_puts by ci-admin audited"
 
 echo "== backups: empty overview on the plugins server"
 b_overview
@@ -1483,4 +1762,4 @@ setpriv --reuid=mcpanel --regid=mcpanel --init-groups \
   fail "panel audit verify: $(cat "$po/verify.txt")"
 echo "OK: backup.create/restore/download/schedule_update/pin/delete by ci-admin on server:$psrv, server.delete backups_purged=true; audit verify OK"
 
-echo "PASS: instance acceptance (agent, files, plugins and backups path)"
+echo "PASS: instance acceptance (agent, files, plugins, monitoring and backups path)"
