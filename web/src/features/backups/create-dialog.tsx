@@ -24,7 +24,8 @@ export function CreateBackupDialog({ pending, onClose, onSubmit }: { pending: bo
           noValidate
           onSubmit={(e) => {
             e.preventDefault()
-            if (error === null) onSubmit(note)
+            // Enter while the request runs must not start a second backup (the tab also guards synchronously).
+            if (error === null && !pending) onSubmit(note)
           }}
         >
           <FieldRow id={`${id}-note`} label={t('backups.create.note_label')} hint={t('backups.create.note_hint')} error={error ?? undefined}>

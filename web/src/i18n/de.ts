@@ -376,6 +376,7 @@ export const de = {
       deleted: 'Server „{{name}}“ gelöscht.',
       purge_backups: 'Backups ebenfalls löschen',
       purge_backups_hint: 'Ohne diese Option bleiben die Backups des Servers auf dem Host liegen und belegen weiter Platz.',
+      deleting_with_backups: 'Server und Backups werden gelöscht …',
       busy: 'Für diesen Server wird gerade ein Archiv entpackt oder ein Backup wiederhergestellt. Lösche ihn, wenn der Auftrag fertig ist.',
     },
 
@@ -901,7 +902,10 @@ export const de = {
       keep_monthly: 'Monate behalten',
       timezone_hint: 'Uhrzeiten gelten in der Zeitzone des Panels: {{timezone}}. Administratoren ändern sie unter Einstellungen.',
       next_run: 'Nächster Lauf: {{when}} ({{relative}})',
+      next_run_local: 'Nächster Lauf: {{when}} in deiner Ortszeit {{zone}} ({{relative}})',
+      not_scheduled: 'Nächster Lauf: noch nicht geplant',
       last_run: 'Letzter geplanter Lauf: {{when}} – {{status}}',
+      last_status_only: 'Letzter geplanter Lauf: {{status}}',
       last_status: {
         ok: 'erfolgreich',
         failed: 'fehlgeschlagen',

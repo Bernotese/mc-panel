@@ -32,7 +32,7 @@ export function RestoreDialog({ serverName, when, pending, onClose, onConfirm }:
           noValidate
           onSubmit={(e) => {
             e.preventDefault()
-            if (matches) onConfirm()
+            if (matches && !pending) onConfirm()
           }}
         >
           <div className="space-y-2">

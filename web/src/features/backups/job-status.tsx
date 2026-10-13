@@ -22,7 +22,8 @@ export function JobStatus({ job, onDismiss }: { job: BackupJob; onDismiss(): voi
             {t(jobTitleKey(job))}
           </h2>
           {job.trigger === 'scheduled' ? <p className="text-muted-foreground">{t('backups.job.scheduled')}</p> : null}
-          {job.state !== 'failed' ? <p>{t(stepKey(job.step))}</p> : null}
+          {/* The step changes every few seconds: screen readers announce it without taking the focus. */}
+          <p aria-live="polite">{job.state !== 'failed' ? t(stepKey(job.step)) : null}</p>
           {job.state === 'queued' && job.queue_position > 0 ? (
             <p className="text-muted-foreground">{t('backups.job.queue_position', { position: job.queue_position })}</p>
           ) : null}

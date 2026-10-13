@@ -360,4 +360,27 @@ describe('ServerDetailPage', () => {
     expect(screen.queryByText('Konflikt mit dem aktuellen Zustand')).not.toBeInTheDocument()
     expect(db.servers.some((s) => s.id === 1)).toBe(true)
   })
+
+  it('links the purge hint to the checkbox and says that the backups are being deleted', async () => {
+    const user = userEvent.setup()
+    let release: () => void = () => undefined
+    server.use(
+      http.delete('*/api/servers/:id', async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    await renderWithProviders(<ServerDetailPage serverId={1} />, { path: '/servers/1', me: loginAs('admin', { sudo: true }) })
+    await user.click(await screen.findByRole('tab', { name: 'Löschen' }))
+    const purge = screen.getByRole('checkbox', { name: 'Backups ebenfalls löschen' })
+    expect(purge).toHaveAccessibleDescription('Ohne diese Option bleiben die Backups des Servers auf dem Host liegen und belegen weiter Platz.')
+    await user.click(purge)
+    await user.type(screen.getByLabelText('Zum Bestätigen den Namen „survival“ eintippen'), 'survival')
+    await user.click(screen.getByRole('button', { name: 'Server löschen' }))
+    expect(await screen.findByText('Server und Backups werden gelöscht …')).toBeInTheDocument()
+    release()
+    expect(await screen.findByText('Server „survival“ gelöscht.')).toBeInTheDocument()
+  })
 })
