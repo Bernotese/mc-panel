@@ -68,6 +68,11 @@ func TestDeleteRemovesMonitoringData(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	for _, s := range []int64{gone, keep} {
+		if err := q.MonitoringSetServerAlerts(ctx, store.MonitoringSetServerAlertsParams{ServerID: s, DownAlerts: 0}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", gone), nil, &admin); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}
@@ -85,6 +90,10 @@ func TestDeleteRemovesMonitoringData(t *testing.T) {
 		if err := e.db.QueryRowContext(ctx, "SELECT count(*) FROM "+tc.table+" WHERE series = ?", tc.series).Scan(&n); err != nil || n != tc.want {
 			t.Errorf("%s series %d: %d rows (err %v), want %d", tc.table, tc.series, n, err, tc.want)
 		}
+	}
+	// server_alerts goes by ON DELETE CASCADE
+	if rows, err := q.MonitoringListServerAlerts(ctx); err != nil || len(rows) != 1 || rows[0].ServerID != keep {
+		t.Fatalf("server_alerts after delete: %+v %v", rows, err)
 	}
 	st, _ := q.MonitoringListAlertState(ctx)
 	keys := []string{}

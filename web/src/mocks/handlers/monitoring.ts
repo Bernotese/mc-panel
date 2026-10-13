@@ -14,6 +14,7 @@ const LIMITS: Record<keyof UpdateMonitoringSettingsRequest, [number, number]> = 
   crash_restarts: [2, 20],
   crash_window_min: [1, 120],
 }
+const LIVE_STEP = 5_000 // live values change every 5 s (V6)
 const NAMES = ['Alex', 'Steve', 'Notch_Fan', 'Builder42', 'Creeper_X']
 
 /** Deterministic noise in [0, 1) for a seed and an integer index. */
@@ -30,16 +31,17 @@ function scenario(s: MockServer): Scenario {
   return s.status.state === 'running' ? 'up' : 'off'
 }
 
-/** Value of a metric at time t for a running server (players follow the time of day). */
-function value(s: MockServer, metric: string, t: number, now: number): number | null {
+/** Value of a metric at time t for a running server (players follow the time of day, at most 12).
+ * The noise index changes every step (30 s for the history and the overview, 5 s for live). */
+function value(s: MockServer, metric: string, t: number, now: number, step = 30_000): number | null {
   const seed = s.id
   const hour = new Date(t).getUTCHours() + new Date(t).getUTCMinutes() / 60
-  const i = Math.floor(t / 30_000)
+  const i = Math.floor(t / step)
   switch (metric) {
     case 'up':
       return 1
     case 'players':
-      return Math.max(0, Math.round(6 + 6 * Math.sin(((hour - 14) / 24) * 2 * Math.PI) + 2 * noise(seed, i) - 1))
+      return Math.min(12, Math.max(0, Math.round(6 + 6 * Math.sin(((hour - 14) / 24) * 2 * Math.PI) + 2 * noise(seed, i) - 1)))
     case 'players_max':
       return s.instance?.properties.max_players ?? 20
     case 'tps': {
@@ -153,19 +155,20 @@ export const monitoringOperations: MockOperation[] = [
       const sc = scenario(s)
       const empty: LiveMetrics = { at: null, up: null, players: null, players_max: null, player_names: [], tps: null, mspt: null, cpu_percent: null, memory_bytes: null, memory_limit_bytes: null, tps_source: 'unknown' }
       if (sc === 'off') return HttpResponse.json<LiveMetrics>(empty)
-      if (sc === 'down') return HttpResponse.json<LiveMetrics>({ ...empty, at: now, up: false, tps_source: 'none' })
+      // like the overview: modded keeps its players_max; stopped servers stay at tps_source unknown
+      if (sc === 'down') return HttpResponse.json<LiveMetrics>({ ...empty, at: now, up: false, players_max: value(s, 'players_max', now, now), tps_source: 'none' })
       // live always shows at least one named player (V6), whatever the time of day
-      const players = Math.max(1, value(s, 'players', now, now) ?? 0)
+      const players = Math.max(1, value(s, 'players', now, now, LIVE_STEP) ?? 0)
       return HttpResponse.json<LiveMetrics>({
         at: now,
         up: true,
         players,
         players_max: value(s, 'players_max', now, now),
         player_names: NAMES.slice(0, Math.min(players, 12)),
-        tps: value(s, 'tps', now, now),
-        mspt: value(s, 'mspt', now, now),
-        cpu_percent: value(s, 'cpu_percent', now, now),
-        memory_bytes: value(s, 'memory_bytes', now, now),
+        tps: value(s, 'tps', now, now, LIVE_STEP),
+        mspt: value(s, 'mspt', now, now, LIVE_STEP),
+        cpu_percent: value(s, 'cpu_percent', now, now, LIVE_STEP),
+        memory_bytes: value(s, 'memory_bytes', now, now, LIVE_STEP),
         memory_limit_bytes: value(s, 'memory_limit_bytes', now, now),
         tps_source: 'tick_query',
       })

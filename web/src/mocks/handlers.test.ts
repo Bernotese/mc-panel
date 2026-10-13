@@ -592,6 +592,7 @@ describe('mock behaviour', () => {
     expect(s.step_ms).toBe(300_000)
     expect(s.series.players).toHaveLength(288)
     expect(s.series.tps.every(([, avg]) => avg > 0 && avg <= 20)).toBe(true)
+    expect(s.series.players.every(([, avg]) => avg >= 0 && avg <= 12)).toBe(true)
     const again = (await callApi('GET', '/servers/1/metrics?range=24h')).body as MetricsSeries
     expect(again.series.players.map((p) => p[1])).toEqual(s.series.players.map((p) => p[1]))
     expect(((await callApi('GET', '/servers/1/metrics?range=30d')).body as MetricsSeries).series.players).toHaveLength(720)
@@ -600,7 +601,12 @@ describe('mock behaviour', () => {
     const live = (await callApi('GET', '/servers/1/metrics/live')).body as LiveMetrics
     expect(live).toMatchObject({ up: true, tps_source: 'tick_query' })
     expect(live.player_names.length).toBeGreaterThan(0)
-    expect(((await callApi('GET', '/servers/4/metrics/live')).body as LiveMetrics)).toMatchObject({ up: false, tps_source: 'none' })
+    const modded = (await callApi('GET', '/servers/4/metrics/live')).body as LiveMetrics
+    expect(modded).toMatchObject({ up: false, tps_source: 'none' })
+    const ov = (await callApi('GET', '/monitoring/overview')).body as MonitoringOverview
+    expect(modded.players_max).not.toBeNull()
+    expect(modded.players_max).toBe(ov.servers.find((x) => x.id === 4)?.players_max)
+    expect(((await callApi('GET', '/servers/2/metrics/live')).body as LiveMetrics)).toMatchObject({ up: null, tps_source: 'unknown' })
   })
 
   it('filters the overview and hides host values from users', async () => {
