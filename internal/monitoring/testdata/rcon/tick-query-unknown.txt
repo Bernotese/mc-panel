@@ -1,0 +1,2 @@
+Unknown or incomplete command. See below for error
+[0mtick query<--[HERE]

@@ -45,6 +45,30 @@ func (q *Queries) MonitoringDeleteSeriesRaw(ctx context.Context, series int64) e
 	return err
 }
 
+const monitoringEarliest5m = `-- name: MonitoringEarliest5m :one
+SELECT at FROM metrics_5m ORDER BY at LIMIT 1
+`
+
+func (q *Queries) MonitoringEarliest5m(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, monitoringEarliest5m)
+	var at int64
+	err := row.Scan(&at)
+	return at, err
+}
+
+const monitoringEarliestRaw = `-- name: MonitoringEarliestRaw :one
+SELECT at FROM metrics_raw ORDER BY at LIMIT 1
+`
+
+// Earliest timestamp for the first rollup after a start; sql.ErrNoRows = empty table (sqlc types
+// min(at) as interface{}, ORDER BY at LIMIT 1 keeps it an int64).
+func (q *Queries) MonitoringEarliestRaw(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, monitoringEarliestRaw)
+	var at int64
+	err := row.Scan(&at)
+	return at, err
+}
+
 const monitoringGetServerAlerts = `-- name: MonitoringGetServerAlerts :one
 SELECT down_alerts FROM server_alerts WHERE server_id = ?
 `
