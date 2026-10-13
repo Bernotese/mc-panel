@@ -60,6 +60,9 @@ func NewServer(svc *Service, version string, log *slog.Logger) *Server {
 		filesapi.PathJobs:     {method: http.MethodGet, handler: s.jobs},
 		filesapi.PathJars:     {method: http.MethodPost, handler: s.jars},
 	}
+	for p, rt := range s.backupRoutes() {
+		s.routes[p] = rt
+	}
 	s.srv = &http.Server{
 		Handler:           s,
 		ConnContext:       peercred.ConnContext,
