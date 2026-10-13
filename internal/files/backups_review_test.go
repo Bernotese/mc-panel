@@ -391,7 +391,7 @@ func TestSwapUndoFailureKeepsTheTempFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	job := waitJob(t, s, 1)
-	if job.State != jobFailed || job.Error != errRestoreStuck.Error() {
+	if job.State != jobFailed || !strings.HasPrefix(job.Error, errRestoreStuck.Error()) {
 		t.Fatalf("job = %+v", job)
 	}
 	var kept string

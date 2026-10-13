@@ -194,5 +194,8 @@ func (s *Service) PurgeBackups(ctx context.Context, id int64) error {
 	if err := root.Remove(path.Join("keys", name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("remove the repository key: %w", err)
 	}
+	if err := s.purgeJournal(root, id); err != nil {
+		return fmt.Errorf("remove the restore journal entry: %w", err)
+	}
 	return nil
 }

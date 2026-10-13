@@ -88,8 +88,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, geteuid f
 	svc := files.New(files.Config{InstancesDir: cfg.InstancesDir, Limits: cfg.Limits, Dev: cfg.Dev, Clock: clock.Real{}, Log: log,
 		ResticBinary: cfg.ResticBinary})
 	// Spec 4 §4.3: a restore swap that an earlier run did not finish is finished or undone from
-	// the restore journal before anything else touches the data directories (cheap: only the
-	// journal entries are looked at).
+	// the restore journal before anything else touches the data directories. Only journal
+	// entries are read and only top-level entries renamed; the temp folders are removed by the
+	// cleanup below, in the background.
 	if n := svc.RecoverRestores(); n > 0 {
 		log.Warn("files: recovered interrupted restores", "count", n)
 	}

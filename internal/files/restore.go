@@ -39,9 +39,8 @@ func (s *Service) RestoreBackup(ctx context.Context, req filesapi.SnapshotReques
 			_ = root.Close()
 		}
 	}()
-	if j, ok := s.readJournals()[req.ID]; ok {
-		return filesapi.Job{}, fmt.Errorf("%w: an earlier restore of this server could not be undone (its previous state is in %s); remove the journal entry backups/%s/%d once it is checked",
-			filesapi.ErrBusy, j.Tmp, journalDir, req.ID)
+	if j, ok := s.readJournals(false)[req.ID]; ok && j.Phase == phaseStuck {
+		return filesapi.Job{}, fmt.Errorf("%w: a previous restore of this server could not be completed; its old state is kept in a hidden folder - see the files service log", filesapi.ErrBusy)
 	}
 	snap, err := s.findSnapshot(ctx, req.ID, req.Snapshot)
 	if err != nil {
@@ -78,6 +77,11 @@ func (s *Service) runRestore(ctx context.Context, root *os.Root, id int64, sid s
 	if _, err := s.restic(ctx, id, nil, "unlock"); err != nil {
 		return s.ctxErr(ctx, err)
 	}
+	// The container may have made its folders read-only (the service owns them): u+rwx on the
+	// data directory, so the temp folder can be created and entries moved.
+	if err := unlockDir(root, "."); err != nil {
+		return err
+	}
 	tmp, err := s.tempName("")
 	if err != nil {
 		return err
@@ -85,22 +89,25 @@ func (s *Service) runRestore(ctx context.Context, root *os.Root, id int64, sid s
 	if err := root.Mkdir(tmp, dirMode); err != nil { //nolint:gosec // G301: temp folder, 0755 like extract
 		return fsErr(err)
 	}
-	keep := false      // the swap could not be undone: tmp holds the previous state
-	journaled := false // the restore journal has an entry for this swap
+	keep := false      // the swap could neither be completed nor undone: tmp holds the old state
+	journaled := false // the restore journal may have an entry for this swap
 	defer func() {
 		if keep {
 			return
 		}
-		// After a swap only the old entries are left in tmp. The journal entry goes only once
-		// tmp is gone: until then the next start finishes the cleanup.
-		if err := root.RemoveAll(tmp); err != nil {
-			s.log.Error("files: cannot remove the temp folder of a restore", "id", id, "folder", tmp, "err", err)
-			return
-		}
+		// The journal covers the renames only: once nothing is out of place it goes first, then
+		// tmp (a leftover without a journal entry is removed by CleanupTemp, never rolled back).
 		if journaled {
 			if err := s.removeJournal(id); err != nil {
 				s.log.Error("files: cannot remove the restore journal entry", "id", id, "err", err)
 			}
+		}
+		err := unlockTree(root, tmp)
+		if err == nil {
+			err = root.RemoveAll(tmp)
+		}
+		if err != nil {
+			s.log.Warn("files: cannot remove the temp folder of a restore; CleanupTemp removes it at the next start", "id", id, "folder", tmp, "err", err)
 		}
 	}()
 	if err := root.Mkdir(tmp+"/new", dirMode); err != nil { //nolint:gosec // G301: see above
@@ -117,26 +124,24 @@ func (s *Service) runRestore(ctx context.Context, root *os.Root, id int64, sid s
 	}
 	// The journal (restorejournal.go) lets the next start finish or undo a swap this process
 	// does not live to complete.
+	journaled = true // set first: removeJournal accepts a missing entry
 	if err := s.writeJournal(id, restoreJournal{Tmp: tmp, Phase: phaseOldMoving}); err != nil {
 		return err
 	}
-	journaled = true
 	err = swapTop(root, tmp, s.swapHook, func(phase string) error {
 		return s.writeJournal(id, restoreJournal{Tmp: tmp, Phase: phase})
 	})
 	if se := (*restoreStuckError)(nil); errors.As(err, &se) {
 		keep = true
-		if jerr := s.writeJournal(id, restoreJournal{Tmp: tmp, Phase: phaseStuck}); jerr != nil {
-			s.log.Error("files: cannot mark the restore journal as stuck", "id", id, "err", jerr)
-		}
-		s.log.Error("files: RESTORE SWAP COULD NOT BE UNDONE: the previous state of the data directory is kept in a hidden folder; check it by hand",
-			"id", id, "snapshot", sid, "folder", tmp, "causes", se.Causes())
+		s.log.Error("files: RESTORE COULD NOT BE COMPLETED: the old state of the data directory is kept in a hidden folder; the restore journal decides what the next start does",
+			"id", id, "snapshot", sid, "folder", tmp, "phase", se.phase, "causes", se.Causes())
 		return err
 	}
 	if err == nil {
-		if jerr := s.writeJournal(id, restoreJournal{Tmp: tmp, Phase: phaseCleanup}); jerr != nil {
-			// new_moving with an empty new/ resolves to the same cleanup at the next start
-			s.log.Warn("files: cannot update the restore journal", "id", id, "err", jerr)
+		// The renames are on disk before the journal entry goes.
+		if serr := syncRootDir(root, "."); serr != nil {
+			keep = true // the journal (new_moving, nothing left in new/) resolves it at the next start
+			s.log.Warn("files: cannot sync the data directory after a restore; the next start finishes it", "id", id, "err", serr)
 		}
 	}
 	return err
@@ -180,14 +185,19 @@ func (s *Service) dump(ctx context.Context, id int64, sid string, consume func(i
 	return nil
 }
 
-// errRestoreStuck: a swap failed and could not be fully undone (restoreStuckError).
-var errRestoreStuck = errors.New("restore failed and the previous state could not be fully put back; it is kept in a hidden folder")
+// errRestoreStuck: a swap could neither be completed nor undone (restoreStuckError).
+var errRestoreStuck = errors.New("the restore could not be completed or undone; the old state of the data directory is kept in a hidden folder - see the files service log")
 
-// restoreStuckError is errRestoreStuck with its causes (only the fixed text leaves the
-// service; the causes go to the log).
-type restoreStuckError struct{ swap, undo error }
+// restoreStuckError is errRestoreStuck with the journal phase it was left in and its causes
+// (only the fixed text and the phase leave the service; the causes go to the log).
+type restoreStuckError struct {
+	phase      string // phaseStuck or phaseNewMoving (completed at the next start)
+	swap, undo error
+}
 
-func (e *restoreStuckError) Error() string { return errRestoreStuck.Error() }
+func (e *restoreStuckError) Error() string {
+	return errRestoreStuck.Error() + " (restore journal: " + e.phase + ")"
+}
 
 func (e *restoreStuckError) Is(target error) bool { return target == errRestoreStuck }
 
@@ -215,16 +225,27 @@ func visibleNames(root *os.Root, dir string) ([]string, error) {
 
 // swapTop replaces the visible top-level entries of the data directory by the entries of
 // <tmp>/new (renames only, no copying): the current ones move to <tmp>/old first, then the new
-// ones move up. phase records the progress in the restore journal: phaseNewMoving before the
-// first new entry moves up (a failure to record it fails the swap), phaseStuck before an undo
-// of new entries (a crash during the undo leaves a mixed state that is not guessed at). A
-// failing rename undoes the renames done so far, newest first; when one of those fails too, the
-// result is errRestoreStuck and the caller keeps tmp (it holds the previous state). hook (tests)
-// runs before every rename with its step number, and before every undo with -1-<step undone>.
+// ones move up. Every folder involved gets u+rwx first (unlockDir), so read-only folders of the
+// container do not stop it. phase records the progress in the restore journal:
+//   - phaseNewMoving before the first new entry moves up, after <tmp>/old and the top level are
+//     synced. From then on the journal may say new_moving, also when writing it failed.
+//   - A failing rename is undone (newest first). In the new phase the journal is set to
+//     phaseStuck before the undo, so a crash during the undo is not guessed at; when that write
+//     fails, there is no undo: the error is errRestoreStuck and the journal still says
+//     new_moving (or old_moving), which the next start completes (or undoes).
+//   - An undo that fails as well is errRestoreStuck (phaseStuck in the journal).
+//
+// The caller keeps tmp on errRestoreStuck. hook (tests) runs before every rename with its step
+// number, and before every undo with -1-<step undone>.
 func swapTop(root *os.Root, tmp string, hook func(step int) error, phase func(string) error) error {
 	old, nw := tmp+"/old", tmp+"/new"
 	if err := root.Mkdir(old, dirMode); err != nil { //nolint:gosec // G301: temp folder
 		return fsErr(err)
+	}
+	for _, d := range []string{".", tmp, old, nw} {
+		if err := unlockDir(root, d); err != nil {
+			return err
+		}
 	}
 	cur, err := visibleNames(root, "")
 	if err != nil {
@@ -242,12 +263,23 @@ func swapTop(root *os.Root, tmp string, hook func(step int) error, phase func(st
 	for _, n := range next {
 		plan = append(plan, move{nw + "/" + n, n})
 	}
-	newPhase := false // the journal says phaseNewMoving
+	// A folder that moves to another parent needs write permission itself (its ".." changes).
+	for _, m := range plan {
+		if err := unlockDir(root, m.from); err != nil {
+			return err
+		}
+	}
+	newPhase := false // the journal may say phaseNewMoving
 	for i, m := range plan {
 		var err error
 		if i == len(cur) {
-			if err = phase(phaseNewMoving); err == nil {
-				newPhase = true
+			err = syncRootDir(root, old)
+			if err == nil {
+				err = syncRootDir(root, ".")
+			}
+			if err == nil {
+				err = phase(phaseNewMoving)
+				newPhase = true // even if the write failed: it may have reached the disk
 			}
 		}
 		if err == nil && hook != nil {
@@ -256,31 +288,37 @@ func swapTop(root *os.Root, tmp string, hook func(step int) error, phase func(st
 		if err == nil {
 			err = root.Rename(m.from, m.to)
 		}
-		if err != nil {
-			if newPhase {
-				_ = phase(phaseStuck) // back to phaseOldMoving below once the undo succeeded
-			}
-			var undoErr error
-			for k := i - 1; k >= 0; k-- {
-				var uerr error
-				if hook != nil {
-					uerr = hook(-1 - k)
-				}
-				if uerr == nil {
-					uerr = root.Rename(plan[k].to, plan[k].from)
-				}
-				if uerr != nil && undoErr == nil {
-					undoErr = uerr
-				}
-			}
-			if undoErr != nil {
-				return &restoreStuckError{swap: fsErr(err), undo: undoErr}
-			}
-			if newPhase {
-				_ = phase(phaseOldMoving) // everything is back: recovery would find nothing to move
-			}
-			return fmt.Errorf("swap the restored files into place: %w", fsErr(err))
+		if err == nil {
+			continue
 		}
+		if newPhase {
+			if perr := phase(phaseStuck); perr != nil {
+				return &restoreStuckError{phase: phaseNewMoving, swap: fsErr(err), undo: fmt.Errorf("no undo, the journal could not be updated: %w", perr)}
+			}
+		}
+		var undoErr error
+		for k := i - 1; k >= 0; k-- {
+			var uerr error
+			if hook != nil {
+				uerr = hook(-1 - k)
+			}
+			if uerr == nil {
+				uerr = root.Rename(plan[k].to, plan[k].from)
+			}
+			if uerr != nil && undoErr == nil {
+				undoErr = uerr
+			}
+		}
+		if undoErr != nil {
+			if !newPhase {
+				_ = phase(phaseStuck) // if this fails, old_moving undoes it at the next start
+			}
+			return &restoreStuckError{phase: phaseStuck, swap: fsErr(err), undo: undoErr}
+		}
+		if newPhase {
+			_ = phase(phaseOldMoving) // everything is back: recovery would find nothing to move
+		}
+		return fmt.Errorf("swap the restored files into place: %w", fsErr(err))
 	}
 	return nil
 }
