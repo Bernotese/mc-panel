@@ -51,6 +51,8 @@ type Config struct {
 	Clock        clock.Clock        // nil = clock.Real{}
 	Log          *slog.Logger       // nil = slog.Default()
 	Disk         DiskSpace          // nil = statfs
+	ResticBinary string             // spec 4 §3.2; "" = backups unavailable. A bare name is looked up in PATH (dev).
+	runner       resticRunner       // tests: replaces the restic binary
 }
 
 // Service performs the file operations of all instances.
@@ -70,6 +72,16 @@ type Service struct {
 	jarHashBudget int64             // bytes one listing may hash (maxHashBytesPerRequest; tests lower it)
 	instMu        sync.Mutex
 	instHash      map[int64]*instSlot // one jar pass per instance at a time, on top of hashSlots
+	runner        resticRunner        // nil = no usable binary (runnerWhy says why)
+	runnerWhy     string
+	resticPaths   []string // the configured and the resolved restic binary: publicMessage hides them
+	backupMu      sync.Mutex
+	journalMu     sync.Mutex             // every operation on the restore journal (restorejournal.go)
+	backupStat    filesapi.BackupsStatus // set by InitBackups
+	// backupHook runs before every entry of a backup stream; swapHook before every rename of
+	// a restore swap (tests: swap folders, fail a step).
+	backupHook func(p string)
+	swapHook   func(step int) error
 	// tempToken is part of every temp name this process creates, so CleanupTemp, which runs
 	// while the service already serves, removes only the leftovers of earlier runs.
 	tempToken string
@@ -83,7 +95,7 @@ type Service struct {
 
 func New(cfg Config) *Service {
 	s := &Service{
-		cfg: cfg, clock: cfg.Clock, log: cfg.Log, disk: cfg.Disk, jobs: newJobs(),
+		cfg: cfg, clock: cfg.Clock, log: cfg.Log, disk: cfg.Disk, jobs: newJobs(cfg.Limits.MaxBackupJobs),
 		uploads:       make(chan struct{}, maxUploads),
 		zipDownloads:  make(chan struct{}, maxZipDownloads),
 		fileDownloads: make(chan struct{}, maxFileDownloads),
@@ -110,6 +122,17 @@ func New(cfg Config) *Service {
 	if s.disk == nil {
 		s.disk = statfsDisk{}
 	}
+	s.runner, s.runnerWhy = cfg.runner, ""
+	if s.runner == nil {
+		s.runner, s.runnerWhy = newExecRunner(cfg.ResticBinary)
+	}
+	if strings.ContainsRune(cfg.ResticBinary, '/') {
+		s.resticPaths = append(s.resticPaths, cfg.ResticBinary)
+	}
+	if er, ok := s.runner.(execRunner); ok && er.bin != cfg.ResticBinary {
+		s.resticPaths = append(s.resticPaths, er.bin)
+	}
+	s.backupStat = filesapi.BackupsStatus{Reason: "the restic check has not run yet"}
 	return s
 }
 
@@ -297,8 +320,12 @@ const pathStart = `(^|[\s"'(=])`
 // up to the instance id is cut, so "write <instances_dir>/instances/1/world/x: …" becomes
 // "write world/x: …" and the data directory itself becomes ".". Any other path starting with
 // instances_dir gets "<instances_dir>" instead. Only paths at a path start (pathStart) are
-// replaced. The log keeps the full message.
+// replaced; the path of the restic binary becomes "restic" anywhere. The log keeps the full
+// message.
 func (s *Service) publicMessage(msg string) string {
+	for _, p := range s.resticPaths {
+		msg = strings.ReplaceAll(msg, p, "restic")
+	}
 	msg = s.dataPathRe.ReplaceAllString(msg, "$1")
 	msg = s.dataDirRe.ReplaceAllString(msg, "$1.")
 	if s.baseDirRe != nil {
@@ -328,7 +355,7 @@ func fsErr(err error) error {
 	case errors.Is(err, filesapi.ErrNotFound), errors.Is(err, filesapi.ErrExists), errors.Is(err, filesapi.ErrModified),
 		errors.Is(err, filesapi.ErrNotRegular), errors.Is(err, filesapi.ErrNotText), errors.Is(err, filesapi.ErrTooLarge),
 		errors.Is(err, filesapi.ErrInsufficientStorage), errors.Is(err, filesapi.ErrBusy), errors.Is(err, filesapi.ErrInvalid),
-		errors.Is(err, filesapi.ErrHashMismatch):
+		errors.Is(err, filesapi.ErrHashMismatch), errors.Is(err, filesapi.ErrBackupsUnavailable):
 		return err
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
 		return fmt.Errorf("%w: %w", filesapi.ErrNotFound, err)

@@ -20,8 +20,9 @@ const (
 	// DefaultRconCommand runs every console command; itzg/minecraft-server ships it and
 	// keeps the RCON password it generates for it in /data (spec §2).
 	DefaultRconCommand = "rcon-cli"
-	// RconTimeout bounds one console command: inspect, exec, output and exit code.
-	RconTimeout = 10 * time.Second
+	// RconTimeout bounds one console command (inspect, exec, output and exit code) unless the
+	// request asks for its own (agentapi.RconRequest.TimeoutMS).
+	RconTimeout = agentapi.DefaultRconTimeout
 	// MaxParallelRcon bounds the console commands running at once per instance.
 	MaxParallelRcon = 4
 
@@ -259,11 +260,20 @@ func firstRunes(s string, n int) string {
 	return s
 }
 
-// Rcon runs one console command in mcpanel-mc-<id> as `<rcon-cli> -- <command>` with the
-// container user's uid:gid in /data (spec §5.3) and returns its output.
+// Rcon runs one console command with the default timeout (RconTimeout).
 func (m *Manager) Rcon(ctx context.Context, id int64, command string) (string, error) {
-	if err := (agentapi.RconRequest{ID: id, Command: command}).Validate(); err != nil {
+	return m.RconTimeout(ctx, id, command, 0)
+}
+
+// RconTimeout runs one console command in mcpanel-mc-<id> as `<rcon-cli> -- <command>` with
+// the container user's uid:gid in /data (spec §5.3) and returns its output. timeout bounds the
+// whole command (0 = the manager's default, at most agentapi.MaxRconTimeoutMS).
+func (m *Manager) RconTimeout(ctx context.Context, id int64, command string, timeout time.Duration) (string, error) {
+	if err := (agentapi.RconRequest{ID: id, Command: command, TimeoutMS: agentapi.RconTimeoutMS(timeout)}).Validate(); err != nil {
 		return "", err
+	}
+	if timeout <= 0 {
+		timeout = m.rconTimeout
 	}
 	if !m.dockerAvailable(ctx) {
 		return "", agentapi.ErrDockerUnavailable
@@ -273,12 +283,12 @@ func (m *Manager) Rcon(ctx context.Context, id int64, command string) (string, e
 		return "", fmt.Errorf("%w: %d console commands of instance %d are running", agentapi.ErrBusy, MaxParallelRcon, id)
 	}
 	defer release()
-	ctx, cancel := context.WithTimeout(ctx, m.rconTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	// fail turns errors into rcon_unavailable once our own deadline has passed.
 	fail := func(err error) error {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("%w: %s did not answer within %s", agentapi.ErrRconUnavailable, m.rconCmd, m.rconTimeout)
+			return fmt.Errorf("%w: %s did not answer within %s", agentapi.ErrRconUnavailable, m.rconCmd, timeout)
 		}
 		return dockerErr(err)
 	}

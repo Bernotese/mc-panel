@@ -429,6 +429,23 @@ func TestRconTimeout(t *testing.T) {
 	}
 }
 
+// A per-call timeout bounds the command instead of the manager's default.
+func TestRconCallTimeout(t *testing.T) {
+	e := newEnv(t, func(c *instances.Config) { c.RconTimeout = time.Minute })
+	e.startInstance(t, 1, "survival")
+	ctx := context.Background()
+	_, release := e.d.Hold(dockertest.OpExecStart)
+	begin := time.Now()
+	_, err := e.m.RconTimeout(ctx, 1, "save-all flush", 200*time.Millisecond)
+	if !errors.Is(err, agentapi.ErrRconUnavailable) || !strings.Contains(err.Error(), "200ms") || time.Since(begin) > 5*time.Second {
+		t.Fatalf("hanging rcon-cli = %v after %v, want ErrRconUnavailable after 200ms", err, time.Since(begin))
+	}
+	release()
+	if _, err := e.m.RconTimeout(ctx, 1, "list", 121*time.Second); !errors.Is(err, instancespec.ErrInvalid) {
+		t.Fatalf("timeout above the maximum = %v, want ErrInvalid", err)
+	}
+}
+
 // TestRconTruncatedOutputStillChecksExitCode: a failing rcon-cli with more than 64 KiB of
 // output is still rcon_unavailable.
 func TestRconTruncatedOutputStillChecksExitCode(t *testing.T) {

@@ -174,6 +174,10 @@ func TestClientRconAndPlayers(t *testing.T) {
 	if err != nil || !strings.HasPrefix(out, "There are 0") || rcon != (agentapi.RconRequest{ID: 3, Command: "list uuids"}) {
 		t.Fatalf("Rcon = %q, %v (sent %+v)", out, err, rcon)
 	}
+	out, err = c.RconTimeout(ctx, 3, "save-all flush", time.Minute)
+	if err != nil || rcon != (agentapi.RconRequest{ID: 3, Command: "save-all flush", TimeoutMS: 60000}) {
+		t.Fatalf("RconTimeout = %q, %v (sent %+v)", out, err, rcon)
+	}
 	p, err := c.Players(ctx, 3)
 	if err != nil || len(p.Ops) != 1 || p.Ops[0].Level != 4 || p.Whitelist == nil || p.Bans == nil ||
 		len(p.Errors) != 1 || p.Errors[0] != "banned-players.json" {
@@ -191,6 +195,9 @@ func TestClientConsoleValidatesBeforeSending(t *testing.T) {
 	}
 	if _, err := c.Rcon(ctx, 0, "list"); !errors.Is(err, instancespec.ErrInvalid) {
 		t.Fatalf("Rcon id 0: %v", err)
+	}
+	if _, err := c.RconTimeout(ctx, 1, "list", 121*time.Second); !errors.Is(err, agent.ErrInvalid) {
+		t.Fatalf("RconTimeout above the maximum: %v", err)
 	}
 	if _, err := c.Logs(ctx, agentapi.LogsRequest{ID: 1, Tail: 1001}); !errors.Is(err, agent.ErrInvalid) {
 		t.Fatalf("Logs tail: %v", err)

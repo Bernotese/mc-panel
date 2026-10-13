@@ -16,10 +16,15 @@ import (
 // deletedTimeFormat is the UTC timestamp suffix of archived data directories.
 const deletedTimeFormat = "20060102T150405Z"
 
+// BackupsDir is <instances_dir>/backups: the restic repositories and their keys (spec 4 §3.1),
+// owned by the container user with 0700. No container sees it; the agent never looks inside.
+func BackupsDir(instancesDir string) string { return filepath.Join(instancesDir, "backups") }
+
 // ensureLayout makes sure <instances_dir> exists (0755), that instances/ is root:<mc_user gid>
-// 0750 and deleted/ root:root 0700 (in production). The panel user must not read world data;
-// the files service (running as mc_user, spec 3b §3.3) may enter instances/ but never write
-// into it; no container user may swap either directory.
+// 0750, deleted/ root:root 0700 and backups/ <mc_user>:<mc_user gid> 0700 (in production). The
+// panel user must not read world data; the files service (running as mc_user, spec 3b §3.3)
+// may enter instances/ but never write into it and owns backups/ (spec 4 §3.1); no container
+// user may swap either directory.
 func (m *Manager) ensureLayout() error {
 	if err := os.MkdirAll(m.host.InstancesDir, 0o755); err != nil { //nolint:gosec // G301: spec §3.3, root:root 0755; contains no secrets itself
 		return err
@@ -27,7 +32,10 @@ func (m *Manager) ensureLayout() error {
 	if err := ensureDir(filepath.Join(m.host.InstancesDir, "instances"), m.host.GID, 0o750); err != nil {
 		return err
 	}
-	return ensureDir(DeletedDir(m.host.InstancesDir), os.Getegid(), 0o700)
+	if err := ensureDir(DeletedDir(m.host.InstancesDir), os.Getegid(), 0o700); err != nil {
+		return err
+	}
+	return ensureOwnedDir(BackupsDir(m.host.InstancesDir), m.host.UID, m.host.GID, 0o700)
 }
 
 // Init enforces the layout of instances_dir once at agent start (spec 3b §3.3), independent of
@@ -56,6 +64,27 @@ func ensureDir(dir string, gid int, perm os.FileMode) error {
 	}
 	if err := f.Chown(os.Geteuid(), gid); err != nil {
 		return fmt.Errorf("chown %s: %w", dir, err)
+	}
+	return nil
+}
+
+// ensureOwnedDir is ensureDir for a directory that belongs to another user (uid:gid): created
+// if needed, then mode and owner are enforced through an O_NOFOLLOW descriptor (a symlink in
+// its place is refused). The mode is set before the owner, like ensureDir.
+func ensureOwnedDir(dir string, uid, gid int, perm os.FileMode) error {
+	if err := os.Mkdir(dir, perm); err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	f, err := openDirNoFollow(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	if err := f.Chmod(perm); err != nil {
+		return fmt.Errorf("chmod %s: %w", dir, err)
+	}
+	if err := f.Chown(uid, gid); err != nil {
+		return fmt.Errorf("chown %s to %d:%d: %w", dir, uid, gid, err)
 	}
 	return nil
 }

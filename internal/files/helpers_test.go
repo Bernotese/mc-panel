@@ -46,6 +46,9 @@ func testLimits() config.FilesLimits {
 		ReserveBytes:      1 << 10,
 		MaxTextBytes:      64 << 10,
 		MaxListEntries:    50,
+		MaxBackupBytes:    1 << 20,
+		MaxBackupEntries:  100,
+		MaxBackupJobs:     1,
 	}
 }
 
