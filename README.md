@@ -9,7 +9,8 @@ Selbst gehostetes Web-Panel für die eigenen Minecraft-Server auf einem Linux-VP
 - **Anmeldung:** Passwort plus zweiter Faktor (TOTP oder Passkey, für Admins Pflicht), Wiederherstellungscodes, Sessions mit Idle- und Absolut-Timeout, Sudo-Modus für kritische Aktionen.
 - **Dateien:** Dateibrowser pro Server mit Editor für Konfigurationsdateien, Up- und Download (bis 4 GiB, Ordner als Zip), Anlegen, Umbenennen, Verschieben, Löschen und Entpacken von Zips (z. B. Welt-Upload bei gestopptem Server). Ausgeführt von einem eigenen, unprivilegierten Dienst; das RCON-Passwort bleibt verborgen.
 - **Plugins und Mods:** Plugins für Paper/Purpur aus Modrinth und Hangar, Mods für Fabric/NeoForge aus Modrinth suchen und mit einem Klick samt Pflicht-Abhängigkeiten installieren; installierte Jars (auch per Hand hochgeladene) sehen, aktualisieren, deaktivieren und entfernen. Der unprivilegierte Dateidienst schreibt jede Datei und prüft sie vorher gegen die Prüfsumme der Quelle.
-- **Rechte:** Admins und Benutzer mit Rechten pro Server (`server.view`, `server.power`, `server.console`, `server.files`, `server.plugins`).
+- **Backups:** Datenverzeichnis eines Servers per Klick oder nach Zeitplan (alle N Stunden, täglich, wöchentlich) sichern, auch im laufenden Betrieb (Speichern wird währenddessen angehalten). Aufbewahrung nach Stufen (letzte, täglich, wöchentlich, monatlich), wichtige Stände anpinnen, als Zip herunterladen und den ganzen Server auf einen Stand zurücksetzen; vor jedem Restore entsteht automatisch ein Sicherheits-Snapshot. Lokale, deduplizierte restic-Repos; fehlgeschlagene Läufe melden sich über Discord/ntfy.
+- **Rechte:** Admins und Benutzer mit Rechten pro Server (`server.view`, `server.power`, `server.console`, `server.files`, `server.plugins`, `server.backups`).
 - **Abwehr:** Rate-Limits, Jail nach Fehlversuchen (in der App und per nftables auf dem Host), IP-Regeln, Länderfilter (GeoIP), Security Center in der Oberfläche, Benachrichtigungen über Discord und ntfy.
 - **Audit-Log:** unveränderlich und hash-verkettet, prüfbar mit `panel audit verify`.
 
@@ -19,7 +20,7 @@ Selbst gehostetes Web-Panel für die eigenen Minecraft-Server auf einem Linux-VP
 |---|---|---|
 | `panel` | Benutzer `mcpanel` (unprivilegiert) | Weboberfläche und `/api`, SQLite-Datenbank, Downloads von Modrinth/Hangar, CLI (`serve`, `admin create`, `admin unlock`, `audit verify`) |
 | `agent` | root | schmale JSON-API über einen Unix-Socket, nur für das panel: nftables-Jails und Docker (Minecraft-Container, Router) |
-| `files` | Benutzer `mcpanel-mc` (wie die Minecraft-Container, ohne Capabilities) | Dateibrowser: Dateioperationen im Datenverzeichnis eines Servers, nur für das panel (und root), über einen eigenen Unix-Socket |
+| `files` | Benutzer `mcpanel-mc` (wie die Minecraft-Container, ohne Capabilities) | Dateibrowser und Backups (restic als Kindprozess, ohne Netz): Dateioperationen im Datenverzeichnis eines Servers, nur für das panel (und root), über einen eigenen Unix-Socket |
 
 Die Trennung soll verhindern, dass ein kompromittiertes panel Root-Rechte auf dem Host bekommt; Dateioperationen auf Daten, die ein Minecraft-Server kontrolliert, laufen nie als root. In Produktion terminiert Caddy TLS vor dem panel.
 
@@ -49,6 +50,8 @@ Zum Ausprobieren gegen das echte Backend mit Docker gibt es eine interne Test-VM
 | [`docs/superpowers/specs/2026-10-11-mc-panel-files-design.md`](docs/superpowers/specs/2026-10-11-mc-panel-files-design.md) | Dateibrowser über den unprivilegierten Dienst `mcpanel-files` |
 | [`docs/dev/acceptance-tp3c.md`](docs/dev/acceptance-tp3c.md) | manuelle Abnahme von Plugins und Mods auf der Test-VM |
 | [`docs/superpowers/specs/2026-10-12-mc-panel-plugins-design.md`](docs/superpowers/specs/2026-10-12-mc-panel-plugins-design.md) | Plugins und Mods aus Modrinth und Hangar |
+| [`docs/dev/acceptance-tp4.md`](docs/dev/acceptance-tp4.md) | manuelle Abnahme der Backups auf der Test-VM |
+| [`docs/superpowers/specs/2026-10-12-mc-panel-backups-design.md`](docs/superpowers/specs/2026-10-12-mc-panel-backups-design.md) | Backups mit lokalen restic-Repos über den Dateidienst |
 | [`docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`](docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md) | Architektur, Security-Anforderungen, Roadmap |
 | [`docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md`](docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md) | Minecraft-Instanzen (Docker, Router, Reconcile) |
 | [`docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md`](docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md) | Konsole, Live-Log, Spieler-Verwaltung (RCON, SSE) |
@@ -64,7 +67,7 @@ Zum Ausprobieren gegen das echte Backend mit Docker gibt es eine interne Test-VM
 | 3a | Live-Betrieb: Konsole, Logs, Spieler | fertig |
 | 3b | Live-Betrieb: Dateibrowser | fertig |
 | 3c | Live-Betrieb: Plugins/Mods (Modrinth, Hangar) | fertig |
-| 4 | Backups | offen |
+| 4 | Backups (lokal; Offsite später) | in Arbeit |
 | 5 | Monitoring + Alerts | offen |
 | 6 | Installer-CLI (`install`/`update`/`doctor`, Caddy, VPS-Härtung) | offen |
 

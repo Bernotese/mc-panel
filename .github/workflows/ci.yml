@@ -80,7 +80,7 @@ jobs:
           out openapi '^api/'
           out e2e "^(cmd|internal|api|web)/|${gomod}"
           out nftables "^internal/(agent|defense|auth)/|^cmd/(agent|panel)/|^scripts/ci-acceptance\.sh$|${gomod}"
-          out instances "^(cmd|internal)/|^scripts/(ci-instances\.sh|mc-status\.py)$|${gomod}"
+          out instances "^(cmd|internal)/|^scripts/(ci-instances\.sh|mc-status\.py|install-restic\.sh)$|${gomod}"
           out release "^cmd/|^internal/webui/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
 
   go:
@@ -368,7 +368,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.instances == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 55
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -389,13 +389,19 @@ jobs:
           go build -o bin/files ./cmd/files
           go build -o bin/panel ./cmd/panel
 
+      # The files service runs restic for backups (sub-project 4): the pinned release.
+      - name: Install restic
+        run: sudo bash scripts/install-restic.sh
+
       # Real agent + Docker + itzg Paper server: routing by hostname, hardening, console
       # (rcon, log stream, player lists, planted player files), automatic restart after a
       # crash, removal; the files service as mcpanel-mc (peer UID, os.Root limits,
-      # redaction, upload/download, extract incl. zip slip); and the plugins path: the panel
+      # redaction, upload/download, extract incl. zip slip); the plugins path: the panel
       # in production mode (TOTP sign-in, sudo, CSRF) installs Chunky from Modrinth and
       # ViaBackwards with its dependency ViaVersion from Hangar (real upstreams, one retry),
-      # the server loads them after a restart, a disabled jar is not loaded.
+      # the server loads them after a restart, a disabled jar is not loaded; and backups with
+      # a real restic: manual backup with save-off/save-on, restore with sudo, zip download,
+      # a schedule firing in the panel's time zone, pin, delete, purge with the server.
       - name: Instance acceptance
         run: sudo scripts/ci-instances.sh bin/agent bin/files bin/panel
 
