@@ -57,6 +57,9 @@ type serverJSON struct {
 	Address     *string           `json:"address"`
 	Instance    *instanceJSON     `json:"instance"`
 	Status      statusJSON        `json:"status"`
+	// DownAlerts is the per-server switch of the TP5 down/crash-loop alerts; admins only
+	// (missing row = on), null for other users.
+	DownAlerts *bool `json:"down_alerts"`
 }
 
 // viewData is everything a Server response needs besides the server row.
@@ -64,6 +67,7 @@ type viewData struct {
 	baseDomain *string
 	instances  map[int64]store.Instance
 	snap       Snapshot
+	downAlerts map[int64]bool // server_alerts rows (missing = on)
 }
 
 func (h *Handler) loadViewData(ctx context.Context) (viewData, error) {
@@ -79,6 +83,14 @@ func (h *Handler) loadViewData(ctx context.Context) (viewData, error) {
 	for _, r := range rows {
 		d.instances[r.ServerID] = instanceFromListRow(r)
 	}
+	alerts, err := h.q.MonitoringListServerAlerts(ctx)
+	if err != nil {
+		return viewData{}, err
+	}
+	d.downAlerts = make(map[int64]bool, len(alerts))
+	for _, a := range alerts {
+		d.downAlerts[a.ServerID] = a.DownAlerts != 0
+	}
 	return d, nil
 }
 
@@ -87,7 +99,16 @@ func (d viewData) server(s store.Server, perms []rbac.Permission) (serverJSON, e
 	if row, ok := d.instances[s.ID]; ok {
 		in = &row
 	}
-	return view(s, perms, in, d.baseDomain, d.snap)
+	out, err := view(s, perms, in, d.baseDomain, d.snap)
+	if err != nil {
+		return serverJSON{}, err
+	}
+	on, ok := d.downAlerts[s.ID]
+	if !ok {
+		on = true
+	}
+	out.DownAlerts = &on
+	return out, nil
 }
 
 // view builds the Server schema; in == nil is a server without instance ("not configured",

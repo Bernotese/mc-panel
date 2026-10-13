@@ -237,3 +237,57 @@ func TestLoadPanelUnixListenFromFile(t *testing.T) {
 		t.Fatalf("ListenUnix = %q, %v", sock, ok)
 	}
 }
+
+// TP5: monitoring keys with production and dev defaults.
+func TestMonitoringDefaults(t *testing.T) {
+	p := config.DefaultPanel()
+	if p.MonitoringPingAddr != "127.0.0.1:25565" || p.InstancesDir != "/srv/mc-panel" {
+		t.Fatalf("defaults = %q %q", p.MonitoringPingAddr, p.InstancesDir)
+	}
+	d := config.DevPanel("/repo")
+	if d.MonitoringPingAddr != "" || d.InstancesDir != "/repo/.dev/mc" {
+		t.Fatalf("dev = %q %q", d.MonitoringPingAddr, d.InstancesDir)
+	}
+}
+
+func TestLoadPanelMonitoringKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "panel.toml")
+	content := "public_url = \"https://mc.example.org\"\nmonitoring_ping_addr = \"[::1]:25566\"\ninstances_dir = \"/data/mc\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := config.LoadPanel(path, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.MonitoringPingAddr != "[::1]:25566" || p.InstancesDir != "/data/mc" {
+		t.Fatalf("loaded = %q %q", p.MonitoringPingAddr, p.InstancesDir)
+	}
+}
+
+func TestMonitoringKeyValidation(t *testing.T) {
+	for _, tc := range []struct {
+		ping, dir string
+		ok        bool
+	}{
+		{"", "", true},
+		{"127.0.0.1:25565", "/srv/mc-panel", true},
+		{"localhost:1", "/x", true},
+		{"127.0.0.1", "/x", false},       // no port
+		{":25565", "/x", false},          // no host
+		{"127.0.0.1:0", "/x", false},     // port 0
+		{"127.0.0.1:65536", "/x", false}, // port too large
+		{"127.0.0.1:http", "/x", false},  // named port
+		{"127.0.0.1:25565", "relative", false},
+		{"127.0.0.1:25565", "/srv/../etc", false},
+		{"127.0.0.1:25565", "/srv/mc-panel/", false},
+	} {
+		p := config.DefaultPanel()
+		p.PublicURL = "https://panel.example.com"
+		p.MonitoringPingAddr, p.InstancesDir = tc.ping, tc.dir
+		err := p.Validate()
+		if (err == nil) != tc.ok {
+			t.Errorf("ping %q dir %q: err = %v, want ok=%v", tc.ping, tc.dir, err, tc.ok)
+		}
+	}
+}

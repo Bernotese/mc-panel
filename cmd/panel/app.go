@@ -22,6 +22,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/defense"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/monitoring"
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/plugins"
 	"github.com/Bernotese/mc-panel/internal/plugins/upstream"
@@ -146,6 +147,12 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		Gate:    servers.AnyGate(backupsH, filesH),
 		Backups: backupsH,
 	})
+	// Monitoring reads the agent status, pings through mc-router and asks RCON for TPS; the
+	// data gates keep down alerts quiet while an extract or a restore holds the server.
+	monitoringH := monitoring.NewHandler(monitoring.Deps{
+		DB: db, Clock: d.Clock, Audit: auditRec, Notifier: disp, Instances: d.Instances, Console: d.Console,
+		Gate: servers.AnyGate(backupsH, filesH), PingAddr: cfg.MonitoringPingAddr, InstancesDir: cfg.InstancesDir,
+	})
 	pluginsH := plugins.NewHandler(plugins.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Files: d.Files, Instances: d.Instances,
 		Catalog: cat, Upstream: d.Upstream, Version: d.Version,
@@ -195,18 +202,20 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		filesH.Routes(api)
 		pluginsH.Routes(api)
 		backupsH.Routes(api)
+		monitoringH.Routes(api)
 		auditH.Routes(api)
 	})
 	mux.Handle("/*", webui.Handler())
 
 	run := func(ctx context.Context) {
 		var wg sync.WaitGroup
-		wg.Add(6)
+		wg.Add(7)
 		go func() { defer wg.Done(); disp.Run(ctx) }()
 		go func() { defer wg.Done(); svc.Run(ctx) }()
 		go func() { defer wg.Done(); serversH.Run(ctx) }()
 		go func() { defer wg.Done(); pluginsH.Run(ctx) }()
 		go func() { defer wg.Done(); backupsH.Run(ctx) }()
+		go func() { defer wg.Done(); monitoringH.Run(ctx) }()
 		go func() { defer wg.Done(); pruneSessionsLoop(ctx, authH.PruneSessions, sessionPruneInterval) }()
 		wg.Wait()
 	}

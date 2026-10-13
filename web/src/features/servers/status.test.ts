@@ -21,7 +21,7 @@ function status(patch: Partial<ServerStatus>): ServerStatus {
 }
 
 function server(patch: Partial<ServerStatus>): Server {
-  return { id: 1, name: 'survival', permissions: [], address: null, instance: null, status: status(patch) }
+  return { id: 1, name: 'survival', permissions: [], address: null, instance: null, status: status(patch), down_alerts: null }
 }
 
 describe('server status', () => {

@@ -420,6 +420,21 @@ export interface MockServerSettings {
   docker: 'ok' | 'unavailable' | 'unknown'
 }
 
+/** Monitoring state of the mock (TP5 V6); series are generated, not stored. */
+export interface MockMonitoring {
+  downAlerts: Record<number, boolean> // missing = on
+  settings: { disk_min_percent: number; disk_min_bytes: number; down_after_min: number; crash_restarts: number; crash_window_min: number }
+  diskLow: boolean // lets host.disk_low fire
+}
+
+export function defaultMonitoring(): MockMonitoring {
+  return {
+    downAlerts: {},
+    settings: { disk_min_percent: 10, disk_min_bytes: 10 * GIB, down_after_min: 3, crash_restarts: 3, crash_window_min: 10 },
+    diskLow: false,
+  }
+}
+
 export interface MockDb {
   users: MockUser[]
   sessions: MockSession[]
@@ -431,6 +446,7 @@ export interface MockDb {
   pluginJobs: Record<number, MockPluginJob> // running or last plugin job per server id
   backups: Record<number, MockBackups> // per server id (created on first access)
   backupJobs: Record<number, MockBackupJob> // queued, running or last job per server id
+  monitoring: MockMonitoring
   serverSettings: MockServerSettings
   catalogs: Partial<Record<InstanceType, Catalog>>
   grants: Map<number, PermissionGrant[]>
@@ -620,6 +636,7 @@ function seed(now: number): MockDb {
     pluginJobs: {},
     backups: seedBackups(now),
     backupJobs: {},
+    monitoring: defaultMonitoring(),
     serverSettings: { base_domain: 'mc.example.com', curseforge_api_key_set: false, backup_timezone: 'Europe/Berlin', docker: 'ok' },
     catalogs: {
       vanilla: {

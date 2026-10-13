@@ -105,7 +105,8 @@ type InstanceStatus struct {
 	Revision         int64          `json:"revision"`
 	State            ContainerState `json:"state"`
 	ExitCode         int            `json:"exit_code"`
-	StartedAt        int64          `json:"started_at"` // Unix ms, 0 = not running
+	RestartCount     int            `json:"restart_count"` // Docker restarts since creation (TP5)
+	StartedAt        int64          `json:"started_at"`    // Unix ms, 0 = not running
 	MemoryBytes      int64          `json:"memory_bytes"`
 	MemoryLimitBytes int64          `json:"memory_limit_bytes"`
 	CPUPercent       float64        `json:"cpu_percent"`

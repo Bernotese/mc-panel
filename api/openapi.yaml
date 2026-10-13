@@ -17,6 +17,7 @@ tags:
   - { name: files, description: 'File browser of a server: list, edit, upload, download, manage, extract' }
   - { name: plugins, description: 'Plugins and mods of a server: inventory, search in Modrinth and Hangar, install, update, toggle, remove' }
   - { name: backups, description: 'Backups of a server: restic snapshots, schedule and retention, restore, download' }
+  - { name: monitoring, description: 'Monitoring: live values and history of servers and host, alert settings' }
   - { name: audit, description: 'Audit log' }
   - { name: security, description: 'Security center: attempts, jails, IP rules, settings, notifiers, agent' }
 paths:
@@ -1157,6 +1158,93 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { description: 'backups_unavailable or files_unavailable', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/{id}/metrics:
+    get:
+      operationId: getServerMetrics
+      tags: [monitoring]
+      summary: History of a server (1h raw 30 s, 24h 5-min, 7d/30d 1-h averages)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/MetricsRangeQuery'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/MetricsSeries' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /servers/{id}/metrics/live:
+    get:
+      operationId: getServerLiveMetrics
+      tags: [monitoring]
+      summary: Current values of a server; each call keeps TPS sampling at 5 s for 30 s
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/LiveMetrics' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/alerts:
+    put:
+      operationId: updateServerAlerts
+      tags: [monitoring]
+      summary: Switch the down and crash-loop alerts of one server (admin; audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateServerAlertsRequest' } } }
+      responses:
+        '204': { description: Saved }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /monitoring/overview:
+    get:
+      operationId: getMonitoringOverview
+      tags: [monitoring]
+      summary: Compact values of every server the caller can view; host values for admins only
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/MonitoringOverview' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /monitoring/host:
+    get:
+      operationId: getHostMetrics
+      tags: [monitoring]
+      summary: History of the host (admin)
+      parameters:
+        - $ref: '#/components/parameters/MetricsRangeQuery'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/MetricsSeries' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /monitoring/settings:
+    get:
+      operationId: getMonitoringSettings
+      tags: [monitoring]
+      summary: Alert thresholds and the alerts firing right now (admin)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/MonitoringSettings' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      operationId: updateMonitoringSettings
+      tags: [monitoring]
+      summary: Set the alert thresholds (admin, sudo; audited)
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateMonitoringSettingsRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/MonitoringSettings' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /audit:
     get:
       operationId: listAudit
@@ -1370,6 +1458,7 @@ components:
     PluginSourceQuery: { name: source, in: query, required: true, description: 'hangar only for plugins (paper, purpur)', schema: { $ref: '#/components/schemas/PluginSource' } }
     PluginProjectQuery: { name: project, in: query, required: true, description: 'Modrinth project ID or slug, Hangar slug or ID', schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._+-]+$' } }
     SnapshotPath: { name: snapshot, in: path, required: true, description: 'restic snapshot ID (64 lowercase hex characters)', schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+    MetricsRangeQuery: { name: range, in: query, required: true, schema: { $ref: '#/components/schemas/MetricsRange' } }
   responses:
     BadRequest: { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Unauthorized: { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -1564,7 +1653,7 @@ components:
         cpu_percent: { type: number }
     Server:
       type: object
-      required: [id, name, permissions, address, instance, status]
+      required: [id, name, permissions, address, instance, status, down_alerts]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
@@ -1572,6 +1661,7 @@ components:
         address: { type: [string, 'null'], description: '<name>.<base_domain>; null without base domain' }
         instance: { anyOf: [{ $ref: '#/components/schemas/InstanceConfig' }, { type: 'null' }] }
         status: { $ref: '#/components/schemas/ServerStatus' }
+        down_alerts: { type: [boolean, 'null'], description: 'Down/crash-loop alerts for this server (TP5); admins only, null for other users' }
     CreateServerRequest:
       type: object
       additionalProperties: false
@@ -2101,6 +2191,113 @@ components:
       required: [snapshot]
       properties:
         snapshot: { $ref: '#/components/schemas/BackupSnapshot' }
+    MetricsRange: { type: string, enum: [1h, 24h, 7d, 30d] }
+    MetricPoint:
+      type: array
+      description: '[at (Unix ms), avg, min, max]; for 1h min = max = avg'
+      items: { type: number }
+      minItems: 4
+      maxItems: 4
+    MetricsSeries:
+      type: object
+      required: [range, step_ms, series]
+      properties:
+        range: { $ref: '#/components/schemas/MetricsRange' }
+        step_ms: { type: integer, format: int64, description: '30000 (1h), 300000 (24h), 3600000 (7d, 30d)' }
+        series:
+          type: object
+          description: 'Per metric (server: up, players, players_max, tps, mspt, cpu_percent, memory_bytes, memory_limit_bytes; host: cpu_percent, memory_used, memory_total, load1, disk_free, disk_total); missing values are gaps'
+          additionalProperties: { type: array, items: { $ref: '#/components/schemas/MetricPoint' } }
+    TpsSource: { type: string, enum: [tick_query, paper, none, unknown] }
+    LiveMetrics:
+      type: object
+      required: [at, up, players, players_max, player_names, tps, mspt, cpu_percent, memory_bytes, memory_limit_bytes, tps_source]
+      properties:
+        at: { type: [integer, 'null'], format: int64 }
+        up: { type: [boolean, 'null'] }
+        players: { type: [integer, 'null'] }
+        players_max: { type: [integer, 'null'] }
+        player_names: { type: array, items: { type: string }, maxItems: 12 }
+        tps: { type: [number, 'null'] }
+        mspt: { type: [number, 'null'] }
+        cpu_percent: { type: [number, 'null'] }
+        memory_bytes: { type: [integer, 'null'], format: int64 }
+        memory_limit_bytes: { type: [integer, 'null'], format: int64 }
+        tps_source: { $ref: '#/components/schemas/TpsSource' }
+    AlertKind: { type: string, enum: [server.down, server.crash_loop, host.disk_low] }
+    SparklinePoint:
+      type: array
+      description: '[at (Unix ms), players]'
+      items: { type: number }
+      minItems: 2
+      maxItems: 2
+    OverviewServer:
+      type: object
+      required: [id, up, players, players_max, tps, cpu_percent, memory_bytes, memory_limit_bytes, sparkline, alerts]
+      properties:
+        id: { type: integer, format: int64 }
+        up: { type: [boolean, 'null'] }
+        players: { type: [integer, 'null'] }
+        players_max: { type: [integer, 'null'] }
+        tps: { type: [number, 'null'] }
+        cpu_percent: { type: [number, 'null'] }
+        memory_bytes: { type: [integer, 'null'], format: int64 }
+        memory_limit_bytes: { type: [integer, 'null'], format: int64 }
+        sparkline: { type: array, items: { $ref: '#/components/schemas/SparklinePoint' }, maxItems: 120 }
+        alerts: { type: array, items: { $ref: '#/components/schemas/AlertKind' } }
+    HostSnapshot:
+      type: object
+      required: [at, cpu_percent, load1, memory_used, memory_total, disk_free, disk_total, alerts]
+      properties:
+        at: { type: [integer, 'null'], format: int64 }
+        cpu_percent: { type: [number, 'null'] }
+        load1: { type: [number, 'null'] }
+        memory_used: { type: [integer, 'null'], format: int64 }
+        memory_total: { type: [integer, 'null'], format: int64 }
+        disk_free: { type: [integer, 'null'], format: int64 }
+        disk_total: { type: [integer, 'null'], format: int64 }
+        alerts: { type: array, items: { $ref: '#/components/schemas/AlertKind' } }
+    MonitoringOverview:
+      type: object
+      required: [servers, host]
+      properties:
+        servers: { type: array, items: { $ref: '#/components/schemas/OverviewServer' } }
+        host: { anyOf: [{ $ref: '#/components/schemas/HostSnapshot' }, { type: 'null' }], description: 'null for non-admins' }
+    FiringAlert:
+      type: object
+      required: [kind, server_id, server_name, since, detail]
+      properties:
+        kind: { $ref: '#/components/schemas/AlertKind' }
+        server_id: { type: [integer, 'null'], format: int64 }
+        server_name: { type: [string, 'null'] }
+        since: { type: integer, format: int64 }
+        detail: { type: string }
+    MonitoringSettings:
+      type: object
+      required: [disk_min_percent, disk_min_bytes, down_after_min, crash_restarts, crash_window_min, alerts]
+      properties:
+        disk_min_percent: { type: integer, minimum: 1, maximum: 50 }
+        disk_min_bytes: { type: integer, format: int64, minimum: 1073741824, maximum: 10995116277760 }
+        down_after_min: { type: integer, minimum: 1, maximum: 60 }
+        crash_restarts: { type: integer, minimum: 2, maximum: 20 }
+        crash_window_min: { type: integer, minimum: 1, maximum: 120 }
+        alerts: { type: array, items: { $ref: '#/components/schemas/FiringAlert' } }
+    UpdateMonitoringSettingsRequest:
+      type: object
+      additionalProperties: false
+      required: [disk_min_percent, disk_min_bytes, down_after_min, crash_restarts, crash_window_min]
+      properties:
+        disk_min_percent: { type: integer, minimum: 1, maximum: 50 }
+        disk_min_bytes: { type: integer, format: int64, minimum: 1073741824, maximum: 10995116277760 }
+        down_after_min: { type: integer, minimum: 1, maximum: 60 }
+        crash_restarts: { type: integer, minimum: 2, maximum: 20 }
+        crash_window_min: { type: integer, minimum: 1, maximum: 120 }
+    UpdateServerAlertsRequest:
+      type: object
+      additionalProperties: false
+      required: [down_alerts]
+      properties:
+        down_alerts: { type: boolean }
     PermissionGrant:
       type: object
       required: [server_id, permissions]

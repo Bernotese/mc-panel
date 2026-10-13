@@ -137,10 +137,11 @@ func (h *Handler) handleGetServer(w http.ResponseWriter, r *http.Request) {
 }
 
 // redactFor hides the raw last_error from non-admins: it can name host paths, images and
-// Docker internals. The state (error) stays visible.
+// Docker internals. The state (error) stays visible. The alert switch is admin-only too.
 func redactFor(p principal.Principal, v serverJSON) serverJSON {
 	if !p.IsAdmin() {
 		v.Status.LastError = ""
+		v.DownAlerts = nil
 	}
 	return v
 }
@@ -241,6 +242,8 @@ func (h *Handler) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
+	on := true // a new server has no server_alerts row
+	out.DownAlerts = &on
 	httpx.WriteJSON(w, http.StatusCreated, out)
 }
 
@@ -362,7 +365,22 @@ func (h *Handler) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
+	on, err := h.downAlerts(ctx, s.ID)
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	out.DownAlerts = &on
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// downAlerts is the TP5 per-server alert switch; a missing row means on.
+func (h *Handler) downAlerts(ctx context.Context, id int64) (bool, error) {
+	v, err := h.q.MonitoringGetServerAlerts(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	return v != 0, err
 }
 
 const (
@@ -485,6 +503,10 @@ func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s sto
 		writeNotFound(w, r)
 		return false, false
 	}
+	if err := deleteMonitoring(ctx, h.q.WithTx(tx), s.ID); err != nil {
+		httpx.Internal(w, r, err)
+		return false, false
+	}
 	if remove {
 		if err := h.inst.Remove(ctx, s.ID); err != nil {
 			writeAgentError(w, r, err) // the rollback keeps the rows
@@ -500,6 +522,25 @@ func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s sto
 	delete(h.reconcile.foreign, s.ID)
 	h.setPanelError(s.ID, "")
 	return configured, true
+}
+
+// deleteMonitoring removes the TP5 series and alert states of a deleted server (server_alerts
+// goes by ON DELETE CASCADE). The keys follow internal/monitoring's alertKey; servers cannot
+// import monitoring (monitoring imports servers for DataGate).
+func deleteMonitoring(ctx context.Context, q *store.Queries, id int64) error {
+	for _, del := range []func(context.Context, int64) error{
+		q.MonitoringDeleteSeriesRaw, q.MonitoringDeleteSeries5m, q.MonitoringDeleteSeries1h,
+	} {
+		if err := del(ctx, id); err != nil {
+			return err
+		}
+	}
+	for _, kind := range []string{"server.down", "server.crash_loop"} {
+		if err := q.MonitoringDeleteAlertState(ctx, fmt.Sprintf("%s:%d", kind, id)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // isForeign asks the agent whether the container with the server's ID belongs to another

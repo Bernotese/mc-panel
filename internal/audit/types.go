@@ -89,4 +89,8 @@ const (
 	ActionNotifierCreate       = "security.notifier_create"
 	ActionNotifierUpdate       = "security.notifier_update"
 	ActionNotifierDelete       = "security.notifier_delete"
+
+	// Monitoring (TP5).
+	ActionMonitoringSettingsUpdate = "monitoring.settings_update"
+	ActionServerAlertsUpdate       = "server.alerts_update"
 )
