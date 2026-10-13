@@ -9,9 +9,11 @@ import (
 // backupRoutes are the endpoints of spec 4 §4.1; NewServer adds them to its routes.
 func (s *Server) backupRoutes() map[string]route {
 	return map[string]route{
-		filesapi.PathBackupsStatus: {method: http.MethodGet, handler: s.backupsStatus},
-		filesapi.PathBackupsList:   {method: http.MethodPost, handler: s.backupsList},
-		filesapi.PathBackupsCreate: {method: http.MethodPost, handler: s.backupsCreate},
+		filesapi.PathBackupsStatus:  {method: http.MethodGet, handler: s.backupsStatus},
+		filesapi.PathBackupsList:    {method: http.MethodPost, handler: s.backupsList},
+		filesapi.PathBackupsCreate:  {method: http.MethodPost, handler: s.backupsCreate},
+		filesapi.PathBackupsRestore: {method: http.MethodPost, handler: s.backupsRestore},
+		filesapi.PathJobsCancel:     {method: http.MethodPost, handler: s.cancelJob},
 	}
 }
 
@@ -51,4 +53,35 @@ func (s *Server) backupsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, job)
+}
+
+// backupsRestore: the pre-check lists the snapshots (restic reads the index): longOp.
+func (s *Server) backupsRestore(w http.ResponseWriter, r *http.Request) {
+	var req filesapi.SnapshotRequest
+	if !s.decode(w, r, &req, filesapi.MaxSmallJSONBytes) {
+		return
+	}
+	var job filesapi.Job
+	err := s.longOp(w, "backups.restore", func() error {
+		var err error
+		job, err = s.svc.RestoreBackup(r.Context(), req)
+		return err
+	})
+	if err != nil {
+		s.fail(w, r, "backups.restore", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
+	var req filesapi.IDRequest
+	if !s.decode(w, r, &req, filesapi.MaxSmallJSONBytes) {
+		return
+	}
+	if err := s.svc.CancelJob(req.ID); err != nil {
+		s.fail(w, r, "jobs.cancel", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
