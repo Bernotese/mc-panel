@@ -81,7 +81,12 @@ func (s *Service) runRestore(ctx context.Context, root *os.Root, id int64, sid s
 	if err := root.Mkdir(tmp, dirMode); err != nil { //nolint:gosec // G301: temp folder, 0755 like extract
 		return fsErr(err)
 	}
-	defer func() { _ = root.RemoveAll(tmp) }()              // after a swap only the old entries are left in it
+	keep := false // the swap could not be undone: tmp holds the previous state
+	defer func() {
+		if !keep {
+			_ = root.RemoveAll(tmp) // after a swap only the old entries are left in it
+		}
+	}()
 	if err := root.Mkdir(tmp+"/new", dirMode); err != nil { //nolint:gosec // G301: see above
 		return fsErr(err)
 	}
@@ -94,7 +99,13 @@ func (s *Service) runRestore(ctx context.Context, root *os.Root, id int64, sid s
 	if !s.jobs.beginCommit(ctx, id) {
 		return s.jobs.stopErr()
 	}
-	return swapTop(root, tmp, s.swapHook)
+	err = swapTop(root, tmp, s.swapHook)
+	if se := (*restoreStuckError)(nil); errors.As(err, &se) {
+		keep = true
+		s.log.Error("files: RESTORE SWAP COULD NOT BE UNDONE: the previous state of the data directory is kept in a hidden folder; check it by hand",
+			"id", id, "snapshot", sid, "folder", tmp, "causes", se.Causes())
+	}
+	return err
 }
 
 // dump streams snapshot sid of server id (`restic dump <id> /data.tar`) into consume. When
@@ -106,7 +117,7 @@ func (s *Service) dump(ctx context.Context, id int64, sid string, consume func(i
 	p, err := s.runner.Start(ctx, resticCmd{Args: []string{"--no-cache", "dump", sid, "/" + stdinFilename}, Env: s.resticEnv(id), Stdout: pw})
 	if err != nil {
 		_ = pw.Close()
-		return fmt.Errorf("start restic: %w", err)
+		return s.startErr(err)
 	}
 	waited := make(chan error, 1)
 	go func() {
@@ -135,6 +146,22 @@ func (s *Service) dump(ctx context.Context, id int64, sid string, consume func(i
 	return nil
 }
 
+// errRestoreStuck: a swap failed and could not be fully undone (restoreStuckError).
+var errRestoreStuck = errors.New("restore failed and the previous state could not be fully put back; it is kept in a hidden folder")
+
+// restoreStuckError is errRestoreStuck with its causes (only the fixed text leaves the
+// service; the causes go to the log).
+type restoreStuckError struct{ swap, undo error }
+
+func (e *restoreStuckError) Error() string { return errRestoreStuck.Error() }
+
+func (e *restoreStuckError) Is(target error) bool { return target == errRestoreStuck }
+
+// Causes describes both failures for the log.
+func (e *restoreStuckError) Causes() string {
+	return fmt.Sprintf("swap: %v; undo: %v", e.swap, e.undo)
+}
+
 // visibleNames lists the names of folder dir that are not hidden (spec 4 §4.3: hidden entries
 // such as .rcon-cli.env and the service's temp folders stay where they are).
 func visibleNames(root *os.Root, dir string) ([]string, error) {
@@ -154,8 +181,10 @@ func visibleNames(root *os.Root, dir string) ([]string, error) {
 
 // swapTop replaces the visible top-level entries of the data directory by the entries of
 // <tmp>/new (renames only, no copying): the current ones move to <tmp>/old first, then the new
-// ones move up. A failing rename undoes the renames done so far, newest first (best effort).
-// hook (tests) runs before every rename with its step number.
+// ones move up. A failing rename undoes the renames done so far, newest first; when one of those
+// fails too, the result is errRestoreStuck and the caller keeps tmp (it holds the previous
+// state; CleanupTemp leaves it alone unless it can put it back safely). hook (tests) runs before
+// every rename with its step number, and before every undo with -1-<step undone>.
 func swapTop(root *os.Root, tmp string, hook func(step int) error) error {
 	old, nw := tmp+"/old", tmp+"/new"
 	if err := root.Mkdir(old, dirMode); err != nil { //nolint:gosec // G301: temp folder
@@ -186,8 +215,21 @@ func swapTop(root *os.Root, tmp string, hook func(step int) error) error {
 			err = root.Rename(m.from, m.to)
 		}
 		if err != nil {
+			var undoErr error
 			for k := i - 1; k >= 0; k-- {
-				_ = root.Rename(plan[k].to, plan[k].from)
+				var uerr error
+				if hook != nil {
+					uerr = hook(-1 - k)
+				}
+				if uerr == nil {
+					uerr = root.Rename(plan[k].to, plan[k].from)
+				}
+				if uerr != nil && undoErr == nil {
+					undoErr = uerr
+				}
+			}
+			if undoErr != nil {
+				return &restoreStuckError{swap: fsErr(err), undo: undoErr}
 			}
 			return fmt.Errorf("swap the restored files into place: %w", fsErr(err))
 		}
