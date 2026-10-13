@@ -625,3 +625,17 @@ func TestEnsureLeavesListFiles(t *testing.T) {
 		}
 	}
 }
+
+// TP5 V1: Status reports Docker's RestartCount of the container (crash-loop detection).
+func TestStatusReportsRestartCount(t *testing.T) {
+	e := newEnv(t)
+	e.ensure(t, ensureReq(1, "survival", 1))
+	e.power(t, 1, agentapi.PowerStart)
+	if s := e.status(t, 1); s.RestartCount != 0 {
+		t.Fatalf("restart_count of a fresh container = %d", s.RestartCount)
+	}
+	e.d.SetRestartCount("mcpanel-mc-1", 3)
+	if s := e.status(t, 1); s.RestartCount != 3 {
+		t.Fatalf("restart_count = %d, want 3", s.RestartCount)
+	}
+}
