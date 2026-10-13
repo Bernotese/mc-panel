@@ -641,7 +641,7 @@ export const de = {
       },
       too_large: 'Das Archiv ist zu groß oder hat zu viele Einträge.',
       too_large_detail: 'Das Archiv ist zu groß oder hat zu viele Einträge ({{detail}}).',
-      busy: 'Es läuft bereits ein Entpack-Vorgang.',
+      busy: 'Für diesen Server läuft bereits ein Entpack- oder Backup-Auftrag. Bitte später erneut versuchen.',
       dest_not_empty: 'Der Zielordner ist nicht leer.',
     },
   },

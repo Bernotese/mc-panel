@@ -124,7 +124,8 @@ describe('extracting', () => {
     [503, 'agent_unavailable', 'x', 'Der Agent ist nicht erreichbar.'],
     // Review F5
     [409, 'file_exists', 'x', 'Der Zielordner ist nicht leer.'],
-    [429, 'rate_limited', 'x', 'Es läuft bereits ein Entpack-Vorgang.'],
+    // 429 busy also covers a backup or restore job of the server in the file service.
+    [429, 'rate_limited', 'x', 'Für diesen Server läuft bereits ein Entpack- oder Backup-Auftrag. Bitte später erneut versuchen.'],
     [413, 'payload_too_large', 'the archive has more than 100000 entries', 'Das Archiv ist zu groß oder hat zu viele Einträge (the archive has more than 100000 entries).'],
   ])('shows %i %s inside the dialog', async (status, code, detail, message) => {
     server.use(
