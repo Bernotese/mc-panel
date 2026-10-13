@@ -167,7 +167,7 @@ func TestLiveBeforeFirstPass(t *testing.T) {
 	rec := e.must(http.StatusOK, http.MethodGet, fmt.Sprintf("/servers/%d/metrics/live", id), e.admin())
 	want := `{"at":null,"up":null,"players":null,"players_max":null,"player_names":[],"tps":null,"mspt":null,` +
 		`"cpu_percent":null,"memory_bytes":null,"memory_limit_bytes":null,"tps_source":"unknown"}`
-	if got := string(rec.Body.Bytes()); got != want+"\n" && got != want {
+	if got := rec.Body.String(); got != want+"\n" && got != want {
 		t.Fatalf("live = %s", got)
 	}
 }
