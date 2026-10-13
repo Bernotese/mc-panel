@@ -971,6 +971,7 @@ export const en: Messages = {
       agent_unavailable: 'The agent is unreachable right now; there are no current values.',
       no_players: 'Nobody online.',
       player_names: 'Online players',
+      stopped: 'Server stopped',
     },
     tps_source: {
       tick_query: 'Source: tick query',
