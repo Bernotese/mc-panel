@@ -255,14 +255,14 @@ func readTestPacket(r *bufio.Reader) ([]byte, error) {
 }
 
 // statusJSON is a minimal valid status answer.
-func statusJSON(online, max int, names ...string) string {
+func statusJSON(online, maxPlayers int, names ...string) string {
 	sample := make([]map[string]string, 0, len(names))
 	for i, n := range names {
 		sample = append(sample, map[string]string{"name": n, "id": fmt.Sprintf("00000000-0000-0000-0000-%012d", i)})
 	}
 	b, _ := json.Marshal(map[string]any{
 		"version":     map[string]any{"name": "1.21.11", "protocol": 774},
-		"players":     map[string]any{"online": online, "max": max, "sample": sample},
+		"players":     map[string]any{"online": online, "max": maxPlayers, "sample": sample},
 		"description": map[string]any{"text": "A Minecraft Server"},
 	})
 	return string(b)

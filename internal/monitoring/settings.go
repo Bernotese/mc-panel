@@ -88,6 +88,14 @@ func settingsView(s store.MonitoringSetting, firing []FiringAlert) settingsJSON 
 	}
 }
 
+// settingsValues are the five thresholds of a row (the audit details from/to, without alerts).
+func settingsValues(s store.MonitoringSetting) updateSettingsRequest {
+	return updateSettingsRequest{
+		DiskMinPercent: s.DiskMinPercent, DiskMinBytes: s.DiskMinBytes, DownAfterMin: s.DownAfterMin,
+		CrashRestarts: s.CrashRestarts, CrashWindowMin: s.CrashWindowMin,
+	}
+}
+
 func (h *Handler) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	s, err := h.q.MonitoringGetSettings(r.Context())
 	if err != nil {
@@ -124,9 +132,8 @@ func (h *Handler) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	from, to := settingsView(old, nil), settingsView(s, nil)
-	from.Alerts, to.Alerts = nil, nil
-	h.record(ctx, audit.ActionMonitoringSettingsUpdate, auditTarget, audit.ResultSuccess, map[string]any{"from": from, "to": to})
+	h.record(ctx, audit.ActionMonitoringSettingsUpdate, auditTarget, audit.ResultSuccess,
+		map[string]any{"from": settingsValues(old), "to": settingsValues(s)})
 	httpx.WriteJSON(w, http.StatusOK, settingsView(s, h.alerts.Firing(ctx)))
 }
 
