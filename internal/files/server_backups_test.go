@@ -2,6 +2,7 @@ package files
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -85,3 +86,42 @@ func TestServerRestoreAndCancel(t *testing.T) {
 	}
 }
 
+func TestServerForgetPinPurgeDownload(t *testing.T) {
+	s, _, f := newBackupService(t)
+	sid := snapshotOf(t, s, f, makeTar(t, reg("a.txt", "hello")))
+	ts := startHTTP(t, NewServer(s, "test", discardLog()))
+
+	resp, err := http.Get(ts.URL + filesapi.PathBackupsDownload + "?id=1&snapshot=" + sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get(filesapi.HeaderKind) != "dir" || resp.Header.Get("Content-Type") != "application/zip" {
+		t.Fatalf("download: %d %v", resp.StatusCode, resp.Header)
+	}
+	if zipNames(t, body)["a.txt"] != "hello" {
+		t.Fatal("download content")
+	}
+	resp, err = http.Get(ts.URL + filesapi.PathBackupsDownload + "?id=1&snapshot=xyz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad snapshot id: %d", resp.StatusCode)
+	}
+
+	status, b := postJSON(t, ts, filesapi.PathBackupsPin, filesapi.PinRequest{ID: 1, Snapshot: sid, Pinned: true})
+	if status != http.StatusBadRequest || errCode(t, b) != filesapi.CodeInvalid { // a manual snapshot
+		t.Fatalf("pin manual: %d %s", status, b)
+	}
+	status, b = postJSON(t, ts, filesapi.PathBackupsForget, filesapi.ForgetRequest{ID: 1, Snapshots: []string{sid}})
+	if status != http.StatusAccepted {
+		t.Fatalf("forget: %d %s", status, b)
+	}
+	waitJob(t, s, 1)
+	if status, b = postJSON(t, ts, filesapi.PathBackupsPurge, filesapi.IDRequest{ID: 1}); status != http.StatusNoContent {
+		t.Fatalf("purge: %d %s", status, b)
+	}
+}
