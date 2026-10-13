@@ -312,6 +312,7 @@ type FiringAlert struct { Kind string; ServerID int64; ServerName string; Since 
 ### V6 – MSW-Mock (Aufgabe 3, `web/src/mocks/handlers/monitoring.ts`)
 
 - Deterministische Zeitreihen pro Server (Seed = Server-ID) für alle Bereiche: `survival` (läuft, im Verlauf 0–12 Spieler im Tagesverlauf, live immer mindestens 1 Spieler mit Namen, TPS 19,5–20, ein Einbruch auf 14 vor 3 h), `creative` (im Seed gestoppt → alle Werte `null`, `tps_source = none`), `modded` (im Monitoring-Mock „soll laufen, nicht erreichbar“: `up = false` seit 5 min, Alert `server.down` – bewusste Mock-Vereinfachung, sein Server-Status im übrigen Mock bleibt `stopped`), `lobby` (ohne Instanz → alle Metrik-Schlüssel mit `[]`, wie das Backend). Host mit `disk_free` knapp über der Schwelle; ein Schalter im Mock (`db.monitoring.diskLow`) lässt `host.disk_low` feuern.
+- Gestoppte Server (Mock und Backend) liefern live `tps_source: "unknown"` und `null`-Werte; B3 verlässt sich für gestoppte Server auf keinen bestimmten `tps_source`.
 - `live` wechselt alle 5 s leicht die Werte (Zeit aus `Date.now()`), Namensliste bei `survival` (nie leer); `down_alerts` ist für Admins `true` (außer nach `PUT /servers/{id}/alerts`).
 - `overview` filtert nach `serverPermissions` (`server.view`), `host = null` für Nicht-Admins.
 - `PUT /monitoring/settings` validiert wie die Global Constraints und verlangt Sudo wie die übrigen Sudo-Mocks; `PUT /servers/{id}/alerts` nur Admin.
