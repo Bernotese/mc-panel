@@ -78,3 +78,11 @@ ON CONFLICT (key) DO UPDATE SET firing = excluded.firing, since = excluded.since
 
 -- name: MonitoringDeleteAlertState :exec
 DELETE FROM alert_state WHERE key = ?;
+
+-- Earliest timestamp for the first rollup after a start; sql.ErrNoRows = empty table (sqlc types
+-- min(at) as interface{}, ORDER BY at LIMIT 1 keeps it an int64).
+-- name: MonitoringEarliestRaw :one
+SELECT at FROM metrics_raw ORDER BY at LIMIT 1;
+
+-- name: MonitoringEarliest5m :one
+SELECT at FROM metrics_5m ORDER BY at LIMIT 1;
