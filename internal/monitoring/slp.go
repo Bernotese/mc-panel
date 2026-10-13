@@ -126,15 +126,21 @@ func parseStatus(payload []byte) (slpResult, error) {
 	if top == nil {
 		return slpResult{}, fmt.Errorf("%w: json: not an object", errSLP)
 	}
+	return slpPlayers(top["players"]), nil
+}
+
+// slpPlayers reads players.online, players.max and the names of players.sample; a field with
+// an unexpected type is left out.
+func slpPlayers(raw json.RawMessage) slpResult {
 	var res slpResult
 	var players map[string]json.RawMessage
-	if json.Unmarshal(top["players"], &players) != nil {
-		return res, nil
+	if json.Unmarshal(raw, &players) != nil {
+		return res
 	}
 	res.Online, res.Max = slpCount(players["online"]), slpCount(players["max"])
 	var sample []json.RawMessage
 	if json.Unmarshal(players["sample"], &sample) != nil {
-		return res, nil
+		return res
 	}
 	for _, raw := range sample {
 		if len(res.Names) == slpMaxNames {
@@ -146,7 +152,7 @@ func parseStatus(payload []byte) (slpResult, error) {
 			res.Names = append(res.Names, name)
 		}
 	}
-	return res, nil
+	return res
 }
 
 // slpCount accepts a whole number (also written as 5.0) in 0–slpMaxCount; anything else is nil.
