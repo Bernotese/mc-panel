@@ -72,11 +72,12 @@ Browser ─/api/servers/{id}/backups/*─▶ panel: internal/backups
 ├── instances/<id>/                mcpanel-mc 0750  (unverändert)
 ├── backups/                       mcpanel-mc 0700  (neu, vom agent angelegt)
 │   ├── repos/<id>/                restic-Repo des Servers
-│   └── keys/<id>                  Repo-Passwort (32 Zufallsbytes, base64), 0600
+│   ├── keys/<id>                  Repo-Passwort (32 Zufallsbytes, base64), 0600
+│   └── restore-journal/<id>       Journal eines laufenden Tauschs (§4.3), nur während des Tauschs
 └── deleted/                       unverändert
 ```
 
-- Der agent legt `backups/` in `ensureLayout` mit Besitzer `mcpanel-mc` und Modus 0700 an (wie `instances/<id>`) und korrigiert Besitzer/Modus, falls abweichend; den Inhalt berührt er nie. `repos/` und `keys/` legt der Dienst selbst an.
+- Der agent legt `backups/` in `ensureLayout` mit Besitzer `mcpanel-mc` und Modus 0700 an (wie `instances/<id>`) und korrigiert Besitzer/Modus, falls abweichend; den Inhalt berührt er nie. `repos/`, `keys/` und `restore-journal/` legt der Dienst selbst an.
 - Kein Container sieht `backups/`; das panel (`mcpanel`) hat keinen Zugriff.
 - Ein Repo wird beim ersten Backup eines Servers angelegt (`restic init`); vorher ist die Snapshot-Liste leer.
 - **Schlüssel:** Für ein lokales Repo schützt das Passwort nicht vor dem Host selbst; es wird gebraucht, weil restic immer verschlüsselt, und es macht spätere Offsite-Kopien sicher. Ohne `keys/<id>` ist das Repo unlesbar: Die Betriebsdoku sagt, dass `backups/keys/` bei jeder Sicherung des Hosts mitgehört.
@@ -149,13 +150,14 @@ Wie bisher feste Pfade, `DisallowUnknownFields`, Fehler `{error, code}`.
 1. Vorprüfung in der Anfrage: Snapshot gehört zum Repo; freier Platz auf `instances/<id>` ≥ `bytes` des Snapshots + `reserve_bytes` (sonst `507`).
 2. Temp-Ordner `instances/<id>/.mcpanel-tmp-<token>-<zufall>/new` per `root.Mkdir`; `restic dump` → tar-Leser → Entpacken mit den Regeln aus TP3b §4.2: Pfadregeln, keine verborgenen Namen, nur Ordner und reguläre Dateien (andere tar-Typen → Job `failed`), keine doppelten Namen, Bytes und Einträge neu gezählt gegen `max_backup_bytes`/`max_backup_entries`, Dateien 0644 (0755, wenn im tar ein Ausführbit gesetzt ist), Ordner 0755, umask 0027 des Dienstes wirkt zusätzlich, mtime aus dem tar. Fehler → Temp-Ordner löschen, Datenverzeichnis unverändert.
 3. Tausch der obersten Ebene (nur `rename` über das `os.Root`, kein Kopieren): alle sichtbaren Einträge des Datenverzeichnisses nach `<tmp>/old/`, dann alle Einträge aus `<tmp>/new/` nach oben, dann `<tmp>` rekursiv löschen. Verborgene Einträge (`.rcon-cli.*`, `.mcpanel-*`) bleiben an Ort und Stelle.
-4. Abbrechen (§4.5) wirkt nur bis zum Beginn des Tauschs; der Tausch selbst läuft ohne Abbruchpunkt durch. Stirbt der Dienst mitten im Tausch, entfernt die Temp-Bereinigung beim nächsten Start (TP3b §3.3) den Rest; der Pre-Restore-Snapshot des panels (§5.5) stellt den alten Stand dann wieder her.
+4. Abbrechen (§4.5) wirkt nur bis zum Beginn des Tauschs; der Tausch selbst läuft ohne Abbruchpunkt durch. Vor dem ersten `rename` schreibt der Dienst ein Restore-Journal nach `backups/restore-journal/<id>` (außerhalb des Datenverzeichnisses, das der Container kontrolliert) und löscht es nach dem Tausch. Stirbt der Dienst mitten im Tausch, wertet er das Journal beim nächsten Start synchron aus, bevor er Anfragen annimmt: Der Tausch wird je nach Stand zurückgerollt (alter Stand wieder oben) oder zu Ende geführt, erst danach entfernt die Temp-Bereinigung (TP3b §3.3) den Rest. Der Pre-Restore-Snapshot des panels (§5.5) bleibt die Rückfallebene.
 
 ### 4.4 Download
 
 - `restic dump` → tar-Leser → Zip-Stream (`application/zip`, Dateiname `<server>-<zeit>.zip` setzt das panel), mit denselben Ausschlüssen für Namen, die sich nicht sicher in einer Zip speichern lassen, wie der Ordner-Zip-Download (TP3b §4). Der tar enthält bereits nur Ordner und reguläre Dateien und ein geschwärztes `rcon.password`.
 - Zählt zu den 4 gleichzeitigen Ordner-Zips (TP3b §4.1); läuft für die Instanz ein `forget`-Job, → `429 busy` (Prune hält eine exklusive Sperre). Während eines Backups ist ein Download möglich.
 - Fristen wie beim Ordner-Zip: 60 s pro Lese-/Schreibvorgang, keine Gesamtfrist.
+- Namensgrenze: Der Zip-Stream übernimmt die Grenze des Ordner-Zips von 16 MiB für alle Pfadnamen zusammen (TP3b). Backup und Restore erlauben 64 MiB; ein Snapshot mit mehr als 16 MiB sichtbarer Pfadnamen lässt sich daher wiederherstellen, aber nicht als Zip herunterladen (der Download bricht ab).
 
 ### 4.5 Abbrechen und Beenden
 
