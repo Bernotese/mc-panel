@@ -615,6 +615,7 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 		case err == nil:
 			st.State = mapState(info.State.Status)
 			st.ExitCode = info.State.ExitCode
+			st.RestartCount = info.RestartCount
 			if st.State == agentapi.StateRunning || st.State == agentapi.StateRestarting {
 				st.StartedAt = startedAtMillis(info.State.StartedAt)
 			}

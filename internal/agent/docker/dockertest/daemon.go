@@ -45,14 +45,15 @@ const (
 
 // Container is a snapshot of a fake container.
 type Container struct {
-	ID        string
-	Name      string
-	Config    docker.ContainerConfig
-	Status    string // created, running, exited
-	ExitCode  int
-	StartedAt time.Time
-	Kills     []string // signals received
-	StopTimes []int    // t= of every stop/restart
+	ID           string
+	Name         string
+	Config       docker.ContainerConfig
+	Status       string // created, running, exited
+	ExitCode     int
+	RestartCount int // reported by inspect
+	StartedAt    time.Time
+	Kills        []string // signals received
+	StopTimes    []int    // t= of every stop/restart
 }
 
 type failure struct {
@@ -177,6 +178,15 @@ func (d *Daemon) SetState(name, status string, exitCode int) {
 		c.Status, c.ExitCode = status, exitCode
 	}
 	d.wakeLogs()
+}
+
+// SetRestartCount sets the RestartCount inspect reports for the container called name.
+func (d *Daemon) SetRestartCount(name string, n int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if c, ok := d.containers[name]; ok {
+		c.RestartCount = n
+	}
 }
 
 // SetStats sets the answer of the stats endpoint for the container called name.
@@ -593,7 +603,8 @@ func (d *Daemon) container(w http.ResponseWriter, r *http.Request, op, ref strin
 				Status: c.Status, Running: c.Status == "running", Restarting: c.Status == "restarting",
 				ExitCode: c.ExitCode, StartedAt: started,
 			},
-			Config: docker.InfoConfig{Image: c.Config.Image, Labels: c.Config.Labels},
+			RestartCount: c.RestartCount,
+			Config:       docker.InfoConfig{Image: c.Config.Image, Labels: c.Config.Labels},
 		})
 	case OpStats:
 		writeJSON(w, http.StatusOK, d.stats[c.Name])
