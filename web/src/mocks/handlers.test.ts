@@ -2,9 +2,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { BackupJob, BackupOverview, BackupSnapshot } from '@/api/types'
+import type { LiveMetrics, MetricsSeries, MonitoringOverview, MonitoringSettings } from '@/api/types'
 import type { PluginInventory, PluginJob, PluginResolution, PluginSearchResult, PluginUpdates, PluginVersionList } from '@/api/types'
 import { callApi, field } from '@/test/call-api'
-import { db, loginAs } from './db'
+import { db, defaultMonitoring, loginAs } from './db'
 import { operations } from './handlers'
 
 const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../api/openapi.yaml'), 'utf8')
@@ -12,7 +13,7 @@ const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../
 describe('mock coverage', () => {
   it('mocks every operationId of api/openapi.yaml exactly once', () => {
     const ids = [...openapiYaml.matchAll(/operationId:\s*(\w+)/g)].map((m) => m[1]).sort()
-    expect(ids).toHaveLength(95)
+    expect(ids).toHaveLength(102)
     expect(operations.map((o) => o.operationId).sort()).toEqual(ids)
   })
 })
@@ -582,5 +583,55 @@ describe('mock behaviour', () => {
     expect((await callApi('DELETE', '/servers/1?purge_backups=1', { csrf: me.csrf_token })).status).toBe(204)
     expect(db.backups[1]).toBeUndefined()
     expect(db.audit.at(-1)).toMatchObject({ action: 'server.delete', details: { backups_purged: true } })
+  })
+
+  it('serves deterministic monitoring series and live values', async () => {
+    loginAs('admin')
+    const s = (await callApi('GET', '/servers/1/metrics?range=24h')).body as MetricsSeries
+    expect(s.range).toBe('24h')
+    expect(s.step_ms).toBe(300_000)
+    expect(s.series.players).toHaveLength(288)
+    expect(s.series.tps.every(([, avg]) => avg > 0 && avg <= 20)).toBe(true)
+    const again = (await callApi('GET', '/servers/1/metrics?range=24h')).body as MetricsSeries
+    expect(again.series.players.map((p) => p[1])).toEqual(s.series.players.map((p) => p[1]))
+    expect(((await callApi('GET', '/servers/1/metrics?range=30d')).body as MetricsSeries).series.players).toHaveLength(720)
+    expect(field((await callApi('GET', '/servers/1/metrics?range=2h')).body, 'error')).toBe('validation_failed')
+    expect(Object.values(((await callApi('GET', '/servers/3/metrics?range=1h')).body as MetricsSeries).series).every((v) => v.length === 0)).toBe(true)
+    const live = (await callApi('GET', '/servers/1/metrics/live')).body as LiveMetrics
+    expect(live).toMatchObject({ up: true, tps_source: 'tick_query' })
+    expect(live.player_names.length).toBeGreaterThan(0)
+    expect(((await callApi('GET', '/servers/4/metrics/live')).body as LiveMetrics)).toMatchObject({ up: false, tps_source: 'none' })
+  })
+
+  it('filters the overview and hides host values from users', async () => {
+    loginAs('admin')
+    const ov = (await callApi('GET', '/monitoring/overview')).body as MonitoringOverview
+    expect(ov.servers.map((s) => s.id).sort()).toEqual([1, 2, 3, 4])
+    expect(ov.servers.find((s) => s.id === 4)?.alerts).toEqual(['server.down'])
+    expect(ov.host?.alerts).toEqual([])
+    db.monitoring.diskLow = true
+    expect(((await callApi('GET', '/monitoring/overview')).body as MonitoringOverview).host?.alerts).toEqual(['host.disk_low'])
+    db.monitoring.diskLow = false
+    loginAs('alice')
+    const user = (await callApi('GET', '/monitoring/overview')).body as MonitoringOverview
+    expect(user.host).toBeNull()
+    expect(user.servers.map((s) => s.id).sort()).toEqual([1, 2])
+    expect((await callApi('GET', '/monitoring/host?range=1h')).status).toBe(403)
+  })
+
+  it('saves monitoring settings with sudo and validates them', async () => {
+    const plain = loginAs('admin')
+    const body = { disk_min_percent: 20, disk_min_bytes: 5 * 1024 ** 3, down_after_min: 2, crash_restarts: 4, crash_window_min: 15 }
+    expect(field((await callApi('PUT', '/monitoring/settings', { body, csrf: plain.csrf_token })).body, 'error')).toBe('sudo_required')
+    const me = loginAs('admin', { sudo: true })
+    const saved = (await callApi('PUT', '/monitoring/settings', { body, csrf: me.csrf_token })).body as MonitoringSettings
+    expect(saved).toMatchObject(body)
+    expect(field((await callApi('PUT', '/monitoring/settings', { body: { ...body, crash_restarts: 1 }, csrf: me.csrf_token })).body, 'error')).toBe('validation_failed')
+    const settings = (await callApi('GET', '/monitoring/settings')).body as MonitoringSettings
+    expect(settings.alerts.map((a) => a.kind)).toEqual(['server.down'])
+    expect((await callApi('PUT', '/servers/4/alerts', { body: { down_alerts: false }, csrf: me.csrf_token })).status).toBe(204)
+    expect(field((await callApi('GET', '/servers/4')).body, 'down_alerts')).toBe(false)
+    expect(((await callApi('GET', '/monitoring/overview')).body as MonitoringOverview).servers.find((s) => s.id === 4)?.alerts).toEqual([])
+    db.monitoring = defaultMonitoring()
   })
 })
