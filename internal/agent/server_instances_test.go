@@ -84,7 +84,7 @@ func TestServerInstanceEndpoints(t *testing.T) {
 
 	rec := serve(srv, http.MethodGet, agentapi.PathInstances, "", "")
 	want := `{"docker":"ok","instances":[{"id":1,"name":"survival","revision":2,"state":"running","exit_code":0,` +
-		`"started_at":0,"memory_bytes":0,"memory_limit_bytes":0,"cpu_percent":12.5,"operation":"","last_error":""}],` +
+		`"restart_count":0,"started_at":0,"memory_bytes":0,"memory_limit_bytes":0,"cpu_percent":12.5,"operation":"","last_error":""}],` +
 		`"router":{"state":"running","last_error":""}}` + "\n"
 	if rec.Code != http.StatusOK || rec.Body.String() != want {
 		t.Fatalf("GET instances: %d %s", rec.Code, rec.Body)

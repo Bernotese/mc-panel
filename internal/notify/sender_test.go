@@ -195,3 +195,16 @@ func TestNewSenderUnknownKind(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+// TP5: every monitoring event has its own title.
+func TestDefaultTitlesCoverMonitoringEvents(t *testing.T) {
+	for _, e := range []EventType{EventServerDown, EventServerRecovered, EventServerCrashLoop, EventHostDiskLow, EventHostDiskOK} {
+		if defaultTitles[e] == "" {
+			t.Errorf("no default title for %s", e)
+		}
+	}
+	if EventServerDown != "server.down" || EventServerRecovered != "server.recovered" || EventServerCrashLoop != "server.crash_loop" ||
+		EventHostDiskLow != "host.disk_low" || EventHostDiskOK != "host.disk_ok" {
+		t.Fatal("event type values differ from the contract (V1)")
+	}
+}

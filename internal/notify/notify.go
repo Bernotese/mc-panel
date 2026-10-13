@@ -19,6 +19,11 @@ const (
 	Event2FAChanged         EventType = "auth.2fa_changed"
 	EventAuditChainBroken   EventType = "audit.chain_broken"
 	EventBackupFailed       EventType = "backup.failed"
+	EventServerDown         EventType = "server.down"
+	EventServerRecovered    EventType = "server.recovered"
+	EventServerCrashLoop    EventType = "server.crash_loop"
+	EventHostDiskLow        EventType = "host.disk_low"
+	EventHostDiskOK         EventType = "host.disk_ok"
 	EventTest               EventType = "test"
 )
 

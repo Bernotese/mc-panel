@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,13 +38,18 @@ type Session struct {
 }
 
 type Panel struct {
-	Dev            bool     `toml:"dev"`
-	Listen         string   `toml:"listen"`
-	PublicURL      string   `toml:"public_url"`
-	DataDir        string   `toml:"data_dir"`
-	AgentSocket    string   `toml:"agent_socket"`
-	FilesSocket    string   `toml:"files_socket"`
-	GeoIPPath      string   `toml:"geoip_path"`
+	Dev         bool   `toml:"dev"`
+	Listen      string `toml:"listen"`
+	PublicURL   string `toml:"public_url"`
+	DataDir     string `toml:"data_dir"`
+	AgentSocket string `toml:"agent_socket"`
+	FilesSocket string `toml:"files_socket"`
+	GeoIPPath   string `toml:"geoip_path"`
+	// MonitoringPingAddr is where the panel sends Server List Pings (mc-router); "" = no ping
+	// (TP5 §3.2).
+	MonitoringPingAddr string `toml:"monitoring_ping_addr"`
+	// InstancesDir is statfs'ed for the host disk values (TP5 §3.4); "" = no disk values.
+	InstancesDir   string   `toml:"instances_dir"`
 	TrustedProxies []string `toml:"trusted_proxies"`
 	Session        Session  `toml:"session"`
 
@@ -66,13 +72,15 @@ const UnixListenPrefix = "unix:"
 // reverse proxy (Caddy) can reach; requests arriving over it are treated as proxied.
 func DefaultPanel() Panel {
 	return Panel{
-		Listen:         UnixListenPrefix + "/run/mc-panel/panel.sock",
-		DataDir:        "/var/lib/mc-panel",
-		AgentSocket:    "/run/mc-panel/agent.sock",
-		FilesSocket:    "/run/mc-panel-files/files.sock",
-		GeoIPPath:      "/var/lib/mc-panel/dbip-country-lite.mmdb",
-		TrustedProxies: []string{"127.0.0.1/32", "::1/128"},
-		Session:        defaultSession(),
+		Listen:             UnixListenPrefix + "/run/mc-panel/panel.sock",
+		DataDir:            "/var/lib/mc-panel",
+		AgentSocket:        "/run/mc-panel/agent.sock",
+		FilesSocket:        "/run/mc-panel-files/files.sock",
+		GeoIPPath:          "/var/lib/mc-panel/dbip-country-lite.mmdb",
+		TrustedProxies:     []string{"127.0.0.1/32", "::1/128"},
+		Session:            defaultSession(),
+		MonitoringPingAddr: "127.0.0.1:25565",
+		InstancesDir:       DefaultInstancesDir,
 	}
 }
 
@@ -85,6 +93,8 @@ func DevPanel(root string) Panel {
 	p.AgentSocket = filepath.Join(root, ".dev", "agent.sock")
 	p.FilesSocket = filepath.Join(root, ".dev", "files.sock")
 	p.GeoIPPath = filepath.Join(root, ".dev", "dbip-country-lite.mmdb")
+	p.MonitoringPingAddr = "" // no mc-router on the Mac
+	p.InstancesDir = filepath.Join(root, ".dev", "mc")
 	return p
 }
 
@@ -130,6 +140,12 @@ func (p *Panel) Validate() error {
 	if p.DataDir == "" || p.AgentSocket == "" || p.FilesSocket == "" {
 		errs = append(errs, errors.New("data_dir, agent_socket and files_socket must be set"))
 	}
+	if err := validatePingAddr(p.MonitoringPingAddr); err != nil {
+		errs = append(errs, err)
+	}
+	if p.InstancesDir != "" && (!filepath.IsAbs(p.InstancesDir) || filepath.Clean(p.InstancesDir) != p.InstancesDir) {
+		errs = append(errs, fmt.Errorf("instances_dir: %q must be a clean absolute path", p.InstancesDir))
+	}
 	p.trusted = make([]netip.Prefix, 0, len(p.TrustedProxies))
 	for _, s := range p.TrustedProxies {
 		pf, err := netip.ParsePrefix(s)
@@ -162,6 +178,19 @@ func validateListen(l string) error {
 	}
 	if _, _, err := net.SplitHostPort(l); err != nil || l == "" {
 		return fmt.Errorf("listen: %q must be host:port or unix:/absolute/path", l)
+	}
+	return nil
+}
+
+// validatePingAddr accepts "" (no ping) or host:port with a numeric port 1–65535.
+func validatePingAddr(a string) error {
+	if a == "" {
+		return nil
+	}
+	host, port, err := net.SplitHostPort(a)
+	n, perr := strconv.Atoi(port)
+	if err != nil || host == "" || perr != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("monitoring_ping_addr: %q must be host:port (port 1–65535) or empty", a)
 	}
 	return nil
 }
