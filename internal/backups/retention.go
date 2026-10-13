@@ -19,9 +19,10 @@ func (h *Handler) runScheduled(ctx context.Context, j *job) (string, error) {
 		return "", err
 	}
 	snap, err := h.runBackup(ctx, j, filesapi.SnapshotScheduled, "")
+	err = h.deletedOr(ctx, id, err)
 	hint := ""
 	if err == nil {
-		perr := h.prune(ctx, j)
+		perr := h.deletedOr(ctx, id, h.prune(ctx, j))
 		switch {
 		case errors.Is(perr, errServerDeleted):
 			err = perr
@@ -63,7 +64,7 @@ func (h *Handler) prune(ctx context.Context, j *job) (err error) {
 	if err != nil {
 		return err
 	}
-	_, err = h.waitService(ctx, j, id, sj.ID, false)
+	_, err = h.waitService(ctx, j, id, sj.ID, waitForget)
 	return err
 }
 

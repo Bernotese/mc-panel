@@ -1,6 +1,7 @@
 package backups_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -90,8 +91,8 @@ func TestProgressResetsStallWatchdog(t *testing.T) {
 	}
 }
 
-// The retention forget has the watchdog as well.
-func TestStalledForgetFails(t *testing.T) {
+// A forget reports no bytes: no stall watchdog, but an overall limit of 2 hours.
+func TestForgetTimeLimit(t *testing.T) {
 	e := newEnv(t)
 	id := e.instance("survival")
 	snap := e.files.add(id, filesapi.SnapshotManual, false, "")
@@ -100,9 +101,17 @@ func TestStalledForgetFails(t *testing.T) {
 	setStall(e, true)
 	e.must(http.StatusAccepted, http.MethodDelete, bPath(id, "/"+snap), nil, e.sudoAdmin())
 	e.waitStep(id, "deleting")
-	e.clk.Advance(10 * time.Minute)
-	if j := e.waitJob(id); j.State != "failed" || j.Error != msgStalled {
+	e.clk.Advance(time.Hour)
+	time.Sleep(50 * time.Millisecond) // some polls: no stall watchdog for a forget
+	if j := e.job(id); j.State != "running" {
+		t.Fatalf("forget ended after an hour without bytes: %+v", j)
+	}
+	e.clk.Advance(time.Hour)
+	if j := e.waitJob(id); j.State != "failed" || code(j) != "internal" || j.Error != "deleting snapshots did not finish within 2 hours" {
 		t.Fatalf("job = %+v", j)
+	}
+	if n := e.files.count(fmt.Sprintf("cancel %d", id)); n != 1 {
+		t.Fatalf("calls = %v", e.files.callLog())
 	}
 }
 
@@ -382,29 +391,125 @@ func TestPurgeWaitsForServiceJob(t *testing.T) {
 	}
 }
 
-// Without Docker no container runs: a backup needs no save-off, a restore no stop.
-func TestDockerUnavailableCountsAsStopped(t *testing.T) {
+// Docker not reachable is never "stopped" (dockerd may hang while the containers run): a
+// backup fails without save-off and without a snapshot, a restore without a stop.
+func TestDockerUnavailableFailsJobs(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		set  func(a *fakeAgent)
+	}{
+		{"status", func(a *fakeAgent) { a.docker = agentapi.DockerUnavailable }},
+		{"error", func(a *fakeAgent) {
+			a.err = fmt.Errorf("%w: GET /containers/json: context deadline exceeded", agentapi.ErrDockerUnavailable)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			id := e.instance("survival")
+			e.agent.set(id, agentapi.StateRunning)
+			snap := e.files.add(id, filesapi.SnapshotManual, false, "")
+			c.set(e.agent)
+			e.create(id, map[string]any{})
+			if j := e.waitJob(id); code(j) != "agent_unavailable" || j.Error != "Docker is not reachable" {
+				t.Fatalf("backup = %+v", j)
+			}
+			e.restore(id, snap)
+			if j := e.waitJob(id); code(j) != "agent_unavailable" || j.Error != "Docker is not reachable" {
+				t.Fatalf("restore = %+v", j)
+			}
+			if len(e.console.sent()) != 0 || len(e.agent.powerLog()) != 0 || e.files.count("create") != 0 || e.files.count("restore") != 0 {
+				t.Fatalf("rcon %v, powers %v, calls %v", e.console.sent(), e.agent.powerLog(), e.files.callLog())
+			}
+		})
+	}
+}
+
+// Docker briefly not reachable while the restore waits for the stop: those answers are not
+// "stopped"; the server that keeps running ends in stop_timeout, nothing is restored.
+func TestDockerBlipDuringStopWait(t *testing.T) {
 	e := newEnv(t)
 	id := e.instance("survival")
 	e.agent.set(id, agentapi.StateRunning)
-	e.agent.docker = agentapi.DockerUnavailable
-	e.create(id, map[string]any{})
-	if j := e.waitJob(id); j.State != "done" {
-		t.Fatalf("backup = %+v", j)
+	e.agent.stuck = true
+	e.agent.blipAfterStop = 3
+	snap := e.files.add(id, filesapi.SnapshotManual, false, "")
+	e.restore(id, snap)
+	if j := e.waitJob(id); code(j) != "stop_timeout" {
+		t.Fatalf("job = %+v", j)
 	}
-	snap := e.files.list(id)[0].ID
+	if n := e.files.count("create") + e.files.count("restore"); n != 0 {
+		t.Fatalf("calls = %v", e.files.callLog())
+	}
+}
+
+// After the blip a successful answer that shows the stop lets the restore go on.
+func TestDockerBlipThenStopped(t *testing.T) {
+	e := newEnv(t)
+	id := e.instance("survival")
+	e.agent.set(id, agentapi.StateRunning)
+	e.agent.blipAfterStop = 3
+	snap := e.files.add(id, filesapi.SnapshotManual, false, "")
 	e.restore(id, snap)
 	if j := e.waitJob(id); j.State != "done" {
-		t.Fatalf("restore = %+v", j)
+		t.Fatalf("job = %+v", j)
 	}
-	if len(e.console.sent()) != 0 || len(e.agent.powerLog()) != 0 {
-		t.Fatalf("rcon %v, powers %v", e.console.sent(), e.agent.powerLog())
+}
+
+// A job that only waits does not hold the save lock: a marked server gets its save-on retry.
+func TestSaveOnRetryNotBlockedByWaitingJob(t *testing.T) {
+	e := newEnv(t)
+	a := e.instance("alpha")
+	b := e.instance("beta")
+	e.agent.set(b, agentapi.StateRunning)
+	release := e.files.holdPlan("manual")
+	defer release()
+	e.create(a, map[string]any{})
+	e.waitStep(a, "backing_up")
+	mustExec(t, e.db, `INSERT INTO backup_schedules (server_id, saveoff_since, updated_at) VALUES (?, ?, 0)`, b, t0.UnixMilli())
+	if j := e.create(b, map[string]any{}); j.State != "queued" {
+		t.Fatalf("beta = %+v", j)
 	}
-	e.agent.docker = ""
-	e.agent.err = agentapi.ErrDockerUnavailable // the same as an error of the instances call
+	backups.Tick(t.Context(), e.h)
+	if !slices.Contains(e.console.sent(), fmt.Sprintf("%d save-on", b)) {
+		t.Fatalf("rcon = %v, want beta's save-on", e.console.sent())
+	}
+	if e.schedule(b).SaveoffSince.Valid {
+		t.Fatal("mark still set")
+	}
+}
+
+// A server deleted and purged while its backup waits for RCON: the job ends as canceled
+// without a backup.create entry (the cancel of the purge does not hide the deletion).
+func TestPurgeOfDeletedServerDuringBackup(t *testing.T) {
+	e := newEnv(t)
+	id := e.instance("survival")
+	e.agent.set(id, agentapi.StateRunning)
+	e.console.setHang("save-all flush")
+	purged := make(chan error, 1)
+	e.console.onCmd = func(cmd string) {
+		if cmd == "save-all flush" {
+			e.deleteServer(id)
+			go func() { purged <- e.h.PurgeBackups(context.Background(), id) }()
+		}
+	}
 	e.create(id, map[string]any{})
-	if j := e.waitJob(id); j.State != "done" {
-		t.Fatalf("backup = %+v", j)
+	if err := <-purged; err != nil {
+		t.Fatal(err)
+	}
+	if !backups.WaitIdle(e.h) {
+		t.Fatal("job did not finish")
+	}
+	if state, c, _ := backups.JobOf(e.h, id); state != "failed" || c != "canceled" {
+		t.Fatalf("job = %s %s", state, c)
+	}
+	if got := e.rec.actions(); len(got) != 0 {
+		t.Fatalf("audit = %v", got)
+	}
+	if e.files.count("create") != 0 || e.files.count(fmt.Sprintf("purge %d", id)) != 1 {
+		t.Fatalf("calls = %v", e.files.callLog())
+	}
+	if got := e.console.sent(); got[len(got)-1] != fmt.Sprintf("%d save-on", id) {
+		t.Fatalf("rcon = %v", got)
 	}
 }
 

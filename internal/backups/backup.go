@@ -36,15 +36,30 @@ func (h *Handler) ready(ctx context.Context, srv server, needInstance bool) erro
 
 // serverGone reports whether the server row no longer exists (deleted while its job waited or
 // ran). A failing lookup counts as present: the next step fails on its own if the DB is gone.
-func (h *Handler) serverGone(ctx context.Context, id int64) bool {
+func (h *Handler) serverGone(parent context.Context, id int64) bool {
+	// also after a cancel (a purge drops the job of a server it deletes)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), cleanupTimeout)
+	defer cancel()
 	_, err := h.q.RbacGetServer(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true
 	}
-	if err != nil && ctx.Err() == nil {
+	if err != nil {
 		h.log.WarnContext(ctx, "backups: look up the server of a job", "server_id", id, "err", err)
 	}
 	return false
+}
+
+// deletedOr turns a failure of a job whose server is gone meanwhile into errServerDeleted
+// (no audit entry, no notification); other results stay.
+func (h *Handler) deletedOr(ctx context.Context, id int64, err error) error {
+	if err == nil || errors.Is(err, errServerDeleted) {
+		return err
+	}
+	if h.serverGone(ctx, id) {
+		return errServerDeleted
+	}
+	return err
 }
 
 // step moves j to step unless its server was deleted meanwhile (errServerDeleted). A service
@@ -58,22 +73,18 @@ func (h *Handler) step(ctx context.Context, j *job, step string) error {
 }
 
 // instanceState asks the agent for the container state; no agent client counts as stopped.
-// Without a Docker daemon no container runs: the state is StateMissing (a backup needs no
-// save-off, a restore no stop; dev without Docker, spec §7). An agent that does not answer is
-// an error (agent_unavailable).
+// Docker not ok is always an error, never "stopped": the agent also reports it when dockerd
+// hangs while the containers keep running.
 func (h *Handler) instanceState(ctx context.Context, id int64) (agentapi.ContainerState, error) {
 	if h.inst == nil {
 		return agentapi.StateMissing, nil
 	}
 	resp, err := h.inst.Instances(ctx)
-	if errors.Is(err, agentapi.ErrDockerUnavailable) {
-		return agentapi.StateMissing, nil
-	}
 	if err != nil {
 		return "", err
 	}
 	if resp.Docker != agentapi.DockerOK {
-		return agentapi.StateMissing, nil
+		return "", agentapi.ErrDockerUnavailable
 	}
 	for _, s := range resp.Instances {
 		if s.ID == id {
@@ -96,9 +107,18 @@ func (h *Handler) containerRunning(ctx context.Context, id int64) (bool, error) 
 			return false, ctx.Err()
 		}
 		h.log.WarnContext(ctx, "backups: read the server state", "server_id", id, "err", err)
-		return false, failf(codeAgent, "the agent is not reachable, the server state is unknown")
+		return false, stateError(err)
 	}
 	return isRunning(st), nil
+}
+
+// stateError is the job error of an unknown server state (fixed texts: the agent's errors may
+// name its socket path).
+func stateError(err error) error {
+	if errors.Is(err, agentapi.ErrDockerUnavailable) {
+		return failf(codeAgent, "Docker is not reachable")
+	}
+	return failf(codeAgent, "the agent is not reachable, the server state is unknown")
 }
 
 // sendRcon runs one console command with the agent-side timeout rconTimeout (60 s: save-off
@@ -176,19 +196,37 @@ func (h *Handler) cancelService(parent context.Context, id int64) {
 	}
 }
 
+// waitMode says how waitService watches a service job.
+type waitMode struct {
+	// stall: the job reports byte progress (backup, pre-restore, restore); no change for
+	// stallTimeout cancels and fails it.
+	stall bool
+	// limit > 0 bounds the whole job instead (forget reports no bytes).
+	limit time.Duration
+	// untilEnd: the restoring step, which holds the start gate. Poll errors never end the wait
+	// and a cancelled job is waited for until a successful poll shows its end, so the gate does
+	// not open while the service may still swap the data directory.
+	untilEnd bool
+}
+
+var (
+	waitBackup  = waitMode{stall: true}
+	waitRestore = waitMode{stall: true, untilEnd: true}
+	waitForget  = waitMode{limit: forgetTimeout}
+)
+
 // waitService polls the service job jobID of the server until it ended; progress goes to j.
-// A cancelled ctx cancels the service job. A job whose byte count does not change for
-// stallTimeout (h.clock) is cancelled and fails with msgStalled. With untilEnd (the restoring
-// step, which holds the start gate) poll errors never end the wait and a stalled job is waited
-// for after its cancel: the wait ends only when a successful poll shows the job ended (or ctx
-// ends), so the gate does not open while the service may still swap the data directory.
-func (h *Handler) waitService(ctx context.Context, j *job, id int64, jobID string, untilEnd bool) (filesapi.Job, error) {
+// A cancelled ctx cancels the service job. Stall watchdog and overall limit (h.clock) follow
+// m: on expiry the job is cancelled and fails (with m.untilEnd only once its end is seen).
+func (h *Handler) waitService(ctx context.Context, j *job, id int64, jobID string, m waitMode) (filesapi.Job, error) {
 	if h.files == nil {
 		return filesapi.Job{}, errNoFiles
 	}
+	untilEnd := m.untilEnd
+	started := h.clock.Now()
 	misses := 0
 	lastBytes, lastChange := int64(0), h.clock.Now() // a new job starts at 0 bytes
-	stalled := false
+	stalled, overMsg := false, ""                    // stalled: cancelled for the watchdog or the limit
 	for {
 		select {
 		case <-ctx.Done():
@@ -220,18 +258,27 @@ func (h *Handler) waitService(ctx context.Context, j *job, id int64, jobID strin
 				return *sj, nil
 			case filesapi.JobFailed:
 				if stalled {
-					return *sj, failf(codeInternal, msgStalled)
+					return *sj, failf(codeInternal, "%s", overMsg)
 				}
 				return *sj, failf(serviceJobCode(sj.Code), "%s", sj.Error)
 			}
 		}
-		if !stalled && h.clock.Now().Sub(lastChange) >= stallTimeout {
-			h.log.WarnContext(ctx, "backups: the service job made no progress, cancelling it", "server_id", id, "job", jobID)
+		now := h.clock.Now()
+		over := ""
+		switch {
+		case stalled:
+		case m.stall && now.Sub(lastChange) >= stallTimeout:
+			over = msgStalled
+		case m.limit > 0 && now.Sub(started) >= m.limit:
+			over = msgForgetTimeout
+		}
+		if over != "" {
+			h.log.WarnContext(ctx, "backups: cancelling the service job", "server_id", id, "job", jobID, "reason", over)
 			h.cancelService(ctx, id)
 			if !untilEnd {
-				return filesapi.Job{}, failf(codeInternal, msgStalled)
+				return filesapi.Job{}, failf(codeInternal, "%s", over)
 			}
-			stalled = true
+			stalled, overMsg = true, over
 		}
 	}
 }
@@ -293,7 +340,7 @@ func (h *Handler) runBackup(ctx context.Context, j *job, kind filesapi.SnapshotK
 	if err != nil {
 		return "", err
 	}
-	done, err := h.waitService(ctx, j, id, sj.ID, false)
+	done, err := h.waitService(ctx, j, id, sj.ID, waitBackup)
 	if err != nil {
 		return "", err
 	}
@@ -334,7 +381,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		serverID: srv.ID, name: srv.Name, kind: kindBackup, trigger: triggerManual,
 		run: func(ctx context.Context, j *job) (string, error) {
 			snap, err := h.runBackup(ctx, j, filesapi.SnapshotManual, note)
-			if errors.Is(err, errServerDeleted) {
+			if err = h.deletedOr(ctx, srv.ID, err); errors.Is(err, errServerDeleted) {
 				return "", err
 			}
 			details := map[string]any{"note": nil, "snapshot": nil}

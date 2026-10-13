@@ -169,6 +169,9 @@ func (q *queue) work(ctx context.Context) {
 			q.finish(j, "", errServerDeleted)
 		} else {
 			snap, err := j.spec.run(j.ctx, j)
+			if err != nil && !errors.Is(err, errServerDeleted) && q.gone != nil && q.gone(j.ctx, j.spec.serverID) {
+				err = errServerDeleted // failed because its server went away: a cancel without log
+			}
 			q.finish(j, snap, err)
 		}
 		if j.spec.after != nil {
@@ -206,7 +209,7 @@ func (q *queue) finish(j *job, snapshot string, err error) {
 	defer q.mu.Unlock()
 	j.view.FinishedAt = q.clock.Now().UnixMilli()
 	err = canceledOr(j.ctx, err) // dropped or shut down: never an RCON or agent error
-	if err != nil && !errors.Is(err, context.Canceled) {
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, errServerDeleted) {
 		log := q.log
 		if log == nil {
 			log = slog.Default()

@@ -16,6 +16,8 @@ const (
 	purgeWait = 15 * time.Second
 	// purgeJobWait bounds the wait until the service no longer runs a job of the server.
 	purgeJobWait = 30 * time.Second
+	// purgeTries is how often a purge is tried while the service answers busy.
+	purgeTries = 5
 )
 
 func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
@@ -45,9 +47,11 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 			}
 			sj, err := h.files.ForgetBackups(ctx, filesapi.ForgetRequest{ID: srv.ID, Snapshots: []string{snap}})
 			if err == nil {
-				_, err = h.waitService(ctx, j, srv.ID, sj.ID, false)
+				_, err = h.waitService(ctx, j, srv.ID, sj.ID, waitForget)
 			}
-			err = canceledOr(ctx, err)
+			if err = h.deletedOr(ctx, srv.ID, canceledOr(ctx, err)); errors.Is(err, errServerDeleted) {
+				return snap, err
+			}
 			h.record(ctx, audit.ActionBackupDelete, srv.ID, result(err), map[string]any{"snapshot": snap, "kind": string(s.Kind)})
 			return snap, err
 		},
@@ -109,9 +113,10 @@ func (h *Handler) handlePin(w http.ResponseWriter, r *http.Request) {
 // PurgeBackups ends the server's jobs (a waiting one is dropped, a running one cancelled and
 // awaited), waits until the service runs no job of the server any more and deletes its
 // repository (servers.BackupPurger, spec §5.6). Should the service still report busy, the
-// purge is retried a few times. The waiting before the service call is bounded (purgeWait +
-// purgeJobWait + 5 × pollEvery ≈ 55 s): servers' DELETE gives the whole purge
-// filesapi.DeleteTimeout + 1 min (context and write deadline, V2).
+// purge is retried up to purgeTries times. The waiting before the last purge call is bounded:
+// purgeWait (15 s) + purgeJobWait (30 s, every Job call included) + (purgeTries-1) ×
+// pollEvery (8 s) = 53 s, plus the busy answers themselves; servers' DELETE gives the whole
+// purge filesapi.DeleteTimeout + 1 min (context and write deadline, V2).
 func (h *Handler) PurgeBackups(ctx context.Context, serverID int64) error {
 	h.queue.drop(serverID, purgeWait)
 	if h.files == nil {
@@ -119,33 +124,34 @@ func (h *Handler) PurgeBackups(ctx context.Context, serverID int64) error {
 	}
 	h.waitServiceIdle(ctx, serverID, purgeJobWait)
 	var err error
-	for range 5 {
+	for i := range purgeTries {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(h.pollEvery):
+			}
+		}
 		if err = h.files.PurgeBackups(ctx, serverID); !errors.Is(err, filesapi.ErrBusy) {
 			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(h.pollEvery):
 		}
 	}
 	return err
 }
 
 // waitServiceIdle polls the service until it reports no running job of the server, at most
-// wait (a cancelled job may take a moment to end; poll errors count as still running).
+// wait in total: every Job call runs under the remaining time (a cancelled job may take a
+// moment to end; poll errors count as still running).
 func (h *Handler) waitServiceIdle(ctx context.Context, serverID int64, wait time.Duration) {
-	deadline := time.NewTimer(wait)
-	defer deadline.Stop()
+	ctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
 	for {
 		if sj, err := h.files.Job(ctx, serverID); err == nil && (sj == nil || sj.State != filesapi.JobRunning) {
 			return
 		}
 		select {
 		case <-ctx.Done():
-			return
-		case <-deadline.C:
-			h.log.WarnContext(ctx, "backups: the service still runs a job of the server, purging anyway", "server_id", serverID)
+			h.log.WarnContext(ctx, "backups: the service may still run a job of the server, purging anyway", "server_id", serverID)
 			return
 		case <-time.After(h.pollEvery):
 		}
