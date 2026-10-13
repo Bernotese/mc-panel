@@ -38,7 +38,9 @@ func TestSettingsDefaultsAndUpdate(t *testing.T) {
 	if last.Action != audit.ActionMonitoringSettingsUpdate || last.Target != auditTarget || last.Result != audit.ResultSuccess {
 		t.Fatalf("audit = %+v", last)
 	}
-	if _, ok := last.Details["from"]; !ok {
+	from, okFrom := last.Details["from"].(updateSettingsRequest)
+	to, okTo := last.Details["to"].(updateSettingsRequest)
+	if !okFrom || !okTo || from.DiskMinPercent != 10 || to.DiskMinPercent != 15 || to.CrashWindowMin != 15 {
 		t.Fatalf("audit details = %v", last.Details)
 	}
 }
@@ -84,7 +86,7 @@ func TestServerAlertsSwitch(t *testing.T) {
 		t.Fatalf("row = %d %v", v, err)
 	}
 	last := e.rec.Entries[len(e.rec.Entries)-1]
-	if last.Action != audit.ActionServerAlertsUpdate || last.Target != serverTarget(id) || last.Details["down_alerts"] != false {
+	if on, ok := last.Details["down_alerts"].(bool); last.Action != audit.ActionServerAlertsUpdate || last.Target != serverTarget(id) || !ok || on {
 		t.Fatalf("audit = %+v", last)
 	}
 	if rec := e.do(http.MethodPut, path, map[string]any{}, &admin); rec.Code != http.StatusBadRequest {
