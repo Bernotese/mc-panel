@@ -72,11 +72,12 @@ Browser ─/api/servers/{id}/backups/*─▶ panel: internal/backups
 ├── instances/<id>/                mcpanel-mc 0750  (unverändert)
 ├── backups/                       mcpanel-mc 0700  (neu, vom agent angelegt)
 │   ├── repos/<id>/                restic-Repo des Servers
-│   └── keys/<id>                  Repo-Passwort (32 Zufallsbytes, base64), 0600
+│   ├── keys/<id>                  Repo-Passwort (32 Zufallsbytes, base64), 0600
+│   └── restore-journal/<id>       Restore-Journal (§4.3): nur während des Tauschs oder bei `stuck`
 └── deleted/                       unverändert
 ```
 
-- Der agent legt `backups/` in `ensureLayout` mit Besitzer `mcpanel-mc` und Modus 0700 an (wie `instances/<id>`) und korrigiert Besitzer/Modus, falls abweichend; den Inhalt berührt er nie. `repos/` und `keys/` legt der Dienst selbst an.
+- Der agent legt `backups/` in `ensureLayout` mit Besitzer `mcpanel-mc` und Modus 0700 an (wie `instances/<id>`) und korrigiert Besitzer/Modus, falls abweichend; den Inhalt berührt er nie. `repos/`, `keys/` und `restore-journal/` legt der Dienst selbst an.
 - Kein Container sieht `backups/`; das panel (`mcpanel`) hat keinen Zugriff.
 - Ein Repo wird beim ersten Backup eines Servers angelegt (`restic init`); vorher ist die Snapshot-Liste leer.
 - **Schlüssel:** Für ein lokales Repo schützt das Passwort nicht vor dem Host selbst; es wird gebraucht, weil restic immer verschlüsselt, und es macht spätere Offsite-Kopien sicher. Ohne `keys/<id>` ist das Repo unlesbar: Die Betriebsdoku sagt, dass `backups/keys/` bei jeder Sicherung des Hosts mitgehört.
@@ -149,13 +150,16 @@ Wie bisher feste Pfade, `DisallowUnknownFields`, Fehler `{error, code}`.
 1. Vorprüfung in der Anfrage: Snapshot gehört zum Repo; freier Platz auf `instances/<id>` ≥ `bytes` des Snapshots + `reserve_bytes` (sonst `507`).
 2. Temp-Ordner `instances/<id>/.mcpanel-tmp-<token>-<zufall>/new` per `root.Mkdir`; `restic dump` → tar-Leser → Entpacken mit den Regeln aus TP3b §4.2: Pfadregeln, keine verborgenen Namen, nur Ordner und reguläre Dateien (andere tar-Typen → Job `failed`), keine doppelten Namen, Bytes und Einträge neu gezählt gegen `max_backup_bytes`/`max_backup_entries`, Dateien 0644 (0755, wenn im tar ein Ausführbit gesetzt ist), Ordner 0755, umask 0027 des Dienstes wirkt zusätzlich, mtime aus dem tar. Fehler → Temp-Ordner löschen, Datenverzeichnis unverändert.
 3. Tausch der obersten Ebene (nur `rename` über das `os.Root`, kein Kopieren): alle sichtbaren Einträge des Datenverzeichnisses nach `<tmp>/old/`, dann alle Einträge aus `<tmp>/new/` nach oben, dann `<tmp>` rekursiv löschen. Verborgene Einträge (`.rcon-cli.*`, `.mcpanel-*`) bleiben an Ort und Stelle.
-4. Abbrechen (§4.5) wirkt nur bis zum Beginn des Tauschs; der Tausch selbst läuft ohne Abbruchpunkt durch. Stirbt der Dienst mitten im Tausch, entfernt die Temp-Bereinigung beim nächsten Start (TP3b §3.3) den Rest; der Pre-Restore-Snapshot des panels (§5.5) stellt den alten Stand dann wieder her.
+4. Abbrechen (§4.5) wirkt nur bis zum Beginn des Tauschs; der Tausch selbst läuft ohne Abbruchpunkt durch. Nur während der Umbenennungen führt der Dienst ein Restore-Journal in `backups/restore-journal/<id>` (außerhalb des Datenverzeichnisses, das der Container kontrolliert; Inhalt: `<tmp>` und die Phase `old_moving`, `new_moving` oder `stuck`, jeweils atomar geschrieben). Stirbt der Dienst mitten im Tausch, schließt er die Umbenennungen beim nächsten Start synchron ab, bevor er Anfragen annimmt: bei `old_moving` zurück (der vorige Stand kommt aus `<tmp>/old` wieder nach oben), bei `new_moving` vorwärts (der Rest aus `<tmp>/new`; der Snapshot war vollständig geprüft). Danach verschwinden `<tmp>` (Temp-Bereinigung, TP3b §3.3) und der Journal-Eintrag. Ein Temp-Ordner ohne Journal-Eintrag ist ein gewöhnlicher Rest und wird nur gelöscht, nie zurückgerollt.
+   - **Phase `stuck`:** Scheitert der Tausch und auch der Rücktausch (oder die Wiederherstellung beim Start), bleibt `<tmp>` mit dem vorigen Stand in `old/` liegen, die Temp-Bereinigung lässt ihn in Ruhe, und der Eintrag bleibt mit Phase `stuck`. Neue Restores dieses Servers lehnt der Dienst ab, bis ein Betreiber den Fall gelöst hat (Runbook in `docs/dev/README.md`: Log lesen, `<tmp>` prüfen, Inhalte von Hand zurückverschieben, dann den Eintrag löschen). Server löschen mit `purge_backups` entfernt den Eintrag ebenfalls.
+   - Der Pre-Restore-Snapshot des panels (§5.5) bleibt die Rückfallebene.
 
 ### 4.4 Download
 
 - `restic dump` → tar-Leser → Zip-Stream (`application/zip`, Dateiname `<server>-<zeit>.zip` setzt das panel), mit denselben Ausschlüssen für Namen, die sich nicht sicher in einer Zip speichern lassen, wie der Ordner-Zip-Download (TP3b §4). Der tar enthält bereits nur Ordner und reguläre Dateien und ein geschwärztes `rcon.password`.
 - Zählt zu den 4 gleichzeitigen Ordner-Zips (TP3b §4.1); läuft für die Instanz ein `forget`-Job, → `429 busy` (Prune hält eine exklusive Sperre). Während eines Backups ist ein Download möglich.
 - Fristen wie beim Ordner-Zip: 60 s pro Lese-/Schreibvorgang, keine Gesamtfrist.
+- Namensgrenze: Der Zip-Stream übernimmt die Grenze des Ordner-Zips von 16 MiB für alle Pfadnamen zusammen (TP3b). Backup und Restore erlauben 64 MiB; ein Snapshot mit mehr als 16 MiB sichtbarer Pfadnamen lässt sich daher wiederherstellen, aber nicht als Zip herunterladen (der Download scheitert mit `too_large`).
 
 ### 4.5 Abbrechen und Beenden
 
@@ -287,7 +291,7 @@ Neu in `internal/httpx/errors.go` und im OpenAPI-Enum: `backups_unavailable` (50
 
 ## 7. Entwicklung, Betrieb und CI
 
-- **Mac (`make dev`):** Backups funktionieren nur, wenn der Nutzer restic selbst installiert hat (`brew install restic`; Claude installiert nichts). Ohne restic zeigt der Tab den Hinweis aus §6.1. Dev-Daten unter `.dev/mc/backups`.
+- **Mac (`make dev`):** Backups funktionieren nur mit `MCPANEL_DEV_DOCKER=1` und einem restic im `PATH`, das der Nutzer selbst installiert hat (`brew install restic`; Claude installiert nichts). Ohne restic zeigt der Tab den Hinweis aus §6.1. Ohne erreichbares Docker scheitern Backup und Restore mit „Docker is not reachable“ (Job-Code `agent_unavailable`): Das panel kennt den Zustand des Containers nicht, und ein hängender dockerd darf nicht als gestoppter Server gelten. Liste, Zeitplan, Anpinnen, Download und Löschen von Snapshots laufen nur über den Dateidienst und gehen auch ohne Docker. Dev-Daten unter `.dev/mc/backups`.
 - **Test-VM und CI:** `scripts/vm-test.sh` und die CI-Jobs installieren restic 0.19.1 aus dem GitHub-Release (`restic_0.19.1_linux_<arch>.bz2`) mit fest eingetragener SHA-256 nach `/usr/local/bin/restic` und setzen `MCPANEL_TEST_RESTIC` für die Go-Integrationstests.
 - **Produktion:** Bis zum Installer (TP6) installiert der Betreiber restic (Ubuntu-Paket `restic` oder das gepinnte Release) und ergänzt die Unit gemäß §3.2; `docs/dev/README.md` beschreibt das, inklusive Mitsichern von `backups/keys/`.
 - **CI-Abnahme** (`scripts/ci-instances.sh`, Produktionsmodus, echter Paper-Server): Datei in der Welt anlegen, manuelles Backup bei laufendem Server (Log zeigt `save-off`/`save-on`), Datei ändern, Restore (Server stoppt, Pre-Restore-Snapshot existiert, Datei hat alten Inhalt, Server läuft wieder), Download als Zip enthält die Datei und kein `rcon.password`, Pin ändert die ID, Löschen entfernt den Snapshot, Server löschen mit `purge_backups=1` entfernt das Repo.
