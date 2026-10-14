@@ -47,8 +47,11 @@ Spawn-Prompt je Teammate: Plan-Datei, Branch, Worktree-Pfad, „alle Tasks des P
    - veraltete Props entfernen: `onOpenSettings` (PlayersTab, FilesTab), `onBusyChange` (FilesTab) und die Übergangsstellen in den T2-Routen (Files-Route-Blocker, `onOpenSettings`-Übergaben, `<DeleteServerSection/>` in der Settings-Route – Test „renders exactly one delete form“ muss grün sein);
    - Settings-Links auf typisiertes `<Link>` umstellen (T3-Cast, T4 `ServerSettingsLink`);
    - Test-Helfer zusammenführen (`web/src/test/render-section.tsx`);
+   - `features/servers/server-detail-page.tsx` löschen, sobald `grep -rn ServerDetailPage web/src` leer ist (T2 lässt die Datei ungenutzt stehen);
    - `features/profile/section-card.tsx` löschen (`grep -rn SectionCard web/src` muss leer sein);
-   - `PowerIconButtons` → `PowerButtons compact`.
+   - `PowerIconButtons` → `PowerButtons compact`;
+   - `index.css` `@layer base`: `html` bekommt `bg-background` (Screenshots über 900 px zeigen sonst einen Streifen ohne Hintergrund);
+   - `e2e/shots/shoot.ts`: Toaster folgt der gespeicherten Theme-Präferenz, nicht der Klasse – Theme über die App setzen (z. B. Theme-Umschalter klicken), damit Toasts im Dark-Screenshot dunkel sind.
    PR mit Basis `feat/ui-shell` öffnen, nach Merge von PR 2 auf `main` umstellen.
 4. Je PR: `make check`, `make test-vm SUITE=all`, `make test-vm SUITE=shots` – Auswahl an Screenshots (Startseite, Konsole, Dateien, Login; Dark/Light; Desktop/Mobil) dem Nutzer zeigen.
 5. Nach dem letzten Merge (nur nach Freigabe): `make deploy-testvm`, Abnahme nach Spec §7, `CLAUDE.md` (Frontend-Abschnitt: Navigation, Routen pro Server-Bereich, Design-Tokens/Utilities, Schriften, Suite `shots`) und Roadmap im Foundation-Spec um Teilprojekt 7 ergänzen, Spec-Status auf „umgesetzt“, Pläne löschen.
