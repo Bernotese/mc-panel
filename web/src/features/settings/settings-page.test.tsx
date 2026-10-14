@@ -93,13 +93,15 @@ describe('SettingsPage', () => {
     expect(within(status).getByText('oldworld (ID 7)')).toBeInTheDocument()
   })
 
-  it('keeps h1 → h2 section → h3 card and limits the width', async () => {
+  it('keeps h1 → h2 section → h3 card and lays the sections out in a responsive grid', async () => {
     const { container } = await renderWithProviders(<SettingsPage />, { me: loginAs('admin') })
     expect(screen.getByRole('heading', { level: 1, name: 'Einstellungen' })).toBeInTheDocument()
     const status = await screen.findByRole('region', { name: 'Status' })
     expect(within(status).getByRole('heading', { level: 3, name: 'Status' })).toBeInTheDocument()
     expect(screen.getAllByRole('heading', { level: 2 }).length).toBeGreaterThanOrEqual(2)
-    expect(container.querySelector('.max-w-3xl')).not.toBeNull()
+    // The width cap is the shared content area of the app layout; the page itself switches to two columns (issue #86).
+    expect(container.querySelector('.max-w-3xl')).toBeNull()
+    expect(container.querySelector('.\\@container\\/settings')).not.toBeNull()
   })
 
   it('reports an empty list of unknown containers', async () => {
