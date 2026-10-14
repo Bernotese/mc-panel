@@ -71,7 +71,7 @@ Zum Ausprobieren gegen das echte Backend mit Docker gibt es eine interne Test-VM
 | 3b | Live-Betrieb: Dateibrowser | fertig |
 | 3c | Live-Betrieb: Plugins/Mods (Modrinth, Hangar) | fertig |
 | 4 | Backups (lokal; Offsite später) | umgesetzt |
-| 5 | Monitoring + Alerts | offen |
+| 5 | Monitoring + Alerts | umgesetzt |
 | 6 | Installer-CLI (`install`/`update`/`doctor`, Caddy, VPS-Härtung) | offen |
 
 Bis der Installer existiert, beschreibt `docs/dev/acceptance-tp2.md` die Einrichtung eines Servers von Hand.
