@@ -182,6 +182,7 @@ export const de = {
     base_domain_missing: 'Server sind unter <name>.<basisdomain> erreichbar. Solange keine Basisdomain eingetragen ist, kannst du keine Server anlegen.',
     empty: 'Keine Server verfügbar.',
     create_server: 'Server anlegen',
+    list_label: 'Server-Liste',
   },
   servers: {
     state: {
