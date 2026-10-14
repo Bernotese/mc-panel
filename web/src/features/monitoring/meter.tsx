@@ -11,9 +11,9 @@ export function Meter({ label, value, max, valueText, danger = false }: { label:
       aria-valuemax={max}
       aria-valuenow={value}
       aria-valuetext={valueText}
-      className="bg-muted h-2 w-full overflow-hidden rounded-full"
+      className="bg-background h-1.5 w-full overflow-hidden"
     >
-      <div className={cn('h-full rounded-full', danger ? 'bg-destructive' : 'bg-primary')} style={{ width: `${pct}%` }} />
+      <div className={cn('h-full', danger ? 'bg-destructive' : 'bg-primary')} style={{ width: `${pct}%` }} />
     </div>
   )
 }

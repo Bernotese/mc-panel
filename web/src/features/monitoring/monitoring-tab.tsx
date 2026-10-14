@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import type { MetricsRange, Server } from '@/api/types'
+import { Section } from '@/components/section'
 import { useMe } from '@/features/auth/me'
 import { liveMetricsQueryOptions } from './api'
 import { DownAlertsSwitch } from './down-alerts-switch'
@@ -17,8 +18,12 @@ export function MonitoringTab({ server }: { server: Server }) {
   return (
     <div className="space-y-6">
       <LiveHeader serverId={server.id} running={running} />
-      <RangePicker value={range} onChange={setRange} />
-      <MetricCharts serverId={server.id} range={range} tpsUnavailable={running && tpsSource === 'none'} />
+      <Section>
+        <div className="space-y-4">
+          <RangePicker value={range} onChange={setRange} />
+          <MetricCharts serverId={server.id} range={range} tpsUnavailable={running && tpsSource === 'none'} />
+        </div>
+      </Section>
       {me?.role === 'admin' ? <DownAlertsSwitch server={server} /> : null}
     </div>
   )

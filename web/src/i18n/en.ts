@@ -193,6 +193,7 @@ export const en: Messages = {
     base_domain_missing: 'Servers are reachable at <name>.<base domain>. You cannot create servers until a base domain is set.',
     empty: 'No servers available.',
     create_server: 'Create server',
+    list_label: 'Server list',
   },
   servers: {
     state: {
