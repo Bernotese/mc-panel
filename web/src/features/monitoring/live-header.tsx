@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { isApiError } from '@/api/errors'
+import { Section } from '@/components/section'
+import { StatSlot } from '@/components/stat-slot'
 import { formatCpu, formatGiB } from '@/features/servers/format'
 import { errorMessage } from '@/lib/error-message'
 import { useFormat } from '@/lib/format'
@@ -15,7 +16,6 @@ import { formatDecimal, tpsSourceKey } from './model'
 export function LiveHeader({ serverId, running }: { serverId: number; running: boolean }) {
   const { t } = useTranslation()
   const fmt = useFormat()
-  const id = useId()
   const live = useQuery({ ...liveMetricsQueryOptions(serverId), refetchInterval: LIVE_POLL_MS })
   const missing = t('monitoring.missing')
 
@@ -49,14 +49,11 @@ export function LiveHeader({ serverId, running }: { serverId: number; running: b
             {t('monitoring.live.unreachable')}
           </p>
         ) : null}
-        <dl className="grid grid-cols-2 gap-3 text-sm tabular-nums sm:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {items.map(([label, value]) => (
-            <div key={label}>
-              <dt className="text-muted-foreground text-xs">{label}</dt>
-              <dd className="text-base font-medium">{value}</dd>
-            </div>
+            <StatSlot key={label} label={label} value={value} />
           ))}
-        </dl>
+        </div>
         {!running ? (
           <p className="text-muted-foreground text-xs">{t('monitoring.live.stopped')}</p>
         ) : m.tps_source !== 'none' ? (
@@ -65,7 +62,7 @@ export function LiveHeader({ serverId, running }: { serverId: number; running: b
         {m.player_names.length > 0 ? (
           <ul aria-label={t('monitoring.live.player_names')} className="flex flex-wrap gap-2 text-sm">
             {m.player_names.map((name) => (
-              <li key={name} className="bg-muted rounded px-2 py-0.5">
+              <li key={name} className="bevel-inset font-pixel px-2 py-0.5">
                 {name}
               </li>
             ))}
@@ -78,11 +75,8 @@ export function LiveHeader({ serverId, running }: { serverId: number; running: b
   }
 
   return (
-    <section aria-labelledby={id} className="space-y-3 rounded-md border p-4">
-      <h3 id={id} className="font-semibold">
-        {t('monitoring.live.title')}
-      </h3>
+    <Section title={t('monitoring.live.title')} headingLevel={3}>
       {body}
-    </section>
+    </Section>
   )
 }

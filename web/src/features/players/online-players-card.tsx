@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { Section } from '@/components/section'
 import { Badge } from '@/components/ui/badge'
-import { SectionCard } from '@/features/profile/section-card'
 import { errorMessage } from '@/lib/error-message'
 import { ONLINE_POLL_MS, onlinePlayersQueryOptions } from './api'
 
@@ -17,7 +17,7 @@ export function OnlinePlayersCard({ serverId }: { serverId: number }) {
     const { online, max } = query.data
     body = (
       <div className="space-y-2">
-        <p className="text-2xl font-semibold tabular-nums">{t('players.card.count', { online: online.length, max: max ?? '—' })}</p>
+        <p className="font-pixel text-2xl tabular-nums">{t('players.card.count', { online: online.length, max: max ?? '—' })}</p>
         {online.length === 0 ? (
           <p className="text-muted-foreground text-sm">{t('players.online.none')}</p>
         ) : (
@@ -33,5 +33,5 @@ export function OnlinePlayersCard({ serverId }: { serverId: number }) {
     )
   }
 
-  return <SectionCard title={t('players.card.title')}>{body}</SectionCard>
+  return <Section title={t('players.card.title')}>{body}</Section>
 }

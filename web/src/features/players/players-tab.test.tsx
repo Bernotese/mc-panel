@@ -2,15 +2,14 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
-import { ServerDetailPage } from '@/features/servers/server-detail-page'
+import { renderSection } from '@/features/console/testing/render-section'
 import { db, loginAs } from '@/mocks/db'
 import { server } from '@/mocks/node'
-import { renderWithProviders } from '@/test/render'
+import { PlayersTab } from './players-tab'
 
 async function openPlayers(serverId = 1, username = 'admin') {
   const user = userEvent.setup()
-  await renderWithProviders(<ServerDetailPage serverId={serverId} />, { me: loginAs(username) })
-  await user.click(await screen.findByRole('tab', { name: 'Spieler' }))
+  await renderSection(serverId, (s) => <PlayersTab server={s} />, { me: loginAs(username) })
   return user
 }
 
@@ -91,17 +90,16 @@ describe('PlayersTab', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
-  it('leads admins to the whitelist setting', async () => {
-    const user = await openPlayers()
-    await user.click(await screen.findByRole('button', { name: 'Zu den Einstellungen' }))
-    expect(screen.getByRole('tab', { name: 'Einstellungen' })).toHaveAttribute('aria-selected', 'true')
+  it('links admins to the whitelist setting', async () => {
+    await openPlayers()
+    expect(await screen.findByRole('link', { name: 'Zu den Einstellungen' })).toHaveAttribute('href', '/servers/1/settings')
   })
 
   it('tells other users that an admin switches the whitelist on', async () => {
     db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.console'] }])
     await openPlayers(1, 'alice')
     expect(await screen.findByText('Die Whitelist ist aus: Einträge wirken erst, wenn ein Admin sie einschaltet.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Zu den Einstellungen' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Zu den Einstellungen' })).not.toBeInTheDocument()
   })
 
   it('shows no online players while the server is stopped', async () => {

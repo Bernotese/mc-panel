@@ -25,7 +25,7 @@ export function DownAlertsSwitch({ server }: { server: Server }) {
     onError: notifyError,
   })
   return (
-    <div className="flex items-start gap-3 rounded-md border p-4">
+    <div className="bevel-inset flex items-start gap-3 p-4">
       <Switch id={id} checked={checked} disabled={save.isPending} aria-describedby={`${id}-hint`} onCheckedChange={(value) => save.mutate(value)} />
       <div className="space-y-1">
         <Label htmlFor={id}>{t('monitoring.down_alerts.label')}</Label>

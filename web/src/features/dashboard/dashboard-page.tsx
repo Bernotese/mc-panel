@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PageHeader } from '@/components/page-header'
+import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
 import { useMe } from '@/features/auth/me'
 import { monitoringOverviewQueryOptions, OVERVIEW_POLL_MS } from '@/features/monitoring/api'
@@ -10,7 +11,7 @@ import { HostCard } from '@/features/monitoring/host-card'
 import { serverSettingsQueryOptions, serversQueryOptions } from '@/features/servers/api'
 import { pollInterval } from '@/features/servers/status'
 import { errorMessage } from '@/lib/error-message'
-import { ServerCard } from './server-card'
+import { ServerRow } from './server-row'
 
 export function DashboardPage() {
   const { t } = useTranslation()
@@ -39,10 +40,10 @@ export function DashboardPage() {
     content = <p className="text-muted-foreground">{t('dashboard.empty')}</p>
   } else {
     content = (
-      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <ul aria-label={t('dashboard.list_label')} className="space-y-2">
         {servers.data.map((server) => (
           <li key={server.id}>
-            <ServerCard server={server} metrics={metricsById.get(server.id)} />
+            <ServerRow server={server} metrics={metricsById.get(server.id)} />
           </li>
         ))}
       </ul>
@@ -66,17 +67,20 @@ export function DashboardPage() {
   return (
     <>
       <PageHeader title={t('dashboard.title')} description={t('dashboard.description')} actions={createAction} />
-      {baseDomainMissing ? (
-        <div role="status" className="mb-6 rounded-md border p-4 text-sm">
-          <p className="font-medium">{t('dashboard.base_domain_missing_title')}</p>
-          <p className="text-muted-foreground mt-1">{t('dashboard.base_domain_missing')}</p>
-          <Link to="/settings" className="text-primary mt-2 inline-block underline underline-offset-4">
-            {t('settings.link')}
-          </Link>
-        </div>
-      ) : null}
-      {host ? <HostCard host={host} /> : null}
-      {content}
+      <div className="space-y-6">
+        {baseDomainMissing ? (
+          <Section title={t('dashboard.base_domain_missing_title')} tone="danger">
+            <div role="status" className="space-y-2 text-sm">
+              <p className="text-muted-foreground">{t('dashboard.base_domain_missing')}</p>
+              <Link to="/settings" className="text-primary inline-block underline underline-offset-4">
+                {t('settings.link')}
+              </Link>
+            </div>
+          </Section>
+        ) : null}
+        {host ? <HostCard host={host} /> : null}
+        {content}
+      </div>
     </>
   )
 }
