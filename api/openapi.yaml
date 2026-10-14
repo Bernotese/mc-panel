@@ -2411,7 +2411,12 @@ components:
       type: object
       required: [cidr, kind, comment]
       properties:
-        cidr: { type: string }
+        cidr:
+          type: string
+          description: >-
+            IPv4/IPv6 address or network. Allow rules cover at most a /8 (IPv4) or /32 (IPv6);
+            deny rules must not cover loopback (127.0.0.0/8, ::1), which Caddy and the installer's
+            health checks use (400 validation_failed).
         kind: { type: string, enum: [allow, deny] }
         comment: { type: string, maxLength: 200 }
         expires_at: { type: [integer, "null"], format: int64 }
