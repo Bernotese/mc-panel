@@ -1,4 +1,4 @@
-import { createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { delay, http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { server } from '@/mocks/node'
@@ -169,26 +169,28 @@ describe('FilesTab', () => {
     expect(await within(uploads).findByText('Wird verarbeitet …')).toBeInTheDocument()
   })
 
-  // Review F1: leaving the tab cancels running uploads, so it asks first.
-  it('asks before leaving the tab while uploads run', async () => {
+  // Review F1: leaving the files area cancels running uploads, so any navigation asks first (useBlocker).
+  it('asks before navigating away while uploads run', async () => {
     server.use(
       http.post('*/api/servers/:id/files/upload', async () => {
         await delay('infinite')
         return HttpResponse.json({ size: 1 }, { status: 201 })
       }),
     )
-    const { user, region } = await openFiles()
+    const { user, region, router } = await openFiles()
     await within(region).findByRole('button', { name: 'plugins' })
     await user.upload(screen.getByLabelText('Dateien hochladen'), new File(['x'], 'big.jar'))
     await screen.findByRole('region', { name: 'Uploads' })
-    await user.click(screen.getByRole('tab', { name: 'Übersicht' }))
+
+    act(() => void router.navigate({ to: '/' }))
     const dialog = await screen.findByRole('dialog', { name: 'Laufende Uploads abbrechen?' })
     expect(within(dialog).getByText('Laufende Uploads werden abgebrochen.')).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: 'Abbrechen' }))
-    expect(screen.getByRole('tab', { name: 'Dateien' })).toHaveAttribute('aria-selected', 'true')
-    await user.click(screen.getByRole('tab', { name: 'Übersicht' }))
+    expect(router.state.location.pathname).toBe('/servers/1/files')
+
+    act(() => void router.navigate({ to: '/' }))
     await user.click(within(await screen.findByRole('dialog', { name: 'Laufende Uploads abbrechen?' })).getByRole('button', { name: 'Verlassen' }))
-    expect(await screen.findByRole('region', { name: 'Zustand' })).toBeInTheDocument()
+    await waitFor(() => expect(router.state.location.pathname).toBe('/'))
   })
 
   it('rejects reserved names without uploading', async () => {
