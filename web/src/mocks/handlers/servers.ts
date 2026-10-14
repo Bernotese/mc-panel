@@ -29,8 +29,8 @@ function validBaseDomain(d: string): boolean {
   return d.length <= 200 && labels.length >= 2 && labels.every((l) => DNS_LABEL.test(l))
 }
 
-/** Installed memory of the mock host (32 GiB): the per-server limit is 24.75 GiB. */
-const MOCK_HOST_MIB = 32768
+/** Installed memory of the mock host (26 GiB): the per-server limit is (26 − 1) / 1.25 = 20 GiB. */
+const MOCK_HOST_MIB = 26624
 const MEMORY_RESERVE_MIB = 1024
 
 /** Same formula as servers.MaxMemoryMiB: (host − 1 GiB) / 1.25 in 256 MiB steps, within 1..32 GiB. */

@@ -30,7 +30,7 @@ import {
   type ServerFormResult,
   type ServerFormValue,
 } from './form-model'
-import { formatGiB, javaLabel, memoryInputValue, serverAddress } from './format'
+import { javaLabel, memoryInputValue, serverAddress } from './format'
 import { PropertiesFields } from './properties-fields'
 import { INSTANCE_TYPES, isModpack, JAVA_VERSIONS, memoryMiBFromGiB, type FieldError, type MemoryLimits } from './validation'
 
@@ -408,7 +408,7 @@ function MemoryField({ id, text, error, limits, ownMiB, recommendedMiB, onChange
   const { t } = useTranslation()
   const fmt = useFormat()
   const bounds: MemoryLimits = memoryLimitsFrom(limits)
-  const gib = (mib: number) => formatGiB(mib * 1024 ** 2, fmt.locale)
+  const gib = (mib: number) => new Intl.NumberFormat(fmt.locale, { maximumFractionDigits: 2 }).format(mib / 1024)
   const mib = memoryMiBFromGiB(text)
   const fallback = Math.min(Math.max(recommendedMiB ?? ownMiB, bounds.min), bounds.max)
   const slider = mib !== null && mib >= bounds.min && mib <= bounds.max ? mib / 1024 : fallback / 1024
@@ -418,9 +418,11 @@ function MemoryField({ id, text, error, limits, ownMiB, recommendedMiB, onChange
       ? t('servers.form.memory_hint_host', { ...range, host: gib(limits.host_total_mib) })
       : t('servers.form.memory_hint', range)
   const overcommit = memoryOvercommit(mib, limits, ownMiB)
+  // The range in the error follows the locale like the hint (11,5 instead of 11.5).
+  const shownError = error?.key === 'servers.validation.memory' ? { ...error, params: range } : error
   return (
     <div className="space-y-2">
-      <FieldRow id={id} label={t('servers.form.memory')} hint={hint} error={error}>
+      <FieldRow id={id} label={t('servers.form.memory')} hint={hint} error={shownError}>
         {(c) => (
           <div className="flex items-center gap-3">
             <input

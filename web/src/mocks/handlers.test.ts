@@ -13,7 +13,7 @@ const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../
 describe('mock coverage', () => {
   it('mocks every operationId of api/openapi.yaml exactly once', () => {
     const ids = [...openapiYaml.matchAll(/operationId:\s*(\w+)/g)].map((m) => m[1]).sort()
-    expect(ids).toHaveLength(102)
+    expect(ids).toHaveLength(103)
     expect(operations.map((o) => o.operationId).sort()).toEqual(ids)
   })
 })
@@ -322,10 +322,10 @@ describe('mock behaviour', () => {
   it('reports the memory limits of the mock host and enforces them', async () => {
     const me = loginAs('admin', { sudo: true })
     const limits = (await callApi('GET', '/servers/memory')).body
-    // (32768 − 1024) / 1.25 = 25395 → 25344; three seeded servers with 4 + 2 + 4 GiB
-    expect(limits).toMatchObject({ min_mib: 1024, max_mib: 25344, step_mib: 256, host_total_mib: 32768, allocated_mib: 10240 })
+    // (26624 − 1024) / 1.25 = 20480; three seeded servers with 4 + 2 + 4 GiB
+    expect(limits).toMatchObject({ min_mib: 1024, max_mib: 20480, step_mib: 256, host_total_mib: 26624, allocated_mib: 10240 })
     expect(field(limits, 'recommended_mib')).toMatchObject({ paper: 4096, fabric: 6144 })
-    const body = { name: 'huge', type: 'paper', version: '1.21.11', memory_mib: 25600, eula_accepted: true }
+    const body = { name: 'huge', type: 'paper', version: '1.21.11', memory_mib: 20736, eula_accepted: true }
     const res = await callApi('POST', '/servers', { body, csrf: me.csrf_token })
     expect(field(res.body, 'error')).toBe('validation_failed')
     loginAs('alice')
