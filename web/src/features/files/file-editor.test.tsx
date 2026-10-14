@@ -1,8 +1,9 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderServerTab } from '@/features/servers/tab-test-utils'
 import { server } from '@/mocks/node'
+import { setViewport } from '@/test/media'
 import { FileEditor } from './file-editor'
 import { openFiles } from './test-utils'
 
@@ -207,5 +208,32 @@ describe('FileEditor', () => {
       expect((await screen.findAllByText('Der Agent ist nicht erreichbar.')).length).toBeGreaterThan(0)
       expect(screen.getByText('Ungespeicherte Änderungen')).toBeInTheDocument()
     })
+  })
+})
+
+describe('two panes from xl', () => {
+  afterEach(() => setViewport('desktop'))
+
+  it('keeps the list beside the editor and asks before switching files with unsaved changes', async () => {
+    // test/media.ts: "desktop" is 1280px = xl.
+    const { user, region, editor } = await openConfig()
+    expect(within(region).getByRole('button', { name: 'config.yml' })).toBeInTheDocument()
+    await user.type(editor, 'x')
+    await user.click(within(region).getByRole('button', { name: 'Server-Daten' }))
+    await user.click(await within(region).findByRole('button', { name: 'bukkit.yml' }))
+    let dialog = await screen.findByRole('dialog', { name: 'Ungespeicherte Änderungen verwerfen?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Abbrechen' }))
+    expect(screen.getByRole('textbox', { name: 'Inhalt von config.yml' })).toBeInTheDocument()
+
+    await user.click(within(region).getByRole('button', { name: 'bukkit.yml' }))
+    dialog = await screen.findByRole('dialog', { name: 'Ungespeicherte Änderungen verwerfen?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Verwerfen' }))
+    expect(await screen.findByRole('textbox', { name: 'Inhalt von bukkit.yml' })).toBeInTheDocument()
+  })
+
+  it('shows either list or editor below xl', async () => {
+    setViewport('mobile')
+    const { region } = await openConfig()
+    expect(within(region).queryByRole('button', { name: 'config.yml' })).not.toBeInTheDocument()
   })
 })

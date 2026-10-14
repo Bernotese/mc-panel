@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
-import { SectionCard } from '@/features/profile/section-card'
 import { errorMessage } from '@/lib/error-message'
 import { useFormat } from '@/lib/format'
 import { formatBytes } from './format'
@@ -24,7 +24,7 @@ export function UploadList({ items, onCancel, onClear }: { items: UploadItem[]; 
   }
 
   return (
-    <SectionCard
+    <Section
       title={t('files.uploads.title')}
       actions={
         anyFinished ? (
@@ -66,6 +66,6 @@ export function UploadList({ items, onCancel, onClear }: { items: UploadItem[]; 
           )
         })}
       </ul>
-    </SectionCard>
+    </Section>
   )
 }

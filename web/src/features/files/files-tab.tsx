@@ -9,9 +9,11 @@ import type { FileEntry, FileList as FileListing, Server } from '@/api/types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { NativeSelect } from '@/components/native-select'
 import { Button } from '@/components/ui/button'
+import { Section } from '@/components/section'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { SectionCard } from '@/features/profile/section-card'
 import { errorMessage, useErrorToast } from '@/lib/error-message'
+import { useMediaQuery } from '@/lib/use-media-query'
+import { cn } from '@/lib/utils'
 import { deleteFile, fileListKey, fileListQueryOptions, fileListsKey, makeDirectory, renameFile, writeFile } from './api'
 import { leaveTexts, type FilesBusy } from './busy'
 import { ExtractDialog } from './extract-dialog'
@@ -28,6 +30,9 @@ import { baseName, breadcrumbs, cleanPath, componentProblem, joinPath, parentPat
 type DialogState = { kind: 'mkdir' } | { kind: 'newfile' } | { kind: 'rename'; entry: FileEntry } | { kind: 'delete'; entry: FileEntry } | { kind: 'extract'; path: string }
 
 const SORT_KEYS: SortKey[] = ['name', 'size', 'mtime']
+
+/** Tailwind xl: list and editor side by side. */
+export const WIDE_QUERY = '(min-width: 1280px)'
 
 export interface FilesTabProps {
   server: Server
@@ -61,6 +66,14 @@ export function FilesTab({ server }: FilesTabProps) {
   const uploads = useUploadQueue(server.id, { onUploaded: () => void refresh(), exists })
   const [editorDirty, setEditorDirty] = useState(false)
   const unsaved = editorDirty && editing !== null
+  const wide = useMediaQuery(WIDE_QUERY)
+  const [pendingOpen, setPendingOpen] = useState<string | null>(null)
+  /** Opening another file would drop the editor's draft: ask first (two panes from xl keep the list clickable). */
+  function openFile(path: string) {
+    if (path === editing) return
+    if (unsaved) setPendingOpen(path)
+    else setEditing(path)
+  }
   const pendingUploads = uploads.active
   const busy: FilesBusy | null = unsaved || pendingUploads ? { unsaved, uploads: pendingUploads } : null
   // The only guard of the files area: any navigation away (other area, other server, logout link) and reloads. Leaving cancels the uploads.
@@ -195,13 +208,99 @@ export function FilesTab({ server }: FilesTabProps) {
           entries={sortEntries(list.data.entries, sortKey, descending)}
           onOpenDir={(name) => setDir(joinPath(dir, name))}
           onExtract={(entry) => setDialog({ kind: 'extract', path: joinPath(dir, entry.name) })}
-          onOpenFile={(entry) => setEditing(joinPath(dir, entry.name))}
+          onOpenFile={(entry) => openFile(joinPath(dir, entry.name))}
           onRename={(entry) => setDialog({ kind: 'rename', entry })}
           onDelete={(entry) => setDialog({ kind: 'delete', entry })}
         />
         {list.data.truncated ? (
           <p className="text-muted-foreground text-sm">{t('files.truncated', { count: list.data.entries.length })}</p>
         ) : null}
+      </div>
+    )
+  }
+
+  /** Path, sorting and the listing; also the drop zone for uploads. */
+  function browser() {
+    return (
+      <div
+        className={cn('relative flex flex-col gap-3', dragging && 'ring-primary ring-2')}
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes('Files') || neverStarted) return
+          event.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={(event) => {
+          // Moving over a child fires dragleave on the zone too: only a real exit clears the highlight.
+          if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+          setDragging(false)
+        }}
+        onDrop={onDrop}
+      >
+        {dragging ? (
+          <p className="bg-background/90 pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-sm font-medium">
+            {t('files.toolbar.drop', { dir: dirLabel })}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <nav aria-label={t('files.breadcrumbs')} className="min-w-0">
+            <ol className="flex flex-wrap items-center gap-1 text-sm">
+              <li>
+                {dir === '' ? (
+                  <span aria-current="page" className="font-medium">
+                    {t('files.root')}
+                  </span>
+                ) : (
+                  <Button type="button" variant="link" className="h-auto p-0" onClick={() => setDir('')}>
+                    {t('files.root')}
+                  </Button>
+                )}
+              </li>
+              {breadcrumbs(dir).map((crumb, i, all) => (
+                <li key={crumb.path} className="flex items-center gap-1">
+                  <span aria-hidden="true" className="text-muted-foreground">
+                    /
+                  </span>
+                  {i === all.length - 1 ? (
+                    <span aria-current="page" className="font-medium break-all">
+                      {crumb.name}
+                    </span>
+                  ) : (
+                    <Button type="button" variant="link" className="h-auto p-0" onClick={() => setDir(crumb.path)}>
+                      {crumb.name}
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </nav>
+          <div className="flex items-center gap-2">
+            <label className="sr-only" htmlFor={`files-sort-${server.id}`}>
+              {t('files.sort.label')}
+            </label>
+            <NativeSelect id={`files-sort-${server.id}`} value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
+              {SORT_KEYS.map((key) => (
+                <option key={key} value={key}>
+                  {t(`files.sort.${key}`)}
+                </option>
+              ))}
+            </NativeSelect>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              aria-label={descending ? t('files.sort.descending') : t('files.sort.ascending')}
+              onClick={() => setDescending((d) => !d)}
+            >
+              {descending ? <ArrowDownWideNarrow aria-hidden="true" /> : <ArrowUpNarrowWide aria-hidden="true" />}
+            </Button>
+          </div>
+        </div>
+        {notice ? (
+          <p role="alert" className="text-destructive text-sm">
+            {notice}
+          </p>
+        ) : null}
+        {body()}
       </div>
     )
   }
@@ -236,101 +335,29 @@ export function FilesTab({ server }: FilesTabProps) {
   )
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-6">
       {running ? (
-        <p role="status" className="rounded-md border p-3 text-sm">
+        <p role="status" className="bevel-inset px-3 py-2 text-sm">
           {t('files.running_hint')}
         </p>
       ) : null}
 
       {job?.state === 'running' ? <JobStatus job={job} /> : null}
 
-      <SectionCard title={t('files.title')} actions={editing === null && !neverStarted ? toolbar : undefined}>
-        {editing !== null ? (
-          <FileEditor server={server} path={editing} onClose={() => setEditing(null)} onDirtyChange={setEditorDirty} />
-        ) : (
-          <div
-            className={dragging ? 'ring-primary relative space-y-3 rounded-md ring-2' : 'relative space-y-3'}
-            onDragOver={(event) => {
-              if (!event.dataTransfer.types.includes('Files') || neverStarted) return
-              event.preventDefault()
-              setDragging(true)
-            }}
-            onDragLeave={(event) => {
-              // Moving over a child fires dragleave on the zone too: only a real exit clears the highlight.
-              if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
-              setDragging(false)
-            }}
-            onDrop={onDrop}
-          >
-            {dragging ? (
-              <p className="bg-background/90 pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md text-sm font-medium">
-                {t('files.toolbar.drop', { dir: dirLabel })}
-              </p>
-            ) : null}
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <nav aria-label={t('files.breadcrumbs')} className="min-w-0">
-                <ol className="flex flex-wrap items-center gap-1 text-sm">
-                  <li>
-                    {dir === '' ? (
-                      <span aria-current="page" className="font-medium">
-                        {t('files.root')}
-                      </span>
-                    ) : (
-                      <Button type="button" variant="link" className="h-auto p-0" onClick={() => setDir('')}>
-                        {t('files.root')}
-                      </Button>
-                    )}
-                  </li>
-                  {breadcrumbs(dir).map((crumb, i, all) => (
-                    <li key={crumb.path} className="flex items-center gap-1">
-                      <span aria-hidden="true" className="text-muted-foreground">
-                        /
-                      </span>
-                      {i === all.length - 1 ? (
-                        <span aria-current="page" className="font-medium break-all">
-                          {crumb.name}
-                        </span>
-                      ) : (
-                        <Button type="button" variant="link" className="h-auto p-0" onClick={() => setDir(crumb.path)}>
-                          {crumb.name}
-                        </Button>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-              </nav>
-              <div className="flex items-center gap-2">
-                <label className="sr-only" htmlFor={`files-sort-${server.id}`}>
-                  {t('files.sort.label')}
-                </label>
-                <NativeSelect id={`files-sort-${server.id}`} value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
-                  {SORT_KEYS.map((key) => (
-                    <option key={key} value={key}>
-                      {t(`files.sort.${key}`)}
-                    </option>
-                  ))}
-                </NativeSelect>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  aria-label={descending ? t('files.sort.descending') : t('files.sort.ascending')}
-                  onClick={() => setDescending((d) => !d)}
-                >
-                  {descending ? <ArrowDownWideNarrow aria-hidden="true" /> : <ArrowUpNarrowWide aria-hidden="true" />}
-                </Button>
-              </div>
+      <Section title={t('files.title')} actions={(editing === null || wide) && !neverStarted ? toolbar : undefined}>
+        {editing === null ? (
+          browser()
+        ) : wide ? (
+          <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-6">
+            <div className="min-w-0">{browser()}</div>
+            <div className="min-w-0 border-l pl-6">
+              <FileEditor key={editing} server={server} path={editing} onClose={() => setEditing(null)} onDirtyChange={setEditorDirty} />
             </div>
-            {notice ? (
-              <p role="alert" className="text-destructive text-sm">
-                {notice}
-              </p>
-            ) : null}
-            {body()}
           </div>
+        ) : (
+          <FileEditor key={editing} server={server} path={editing} onClose={() => setEditing(null)} onDirtyChange={setEditorDirty} />
         )}
-      </SectionCard>
+      </Section>
 
       <UploadList items={uploads.items} onCancel={uploads.cancel} onClear={uploads.clear} />
 
@@ -396,6 +423,19 @@ export function FilesTab({ server }: FilesTabProps) {
           onSubmit={(to) => rename(dialog.entry, to)}
         />
       ) : null}
+      <ConfirmDialog
+        open={pendingOpen !== null}
+        onOpenChange={(open) => (open ? undefined : setPendingOpen(null))}
+        title={t('files.editor.discard_title')}
+        description={t('files.editor.discard_description', { name: editing ? baseName(editing) : '' })}
+        confirmLabel={t('files.editor.discard')}
+        destructive
+        onConfirm={() => {
+          setEditing(pendingOpen)
+          setEditorDirty(false)
+          setPendingOpen(null)
+        }}
+      />
       <ConfirmDialog
         open={blocker.status === 'blocked'}
         onOpenChange={(open) => (open ? undefined : blocker.reset?.())}
