@@ -21,7 +21,7 @@ Entwickelt wird lokal auf macOS; das fertige Produkt wird später per Installer 
 | 3c | Live-Betrieb: Plugins/Mods (umgesetzt, Spec `2026-10-12-mc-panel-plugins-design.md`) | Plugins/Mods (Modrinth, Hangar) |
 | 4 | Backups (umgesetzt, Spec `2026-10-12-mc-panel-backups-design.md`; Offsite zurückgestellt) | Zeitpläne, Retention, lokale restic-Repos, konsistente Snapshots, Restore, Zip-Download |
 | 5 | Monitoring + Alerts (umgesetzt, Spec `2026-10-13-mc-panel-monitoring-design.md`) | Spieler, TPS/MSPT, Ressourcen, Historie, Alerts (Discord, ntfy) |
-| 6 | Installer (Spec `2026-10-13-mc-panel-installer-design.md`) | `install`/`update`/`doctor`/`uninstall`, Caddy + Let's Encrypt, VPS-Härtung |
+| 6 | Installer (umgesetzt, Spec `2026-10-13-mc-panel-installer-design.md`) | `install`/`update`/`doctor`/`uninstall`, Caddy + Let's Encrypt, VPS-Härtung |
 
 Jedes Teilprojekt hat einen eigenen Zyklus Spec → Plan → Umsetzung. **Dieses Dokument spezifiziert nur Teilprojekt 1.**
 

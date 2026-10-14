@@ -1,7 +1,7 @@
 # mc-panel – Teilprojekt 6: Installer (Design-Spec)
 
 - **Datum:** 2026-10-13
-- **Status:** entworfen
+- **Status:** umgesetzt
 - **Autor:** Jannes Göbel (mit Claude)
 - **Baut auf:** allen vorherigen Specs (TP1–TP5); sammelt deren Vorgaben „für den Installer (TP6)“
 
