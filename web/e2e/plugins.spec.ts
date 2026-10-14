@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test'
-import { signIn } from './helpers'
+import { openServer, openServerSection, serverSectionLink, signIn } from './helpers'
 
 test('admin installs ViaBackwards, disables a jar, installs an update and removes a jar', async ({ page }) => {
   await signIn(page, 'admin', true)
-  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await openServer(page, 'survival')
   await expect(page).toHaveURL(/\/servers\/1$/)
-  await page.getByRole('tab', { name: 'Plugins', exact: true }).click()
+  await openServerSection(page, 'survival', 'Plugins')
   const installed = page.getByRole('region', { name: 'Installierte Plugins' })
   await expect(installed.getByText('LuckPerms', { exact: true })).toBeVisible()
 
@@ -51,9 +51,9 @@ test('admin installs ViaBackwards, disables a jar, installs an update and remove
 
 test('installing ChunkyBorder brings its required dependency Chunky along', async ({ page }) => {
   await signIn(page, 'admin', true)
-  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await openServer(page, 'survival')
   await expect(page).toHaveURL(/\/servers\/1$/)
-  await page.getByRole('tab', { name: 'Plugins', exact: true }).click()
+  await openServerSection(page, 'survival', 'Plugins')
   const installed = page.getByRole('region', { name: 'Installierte Plugins' })
   await expect(installed.getByText('LuckPerms', { exact: true })).toBeVisible()
   await expect(installed.getByText('Chunky', { exact: true })).toHaveCount(0)
@@ -78,10 +78,10 @@ test('installing ChunkyBorder brings its required dependency Chunky along', asyn
 
 test('the mods tab of a fabric server offers only Modrinth', async ({ page }) => {
   await signIn(page, 'admin', true)
-  await page.getByRole('link', { name: 'modded', exact: true }).click()
+  await openServer(page, 'modded')
   await expect(page).toHaveURL(/\/servers\/4$/)
-  await expect(page.getByRole('tab', { name: 'Plugins', exact: true })).toHaveCount(0)
-  await page.getByRole('tab', { name: 'Mods', exact: true }).click()
+  await expect(serverSectionLink(page, 'modded', 'Plugins')).toHaveCount(0)
+  await openServerSection(page, 'modded', 'Mods')
   await expect(page.getByRole('region', { name: 'Installierte Mods' }).getByText('fabric-api-0.110.0.jar')).toBeVisible()
   await page.getByRole('tab', { name: 'Entdecken' }).click()
   const discover = page.getByRole('region', { name: 'Entdecken' })
@@ -92,17 +92,17 @@ test('the mods tab of a fabric server offers only Modrinth', async ({ page }) =>
 
 test('vanilla servers have neither a plugins nor a mods tab', async ({ page }) => {
   await signIn(page, 'admin', true)
-  await page.getByRole('link', { name: 'creative', exact: true }).click()
+  await openServer(page, 'creative')
   await expect(page).toHaveURL(/\/servers\/2$/)
-  await expect(page.getByRole('tab', { name: 'Übersicht' })).toBeVisible()
-  await expect(page.getByRole('tab', { name: 'Plugins', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('tab', { name: 'Mods', exact: true })).toHaveCount(0)
+  await expect(serverSectionLink(page, 'creative', 'Übersicht')).toBeVisible()
+  await expect(serverSectionLink(page, 'creative', 'Plugins')).toHaveCount(0)
+  await expect(serverSectionLink(page, 'creative', 'Mods')).toHaveCount(0)
 })
 
 test('a user without the plugins permission sees no plugins tab', async ({ page }) => {
   await signIn(page, 'alice', false)
-  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await openServer(page, 'survival')
   await expect(page).toHaveURL(/\/servers\/1$/)
-  await expect(page.getByRole('tab', { name: 'Übersicht' })).toBeVisible()
-  await expect(page.getByRole('tab', { name: 'Plugins', exact: true })).toHaveCount(0)
+  await expect(serverSectionLink(page, 'survival', 'Übersicht')).toBeVisible()
+  await expect(serverSectionLink(page, 'survival', 'Plugins')).toHaveCount(0)
 })

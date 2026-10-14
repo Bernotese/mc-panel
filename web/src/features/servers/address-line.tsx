@@ -19,7 +19,7 @@ export function AddressLine({ address }: { address: string | null }) {
   const label = t('servers.address.copy', { address })
   return (
     <div className="flex min-w-0 items-center gap-1">
-      <span className="truncate font-mono text-sm" title={address}>
+      <span className="bg-surface-2 text-primary truncate px-1.5 py-0.5 font-mono text-sm" title={address}>
         {address}
       </span>
       <Button type="button" variant="ghost" size="icon-sm" aria-label={label} title={label} onClick={() => void copy(address)}>

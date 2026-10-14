@@ -1,87 +1,39 @@
 import { useTranslation } from 'react-i18next'
 import type { InstanceConfig, Server } from '@/api/types'
-import { Button } from '@/components/ui/button'
+import { Section } from '@/components/section'
 import { OnlinePlayersCard } from '@/features/players/online-players-card'
-import { SectionCard } from '@/features/profile/section-card'
 import { useFormat } from '@/lib/format'
-import { AddressLine } from './address-line'
-import { describeInstance, formatCpu, formatGiB, javaLabel } from './format'
-import { PowerButtons } from './power-buttons'
-import { StatusBadge } from './status-badge'
-import { usePower } from './use-power'
+import { describeInstance, formatGiB, javaLabel } from './format'
 
-export function ServerOverview({ server, instance, extracting = false }: { server: Server; instance: InstanceConfig; extracting?: boolean }) {
+/** Spec §4.4: status, address, power and resources live in the server header; the overview keeps the details and online players. */
+export function ServerOverview({ server, instance }: { server: Server; instance: InstanceConfig; extracting?: boolean }) {
   const { t } = useTranslation()
   const fmt = useFormat()
   const { status } = server
-  const canPower = server.permissions.includes('server.power')
   const running = status.state === 'running'
-  const showResources = running && status.memory_limit_bytes > 0
-
   return (
-    <div className="space-y-4">
-      {status.restart_required ? <RestartBanner server={server} canPower={canPower} extracting={extracting} /> : null}
-      {status.state === 'unknown' ? <p className="text-muted-foreground text-sm">{t('servers.overview.unknown_hint')}</p> : null}
-      <SectionCard title={t('servers.overview.title')}>
+    <div className="grid gap-6 xl:grid-cols-2">
+      {status.state === 'unknown' ? <p className="text-muted-foreground text-sm xl:col-span-2">{t('servers.overview.unknown_hint')}</p> : null}
+      <Section title={t('servers.overview.title')}>
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 text-sm">
-          <dt className="text-muted-foreground">{t('servers.overview.status')}</dt>
-          <dd className="flex flex-wrap items-center gap-2">
-            <StatusBadge state={status.state} />
-            {status.operation ? <span className="text-muted-foreground">{t(`servers.operation.${status.operation}`)}</span> : null}
-          </dd>
-          <dt className="text-muted-foreground">{t('servers.overview.address')}</dt>
-          <dd className="min-w-0">
-            <AddressLine address={server.address} />
-          </dd>
           <dt className="text-muted-foreground">{t('servers.overview.type')}</dt>
           <dd>{describeInstance(instance, t)}</dd>
           <dt className="text-muted-foreground">{t('servers.overview.java')}</dt>
           <dd>{javaLabel(instance.java)}</dd>
-          <dt className="text-muted-foreground">{t('servers.overview.memory')}</dt>
-          <dd className="tabular-nums">
-            {showResources
-              ? t('servers.memory_value', { used: formatGiB(status.memory_bytes, fmt.locale), limit: formatGiB(status.memory_limit_bytes, fmt.locale) })
-              : '—'}
-          </dd>
-          <dt className="text-muted-foreground">{t('servers.overview.cpu')}</dt>
-          <dd className="tabular-nums">{showResources ? t('servers.cpu_value', { value: formatCpu(status.cpu_percent, fmt.locale) }) : '—'}</dd>
+          <dt className="text-muted-foreground">{t('servers.overview.memory_assigned')}</dt>
+          <dd className="tabular-nums">{formatGiB(instance.memory_mib * 1024 ** 2, fmt.locale)} GiB</dd>
           <dt className="text-muted-foreground">{t('servers.overview.started')}</dt>
-          <dd>{running && status.started_at > 0 ? fmt.relative(status.started_at) : '—'}</dd>
+          <dd>{running && status.started_at > 0 ? fmt.relative(status.started_at) : '–'}</dd>
+          {status.operation ? (
+            <>
+              <dt className="text-muted-foreground">{t('servers.overview.status')}</dt>
+              <dd>{t(`servers.operation.${status.operation}`)}</dd>
+            </>
+          ) : null}
         </dl>
-        {status.last_error ? (
-          <div role="alert" className="border-destructive/50 mt-4 space-y-1 rounded-md border p-3 text-sm">
-            <p className="font-medium">{t('servers.overview.last_error')}</p>
-            <p className="font-mono break-words">{status.last_error}</p>
-          </div>
-        ) : status.state === 'error' ? (
-          // Only admins get the error text from the API (it can name host paths and Docker internals).
-          <div role="alert" className="border-destructive/50 mt-4 rounded-md border p-3 text-sm">
-            <p>{t('servers.overview.error_hidden')}</p>
-          </div>
-        ) : null}
-      </SectionCard>
+      </Section>
       <OnlinePlayersCard serverId={server.id} />
-      <SectionCard title={t('servers.overview.controls')}>
-        {canPower ? <PowerButtons server={server} extracting={extracting} /> : <p className="text-muted-foreground text-sm">{t('servers.no_power')}</p>}
-      </SectionCard>
-    </div>
-  )
-}
-
-function RestartBanner({ server, canPower, extracting }: { server: Server; canPower: boolean; extracting: boolean }) {
-  const { t } = useTranslation()
-  const power = usePower(server)
-  return (
-    <div role="status" className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="space-y-1">
-        <p className="font-medium">{t('servers.restart_required')}</p>
-        <p className="text-muted-foreground text-sm">{t('servers.restart.description')}</p>
-      </div>
-      {canPower ? (
-        <Button type="button" disabled={power.isPending || extracting} onClick={() => power.mutate('restart')}>
-          {t('servers.restart.now')}
-        </Button>
-      ) : null}
+      {!server.permissions.includes('server.power') ? <p className="text-muted-foreground text-sm xl:col-span-2">{t('servers.no_power')}</p> : null}
     </div>
   )
 }
