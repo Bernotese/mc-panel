@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest'
 import { NativeSelect } from '../native-select'
 import { Badge } from './badge'
 import { Button } from './button'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from './dialog'
 import { Input } from './input'
 import { Select, SelectTrigger, SelectValue } from './select'
 import { Switch } from './switch'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './table'
+import { Tabs, TabsList, TabsTrigger } from './tabs'
 
 function cls(el: Element): string[] {
   return (el.getAttribute('class') ?? '').split(/\s+/)
@@ -98,5 +101,52 @@ describe('form controls', () => {
     const sw = screen.getByRole('switch', { name: 'An' })
     expect(cls(sw)).toEqual(expect.arrayContaining(['data-checked:bg-primary', 'data-unchecked:bg-slot']))
     expect(cls(sw)).not.toContain('bevel-inset')
+  })
+})
+
+describe('surfaces', () => {
+  it('dialog title is a pixel heading inside a bevelled block', () => {
+    render(
+      <Dialog open>
+        <DialogContent>
+          <DialogTitle>Server stoppen?</DialogTitle>
+          <DialogDescription>d</DialogDescription>
+        </DialogContent>
+      </Dialog>,
+    )
+    const dialog = screen.getByRole('dialog', { name: 'Server stoppen?' })
+    expect(cls(dialog)).toContain('bevel')
+    expect(cls(screen.getByText('Server stoppen?'))).toContain('pixel-heading')
+  })
+  it('active tab gets the green underline and keyboard focus stays visible', () => {
+    render(
+      <Tabs defaultValue="a">
+        <TabsList>
+          <TabsTrigger value="a">Jails</TabsTrigger>
+          <TabsTrigger value="b">Login-Versuche</TabsTrigger>
+        </TabsList>
+      </Tabs>,
+    )
+    const active = screen.getByRole('tab', { name: 'Jails' })
+    expect(active).toHaveAttribute('data-state', 'active')
+    expect(cls(active)).toEqual(expect.arrayContaining(['after:bg-primary', 'data-active:after:opacity-100', 'focus-visible:outline-ring']))
+  })
+  it('table head uses the pixel label font and rows are dense', () => {
+    render(
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Benutzer</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow>
+            <TableCell>alice</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>,
+    )
+    expect(cls(screen.getByRole('columnheader', { name: 'Benutzer' }))).toEqual(expect.arrayContaining(['font-heading', 'text-xs', 'uppercase']))
+    expect(cls(screen.getByRole('cell', { name: 'alice' }))).toContain('py-1.5')
   })
 })
