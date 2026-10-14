@@ -95,7 +95,7 @@ uni_binaries() {
 
 # uni_caddy removes exactly the marked import line (other sites stay) and mc-panel.caddy.
 uni_caddy() {
-  local file="$CADDY_DIR/Caddyfile" changed=0 mode og content
+  local file="$CADDY_DIR/Caddyfile" touched=0 mode og content
   if [[ -f $ROOT$file && ! -L $ROOT$file ]] && grep -qxF -- "$UNI_IMPORT_LINE" "$ROOT$file"; then
     mode="$(stat -c '%a' -- "$ROOT$file")"
     og="$(_owner_get "$file")"
@@ -105,13 +105,13 @@ uni_caddy() {
     else
       write_file --allow-empty "$file" "0$mode" "${og%%:*}" "${og#*:}" </dev/null >/dev/null
     fi
-    changed=1
+    touched=1
   fi
   if [[ -e $ROOT$CADDY_DIR/mc-panel.caddy || -L $ROOT$CADDY_DIR/mc-panel.caddy ]]; then
     rm -f -- "$ROOT$CADDY_DIR/mc-panel.caddy"
-    changed=1
+    touched=1
   fi
-  if [[ $changed == 1 ]]; then
+  if [[ $touched == 1 ]]; then
     log_changed "removed the panel site from Caddy"
     sys_systemctl reload caddy || warn "reloading Caddy failed; check $CADDY_DIR/Caddyfile (systemctl status caddy)"
   fi
