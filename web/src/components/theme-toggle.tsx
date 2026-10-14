@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { nextTheme, setTheme, useThemePreference } from '@/lib/theme'
 
-export function ThemeToggle() {
+export function ThemeToggle({ className }: { className?: string }) {
   const { t } = useTranslation()
   const pref = useThemePreference()
   const Icon = pref === 'dark' ? Moon : pref === 'light' ? Sun : Monitor
@@ -12,6 +12,7 @@ export function ThemeToggle() {
       type="button"
       variant="ghost"
       size="icon"
+      className={className}
       aria-label={t('theme.toggle', { current: t(`theme.${pref}`) })}
       title={t('theme.toggle', { current: t(`theme.${pref}`) })}
       onClick={() => setTheme(nextTheme(pref))}
