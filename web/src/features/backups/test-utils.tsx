@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw'
 import type { BackupJob, BackupOverview, BackupSchedule, BackupSnapshot } from '@/api/types'
-import { renderServerTab } from '@/features/servers/tab-test-utils'
+import { renderServerTab } from '@/test/render-section'
 import { server } from '@/mocks/node'
 import { BackupsTab } from './backups-tab'
 

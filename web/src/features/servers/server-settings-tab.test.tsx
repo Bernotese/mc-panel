@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ServerSettingsTab } from './server-settings-tab'
-import { renderServerTab } from './tab-test-utils'
+import { renderServerTab } from '@/test/render-section'
 
 describe('ServerSettingsTab', () => {
   it('shows the form and the danger zone at the end', async () => {

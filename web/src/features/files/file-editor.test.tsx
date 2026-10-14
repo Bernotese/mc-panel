@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { renderServerTab } from '@/features/servers/tab-test-utils'
+import { renderServerTab } from '@/test/render-section'
 import { server } from '@/mocks/node'
 import { setViewport } from '@/test/media'
 import { FileEditor } from './file-editor'
