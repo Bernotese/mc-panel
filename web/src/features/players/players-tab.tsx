@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link, type LinkProps } from '@tanstack/react-router'
+import { Link } from '@tanstack/react-router'
 import { Gavel, LogOut, ShieldMinus, ShieldPlus, Undo2, UserMinus, type LucideIcon } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -30,12 +30,7 @@ function IconAction({ icon: Icon, label, disabled, onClick }: { icon: LucideIcon
 
 // The settings route is added by T2 (feat/ui-shell); the cast keeps tsc green on feat/ui-live until both are integrated.
 // The lead removes the cast when merging (see "Requests to lead").
-function settingsLink(serverId: number): LinkProps {
-  return { to: '/servers/$id/settings', params: { id: String(serverId) } } as unknown as LinkProps
-}
-
-/** `onOpenSettings` is ignored and goes away once T2's routes land (spec §6.2). */
-export function PlayersTab({ server }: { server: Server; onOpenSettings?: () => void }) {
+export function PlayersTab({ server }: { server: Server }) {
   const { t } = useTranslation()
   const isAdmin = useMe()?.role === 'admin'
   const running = server.status.state === 'running'
@@ -147,7 +142,7 @@ export function PlayersTab({ server }: { server: Server; onOpenSettings?: () => 
             ) : isAdmin ? (
               <div className="flex flex-wrap items-center gap-2">
                 <Muted>{t('players.whitelist.inactive')}</Muted>
-                <Link {...settingsLink(server.id)} className="text-primary text-sm underline underline-offset-4">
+                <Link to="/servers/$id/settings" params={{ id: String(server.id) }} className="text-primary text-sm underline underline-offset-4">
                   {t('players.whitelist.open_settings')}
                 </Link>
               </div>

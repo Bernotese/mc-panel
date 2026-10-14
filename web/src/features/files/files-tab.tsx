@@ -36,10 +36,6 @@ export const WIDE_QUERY = '(min-width: 1280px)'
 
 export interface FilesTabProps {
   server: Server
-  /** @deprecated Ignored; the files area guards itself with useBlocker. Removed by the lead after T2 is integrated. */
-  onBusyChange?: (busy: FilesBusy | null) => void
-  /** @deprecated Ignored; the editor links to /servers/$id/settings itself. Removed by the lead after T2 is integrated. */
-  onOpenSettings?: () => void
 }
 
 export function FilesTab({ server }: FilesTabProps) {
