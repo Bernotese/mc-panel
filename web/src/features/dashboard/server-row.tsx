@@ -85,7 +85,7 @@ export function ServerRow({ server, metrics }: { server: Server; metrics?: Overv
               </span>
             ) : null}
           </div>
-          <p className="font-pixel text-muted-foreground flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm tabular-nums">
+          <p data-testid="server-metrics" className="font-pixel text-muted-foreground flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm tabular-nums">
             {instance ? (
               <Fact className="text-foreground">{describeInstance(instance, t)}</Fact>
             ) : (
