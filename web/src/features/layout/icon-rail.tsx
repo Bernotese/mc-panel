@@ -1,4 +1,4 @@
-import { Link } from '@tanstack/react-router'
+import { Link, useRouterState } from '@tanstack/react-router'
 import { LogOut, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { PixelIcon } from '@/components/pixel-icon'
@@ -6,6 +6,7 @@ import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { useMe } from '@/features/auth/me'
 import { useLogout } from '@/features/auth/use-logout'
+import { cn } from '@/lib/utils'
 import { navItemsFor, type NavItem } from './nav'
 
 const ITEM =
@@ -16,6 +17,8 @@ function RailLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void
   const { t } = useTranslation()
   const Icon = item.icon
   const label = t(item.labelKey)
+  // Server pages belong to the "Server" area: highlight it there too (aria-current stays with the exact page).
+  const inServers = useRouterState({ select: (s) => item.to === '/' && s.location.pathname.startsWith('/servers/') })
   return (
     <li>
       <Link
@@ -26,7 +29,7 @@ function RailLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void
         activeOptions={{ exact: item.to === '/', includeSearch: false }}
         activeProps={{ 'aria-current': 'page', className: ACTIVE }}
         onClick={onNavigate}
-        className={ITEM}
+        className={cn(ITEM, inServers && 'text-primary bg-sidebar-accent bevel')}
       >
         <Icon className="size-5" aria-hidden="true" />
       </Link>

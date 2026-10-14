@@ -39,9 +39,10 @@ describe('AppLayout', () => {
   })
 
   it('marks only the open section of the active server as current', async () => {
-    await renderApp('/servers/1/console', loginAs('admin'))
+    // Players, not the console: jsdom has no EventSource.
+    await renderApp('/servers/1/players', loginAs('admin'))
     const tree = await screen.findByRole('navigation', { name: 'Server' })
-    expect(await within(tree).findByRole('link', { name: 'Konsole' })).toHaveAttribute('aria-current', 'page')
+    expect(await within(tree).findByRole('link', { name: 'Spieler' })).toHaveAttribute('aria-current', 'page')
     expect(within(tree).getByRole('link', { name: 'survival' })).not.toHaveAttribute('aria-current')
     expect(within(tree).getByRole('link', { name: 'Übersicht' })).not.toHaveAttribute('aria-current')
   })
@@ -121,9 +122,9 @@ describe('AppLayout', () => {
   })
 
   it('shows a breadcrumb for server sections', async () => {
-    await renderApp('/servers/1/console', loginAs('admin'))
+    await renderApp('/servers/1/players', loginAs('admin'))
     const crumb = await screen.findByRole('navigation', { name: 'Brotkrume' })
-    await waitFor(() => expect(crumb).toHaveTextContent('survival/Konsole'))
+    await waitFor(() => expect(crumb).toHaveTextContent('survival/Spieler'))
     expect(within(crumb).getByRole('link', { name: 'survival' })).toHaveAttribute('href', '/servers/1')
   })
 

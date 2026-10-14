@@ -7,7 +7,7 @@ import { isExtracting, useFileJob } from '@/features/files/use-file-job'
 import { errorMessage } from '@/lib/error-message'
 import { serverQueryOptions } from './api'
 import { serverSections } from './sections'
-import { ServerContextProvider } from './server-context'
+import { ServerContext } from './server-context'
 import { ServerHeader } from './server-header'
 import { detailPollInterval } from './status'
 
@@ -47,11 +47,11 @@ export function ServerLayout({ serverId }: { serverId: number }) {
   const server = query.data
   const value = { server, isAdmin, extracting: isExtracting(fileJob.data), sections: serverSections(server, isAdmin) }
   return (
-    <ServerContextProvider value={value}>
+    <ServerContext.Provider value={value}>
       <div className="flex min-w-0 flex-col gap-6">
         <ServerHeader />
         <Outlet />
       </div>
-    </ServerContextProvider>
+    </ServerContext.Provider>
   )
 }
