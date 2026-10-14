@@ -27,6 +27,8 @@ ops_uninstall_system() {
   echo db >"$ROOT$DATA_DIR/panel.db"
   echo keep >"$ROOT/run/other/x.sock"
   uni_probe_containers() { printf '%s\n%s\n' "$OPS_C1" "$OPS_C2"; }
+  uni_probe_running_containers() { printf '%s\n' "$OPS_C1"; }
+  uni_probe_mountpoint() { return 1; }
   uni_probe_has_router() { return 0; }
   uni_probe_has_network() { return 0; }
   uni_probe_has_table() { return 0; }
@@ -77,6 +79,15 @@ test_ops_uninstall_stops_the_agent_before_removing_containers() {
   stop="$(grep -n 'systemctl stop mcpanel-agent.service' "$WORK/calls.log" | cut -d: -f1)"
   rm="$(grep -n "docker rm -f $OPS_C1" "$WORK/calls.log" | cut -d: -f1)"
   ((stop < rm)) || fail "agent stopped at line $stop, containers removed at line $rm"
+  # running servers get time to save their worlds before they are removed
+  local dstop
+  dstop="$(grep -n "docker stop -t 60 $OPS_C1" "$WORK/calls.log" | cut -d: -f1)"
+  if [[ -z $dstop ]] || ((dstop >= rm)); then
+    fail "docker stop at line '$dstop', docker rm at line $rm"
+  fi
+  # a socket stops before its service (socket activation would start it again)
+  assert_eq "mcpanel-panel.socket mcpanel-panel.service mcpanel-files.socket mcpanel-files.service mcpanel-agent.service mcpanel-fw.service" \
+    "$(awk '$1 == "systemctl" && $2 == "stop" { print $3 }' "$WORK/calls.log" | paste -sd' ' -)"
 }
 
 test_ops_uninstall_leaves_foreign_objects() {
@@ -97,6 +108,7 @@ test_ops_uninstall_leaves_foreign_objects() {
   assert_not_called 'docker rmi'
   # exactly the two removals of mc-panel containers: the labelled ones and the router
   assert_eq 2 "$(grep -c '^docker rm -f' "$WORK/calls.log")"
+  assert_eq 1 "$(grep -c '^docker stop' "$WORK/calls.log")"
 }
 
 test_ops_uninstall_ignores_odd_container_ids() {
@@ -113,8 +125,36 @@ test_ops_uninstall_keeps_an_unmarked_import_line() {
   printf 'import mc-panel.caddy\nother.example.org {\n}\n' >"$ROOT$CADDY_DIR/Caddyfile"
   YES=1
   assert_exit 0 cmd_uninstall
-  # only the marked line is ours (overview V3); the operator's own line stays
+  # only the marked line is ours (overview V3); the operator's own line stays, and so does a
+  # loadable (comment-only) mc-panel.caddy, with a loud warning
   assert_file_contains "$ROOT$CADDY_DIR/Caddyfile" 'import mc-panel.caddy'
+  assert_file_contains "$ROOT$CADDY_DIR/mc-panel.caddy" '# mc-panel was uninstalled'
+  assert_not_contains "$(cat "$ROOT$CADDY_DIR/mc-panel.caddy")" 'panel.example.com'
+  assert_contains "$(cat "$WORK/out")" "still imports mc-panel.caddy"
+  assert_called 'runuser -u caddy -- env HOME=/var/lib/caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile'
+  assert_called 'systemctl reload caddy.service'
+}
+
+test_ops_uninstall_does_not_reload_an_invalid_caddy_config() {
+  ops_uninstall_system
+  run_as() {
+    echo "runuser -u $*" >>"$WORK/calls.log"
+    [[ $1 != caddy ]]
+  }
+  YES=1
+  assert_exit 0 cmd_uninstall
+  assert_contains "$(cat "$WORK/out")" "Caddy was not reloaded"
+  assert_not_called 'systemctl reload caddy'
+}
+
+test_ops_uninstall_leaves_unlabelled_router_and_network() {
+  ops_uninstall_system
+  uni_probe_has_router() { return 1; }
+  uni_probe_has_network() { return 1; }
+  YES=1
+  assert_exit 0 cmd_uninstall
+  assert_not_called 'docker rm -f mcpanel-router'
+  assert_not_called 'docker network rm'
 }
 
 test_ops_uninstall_without_yes_and_without_terminal_aborts() {
@@ -141,6 +181,7 @@ test_ops_uninstall_is_idempotent() {
   YES=1
   assert_exit 0 cmd_uninstall
   uni_probe_containers() { :; }
+  uni_probe_running_containers() { :; }
   uni_probe_has_router() { return 1; }
   uni_probe_has_network() { return 1; }
   uni_probe_has_table() { return 1; }
@@ -155,6 +196,7 @@ test_ops_uninstall_is_idempotent() {
 test_ops_uninstall_without_docker_and_nft() {
   ops_uninstall_system
   uni_probe_containers() { return 127; }
+  uni_probe_running_containers() { return 127; }
   uni_probe_has_router() { return 127; }
   uni_probe_has_network() { return 127; }
   uni_probe_has_table() { return 127; }
@@ -229,4 +271,33 @@ test_ops_purge_skips_missing_users() {
   assert_exit 0 cmd_uninstall
   assert_not_called 'userdel mcpanel-mc'
   assert_called 'userdel mcpanel'
+}
+
+test_ops_purge_keeps_a_mount_point_and_deletes_its_content() {
+  ops_uninstall_system
+  uni_probe_mountpoint() { [[ $1 == "$ROOT$INSTANCES_DIR" ]]; }
+  PURGE=1
+  ops_tty panel.example.com
+  assert_exit 0 cmd_uninstall
+  assert_file "$ROOT$INSTANCES_DIR"
+  assert_eq "" "$(find "$ROOT$INSTANCES_DIR" -mindepth 1)"
+  assert_no_file "$ROOT$DATA_DIR"
+  assert_contains "$(cat "$WORK/out")" "a mount point; it stays"
+}
+
+test_ops_purge_reports_what_it_could_not_delete() {
+  ops_uninstall_system
+  uni_userdel() { [[ $1 != mcpanel-mc ]]; }
+  # an undeletable tree: rm fails for DATA_DIR
+  rm() {
+    if [[ " $* " == *" $ROOT$DATA_DIR "* ]]; then return 1; fi
+    command rm "$@"
+  }
+  PURGE=1
+  ops_tty panel.example.com
+  assert_exit 1 cmd_uninstall
+  assert_contains "$(cat "$WORK/out")" "could not delete: /var/lib/mc-panel user mcpanel-mc"
+  # the others are gone anyway
+  assert_no_file "$ROOT$INSTANCES_DIR"
+  assert_no_file "$ROOT$ETC_PANEL"
 }
