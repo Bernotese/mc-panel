@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"io/fs"
 	"net"
 	"net/http"
@@ -130,5 +131,65 @@ func TestListenTCP(t *testing.T) {
 	defer l.Close()
 	if _, ok := l.Addr().(*net.TCPAddr); !ok {
 		t.Fatalf("listener addr = %T, want TCP", l.Addr())
+	}
+}
+
+func TestListenPrefersActivatedSocket(t *testing.T) {
+	dir, err := os.MkdirTemp("", "act")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "panel.sock")
+	cfg := config.DefaultPanel()
+	cfg.Listen = "unix:" + sock
+
+	activated, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := listenWith(context.Background(), cfg, func() (net.Listener, error) { return activated, nil })
+	if err != nil || l != activated {
+		t.Fatalf("activated socket not used: %v %v", l, err)
+	}
+	_ = l.Close()
+
+	other, err := net.Listen("unix", filepath.Join(dir, "other.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := listenWith(context.Background(), cfg, func() (net.Listener, error) { return other, nil }); err == nil ||
+		!strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("socket for another path accepted: %v", err)
+	}
+
+	boom := errors.New("boom")
+	if _, err := listenWith(context.Background(), cfg, func() (net.Listener, error) { return nil, boom }); !errors.Is(err, boom) {
+		t.Fatalf("activation error not returned: %v", err)
+	}
+
+	// Without activation the panel creates the socket itself, as before.
+	l, err = listenWith(context.Background(), cfg, func() (net.Listener, error) { return nil, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Lstat(sock)
+	if err != nil || fi.Mode().Type() != fs.ModeSocket || fi.Mode().Perm() != 0o660 {
+		t.Fatalf("own socket: %v %v", fi, err)
+	}
+	_ = l.Close()
+}
+
+func TestListenTCPIgnoresActivation(t *testing.T) {
+	cfg := config.DefaultPanel()
+	cfg.Listen = "127.0.0.1:0"
+	called := false
+	l, err := listenWith(context.Background(), cfg, func() (net.Listener, error) { called = true; return nil, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = l.Close()
+	if called {
+		t.Fatal("activation consulted for a TCP listen address")
 	}
 }
