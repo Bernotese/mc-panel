@@ -264,6 +264,7 @@ export const en: Messages = {
       base_domain_missing: 'You can create servers once a base domain is set.',
     },
     form: {
+      section: { basics: 'Basics', resources: 'Resources' },
       name: 'Name',
       name_hint: 'Becomes part of the address: 2–32 characters, lowercase letters, digits and hyphens.',
       address_preview: 'Address: {{address}}',

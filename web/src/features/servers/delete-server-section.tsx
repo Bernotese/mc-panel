@@ -5,10 +5,10 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { isApiError } from '@/api/errors'
 import type { Server } from '@/api/types'
+import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { SectionCard } from '@/features/profile/section-card'
 import { useErrorToast } from '@/lib/error-message'
 import { deleteServer, serverKey, serversKey } from './api'
 
@@ -42,9 +42,9 @@ export function DeleteServerSection({ server }: { server: Server }) {
   })
 
   return (
-    <SectionCard title={t('servers.delete.title')} className="max-w-3xl">
+    <Section title={t('servers.delete.title')} tone="danger">
       <form
-        className="space-y-4"
+        className="flex flex-col gap-4"
         noValidate
         onSubmit={(e) => {
           e.preventDefault()
@@ -92,6 +92,6 @@ export function DeleteServerSection({ server }: { server: Server }) {
           {t('servers.delete.submit')}
         </Button>
       </form>
-    </SectionCard>
+    </Section>
   )
 }

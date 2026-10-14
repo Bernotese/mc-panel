@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { isSudoCancelled } from '@/api/errors'
 import type { Catalog, InstanceType, JavaVersion } from '@/api/types'
 import { NativeSelect } from '@/components/native-select'
+import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -95,7 +96,7 @@ export function ServerForm({
 
   return (
     <form
-      className="max-w-3xl space-y-6"
+      className="flex max-w-3xl flex-col gap-6"
       noValidate
       onSubmit={(e) => {
         e.preventDefault()
@@ -104,26 +105,32 @@ export function ServerForm({
         if (result) onSubmit(result)
       }}
     >
-      {mode === 'create' ? (
-        <>
-          <NameField id={`${id}-name`} name={value.name} baseDomain={baseDomain} error={shown('name')} onChange={(name) => update({ name }, 'name')} />
-          <TypeField id={`${id}-type`} type={value.type} curseforgeKeySet={curseforgeKeySet} error={shown('type')} onChange={changeType} />
-        </>
-      ) : (
-        <p className="text-sm">
-          <span className="font-medium">{t('servers.form.type')}:</span> {t(`servers.type.${value.type}`)}
-        </p>
-      )}
-      <VersionFields
-        id={id}
-        value={value}
-        catalog={catalog.data}
-        catalogPending={!modpack && catalog.isPending}
-        catalogFailed={catalog.isError}
-        shown={shown}
-        update={update}
-      />
-      <MemoryField id={`${id}-memory`} text={value.memoryGiB} error={shown('memory')} onChange={(memoryGiB) => update({ memoryGiB }, 'memory')} />
+      <Section title={t('servers.form.section.basics')}>
+        <div className="flex flex-col gap-4">
+          {mode === 'create' ? (
+            <>
+              <NameField id={`${id}-name`} name={value.name} baseDomain={baseDomain} error={shown('name')} onChange={(name) => update({ name }, 'name')} />
+              <TypeField id={`${id}-type`} type={value.type} curseforgeKeySet={curseforgeKeySet} error={shown('type')} onChange={changeType} />
+            </>
+          ) : (
+            <p className="text-sm">
+              <span className="font-medium">{t('servers.form.type')}:</span> {t(`servers.type.${value.type}`)}
+            </p>
+          )}
+          <VersionFields
+            id={id}
+            value={value}
+            catalog={catalog.data}
+            catalogPending={!modpack && catalog.isPending}
+            catalogFailed={catalog.isError}
+            shown={shown}
+            update={update}
+          />
+        </div>
+      </Section>
+      <Section title={t('servers.form.section.resources')}>
+        <MemoryField id={`${id}-memory`} text={value.memoryGiB} error={shown('memory')} onChange={(memoryGiB) => update({ memoryGiB }, 'memory')} />
+      </Section>
       <CollapsibleSection
         title={t('servers.form.advanced')}
         description={t('servers.form.advanced_description')}
@@ -148,7 +155,7 @@ export function ServerForm({
       {mode === 'create' ? (
         <EulaField id={`${id}-eula`} checked={value.eulaAccepted} error={shown('eula')} onChange={(eulaAccepted) => update({ eulaAccepted }, 'eula')} />
       ) : null}
-      <div className="space-y-3">
+      <div className="flex flex-col items-start gap-3">
         {notice ? <p className="text-muted-foreground text-sm">{notice}</p> : null}
         {submitted && hasErrors ? (
           <p role="alert" className="text-destructive text-sm">
@@ -228,7 +235,7 @@ function TypeField({
           const optionId = `${id}-${option}`
           const disabled = option === 'curseforge' && !curseforgeKeySet
           return (
-            <div key={option} className={cn('flex items-start gap-3 rounded-md border p-3', type === option && 'border-primary', disabled && 'opacity-60')}>
+            <div key={option} className={cn('bg-surface-2 flex items-start gap-3 border p-3', type === option && 'border-primary bevel-inset', disabled && 'opacity-60')}>
               <input
                 id={optionId}
                 type="radio"
