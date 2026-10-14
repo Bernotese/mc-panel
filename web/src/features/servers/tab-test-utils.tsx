@@ -6,6 +6,7 @@ import { loginAs } from '@/mocks/db'
 import { renderWithProviders, type TestRouter } from '@/test/render'
 import { serverQueryOptions } from './api'
 
+// eslint-disable-next-line react-refresh/only-export-components -- test-only helper, never hot-reloaded
 function WithServer({ serverId, render }: { serverId: number; render: (server: Server) => ReactNode }) {
   const query = useQuery(serverQueryOptions(serverId))
   if (!query.data) return null
