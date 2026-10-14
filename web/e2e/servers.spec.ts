@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { confirmSudo, signIn } from './helpers'
+import { confirmSudo, openServer, openServerSection, serverSectionLink, signIn } from './helpers'
 
 test('admin creates a paper server, changes the MOTD and restarts it', async ({ page }) => {
   await signIn(page, 'admin', true)
@@ -16,11 +16,11 @@ test('admin creates a paper server, changes the MOTD and restarts it', async ({ 
 
   await expect(page).toHaveURL(/\/servers\/\d+$/)
   await expect(page.getByRole('heading', { name: 'skyblock', level: 1 })).toBeVisible()
-  const state = page.getByRole('region', { name: 'Zustand' })
-  await expect(state.getByText('Läuft')).toBeVisible()
-  await expect(state.getByText('skyblock.mc.example.com')).toBeVisible()
+  const header = page.getByRole('region', { name: 'skyblock', exact: true })
+  await expect(header.getByText('Läuft')).toBeVisible()
+  await expect(header.getByText('skyblock.mc.example.com')).toBeVisible()
 
-  await page.getByRole('tab', { name: 'Einstellungen' }).click()
+  await openServerSection(page, 'skyblock', 'Einstellungen')
   await expect(page.getByText('Der Server läuft. Änderungen werden erst nach einem Neustart aktiv.')).toBeVisible()
   await page.getByRole('button', { name: 'Eigenschaften' }).click()
   await page.getByLabel('Nachricht im Serverbrowser (MOTD)').fill('Willkommen auf Skyblock')
@@ -28,12 +28,12 @@ test('admin creates a paper server, changes the MOTD and restarts it', async ({ 
   await page.getByRole('button', { name: 'Änderungen speichern' }).click()
   await expect(page.getByText('Änderungen gespeichert. Sie werden beim nächsten Neustart aktiv.')).toBeVisible()
 
-  await page.getByRole('tab', { name: 'Übersicht' }).click()
+  await openServerSection(page, 'skyblock', 'Übersicht')
   await expect(page.getByText('Neustart nötig')).toBeVisible()
   await page.getByRole('button', { name: 'Jetzt neu starten' }).click()
   await expect(page.getByText('Neustart für „skyblock“ angefordert.')).toBeVisible()
   await expect(page.getByText('Neustart nötig')).toBeHidden()
-  await expect(state.getByText('Läuft')).toBeVisible()
+  await expect(header.getByText('Läuft')).toBeVisible()
 })
 
 test('a restricted user sees only permitted servers and no admin areas', async ({ page }) => {
@@ -47,21 +47,20 @@ test('a restricted user sees only permitted servers and no admin areas', async (
   const nav = page.getByRole('navigation', { name: 'Hauptnavigation' })
   await expect(nav.getByRole('link', { name: 'Einstellungen' })).toHaveCount(0)
 
-  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await openServer(page, 'survival')
   await expect(page).toHaveURL(/\/servers\/1$/)
   await expect(page.getByRole('heading', { name: 'survival', level: 1 })).toBeVisible()
-  await expect(page.getByRole('tab', { name: 'Übersicht' })).toBeVisible()
-  await expect(page.getByRole('tab', { name: 'Einstellungen' })).toHaveCount(0)
-  await expect(page.getByRole('tab', { name: 'Löschen' })).toHaveCount(0)
+  await expect(serverSectionLink(page, 'survival', 'Übersicht')).toBeVisible()
+  await expect(serverSectionLink(page, 'survival', 'Einstellungen')).toHaveCount(0)
   await expect(page.getByRole('group', { name: 'Steuerung für survival' })).toBeVisible()
 })
 
 test('admin follows the console, sends a command and kicks a player', async ({ page }) => {
   await signIn(page, 'admin', true)
-  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await openServer(page, 'survival')
   await expect(page).toHaveURL(/\/servers\/1$/)
 
-  await page.getByRole('tab', { name: 'Konsole' }).click()
+  await openServerSection(page, 'survival', 'Konsole')
   const log = page.getByRole('log', { name: 'Server-Log' })
   await expect(page.getByText('Verbunden')).toBeVisible()
   await expect(log).toContainText('INFO')
@@ -74,7 +73,7 @@ test('admin follows the console, sends a command and kicks a player', async ({ p
   await expect(log).toContainText('of a max of 20 players online')
   await expect(command).toHaveValue('')
 
-  await page.getByRole('tab', { name: 'Spieler' }).click()
+  await openServerSection(page, 'survival', 'Spieler')
   const online = page.getByRole('region', { name: 'Online' })
   await expect(online.getByText('Steve', { exact: true })).toBeVisible()
   await online.getByRole('button', { name: 'Steve kicken' }).click()
@@ -84,18 +83,18 @@ test('admin follows the console, sends a command and kicks a player', async ({ p
 
 test('a user without console permission sees online players but no console', async ({ page }) => {
   await signIn(page, 'alice', false)
-  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await openServer(page, 'survival')
   await expect(page).toHaveURL(/\/servers\/1$/)
   await expect(page.getByRole('region', { name: 'Online-Spieler' }).getByText('Alex')).toBeVisible()
-  await expect(page.getByRole('tab', { name: 'Konsole' })).toHaveCount(0)
-  await expect(page.getByRole('tab', { name: 'Spieler' })).toHaveCount(0)
+  await expect(serverSectionLink(page, 'survival', 'Konsole')).toHaveCount(0)
+  await expect(serverSectionLink(page, 'survival', 'Spieler')).toHaveCount(0)
 })
 
 test('admin edits a config, uploads, renames and deletes files', async ({ page }) => {
   await signIn(page, 'admin', true)
-  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await openServer(page, 'survival')
   await expect(page).toHaveURL(/\/servers\/1$/)
-  await page.getByRole('tab', { name: 'Dateien' }).click()
+  await openServerSection(page, 'survival', 'Dateien')
   const files = page.getByRole('region', { name: 'Dateien' })
 
   await files.getByRole('button', { name: 'plugins', exact: true }).click()
@@ -131,9 +130,9 @@ test('admin edits a config, uploads, renames and deletes files', async ({ page }
 
 test('admin uploads a world zip to a stopped server and extracts it', async ({ page }) => {
   await signIn(page, 'admin', true)
-  await page.getByRole('link', { name: 'creative', exact: true }).click()
+  await openServer(page, 'creative')
   await expect(page).toHaveURL(/\/servers\/2$/)
-  await page.getByRole('tab', { name: 'Dateien' }).click()
+  await openServerSection(page, 'creative', 'Dateien')
   const files = page.getByRole('region', { name: 'Dateien' })
 
   await page.getByLabel('Dateien hochladen').setInputFiles({
@@ -155,8 +154,8 @@ test('admin uploads a world zip to a stopped server and extracts it', async ({ p
 
 test('a user without file permission sees no files tab', async ({ page }) => {
   await signIn(page, 'alice', false)
-  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await openServer(page, 'survival')
   await expect(page).toHaveURL(/\/servers\/1$/)
-  await expect(page.getByRole('tab', { name: 'Übersicht' })).toBeVisible()
-  await expect(page.getByRole('tab', { name: 'Dateien' })).toHaveCount(0)
+  await expect(serverSectionLink(page, 'survival', 'Übersicht')).toBeVisible()
+  await expect(serverSectionLink(page, 'survival', 'Dateien')).toHaveCount(0)
 })

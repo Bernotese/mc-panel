@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test'
-import { confirmSudo, signIn } from './helpers'
+import { confirmSudo, openServer, openServerSection, signIn } from './helpers'
 
 test('admin creates a backup with a note, pins a scheduled snapshot and restores one', async ({ page }) => {
   await signIn(page, 'admin', true)
-  await page.getByRole('link', { name: 'survival', exact: true }).click()
+  await openServer(page, 'survival')
   await expect(page).toHaveURL(/\/servers\/1$/)
-  await page.getByRole('tab', { name: 'Backups', exact: true }).click()
+  await openServerSection(page, 'survival', 'Backups')
   const list = page.getByRole('region', { name: 'Snapshots' })
   await expect(list.getByText('vor Update auf 1.21.11')).toBeVisible()
   await expect(list.getByText('Angepinnt')).toHaveCount(1)
@@ -53,8 +53,8 @@ test('admin creates a backup with a note, pins a scheduled snapshot and restores
 
 test('admin changes the schedule of a server', async ({ page }) => {
   await signIn(page, 'admin', true)
-  await page.getByRole('link', { name: 'survival', exact: true }).click()
-  await page.getByRole('tab', { name: 'Backups', exact: true }).click()
+  await openServer(page, 'survival')
+  await openServerSection(page, 'survival', 'Backups')
   const card = page.getByRole('region', { name: 'Zeitplan' })
   await expect(card.getByText(/Zeitzone des Panels: Europe\/Berlin/)).toBeVisible()
   await card.getByRole('combobox', { name: 'Zeitplan' }).selectOption('interval')
@@ -66,8 +66,8 @@ test('admin changes the schedule of a server', async ({ page }) => {
 
 test('a host without restic shows only a hint', async ({ page }) => {
   await signIn(page, 'admin', true)
-  await page.getByRole('link', { name: 'modded', exact: true }).click()
-  await page.getByRole('tab', { name: 'Backups', exact: true }).click()
+  await openServer(page, 'modded')
+  await openServerSection(page, 'modded', 'Backups')
   await expect(page.getByText(/Backups sind auf diesem Host nicht verfügbar/)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Backup erstellen' })).toHaveCount(0)
 })
