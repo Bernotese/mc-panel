@@ -1,13 +1,27 @@
+import { Play, RotateCw, Square, type LucideIcon } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { Server } from '@/api/types'
+import type { PowerAction, Server } from '@/api/types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import { POWER_ACTIONS, powerAllowed } from './status'
 import { usePower } from './use-power'
 
-/** Start, stop (after confirmation) and restart; actions that make no sense in the current state are disabled. */
-export function PowerButtons({ server, extracting = false }: { server: Pick<Server, 'id' | 'name' | 'status'>; extracting?: boolean }) {
+const ICONS: Record<PowerAction, LucideIcon> = { start: Play, stop: Square, restart: RotateCw }
+
+/**
+ * Start, stop (after confirmation) and restart; actions that make no sense in the current state are disabled.
+ * `compact` renders icon buttons (the label stays the accessible name and tooltip).
+ */
+export function PowerButtons({
+  server,
+  extracting = false,
+  compact = false,
+}: {
+  server: Pick<Server, 'id' | 'name' | 'status'>
+  extracting?: boolean
+  compact?: boolean
+}) {
   const { t } = useTranslation()
   const [confirmStop, setConfirmStop] = useState(false)
   const power = usePower(server)
@@ -15,18 +29,25 @@ export function PowerButtons({ server, extracting = false }: { server: Pick<Serv
   return (
     <>
       <div role="group" aria-label={t('servers.power_group', { name: server.name })} className="flex flex-wrap gap-2">
-        {POWER_ACTIONS.map((action) => (
-          <Button
-            key={action}
-            type="button"
-            size="sm"
-            variant={action === 'stop' ? 'outline' : 'secondary'}
-            disabled={power.isPending || !powerAllowed(server.status.state, action) || (extracting && action !== 'stop')}
-            onClick={() => (action === 'stop' ? setConfirmStop(true) : power.mutate(action))}
-          >
-            {t(`servers.power.${action}`)}
-          </Button>
-        ))}
+        {POWER_ACTIONS.map((action) => {
+          const Icon = ICONS[action]
+          const label = t(`servers.power.${action}`)
+          return (
+            <Button
+              key={action}
+              type="button"
+              size={compact ? 'icon-sm' : 'sm'}
+              variant={action === 'stop' ? 'outline' : 'default'}
+              aria-label={compact ? label : undefined}
+              title={compact ? label : undefined}
+              disabled={power.isPending || !powerAllowed(server.status.state, action) || (extracting && action !== 'stop')}
+              onClick={() => (action === 'stop' ? setConfirmStop(true) : power.mutate(action))}
+            >
+              <Icon aria-hidden="true" />
+              {compact ? null : label}
+            </Button>
+          )
+        })}
       </div>
       {extracting ? <p className="text-muted-foreground text-sm">{t('servers.extracting_lock')}</p> : null}
       <ConfirmDialog

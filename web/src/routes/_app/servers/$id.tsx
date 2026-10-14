@@ -1,5 +1,5 @@
 import { createFileRoute, notFound } from '@tanstack/react-router'
-import { ServerDetailPage } from '@/features/servers/server-detail-page'
+import { ServerLayout } from '@/features/servers/server-layout'
 
 export const Route = createFileRoute('/_app/servers/$id')({
   beforeLoad: ({ params }) => {
@@ -11,5 +11,5 @@ export const Route = createFileRoute('/_app/servers/$id')({
 
 function ServerRoute() {
   const { id } = Route.useParams()
-  return <ServerDetailPage serverId={Number(id)} />
+  return <ServerLayout key={id} serverId={Number(id)} />
 }

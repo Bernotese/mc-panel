@@ -1,7 +1,7 @@
 // web/src/test/media.ts
-type Viewport = 'desktop' | 'mobile'
+type Viewport = 'desktop' | 'tablet' | 'mobile'
 
-const WIDTH: Record<Viewport, number> = { desktop: 1280, mobile: 360 }
+const WIDTH: Record<Viewport, number> = { desktop: 1280, tablet: 900, mobile: 360 }
 let viewport: Viewport = 'desktop'
 let prefersDark = false
 

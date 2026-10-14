@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { confirmSudo, signIn } from './helpers'
+import { confirmSudo, openServerSection, signIn } from './helpers'
 
 test('admin sees host and server values on the dashboard and explores the monitoring tab', async ({ page }) => {
   await signIn(page, 'admin', true)
@@ -10,7 +10,7 @@ test('admin sees host and server values on the dashboard and explores the monito
   const survival = page.getByRole('article', { name: 'survival' })
   await expect(survival.getByTestId('server-metrics')).toBeVisible()
   await survival.getByRole('link', { name: 'survival', exact: true }).click()
-  await page.getByRole('tab', { name: 'Monitoring', exact: true }).click()
+  await openServerSection(page, 'survival', 'Monitoring')
 
   const now = page.getByRole('region', { name: 'Jetzt' })
   await expect(now.getByRole('list', { name: 'Online-Spieler' })).toBeVisible()

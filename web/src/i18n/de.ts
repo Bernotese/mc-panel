@@ -144,7 +144,7 @@ export const de = {
   },
   nav: {
     label: 'Hauptnavigation',
-    dashboard: 'Übersicht',
+    dashboard: 'Server',
     users: 'Benutzer',
     security: 'Security Center',
     audit: 'Audit-Log',
@@ -154,6 +154,15 @@ export const de = {
     menu_description: 'Navigation zu allen Bereichen des Panels',
     skip: 'Zum Inhalt springen',
     signed_in_as: 'Angemeldet als {{username}}',
+    servers: 'Server',
+    server_sections: 'Bereiche von {{name}}',
+    new_server: 'Neuer Server',
+    tree_collapse: 'Serverliste einklappen',
+    tree_expand: 'Serverliste ausklappen',
+    open_servers: 'Serverliste öffnen',
+    breadcrumb: 'Brotkrume',
+    home: 'Startseite',
+    no_servers: 'Noch keine Server.',
   },
   permission: {
     server: {
@@ -340,6 +349,14 @@ export const de = {
     },
     memory_value: '{{used}} / {{limit}} GiB',
     cpu_value: '{{value}} %',
+    header: {
+      players: 'Spieler',
+      tps: 'TPS',
+      memory: 'RAM',
+      cpu: 'CPU',
+      memory_value: '{{used}} / {{limit}} GiB',
+      players_value: '{{players}}/{{max}}',
+    },
     detail: {
       tabs: {
         overview: 'Übersicht',
@@ -369,6 +386,7 @@ export const de = {
       last_error: 'Letzter Fehler',
       error_hidden: 'Der Server meldet einen Fehler. Details sieht ein Admin.',
       controls: 'Steuerung',
+      memory_assigned: 'Zugewiesen',
       unknown_hint: 'Der Agent antwortet gerade nicht. Angezeigt wird der zuletzt bekannte Soll-Zustand; Aktionen werden nachgeholt, sobald er wieder erreichbar ist.',
     },
     settings: {
