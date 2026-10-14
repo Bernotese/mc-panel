@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { Catalog, InstanceConfig } from '@/api/types'
+import type { Catalog, InstanceConfig, ServerMemoryLimits } from '@/api/types'
 import {
   effectiveJava,
   effectiveVersion,
   emptyServerForm,
   formFromInstance,
+  memoryLimitsFrom,
+  memoryOvercommit,
   resolveServerForm,
   sameFormValue,
   validateServerForm,
@@ -151,6 +153,13 @@ describe('server form model', () => {
     }
   })
 
+  it('applies the memory limit of the host', () => {
+    const host: FormContext = { ...ctx('create', paperCatalog), memory: { min: 1024, max: 12288, step: 256 } }
+    expect(resolveServerForm(form({ memoryGiB: '12' }), host)?.memory_mib).toBe(12288)
+    expect(validateServerForm(form({ memoryGiB: '12.25' }), host).memory?.params).toEqual({ min: 1, max: 12 })
+    expect(validateServerForm(form({ memoryGiB: '12.25' }), ctx('create', paperCatalog)).memory).toBeUndefined()
+  })
+
   it('validates properties', () => {
     const value = form({ properties: { ...emptyServerForm().properties, max_players: '0', motd: 'a\nb' } })
     expect(Object.keys(validateServerForm(value, ctx('create', paperCatalog))).sort()).toEqual(['properties.max_players', 'properties.motd'])
@@ -189,5 +198,32 @@ describe('server form model', () => {
     const initial = formFromInstance('survival', survival)
     expect(sameFormValue(initial, formFromInstance('survival', survival))).toBe(true)
     expect(sameFormValue(initial, { ...initial, memoryGiB: '5' })).toBe(false)
+  })
+})
+
+describe('memory limits', () => {
+  const limits: ServerMemoryLimits = {
+    min_mib: 1024,
+    max_mib: 12288,
+    step_mib: 256,
+    host_total_mib: 16384,
+    allocated_mib: 12288,
+    recommended_mib: { vanilla: 1536, paper: 1536, purpur: 1536, fabric: 1536, neoforge: 1536, modrinth: 1536, curseforge: 1536 },
+  }
+
+  it('falls back to the static bounds without host limits', () => {
+    expect(memoryLimitsFrom(undefined)).toEqual({ min: 1024, max: 32768, step: 256 })
+    expect(memoryLimitsFrom(limits)).toEqual({ min: 1024, max: 12288, step: 256 })
+  })
+
+  it('warns when all servers together exceed the host memory', () => {
+    expect(memoryOvercommit(4096, limits, 0)).toBeNull()
+    expect(memoryOvercommit(4352, limits, 0)).toEqual({ totalMiB: 16640, hostMiB: 16384 })
+    // editing a server that already counts 4096 in allocated_mib
+    expect(memoryOvercommit(8192, limits, 4096)).toBeNull()
+    expect(memoryOvercommit(8448, limits, 4096)).toEqual({ totalMiB: 16640, hostMiB: 16384 })
+    expect(memoryOvercommit(null, limits, 0)).toBeNull()
+    expect(memoryOvercommit(32768, undefined, 0)).toBeNull()
+    expect(memoryOvercommit(32768, { ...limits, host_total_mib: null }, 0)).toBeNull()
   })
 })
