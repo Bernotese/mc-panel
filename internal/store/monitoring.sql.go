@@ -45,6 +45,30 @@ func (q *Queries) MonitoringDeleteSeriesRaw(ctx context.Context, series int64) e
 	return err
 }
 
+const monitoringEarliest5m = `-- name: MonitoringEarliest5m :one
+SELECT at FROM metrics_5m ORDER BY at LIMIT 1
+`
+
+func (q *Queries) MonitoringEarliest5m(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, monitoringEarliest5m)
+	var at int64
+	err := row.Scan(&at)
+	return at, err
+}
+
+const monitoringEarliestRaw = `-- name: MonitoringEarliestRaw :one
+SELECT at FROM metrics_raw ORDER BY at LIMIT 1
+`
+
+// Earliest timestamp for the first rollup after a start; sql.ErrNoRows = empty table (sqlc types
+// min(at) as interface{}, ORDER BY at LIMIT 1 keeps it an int64).
+func (q *Queries) MonitoringEarliestRaw(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, monitoringEarliestRaw)
+	var at int64
+	err := row.Scan(&at)
+	return at, err
+}
+
 const monitoringGetServerAlerts = `-- name: MonitoringGetServerAlerts :one
 SELECT down_alerts FROM server_alerts WHERE server_id = ?
 `
@@ -255,6 +279,52 @@ func (q *Queries) MonitoringListRaw(ctx context.Context, arg MonitoringListRawPa
 	for rows.Next() {
 		var i MonitoringListRawRow
 		if err := rows.Scan(&i.Metric, &i.At, &i.Value); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const monitoringListRawMetric = `-- name: MonitoringListRawMetric :many
+SELECT at, value FROM metrics_raw
+WHERE series = ?1 AND metric = ?2 AND at >= ?3 AND at < ?4
+ORDER BY at
+`
+
+type MonitoringListRawMetricParams struct {
+	Series int64
+	Metric string
+	FromAt int64
+	ToAt   int64
+}
+
+type MonitoringListRawMetricRow struct {
+	At    int64
+	Value float64
+}
+
+func (q *Queries) MonitoringListRawMetric(ctx context.Context, arg MonitoringListRawMetricParams) ([]MonitoringListRawMetricRow, error) {
+	rows, err := q.db.QueryContext(ctx, monitoringListRawMetric,
+		arg.Series,
+		arg.Metric,
+		arg.FromAt,
+		arg.ToAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MonitoringListRawMetricRow{}
+	for rows.Next() {
+		var i MonitoringListRawMetricRow
+		if err := rows.Scan(&i.At, &i.Value); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
