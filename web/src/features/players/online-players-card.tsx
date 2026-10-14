@@ -17,7 +17,7 @@ export function OnlinePlayersCard({ serverId }: { serverId: number }) {
     const { online, max } = query.data
     body = (
       <div className="space-y-2">
-        <p className="font-pixel text-2xl tabular-nums">{t('players.card.count', { online: online.length, max: max ?? '—' })}</p>
+        <p className="text-2xl font-semibold tabular-nums">{t('players.card.count', { online: online.length, max: max ?? '—' })}</p>
         {online.length === 0 ? (
           <p className="text-muted-foreground text-sm">{t('players.online.none')}</p>
         ) : (

@@ -115,6 +115,43 @@ describe('AppLayout', () => {
     }
   })
 
+  it('expands the rail with labels and remembers it', async () => {
+    const user = userEvent.setup()
+    await renderApp('/', loginAs('admin'))
+    const nav = await screen.findByRole('navigation', { name: 'Hauptnavigation' })
+    expect(within(nav).queryByText('Audit-Log')).not.toBeInTheDocument()
+    const expand = screen.getByRole('button', { name: 'Menü ausklappen' })
+    expect(expand).toHaveAttribute('aria-expanded', 'false')
+    expect(expand).toHaveAttribute('aria-controls', nav.id)
+    await user.click(expand)
+    expect(within(nav).getByText('Audit-Log')).toBeInTheDocument()
+    expect(localStorage.getItem('mcpanel.rail')).toBe('expanded')
+    // The names stay the same, so everything that selects links by name keeps working.
+    expect(railLabels(nav)).toEqual(['Startseite', 'Server', 'Benutzer', 'Security Center', 'Audit-Log', 'Einstellungen', 'Profil'])
+    const collapse = screen.getByRole('button', { name: 'Menü einklappen' })
+    expect(collapse).toHaveAttribute('aria-expanded', 'true')
+    await user.click(collapse)
+    expect(within(nav).queryByText('Audit-Log')).not.toBeInTheDocument()
+    expect(localStorage.getItem('mcpanel.rail')).toBe('collapsed')
+  })
+
+  it('starts with an expanded rail when that was stored', async () => {
+    localStorage.setItem('mcpanel.rail', 'expanded')
+    await renderApp('/', loginAs('admin'))
+    const nav = await screen.findByRole('navigation', { name: 'Hauptnavigation' })
+    expect(within(nav).getByText('Profil')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Menü einklappen' })).toBeInTheDocument()
+  })
+
+  it('keeps the narrow rail on tablets', async () => {
+    localStorage.setItem('mcpanel.rail', 'expanded')
+    setViewport('tablet')
+    await renderApp('/', loginAs('admin'))
+    const nav = await screen.findByRole('navigation', { name: 'Hauptnavigation' })
+    expect(within(nav).queryByText('Profil')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Menü (aus|ein)klappen/ })).not.toBeInTheDocument()
+  })
+
   it('offers admins a new-server link in the tree', async () => {
     await renderApp('/', loginAs('admin'))
     const tree = await screen.findByRole('navigation', { name: 'Server' })
