@@ -21,6 +21,14 @@ import { Route as Login2faRouteImport } from './routes/login/2fa'
 import { Route as AppServersIdRouteImport } from './routes/_app/servers/$id'
 import { Route as AppServersNewRouteImport } from './routes/_app/servers/new'
 import { Route as AppUsersIndexRouteImport } from './routes/_app/users/index'
+import { Route as AppServersIdIndexRouteImport } from './routes/_app/servers/$id/index'
+import { Route as AppServersIdBackupsRouteImport } from './routes/_app/servers/$id/backups'
+import { Route as AppServersIdConsoleRouteImport } from './routes/_app/servers/$id/console'
+import { Route as AppServersIdFilesRouteImport } from './routes/_app/servers/$id/files'
+import { Route as AppServersIdMonitoringRouteImport } from './routes/_app/servers/$id/monitoring'
+import { Route as AppServersIdPlayersRouteImport } from './routes/_app/servers/$id/players'
+import { Route as AppServersIdPluginsRouteImport } from './routes/_app/servers/$id/plugins'
+import { Route as AppServersIdSettingsRouteImport } from './routes/_app/servers/$id/settings'
 import { Route as AppUsersIdPermissionsRouteImport } from './routes/_app/users/$id.permissions'
 
 const AppRoute = AppRouteImport.update({
@@ -82,6 +90,46 @@ const AppUsersIndexRoute = AppUsersIndexRouteImport.update({
   path: '/users/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppServersIdIndexRoute = AppServersIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppServersIdRoute,
+} as any)
+const AppServersIdBackupsRoute = AppServersIdBackupsRouteImport.update({
+  id: '/backups',
+  path: '/backups',
+  getParentRoute: () => AppServersIdRoute,
+} as any)
+const AppServersIdConsoleRoute = AppServersIdConsoleRouteImport.update({
+  id: '/console',
+  path: '/console',
+  getParentRoute: () => AppServersIdRoute,
+} as any)
+const AppServersIdFilesRoute = AppServersIdFilesRouteImport.update({
+  id: '/files',
+  path: '/files',
+  getParentRoute: () => AppServersIdRoute,
+} as any)
+const AppServersIdMonitoringRoute = AppServersIdMonitoringRouteImport.update({
+  id: '/monitoring',
+  path: '/monitoring',
+  getParentRoute: () => AppServersIdRoute,
+} as any)
+const AppServersIdPlayersRoute = AppServersIdPlayersRouteImport.update({
+  id: '/players',
+  path: '/players',
+  getParentRoute: () => AppServersIdRoute,
+} as any)
+const AppServersIdPluginsRoute = AppServersIdPluginsRouteImport.update({
+  id: '/plugins',
+  path: '/plugins',
+  getParentRoute: () => AppServersIdRoute,
+} as any)
+const AppServersIdSettingsRoute = AppServersIdSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppServersIdRoute,
+} as any)
 const AppUsersIdPermissionsRoute = AppUsersIdPermissionsRouteImport.update({
   id: '/users/$id/permissions',
   path: '/users/$id/permissions',
@@ -97,10 +145,18 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRoute
   '/login/2fa': typeof Login2faRoute
   '/login/': typeof LoginIndexRoute
-  '/servers/$id': typeof AppServersIdRoute
+  '/servers/$id': typeof AppServersIdRouteWithChildren
   '/servers/new': typeof AppServersNewRoute
   '/users/': typeof AppUsersIndexRoute
+  '/servers/$id/backups': typeof AppServersIdBackupsRoute
+  '/servers/$id/console': typeof AppServersIdConsoleRoute
+  '/servers/$id/files': typeof AppServersIdFilesRoute
+  '/servers/$id/monitoring': typeof AppServersIdMonitoringRoute
+  '/servers/$id/players': typeof AppServersIdPlayersRoute
+  '/servers/$id/plugins': typeof AppServersIdPluginsRoute
+  '/servers/$id/settings': typeof AppServersIdSettingsRoute
   '/users/$id/permissions': typeof AppUsersIdPermissionsRoute
+  '/servers/$id/': typeof AppServersIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/setup-2fa': typeof Setup2faRoute
@@ -111,10 +167,17 @@ export interface FileRoutesByTo {
   '/login/2fa': typeof Login2faRoute
   '/': typeof AppIndexRoute
   '/login': typeof LoginIndexRoute
-  '/servers/$id': typeof AppServersIdRoute
   '/servers/new': typeof AppServersNewRoute
   '/users': typeof AppUsersIndexRoute
+  '/servers/$id/backups': typeof AppServersIdBackupsRoute
+  '/servers/$id/console': typeof AppServersIdConsoleRoute
+  '/servers/$id/files': typeof AppServersIdFilesRoute
+  '/servers/$id/monitoring': typeof AppServersIdMonitoringRoute
+  '/servers/$id/players': typeof AppServersIdPlayersRoute
+  '/servers/$id/plugins': typeof AppServersIdPluginsRoute
+  '/servers/$id/settings': typeof AppServersIdSettingsRoute
   '/users/$id/permissions': typeof AppUsersIdPermissionsRoute
+  '/servers/$id': typeof AppServersIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -127,10 +190,18 @@ export interface FileRoutesById {
   '/login/2fa': typeof Login2faRoute
   '/_app/': typeof AppIndexRoute
   '/login/': typeof LoginIndexRoute
-  '/_app/servers/$id': typeof AppServersIdRoute
+  '/_app/servers/$id': typeof AppServersIdRouteWithChildren
   '/_app/servers/new': typeof AppServersNewRoute
   '/_app/users/': typeof AppUsersIndexRoute
+  '/_app/servers/$id/backups': typeof AppServersIdBackupsRoute
+  '/_app/servers/$id/console': typeof AppServersIdConsoleRoute
+  '/_app/servers/$id/files': typeof AppServersIdFilesRoute
+  '/_app/servers/$id/monitoring': typeof AppServersIdMonitoringRoute
+  '/_app/servers/$id/players': typeof AppServersIdPlayersRoute
+  '/_app/servers/$id/plugins': typeof AppServersIdPluginsRoute
+  '/_app/servers/$id/settings': typeof AppServersIdSettingsRoute
   '/_app/users/$id/permissions': typeof AppUsersIdPermissionsRoute
+  '/_app/servers/$id/': typeof AppServersIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -146,7 +217,15 @@ export interface FileRouteTypes {
     | '/servers/$id'
     | '/servers/new'
     | '/users/'
+    | '/servers/$id/backups'
+    | '/servers/$id/console'
+    | '/servers/$id/files'
+    | '/servers/$id/monitoring'
+    | '/servers/$id/players'
+    | '/servers/$id/plugins'
+    | '/servers/$id/settings'
     | '/users/$id/permissions'
+    | '/servers/$id/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/setup-2fa'
@@ -157,10 +236,17 @@ export interface FileRouteTypes {
     | '/login/2fa'
     | '/'
     | '/login'
-    | '/servers/$id'
     | '/servers/new'
     | '/users'
+    | '/servers/$id/backups'
+    | '/servers/$id/console'
+    | '/servers/$id/files'
+    | '/servers/$id/monitoring'
+    | '/servers/$id/players'
+    | '/servers/$id/plugins'
+    | '/servers/$id/settings'
     | '/users/$id/permissions'
+    | '/servers/$id'
   id:
     | '__root__'
     | '/_app'
@@ -175,7 +261,15 @@ export interface FileRouteTypes {
     | '/_app/servers/$id'
     | '/_app/servers/new'
     | '/_app/users/'
+    | '/_app/servers/$id/backups'
+    | '/_app/servers/$id/console'
+    | '/_app/servers/$id/files'
+    | '/_app/servers/$id/monitoring'
+    | '/_app/servers/$id/players'
+    | '/_app/servers/$id/plugins'
+    | '/_app/servers/$id/settings'
     | '/_app/users/$id/permissions'
+    | '/_app/servers/$id/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -271,6 +365,62 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppUsersIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/servers/$id/': {
+      id: '/_app/servers/$id/'
+      path: '/'
+      fullPath: '/servers/$id/'
+      preLoaderRoute: typeof AppServersIdIndexRouteImport
+      parentRoute: typeof AppServersIdRoute
+    }
+    '/_app/servers/$id/backups': {
+      id: '/_app/servers/$id/backups'
+      path: '/backups'
+      fullPath: '/servers/$id/backups'
+      preLoaderRoute: typeof AppServersIdBackupsRouteImport
+      parentRoute: typeof AppServersIdRoute
+    }
+    '/_app/servers/$id/console': {
+      id: '/_app/servers/$id/console'
+      path: '/console'
+      fullPath: '/servers/$id/console'
+      preLoaderRoute: typeof AppServersIdConsoleRouteImport
+      parentRoute: typeof AppServersIdRoute
+    }
+    '/_app/servers/$id/files': {
+      id: '/_app/servers/$id/files'
+      path: '/files'
+      fullPath: '/servers/$id/files'
+      preLoaderRoute: typeof AppServersIdFilesRouteImport
+      parentRoute: typeof AppServersIdRoute
+    }
+    '/_app/servers/$id/monitoring': {
+      id: '/_app/servers/$id/monitoring'
+      path: '/monitoring'
+      fullPath: '/servers/$id/monitoring'
+      preLoaderRoute: typeof AppServersIdMonitoringRouteImport
+      parentRoute: typeof AppServersIdRoute
+    }
+    '/_app/servers/$id/players': {
+      id: '/_app/servers/$id/players'
+      path: '/players'
+      fullPath: '/servers/$id/players'
+      preLoaderRoute: typeof AppServersIdPlayersRouteImport
+      parentRoute: typeof AppServersIdRoute
+    }
+    '/_app/servers/$id/plugins': {
+      id: '/_app/servers/$id/plugins'
+      path: '/plugins'
+      fullPath: '/servers/$id/plugins'
+      preLoaderRoute: typeof AppServersIdPluginsRouteImport
+      parentRoute: typeof AppServersIdRoute
+    }
+    '/_app/servers/$id/settings': {
+      id: '/_app/servers/$id/settings'
+      path: '/settings'
+      fullPath: '/servers/$id/settings'
+      preLoaderRoute: typeof AppServersIdSettingsRouteImport
+      parentRoute: typeof AppServersIdRoute
+    }
     '/_app/users/$id/permissions': {
       id: '/_app/users/$id/permissions'
       path: '/users/$id/permissions'
@@ -281,13 +431,39 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AppServersIdRouteChildren {
+  AppServersIdBackupsRoute: typeof AppServersIdBackupsRoute
+  AppServersIdConsoleRoute: typeof AppServersIdConsoleRoute
+  AppServersIdFilesRoute: typeof AppServersIdFilesRoute
+  AppServersIdMonitoringRoute: typeof AppServersIdMonitoringRoute
+  AppServersIdPlayersRoute: typeof AppServersIdPlayersRoute
+  AppServersIdPluginsRoute: typeof AppServersIdPluginsRoute
+  AppServersIdSettingsRoute: typeof AppServersIdSettingsRoute
+  AppServersIdIndexRoute: typeof AppServersIdIndexRoute
+}
+
+const AppServersIdRouteChildren: AppServersIdRouteChildren = {
+  AppServersIdBackupsRoute: AppServersIdBackupsRoute,
+  AppServersIdConsoleRoute: AppServersIdConsoleRoute,
+  AppServersIdFilesRoute: AppServersIdFilesRoute,
+  AppServersIdMonitoringRoute: AppServersIdMonitoringRoute,
+  AppServersIdPlayersRoute: AppServersIdPlayersRoute,
+  AppServersIdPluginsRoute: AppServersIdPluginsRoute,
+  AppServersIdSettingsRoute: AppServersIdSettingsRoute,
+  AppServersIdIndexRoute: AppServersIdIndexRoute,
+}
+
+const AppServersIdRouteWithChildren = AppServersIdRoute._addFileChildren(
+  AppServersIdRouteChildren,
+)
+
 interface AppRouteChildren {
   AppAuditRoute: typeof AppAuditRoute
   AppProfileRoute: typeof AppProfileRoute
   AppSecurityRoute: typeof AppSecurityRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppIndexRoute: typeof AppIndexRoute
-  AppServersIdRoute: typeof AppServersIdRoute
+  AppServersIdRoute: typeof AppServersIdRouteWithChildren
   AppServersNewRoute: typeof AppServersNewRoute
   AppUsersIndexRoute: typeof AppUsersIndexRoute
   AppUsersIdPermissionsRoute: typeof AppUsersIdPermissionsRoute
@@ -299,7 +475,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSecurityRoute: AppSecurityRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppIndexRoute: AppIndexRoute,
-  AppServersIdRoute: AppServersIdRoute,
+  AppServersIdRoute: AppServersIdRouteWithChildren,
   AppServersNewRoute: AppServersNewRoute,
   AppUsersIndexRoute: AppUsersIndexRoute,
   AppUsersIdPermissionsRoute: AppUsersIdPermissionsRoute,
