@@ -1,0 +1,16 @@
+# Managed by mc-panel install.sh {{VERSION}}; install.sh update rewrites this file.
+# Installer spec §4.6: systemd owns the panel socket so Caddy (group caddy) can connect
+# without being a member of the group mcpanel; the panel takes it over via LISTEN_FDS.
+[Unit]
+Description=mc-panel web panel socket (reverse proxy)
+
+[Socket]
+ListenStream=/run/mc-panel-web/panel.sock
+SocketUser=mcpanel
+SocketGroup=caddy
+SocketMode=0660
+DirectoryMode=0755
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

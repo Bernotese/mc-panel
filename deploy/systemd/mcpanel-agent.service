@@ -1,0 +1,17 @@
+# Managed by mc-panel install.sh {{VERSION}}; install.sh update rewrites this file.
+[Unit]
+Description=mc-panel agent (nftables, Docker)
+Wants=docker.service
+After=network-online.target docker.service
+
+[Service]
+User=root
+Group=mcpanel
+RuntimeDirectory=mc-panel
+RuntimeDirectoryMode=0750
+ExecStart=/usr/local/bin/agent -config /etc/mc-panel/agent.toml
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
