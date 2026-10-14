@@ -2450,6 +2450,7 @@ export interface components {
             created_at: number;
         };
         CreateIPRuleRequest: {
+            /** @description IPv4/IPv6 address or network. Allow rules cover at most a /8 (IPv4) or /32 (IPv6); deny rules must not cover loopback (127.0.0.0/8, ::1), which Caddy and the installer's health checks use (400 validation_failed). */
             cidr: string;
             /** @enum {string} */
             kind: "allow" | "deny";

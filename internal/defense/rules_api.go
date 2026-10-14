@@ -43,6 +43,16 @@ func parseRuleCIDR(s string) (netip.Prefix, error) {
 	return p.Masked(), nil
 }
 
+var loopbackV4 = netip.MustParsePrefix("127.0.0.0/8")
+
+// coversLoopback reports whether p overlaps 127.0.0.0/8 or contains ::1.
+func coversLoopback(p netip.Prefix) bool {
+	if p.Addr().Is4() {
+		return p.Overlaps(loopbackV4)
+	}
+	return p.Contains(netip.IPv6Loopback())
+}
+
 type ipRuleResponse struct {
 	ID        int64  `json:"id"`
 	CIDR      string `json:"cidr"`
@@ -97,6 +107,12 @@ func (h *Handler) createIPRule(w http.ResponseWriter, r *http.Request) {
 	if req.Kind == "allow" && (p.Addr().Is4() && p.Bits() < minAllowBitsV4 || p.Addr().Is6() && p.Bits() < minAllowBitsV6) {
 		// an allow rule for (nearly) everything would disable jails, deny rules and the country filter
 		validation(w, r, "allow rules must cover at most a /8 (IPv4) or /32 (IPv6) network")
+		return
+	}
+	if req.Kind == "deny" && coversLoopback(p) {
+		// Caddy and the installer's health checks reach the panel from loopback (X-Forwarded-For
+		// 127.0.0.1 on the socket); a deny rule there would lock them all out.
+		validation(w, r, "deny rules must not cover loopback (127.0.0.0/8, ::1)")
 		return
 	}
 	comment := strings.TrimSpace(req.Comment)
