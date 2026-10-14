@@ -25,6 +25,33 @@ Selbst gehostetes Web-Panel für die eigenen Minecraft-Server auf einem Linux-VP
 
 Die Trennung soll verhindern, dass ein kompromittiertes panel Root-Rechte auf dem Host bekommt; Dateioperationen auf Daten, die ein Minecraft-Server kontrolliert, laufen nie als root. In Produktion terminiert Caddy TLS vor dem panel.
 
+## Installation (Produktion)
+
+Voraussetzungen: ein VPS mit Ubuntu 26.04 LTS (`amd64` oder `arm64`), root bzw. `sudo`, eine Domain für das Panel (A/AAAA-Eintrag auf den VPS, Port 80 und 443 von außen erreichbar für Let's Encrypt) und ein Wildcard-Eintrag für die Minecraft-Server (z. B. `*.mc.example.com`).
+
+```bash
+curl -fsSL https://github.com/Bernotese/mc-panel/releases/latest/download/install.sh \
+  | sudo bash -s -- install --domain panel.example.com --email you@example.com
+```
+
+Der Installer richtet Docker, Caddy (mit Let's-Encrypt-Zertifikat), eine Host-Firewall (SSH, TCP 80, 443 und 25565, UDP 443 für HTTP/3), Sicherheitsupdates, die drei Dienste und den ersten Admin ein (Name und Passwort fragt er im Terminal ab) und prüft am Ende alles mit `doctor`. Jeder Schritt meldet `[ok]`, `[changed]`, `[skip]` oder `[warn]`; ein zweiter Lauf ändert nichts. Danach im Panel die Basisdomain der Minecraft-Server eintragen, 2FA und Benachrichtigungen einrichten und `/srv/mc-panel/backups/keys/` in die eigene Sicherung des Hosts aufnehmen.
+
+Wichtige Optionen von `install`: `--ssh-port N` (sonst aus `sshd -T`), `--allow-port PORT[/tcp|/udp]` (weitere offene Ports, mehrfach; bei jedem späteren `install` wieder angeben, sonst schließt er sie), `--no-firewall`, `--tls internal` (Caddys eigene CA statt Let's Encrypt), `--admin-user NAME --admin-password-file DATEI` (ohne Rückfrage), `--yes` (Warnungen nicht nachfragen). `install.sh --help` zeigt alle.
+
+| Befehl | Wirkung |
+|---|---|
+| `sudo bash install.sh doctor` | prüft Dienste, Sockets, Rechte, Konfiguration, Zertifikat, Firewall, Docker, restic, Speicher und warnt bei unsicherer SSH-Konfiguration (Exit-Code 0 ok, 1 Warnungen, 2 Fehler; `--json` für Skripte) |
+| `sudo bash install.sh update` | neueste Version mit Sicherung von DB, Konfiguration, Binaries und Units und automatischem Rollback, falls die neue Version nicht gesund startet (`--check` zeigt nur an, `--version vX.Y.Z` wählt eine Version; Exit-Code 3 = zurückgerollt) |
+| `sudo bash install.sh uninstall` | entfernt das Programm, behält Welten, Backups, Datenbank und Konfiguration (`--purge` löscht nach Eintippen der Panel-Domain alles) |
+
+`install.sh` liegt jedem Release bei (`…/releases/download/<version>/install.sh`, Prüfsumme in `checksums.txt`). Für `doctor`, `update` und `uninstall` das Skript einmal herunterladen:
+
+```bash
+curl -fsSLO https://github.com/Bernotese/mc-panel/releases/latest/download/install.sh && sudo bash install.sh doctor
+```
+
+Protokoll: `/var/log/mc-panel-install.log`. Der Installer ändert SSH nicht und entfernt nie Pakete; ein eigenes Dateisystem für `/srv/mc-panel` (damit volle Welten die Panel-Datenbank nicht blockieren) richtet er nicht ein, `doctor` weist darauf hin.
+
 ## Schnellstart (Entwicklung, macOS)
 
 ```bash
@@ -55,6 +82,8 @@ Zum Ausprobieren gegen das echte Backend mit Docker gibt es eine interne Test-VM
 | [`docs/superpowers/specs/2026-10-12-mc-panel-backups-design.md`](docs/superpowers/specs/2026-10-12-mc-panel-backups-design.md) | Backups mit lokalen restic-Repos über den Dateidienst |
 | [`docs/dev/acceptance-tp5.md`](docs/dev/acceptance-tp5.md) | manuelle Abnahme von Monitoring und Alerts auf der Test-VM |
 | [`docs/superpowers/specs/2026-10-13-mc-panel-monitoring-design.md`](docs/superpowers/specs/2026-10-13-mc-panel-monitoring-design.md) | Monitoring (Sammler, Verlauf, Dashboard) und Alerts über notify |
+| [`docs/dev/acceptance-tp6.md`](docs/dev/acceptance-tp6.md) | manuelle Abnahme des Installers auf einem echten VPS (Let's Encrypt) und der Test-VM |
+| [`docs/superpowers/specs/2026-10-13-mc-panel-installer-design.md`](docs/superpowers/specs/2026-10-13-mc-panel-installer-design.md) | Installer `install.sh` (install, update, doctor, uninstall) |
 | [`docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`](docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md) | Architektur, Security-Anforderungen, Roadmap |
 | [`docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md`](docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md) | Minecraft-Instanzen (Docker, Router, Reconcile) |
 | [`docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md`](docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md) | Konsole, Live-Log, Spieler-Verwaltung (RCON, SSE) |
@@ -74,8 +103,6 @@ Zum Ausprobieren gegen das echte Backend mit Docker gibt es eine interne Test-VM
 | 5 | Monitoring + Alerts | umgesetzt |
 | 6 | Installer-CLI (`install`/`update`/`doctor`, Caddy, VPS-Härtung) | offen |
 
-Bis der Installer existiert, beschreibt `docs/dev/acceptance-tp2.md` die Einrichtung eines Servers von Hand.
-
 ## Release
 
-Ein Tag `v*` auf `main` veröffentlicht über GitHub Actions ein Release mit `mc-panel_<version>_linux_{amd64,arm64}.tar.gz` (je `panel`, `agent` und `files`) und `checksums.txt`. Ablauf: `docs/dev/README.md`, Abschnitt „Release“.
+Ein Tag `v*` auf `main` veröffentlicht über GitHub Actions ein Release mit `mc-panel_<version>_linux_{amd64,arm64}.tar.gz` (je `panel`, `agent`, `files` und `deploy/` mit den Vorlagen für Units, Caddy, nftables und Konfiguration), `install.sh` und `checksums.txt` (über alle Assets). Ablauf: `docs/dev/README.md`, Abschnitt „Release“.
