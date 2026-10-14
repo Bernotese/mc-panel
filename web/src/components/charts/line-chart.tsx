@@ -137,16 +137,16 @@ interface ChartTableProps {
 /** The table alternative; memoised so that moving the readout (active point) does not re-render every row. */
 const ChartTable = memo(function ChartTable({ id, title, timeLabel, series, times, tolerance, band, formatValue, formatTime, bandText }: ChartTableProps) {
   return (
-    <div id={id} className="max-h-64 overflow-auto rounded-md border">
+    <div id={id} className="max-h-64 overflow-auto border">
       <table className="w-full text-sm tabular-nums">
         <caption className="sr-only">{title}</caption>
         <thead>
           <tr>
-            <th scope="col" className="px-2 py-1 text-left font-medium">
+            <th scope="col" className="px-2 py-1 text-left font-heading text-xs font-normal uppercase">
               {timeLabel}
             </th>
             {series.map((s) => (
-              <th key={s.id} scope="col" className="px-2 py-1 text-right font-medium">
+              <th key={s.id} scope="col" className="px-2 py-1 text-right font-heading text-xs font-normal uppercase">
                 {s.label}
               </th>
             ))}
@@ -228,7 +228,7 @@ export function LineChart({
   if (!anchor) {
     return (
       <figure className="space-y-2">
-        <figcaption className="text-sm font-medium">{title}</figcaption>
+        <figcaption className="pixel-heading text-xs uppercase">{title}</figcaption>
         <p className="text-muted-foreground text-sm">{emptyText ?? t('charts.no_data')}</p>
       </figure>
     )
@@ -288,11 +288,11 @@ export function LineChart({
   return (
     <figure className="space-y-2">
       <figcaption className="flex flex-wrap items-center justify-between gap-2 text-sm">
-        <span className="font-medium">{title}</span>
+        <span className="pixel-heading text-xs uppercase">{title}</span>
         <span className="flex flex-wrap gap-3" data-testid="chart-legend">
           {series.map((s) => (
             <span key={s.id} className="text-muted-foreground flex items-center gap-1.5">
-              <span aria-hidden="true" className={cn('inline-block h-0.5 w-3 rounded-full', SWATCH[s.tone])} />
+              <span aria-hidden="true" className={cn('inline-block h-1 w-3', SWATCH[s.tone])} />
               {s.label}
             </span>
           ))}
@@ -310,7 +310,7 @@ export function LineChart({
         tabIndex={0}
         aria-labelledby={titleId}
         aria-describedby={`${descId} ${hintId}`}
-        className="focus-visible:ring-ring h-auto w-full touch-pan-y rounded-sm outline-none select-none focus-visible:ring-2"
+        className="focus-visible:ring-ring h-auto w-full touch-pan-y outline-none select-none focus-visible:ring-2"
         onKeyDown={onKeyDown}
         onMouseMove={onMouseMove}
         onMouseLeave={() => setActive(null)}
