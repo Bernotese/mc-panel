@@ -9,6 +9,7 @@ table inet mcpanel_fw {
 		ct state invalid drop
 		meta l4proto icmp accept
 		meta l4proto ipv6-icmp accept
+		ip6 saddr fe80::/10 udp dport 546 accept
 		tcp dport { {{SSH_PORT}} } accept
 		tcp dport { 80, 443, 25565 } accept
 		udp dport 443 accept

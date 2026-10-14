@@ -12,6 +12,14 @@ test_version_ge() {
   version_ge 1.2.3 1.2.3-rc.1
   version_ge 1.2.3+build.5 1.2.3
   version_ge 1.2.3-rc.2 1.2.3-rc.1
+  version_ge 1.2.3-rc.10 1.2.3-rc.9
+  version_ge 1.0.0-alpha.1 1.0.0-alpha
+  version_ge 1.0.0-alpha.beta 1.0.0-alpha.1
+  version_ge 1.0.0-rc.1 1.0.0-beta.11
+  version_ge 0.0.0-testvm+abc 0.0.0-testvm+def
+  assert_exit 1 version_ge 1.2.3-rc.9 1.2.3-rc.10
+  assert_exit 1 version_ge 1.0.0-alpha 1.0.0-alpha.1
+  assert_exit 1 version_ge 1.0.0-2 1.0.0-alpha
   assert_exit 1 version_ge 1.2.2 1.2.3
   assert_exit 1 version_ge 1.2.3-rc.1 1.2.3
   assert_exit 2 version_ge 1.2 1.2.3
@@ -72,12 +80,82 @@ test_write_file_changed_then_unchanged() {
   assert_eq changed "$(printf 'a\n' | write_file /etc/x.conf 0600 root root)"
   assert_eq changed "$(printf 'b\n' | write_file /etc/x.conf 0600 root root)"
   assert_eq b "$(cat "$ROOT/etc/x.conf")"
-  assert_called "chown root:root"
+  assert_called "chown -h root:root"
   assert_eq "" "$(find "$ROOT/etc" -name '.mcpanel-install.*')"
   assert_eq "root:root" "$(_owner_get /etc/x.conf)"
   # a simulated owner change makes the next write "changed" even with equal content and mode
   _owner_set /etc/x.conf mcpanel mcpanel 0600
   assert_eq changed "$(printf 'b\n' | write_file /etc/x.conf 0600 root root)"
+}
+
+test_write_file_refuses_empty_input() {
+  mkdir -p "$ROOT/etc"
+  printf 'old\n' >"$ROOT/etc/x.conf"
+  assert_fails write_file /etc/x.conf 0644 root root </dev/null
+  assert_file_eq "$ROOT/etc/x.conf" old
+  assert_eq "" "$(find "$ROOT/etc" -name '.mcpanel-install.*')"
+  assert_eq changed "$(write_file --allow-empty /etc/x.conf 0644 root root </dev/null)"
+  assert_eq 0 "$(stat -c '%s' "$ROOT/etc/x.conf")"
+}
+
+test_write_file_refuses_unsafe_directory() {
+  mkdir -p "$ROOT/etc/open" "$ROOT/real"
+  chmod 0777 "$ROOT/etc/open"
+  assert_fails write_file /etc/open/x.conf 0644 root root <<<"a"
+  assert_contains "$(cat "$WORK/out")" "writable by group or others"
+  chmod 0775 "$ROOT/etc/open"
+  assert_fails write_file /etc/open/x.conf 0644 root root <<<"a"
+  ln -s "$ROOT/real" "$ROOT/etc/link"
+  assert_fails write_file /etc/link/x.conf 0644 root root <<<"a"
+  assert_no_file "$ROOT/real/x.conf"
+  assert_no_file "$ROOT/etc/open/x.conf"
+}
+
+test_write_file_replaces_a_symlink_instead_of_following_it() {
+  mkdir -p "$ROOT/etc"
+  printf 'a\n' >"$ROOT/target"
+  ln -s "$ROOT/target" "$ROOT/etc/x.conf"
+  assert_eq changed "$(printf 'a\n' | write_file /etc/x.conf 0644 root root)"
+  [[ ! -L $ROOT/etc/x.conf ]] || fail "symlink kept"
+  assert_file_eq "$ROOT/target" a
+}
+
+test_write_template_keeps_file_on_render_error() {
+  FROM_DIR="$ROOT/src"
+  mkdir -p "$FROM_DIR/deploy" "$ROOT/etc"
+  printf 'x {{NOPE}}\n' >"$FROM_DIR/deploy/a"
+  printf 'old\n' >"$ROOT/etc/a.conf"
+  assert_fails write_template a /etc/a.conf 0644 root root
+  assert_contains "$(cat "$WORK/out")" "no value for {{NOPE}}"
+  assert_file_eq "$ROOT/etc/a.conf" old
+  assert_eq "" "$(find "$ROOT/etc" -name '.mcpanel-install.*')"
+  printf 'x {{DOMAIN}}\n' >"$FROM_DIR/deploy/a"
+  KEY_DOMAIN=panel.example.com
+  assert_eq changed "$(write_template a /etc/a.conf 0644 root root)"
+  assert_file_eq "$ROOT/etc/a.conf" "x panel.example.com"
+}
+
+test_render_template_prefers_the_release_deploy_dir() {
+  tpl_a() { printf 'embedded\n'; }
+  FROM_DIR="$ROOT/from"
+  BIN_SOURCE_DIR="$ROOT/tarball"
+  mkdir -p "$FROM_DIR/deploy" "$BIN_SOURCE_DIR/deploy"
+  printf 'from-dir\n' >"$FROM_DIR/deploy/a"
+  printf 'tarball\n' >"$BIN_SOURCE_DIR/deploy/a"
+  assert_eq tarball "$(render_template a)"
+  BIN_SOURCE_DIR=""
+  assert_eq from-dir "$(render_template a)"
+  FROM_DIR=""
+  assert_eq embedded "$(render_template a)"
+}
+
+test_ensure_dir_refuses_unsafe_parent() {
+  mkdir -p "$ROOT/srv"
+  chmod 0757 "$ROOT/srv"
+  assert_fails ensure_dir /srv/mc-panel/instances 0750 root root
+  assert_no_file "$ROOT/srv/mc-panel"
+  chmod 0755 "$ROOT/srv"
+  assert_eq changed "$(ensure_dir /srv/mc-panel/instances 0750 root root)"
 }
 
 test_ensure_dir() {
@@ -119,6 +197,16 @@ test_toml_ensure_key_adds_before_first_section() {
   got="$(cat "$ROOT/etc/c.toml")"
   assert_contains "$got" $'restic_binary = "/usr/bin/restic"\n\n[limits]'
   assert_eq 640 "$(stat -c '%a' "$ROOT/etc/c.toml")"
+}
+
+test_toml_ensure_key_keeps_the_simulated_owner() {
+  mkdir -p "$ROOT/etc"
+  printf 'a = 1\n' >"$ROOT/etc/c.toml"
+  chmod 0640 "$ROOT/etc/c.toml"
+  _owner_set /etc/c.toml root mcpanel 0640
+  assert_eq changed "$(toml_ensure_key /etc/c.toml b 2)"
+  assert_called "chown -h root:mcpanel"
+  assert_eq "root:mcpanel" "$(_owner_get /etc/c.toml)"
 }
 
 test_toml_ensure_key_keeps_existing_value() {
@@ -167,6 +255,7 @@ test_fetch_https_only() {
   curl() { printf '%s\n' "$*" >"$WORK/curl.args"; }
   fetch https://github.com/x "$WORK/x"
   assert_file_contains "$WORK/curl.args" "--proto =https --proto-redir =https --tlsv1.2"
+  assert_file_contains "$WORK/curl.args" "--max-time 600 --speed-limit 1024 --speed-time 60"
   assert_exit 1 fetch http://github.com/x "$WORK/x"
   assert_exit 1 fetch file:///etc/passwd "$WORK/x"
 }
@@ -181,9 +270,12 @@ test_confirm() {
   YES=1
   confirm "go?"
   YES=0
+  assert_exit 1 confirm "go?" # the harness's TTY does not exist
   TTY="$WORK/tty"
   printf 'j\n' >"$TTY"
-  confirm "go?"
+  confirm "go?" >"$WORK/stdout"
+  assert_file_contains "$TTY" "go? [y/N] "
+  assert_eq "" "$(cat "$WORK/stdout")" "the prompt goes to the terminal, not to stdout"
   printf 'n\n' >"$TTY"
   assert_exit 1 confirm "go?"
   TTY="$WORK/none"
@@ -230,6 +322,7 @@ test_parse_args_rejects() {
   assert_exit 1 parse_args install --domain --email x@y.z
   assert_exit 1 parse_args doctor --purge
   assert_exit 1 parse_args update --no-firewall
+  assert_contains "$(cat "$WORK/out")" "usage: install.sh"
   assert_exit 0 parse_args --help
 }
 
@@ -291,6 +384,11 @@ test_validate_args_admin_password_file() {
   assert_contains "$(cat "$WORK/out")" "mode 0600"
   chmod 0600 "$WORK/pw"
   validate_args
+  chmod 0400 "$WORK/pw"
+  validate_args
+  stub _root_uid 'echo 4242'
+  assert_exit 1 validate_args
+  assert_contains "$(cat "$WORK/out")" "must belong to root"
   reset_globals
   parse_args install --domain panel.example.com --email you@example.com --admin-password-file "$WORK/pw"
   assert_exit 1 validate_args
@@ -322,6 +420,55 @@ test_validate_args_update_from_dir_takes_build_version() {
   TARGET_VERSION=""
   assert_exit 1 validate_args
   assert_contains "$(cat "$WORK/out")" "no release version"
+}
+
+test_setup_work_rejects_foreign_handoff_dirs() {
+  local base="$ROOT/tmp" d h
+  mkdir -p "$base"
+  TMPDIR="$base"
+  d="$base/mc-panel-install.abc"
+  mkdir -m 0700 "$d"
+  ln -s "$d" "$base/mc-panel-install.lnk"
+  for h in "$d/../mc-panel-install.abc" "$base/mc-panel-install.lnk" "$base/x/mc-panel-install.abc" "$d/"; do
+    MCPANEL_HANDOFF_WORK="$h"
+    setup_work
+    [[ $WORK != "$h" && $WORK != "$d" ]] || fail "handoff accepted: $h"
+    [[ -z ${MCPANEL_HANDOFF_WORK+x} ]] || fail "MCPANEL_HANDOFF_WORK not unset"
+  done
+  chmod 0755 "$d"
+  MCPANEL_HANDOFF_WORK="$d"
+  setup_work
+  [[ $WORK != "$d" ]] || fail "handoff with mode 0755 accepted"
+  chmod 0700 "$d"
+  MCPANEL_HANDOFF_WORK="$d"
+  setup_work
+  assert_eq "$d" "$WORK"
+  assert_contains "$(trap -p EXIT)" "rm -rf -- $d"
+  trap 'rm -rf -- "$ROOT"' EXIT
+}
+
+test_setup_log_refuses_symlink() {
+  stub id 'echo 0'
+  mkdir -p "$ROOT/var/log"
+  ln -s "$ROOT/elsewhere" "$ROOT/var/log/mc-panel-install.log"
+  assert_exit 1 setup_log
+  assert_no_file "$ROOT/elsewhere"
+  rm "$ROOT/var/log/mc-panel-install.log"
+  setup_log
+  assert_eq 600 "$(stat -c '%a' "$ROOT/var/log/mc-panel-install.log")"
+}
+
+test_install_summary_names_admins_and_keys() {
+  cmd_doctor() { return 0; }
+  DOMAIN=panel.example.com
+  run_as() { printf 'alice\nbob\n'; }
+  local out
+  out="$(install_summary)"
+  assert_contains "$out" "Admin: alice, bob"
+  assert_contains "$out" "/srv/mc-panel/backups/keys/"
+  run_as() { return 0; }
+  out="$(install_summary)"
+  assert_contains "$out" "panel admin create -config /etc/mc-panel/panel.toml -username NAME"
 }
 
 test_validate_args_version_and_from_dir_exclude() {
