@@ -1,7 +1,7 @@
 # mc-panel – Teilprojekt 7: UI-Redesign (Design-Spec)
 
 - **Datum:** 2026-10-14
-- **Status:** entworfen
+- **Status:** umgesetzt (PRs #80, #81, #82, 2026-10-14)
 - **Autor:** Jannes (mit Claude)
 - **Baut auf:** allen Teilprojekten 1–6; ändert nur das Frontend (`web/`)
 
