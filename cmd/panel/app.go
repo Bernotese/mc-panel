@@ -21,6 +21,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/console"
 	"github.com/Bernotese/mc-panel/internal/defense"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
+	"github.com/Bernotese/mc-panel/internal/hostinfo"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/monitoring"
 	"github.com/Bernotese/mc-panel/internal/notify"
@@ -146,6 +147,8 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		// The panel's own restore hold first (a map lookup), then the file service's jobs.
 		Gate:    servers.AnyGate(backupsH, filesH),
 		Backups: backupsH,
+		// The per-server memory limit follows the host's installed memory (issue #79).
+		HostMemory: hostinfo.MemTotal,
 	})
 	// Monitoring reads the agent status, pings through mc-router and asks RCON for TPS; the
 	// data gates keep down alerts quiet while an extract or a restore holds the server.

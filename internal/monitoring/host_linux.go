@@ -5,13 +5,12 @@ package monitoring
 import (
 	"bufio"
 	"bytes"
-	"io"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/Bernotese/mc-panel/internal/hostinfo"
 )
 
 // statfsBytes: free = blocks available to non-root users (spec §3.4). Block counts are in
@@ -28,16 +27,10 @@ func statfsBytes(dir string) (free, total uint64, err error) {
 	return st.Bavail * unit, st.Blocks * unit, nil
 }
 
-// readSmall reads a /proc file (they are small; 64 KiB is plenty).
+// readSmall reads a /proc file; nil if it cannot be read.
 func (h *hostReader) readSmall(name string) []byte {
-	f, err := os.Open(filepath.Join(h.proc, name)) //nolint:gosec // G304: fixed file names under the configured /proc root
-	if err != nil {
-		return nil
-	}
-	defer func() { _ = f.Close() }()
-	var b bytes.Buffer
-	_, _ = b.ReadFrom(io.LimitReader(f, 64<<10))
-	return b.Bytes()
+	b, _ := hostinfo.ReadProc(h.proc, name)
+	return b
 }
 
 func (h *hostReader) readProc() HostSample {
@@ -51,7 +44,7 @@ func (h *hostReader) readProc() HostSample {
 	} else {
 		h.prev = nil
 	}
-	if total, avail, ok := parseMeminfo(h.readSmall("meminfo")); ok && total > 0 && avail <= total {
+	if total, avail, ok := hostinfo.ParseMeminfo(h.readSmall("meminfo")); ok && total > 0 && avail <= total {
 		t, u := int64(total), int64(total-avail)
 		s.MemoryTotal, s.MemoryUsed = &t, &u
 	}
@@ -89,27 +82,4 @@ func parseCPU(b []byte) (cpuTimes, bool) {
 		return cpuTimes{busy: total - idle, total: total}, true
 	}
 	return cpuTimes{}, false
-}
-
-// parseMeminfo returns MemTotal and MemAvailable in bytes.
-func parseMeminfo(b []byte) (total, avail uint64, ok bool) {
-	var gotT, gotA bool
-	sc := bufio.NewScanner(bytes.NewReader(b))
-	for sc.Scan() {
-		f := strings.Fields(sc.Text())
-		if len(f) < 2 {
-			continue
-		}
-		n, err := strconv.ParseUint(f[1], 10, 64)
-		if err != nil {
-			continue
-		}
-		switch f[0] {
-		case "MemTotal:":
-			total, gotT = n*1024, true
-		case "MemAvailable:":
-			avail, gotA = n*1024, true
-		}
-	}
-	return total, avail, gotT && gotA
 }
