@@ -7,7 +7,7 @@
 
 # The exact line of the contract (overview V3); uninstall removes exactly this line.
 CAD_IMPORT='import mc-panel.caddy # managed by mc-panel'
-CAD_IMPORT_RE='^import mc-panel\.caddy([[:space:]]|$)'
+CAD_IMPORT_RE='^[[:space:]]*import[[:space:]]+mc-panel[.]caddy([[:space:]]|$)' # also unmarked or indented
 CAD_WAIT=120 # seconds to wait for https://<domain>/api/health
 
 # cad_is_package_default FILE: 0 if FILE is Ubuntu's unmodified Caddyfile (md5 of the conffile
@@ -31,8 +31,14 @@ cad_own_caddyfile() {
   printf '%s\n' "$CAD_IMPORT"
 }
 
-# cad_new_caddyfile FILE prints the Caddyfile with the import line: an unmarked import line is
-# marked (never a second one), otherwise the line is appended. FILE is left alone.
+# cad_import_ok FILE: 0 if FILE has exactly one import line of ours and it is the marked one.
+cad_import_ok() {
+  [[ $(grep -cE -- "$CAD_IMPORT_RE" "$1") == 1 ]] && grep -qxF -- "$CAD_IMPORT" "$1"
+}
+
+# cad_new_caddyfile FILE prints the Caddyfile with the import line: the first import line of
+# ours (unmarked, indented or marked) becomes the marked line, further ones are dropped
+# (duplicates); without one the line is appended. FILE is left alone.
 cad_new_caddyfile() {
   if grep -qE "$CAD_IMPORT_RE" -- "$1"; then
     awk -v re="$CAD_IMPORT_RE" -v line="$CAD_IMPORT" \
@@ -97,27 +103,38 @@ cad_ensure() {
     fi
   done
   site_r="$(write_template caddy/mc-panel.caddy "$CADDY_DIR/mc-panel.caddy" 0644 root root)" || return 1
+  # An existing Caddyfile keeps its owner, group and mode (e.g. root:caddy 0640).
+  local mode=0644 og=root:root
+  if [[ -e $file ]]; then
+    mode="0$(stat -c '%a' -- "$file")"
+    og="$(_owner_get "$CADDY_DIR/Caddyfile")"
+  fi
   if [[ ! -e $file ]] || cad_is_package_default "$file"; then
-    file_r="$(cad_own_caddyfile | write_file "$CADDY_DIR/Caddyfile" 0644 root root)" || { cad_restore; return 1; }
-  elif ! grep -qxF -- "$CAD_IMPORT" "$file"; then
+    file_r="$(cad_own_caddyfile | write_file "$CADDY_DIR/Caddyfile" "$mode" "${og%%:*}" "${og#*:}")" ||
+      { cad_restore; return 1; }
+  elif ! cad_import_ok "$file"; then
     cad_new_caddyfile "$file" >"$WORK/Caddyfile.new"
-    file_r="$(write_file "$CADDY_DIR/Caddyfile" "0$(stat -c '%a' -- "$file")" root root <"$WORK/Caddyfile.new")" ||
+    file_r="$(write_file "$CADDY_DIR/Caddyfile" "$mode" "${og%%:*}" "${og#*:}" <"$WORK/Caddyfile.new")" ||
       { cad_restore; return 1; }
   fi
-  sys_systemctl enable --now caddy.service || true
+  sys_systemctl enable --now caddy.service </dev/null || true
   if [[ $site_r == unchanged && $file_r == unchanged ]]; then
     log_skip "site $DOMAIN unchanged"
     return 0
   fi
-  if ! sys_caddy validate --config "$file" --adapter caddyfile; then
+  # Validated as the user the service runs as: a file caddy cannot read fails here, not at
+  # the reload. HOME is caddy's own (validate provisions the TLS storage below it).
+  if ! run_as caddy env HOME=/var/lib/caddy caddy validate --config "$file" --adapter caddyfile </dev/null; then
     cad_restore
     warn "caddy rejected the configuration; the previous Caddyfile and mc-panel.caddy are back in place"
     return 1
   fi
-  sys_systemctl reload-or-restart caddy.service || {
-    warn "caddy did not reload (journalctl -u caddy)"
+  if ! sys_systemctl reload-or-restart caddy.service </dev/null; then
+    cad_restore
+    sys_systemctl reload-or-restart caddy.service </dev/null || true
+    warn "caddy did not reload (journalctl -u caddy); the previous Caddyfile and mc-panel.caddy are back in place"
     return 1
-  }
+  fi
   log_changed "site $DOMAIN ($TLS_MODE): mc-panel.caddy $site_r, Caddyfile $file_r"
   cad_wait
 }
