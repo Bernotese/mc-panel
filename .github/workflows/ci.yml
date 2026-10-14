@@ -96,11 +96,12 @@ jobs:
           out nftables "^internal/(agent|defense|auth)/|^cmd/(agent|panel)/|^scripts/ci-acceptance\.sh$|${gomod}" root
           out instances "^(cmd|internal)/|^scripts/(ci-instances\.sh|mc-status\.py|install-restic\.sh)$|${gomod}" root
           out release "^cmd/|^internal/webui/|^deploy/|^scripts/install/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
-          # One filter for both installer jobs: the lint on every run, the lifecycle (root) not on
-          # pushes to main.
+          # The installer jobs share one filter: the lint on every run; the lifecycle (root, not on
+          # pushes to main) also on any internal/ change, since it runs the real panel, agent and
+          # files service (like instances).
           installer="^scripts/install/|^deploy/|^scripts/(ci-installer|install-restic|testvm-deploy)\.sh$|^cmd/|^internal/(config|unixsock)/|^\.goreleaser\.yaml$|^Makefile$|${gomod}"
           out installer "${installer}"
-          out installer_root "${installer}" root
+          out installer_root "${installer}|^internal/" root
 
   go:
     name: Go (race tests, lint, vulns)

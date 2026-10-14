@@ -34,9 +34,9 @@ curl -fsSL https://github.com/Bernotese/mc-panel/releases/latest/download/instal
   | sudo bash -s -- install --domain panel.example.com --email you@example.com
 ```
 
-Der Installer richtet Docker, Caddy (mit Let's-Encrypt-Zertifikat), eine Host-Firewall (SSH, 80, 443, 25565), Sicherheitsupdates, die drei Dienste und den ersten Admin ein (Name und Passwort fragt er im Terminal ab) und prüft am Ende alles mit `doctor`. Jeder Schritt meldet `[ok]`, `[changed]`, `[skip]` oder `[warn]`; ein zweiter Lauf ändert nichts. Danach im Panel die Basisdomain der Minecraft-Server eintragen, 2FA und Benachrichtigungen einrichten und `/srv/mc-panel/backups/keys/` in die eigene Sicherung des Hosts aufnehmen.
+Der Installer richtet Docker, Caddy (mit Let's-Encrypt-Zertifikat), eine Host-Firewall (SSH, TCP 80, 443 und 25565, UDP 443 für HTTP/3), Sicherheitsupdates, die drei Dienste und den ersten Admin ein (Name und Passwort fragt er im Terminal ab) und prüft am Ende alles mit `doctor`. Jeder Schritt meldet `[ok]`, `[changed]`, `[skip]` oder `[warn]`; ein zweiter Lauf ändert nichts. Danach im Panel die Basisdomain der Minecraft-Server eintragen, 2FA und Benachrichtigungen einrichten und `/srv/mc-panel/backups/keys/` in die eigene Sicherung des Hosts aufnehmen.
 
-Wichtige Optionen von `install`: `--ssh-port N` (sonst aus `sshd -T`), `--allow-port PORT[/tcp|/udp]` (weitere offene Ports, mehrfach), `--no-firewall`, `--tls internal` (Caddys eigene CA statt Let's Encrypt), `--admin-user NAME --admin-password-file DATEI` (ohne Rückfrage), `--yes` (Warnungen nicht nachfragen). `install.sh --help` zeigt alle.
+Wichtige Optionen von `install`: `--ssh-port N` (sonst aus `sshd -T`), `--allow-port PORT[/tcp|/udp]` (weitere offene Ports, mehrfach; bei jedem späteren `install` wieder angeben, sonst schließt er sie), `--no-firewall`, `--tls internal` (Caddys eigene CA statt Let's Encrypt), `--admin-user NAME --admin-password-file DATEI` (ohne Rückfrage), `--yes` (Warnungen nicht nachfragen). `install.sh --help` zeigt alle.
 
 | Befehl | Wirkung |
 |---|---|
@@ -44,7 +44,13 @@ Wichtige Optionen von `install`: `--ssh-port N` (sonst aus `sshd -T`), `--allow-
 | `sudo bash install.sh update` | neueste Version mit Sicherung von DB, Konfiguration, Binaries und Units und automatischem Rollback, falls die neue Version nicht gesund startet (`--check` zeigt nur an, `--version vX.Y.Z` wählt eine Version; Exit-Code 3 = zurückgerollt) |
 | `sudo bash install.sh uninstall` | entfernt das Programm, behält Welten, Backups, Datenbank und Konfiguration (`--purge` löscht nach Eintippen der Panel-Domain alles) |
 
-`install.sh` liegt jedem Release bei (`…/releases/download/<version>/install.sh`, Prüfsumme in `checksums.txt`). Protokoll: `/var/log/mc-panel-install.log`. Der Installer ändert SSH nicht und entfernt nie Pakete; ein eigenes Dateisystem für `/srv/mc-panel` (damit volle Welten die Panel-Datenbank nicht blockieren) richtet er nicht ein, `doctor` weist darauf hin.
+`install.sh` liegt jedem Release bei (`…/releases/download/<version>/install.sh`, Prüfsumme in `checksums.txt`). Für `doctor`, `update` und `uninstall` das Skript einmal herunterladen:
+
+```bash
+curl -fsSLO https://github.com/Bernotese/mc-panel/releases/latest/download/install.sh && sudo bash install.sh doctor
+```
+
+Protokoll: `/var/log/mc-panel-install.log`. Der Installer ändert SSH nicht und entfernt nie Pakete; ein eigenes Dateisystem für `/srv/mc-panel` (damit volle Welten die Panel-Datenbank nicht blockieren) richtet er nicht ein, `doctor` weist darauf hin.
 
 ## Schnellstart (Entwicklung, macOS)
 
