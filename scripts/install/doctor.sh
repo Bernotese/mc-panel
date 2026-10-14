@@ -96,7 +96,7 @@ doc_probe_mountpoint() { findmnt -n -o TARGET --target "$INSTANCES_DIR" 2>/dev/n
 # doc_probe_free_percent: free space on INSTANCES_DIR in percent (df reports the used share).
 doc_probe_free_percent() {
   local used
-  used="$(df -P --output=pcent -- "$INSTANCES_DIR" 2>/dev/null | tail -n 1 | tr -dc '0-9')" || used=""
+  used="$(df --output=pcent -- "$INSTANCES_DIR" 2>/dev/null | tail -n 1 | tr -dc '0-9')" || used=""
   [[ -n $used ]] || return 0
   echo $((100 - used))
 }

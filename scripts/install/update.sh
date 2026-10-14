@@ -85,7 +85,7 @@ upd_db_restore() {
 
 # upd_free_bytes DIR: free bytes on DIR's file system.
 upd_free_bytes() {
-  df -P -B1 --output=avail -- "$1" 2>/dev/null | tail -n 1 | tr -d ' '
+  df -B1 --output=avail -- "$1" 2>/dev/null | tail -n 1 | tr -d ' '
 }
 
 upd_exec() { exec "$@"; }
