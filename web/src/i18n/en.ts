@@ -193,6 +193,7 @@ export const en: Messages = {
     base_domain_missing: 'Servers are reachable at <name>.<base domain>. You cannot create servers until a base domain is set.',
     empty: 'No servers available.',
     create_server: 'Create server',
+    list_label: 'Server list',
   },
   servers: {
     state: {
@@ -263,6 +264,7 @@ export const en: Messages = {
       base_domain_missing: 'You can create servers once a base domain is set.',
     },
     form: {
+      section: { basics: 'Basics', resources: 'Resources' },
       name: 'Name',
       name_hint: 'Becomes part of the address: 2–32 characters, lowercase letters, digits and hyphens.',
       address_preview: 'Address: {{address}}',
@@ -1348,6 +1350,7 @@ export const en: Messages = {
     action: 'Action',
     result_label: 'Result',
     result_all: 'All',
+    filters_label: 'Filters',
     from: 'From',
     to: 'To',
     result: {

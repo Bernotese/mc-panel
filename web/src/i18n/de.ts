@@ -191,6 +191,7 @@ export const de = {
     base_domain_missing: 'Server sind unter <name>.<basisdomain> erreichbar. Solange keine Basisdomain eingetragen ist, kannst du keine Server anlegen.',
     empty: 'Keine Server verfügbar.',
     create_server: 'Server anlegen',
+    list_label: 'Server-Liste',
   },
   servers: {
     state: {
@@ -261,6 +262,7 @@ export const de = {
       base_domain_missing: 'Server lassen sich erst anlegen, wenn eine Basisdomain eingetragen ist.',
     },
     form: {
+      section: { basics: 'Grundlagen', resources: 'Ressourcen' },
       name: 'Name',
       name_hint: 'Wird Teil der Adresse: 2–32 Zeichen, Kleinbuchstaben, Ziffern und Bindestrich.',
       address_preview: 'Adresse: {{address}}',
@@ -1347,6 +1349,7 @@ export const de = {
     action: 'Aktion',
     result_label: 'Ergebnis',
     result_all: 'Alle',
+    filters_label: 'Filter',
     from: 'Von',
     to: 'Bis',
     result: {

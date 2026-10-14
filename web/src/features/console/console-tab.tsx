@@ -13,6 +13,7 @@ import { playersKey } from '@/features/players/api'
 import { errorMessage } from '@/lib/error-message'
 import { sendConsoleCommand } from './api'
 import { CommandInput } from './command-input'
+import { useFillHeight } from './fill-height'
 import { entryText, visibleEntries } from './log-model'
 import { LogView } from './log-view'
 import { useConsoleStream, type ConnectionState } from './use-console-stream'
@@ -42,6 +43,7 @@ export function ConsoleTab({ server }: { server: Server }) {
   const visible = useMemo(() => visibleEntries(stream.entries, { query, hideRcon }), [stream.entries, query, hideRcon])
   const running = server.status.state === 'running'
   const locked = LOCKED.includes(stream.connection)
+  const { ref: fillRef, height } = useFillHeight<HTMLDivElement>()
 
   async function send(command: string) {
     const id = stream.addCommand(command)
@@ -65,7 +67,7 @@ export function ConsoleTab({ server }: { server: Server }) {
   }
 
   return (
-    <div className="space-y-3">
+    <div ref={fillRef} className="flex flex-col gap-3" style={height ? { height } : undefined}>
       <div className="flex flex-wrap items-center gap-3">
         <span role="status">
           <Badge variant={CONNECTION_VARIANT[stream.connection]}>{t(`console.connection.${stream.connection}`)}</Badge>

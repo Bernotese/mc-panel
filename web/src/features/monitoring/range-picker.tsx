@@ -8,7 +8,7 @@ export function RangePicker({ value, onChange }: { value: MetricsRange; onChange
   return (
     <div role="group" aria-label={t('monitoring.range.label')} className="flex flex-wrap gap-2">
       {RANGES.map((r) => (
-        <Button key={r} type="button" size="sm" variant={r === value ? 'default' : 'outline'} aria-pressed={r === value} onClick={() => onChange(r)}>
+        <Button key={r} type="button" size="sm" variant={r === value ? 'default' : 'secondary'} aria-pressed={r === value} onClick={() => onChange(r)}>
           {t(`monitoring.range.${r}`)}
         </Button>
       ))}

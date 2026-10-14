@@ -1,3 +1,4 @@
+import { ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
@@ -106,10 +107,17 @@ export function SudoDialog() {
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{t('sudo.title')}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <ShieldCheck className="text-primary size-5 shrink-0" aria-hidden="true" />
+            {t('sudo.title')}
+          </DialogTitle>
           <DialogDescription>{t('sudo.description')}</DialogDescription>
         </DialogHeader>
-        {open && me ? <SudoContent me={me} /> : null}
+        {open && me ? (
+          <div className="pt-2">
+            <SudoContent me={me} />
+          </div>
+        ) : null}
       </DialogContent>
     </Dialog>
   )

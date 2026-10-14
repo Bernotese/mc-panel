@@ -27,7 +27,7 @@ export function SettingsPage() {
     )
   } else {
     content = (
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="flex flex-col gap-6">
         <BaseDomainCard settings={settings.data} />
         <CurseForgeCard settings={settings.data} />
         <BackupTimezoneCard settings={settings.data} />
@@ -39,21 +39,21 @@ export function SettingsPage() {
   return (
     <>
       <PageHeader title={t('settings.title')} description={t('settings.description')} />
-      <section aria-labelledby={headingId} className="space-y-4">
-        <h2 id={headingId} className="text-lg font-semibold">
-          {t('settings.minecraft.title')}
-        </h2>
-        {content}
-      </section>
-      {/* Loads on its own: a failure of the server settings does not hide it. */}
-      <section aria-labelledby={monitoringHeadingId} className="mt-8 space-y-4">
-        <h2 id={monitoringHeadingId} className="text-lg font-semibold">
-          {t('settings.monitoring_section.title')}
-        </h2>
-        <div className="grid gap-4 lg:grid-cols-2">
+      <div className="flex max-w-3xl flex-col gap-10">
+        <section aria-labelledby={headingId} className="space-y-4">
+          <h2 id={headingId} className="pixel-heading text-muted-foreground text-sm uppercase">
+            {t('settings.minecraft.title')}
+          </h2>
+          {content}
+        </section>
+        {/* Loads on its own: a failure of the server settings does not hide it. */}
+        <section aria-labelledby={monitoringHeadingId} className="space-y-4">
+          <h2 id={monitoringHeadingId} className="pixel-heading text-muted-foreground text-sm uppercase">
+            {t('settings.monitoring_section.title')}
+          </h2>
           <MonitoringCard />
-        </div>
-      </section>
+        </section>
+      </div>
     </>
   )
 }

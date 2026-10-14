@@ -13,6 +13,10 @@ describe('OverviewTab', () => {
     expect(within(screen.getByRole('region', { name: 'Fehlversuche' })).getByText('4')).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'Aktive Jails' })).getByText('2')).toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: 'Top-IPs (Fehlversuche)' })).getAllByRole('listitem')).toHaveLength(4)
+    // Stat slots keep their region names and are sunken inventory slots.
+    const failures = screen.getByRole('region', { name: 'Fehlversuche' })
+    expect(failures.querySelector('.bevel-inset')).not.toBeNull()
+    expect(screen.getByRole('heading', { level: 3, name: 'Agent' })).toBeInTheDocument()
   })
 
   it('switches the range', async () => {

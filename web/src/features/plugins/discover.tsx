@@ -38,7 +38,7 @@ export function Discover({ serverId, sources, busy, onInstall }: DiscoverProps) 
     if (search.isPending) return <p className="text-muted-foreground text-sm">{t('common.loading')}</p>
     if (search.isError && hits.length === 0) {
       return (
-        <div role="alert" className="space-y-2 rounded-md border p-3 text-sm">
+        <div role="alert" className="border-destructive/60 space-y-2 border p-3 text-sm">
           <p className="font-medium">{t('plugins.discover.failed')}</p>
           <p className="text-muted-foreground">{pluginErrorMessage(search.error, t)}</p>
           <Button type="button" variant="outline" size="sm" disabled={search.isFetching} onClick={() => void search.refetch()}>
@@ -50,7 +50,7 @@ export function Discover({ serverId, sources, busy, onInstall }: DiscoverProps) 
     if (hits.length === 0) return <p className="text-muted-foreground text-sm">{t('plugins.discover.empty')}</p>
     return (
       <div className="space-y-3">
-        <ul className="space-y-3">
+        <ul data-layout="grid" className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
           {hits.map((hit) => (
             <HitCard key={`${hit.source}:${hit.project_id}`} hit={hit} busy={busy} onInstall={onInstall} />
           ))}
@@ -83,7 +83,7 @@ export function Discover({ serverId, sources, busy, onInstall }: DiscoverProps) 
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="min-w-0 flex-1 space-y-2">
           <Label htmlFor={inputId}>{t('plugins.discover.search')}</Label>
@@ -108,7 +108,7 @@ export function Discover({ serverId, sources, busy, onInstall }: DiscoverProps) 
           </div>
         ) : null}
       </div>
-      <h3 className="text-sm font-medium">
+      <h3 className="pixel-heading text-xs uppercase">
         {q === '' ? t('plugins.discover.popular', { source: sourceName }) : t('plugins.discover.results', { source: sourceName })}
       </h3>
       {results()}
@@ -121,41 +121,43 @@ function HitCard({ hit, busy, onInstall }: { hit: PluginSearchHit; busy: boolean
   const fmt = useFormat()
   const page = externalHref(hit.page_url)
   return (
-    <li className="flex gap-3 rounded-md border p-3">
-      <PluginIcon url={hit.icon_url} />
-      <div className="min-w-0 flex-1 space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <h4 className="font-medium break-words">{hit.title}</h4>
-          {hit.installed ? <Badge variant="secondary">{t('plugins.discover.installed')}</Badge> : null}
+    <li className="bg-surface-2 flex min-w-0 flex-col gap-3 border p-3">
+      <div className="flex min-w-0 items-start gap-3">
+        <PluginIcon url={hit.icon_url} />
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="font-medium break-words">{hit.title}</h4>
+            {hit.installed ? <Badge variant="secondary">{t('plugins.discover.installed')}</Badge> : null}
+          </div>
+          <p className="text-muted-foreground text-xs">{t('plugins.discover.meta', { author: hit.author, downloads: fmt.number(hit.downloads) })}</p>
         </div>
-        <p className="text-muted-foreground text-xs">{t('plugins.discover.meta', { author: hit.author, downloads: fmt.number(hit.downloads) })}</p>
-        {/* Spec §7.1: only the short description, as plain text – never Markdown or HTML from the upstream. */}
-        <p className="line-clamp-3 text-sm break-words">{hit.description}</p>
-        <div className="flex flex-wrap items-center gap-3 pt-1">
-          {!hit.installed ? (
-            <Button
-              type="button"
-              size="sm"
-              disabled={busy}
-              aria-label={t('plugins.discover.install_label', { title: hit.title })}
-              onClick={() => onInstall({ source: hit.source, project: hit.project_id, title: hit.title })}
-            >
-              {t('plugins.discover.install')}
-            </Button>
-          ) : null}
-          {page ? (
-            <a
-              href={page}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={t('plugins.discover.open_page_label', { title: hit.title })}
-              className="text-primary inline-flex items-center gap-1 text-sm underline-offset-4 hover:underline"
-            >
-              {t('plugins.discover.open_page')}
-              <ExternalLink aria-hidden="true" className="size-3.5" />
-            </a>
-          ) : null}
-        </div>
+      </div>
+      {/* Spec §7.1: only the short description, as plain text – never Markdown or HTML from the upstream. */}
+      <p className="line-clamp-3 text-sm break-words">{hit.description}</p>
+      <div className="mt-auto flex flex-wrap items-center gap-3">
+        {!hit.installed ? (
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            aria-label={t('plugins.discover.install_label', { title: hit.title })}
+            onClick={() => onInstall({ source: hit.source, project: hit.project_id, title: hit.title })}
+          >
+            {t('plugins.discover.install')}
+          </Button>
+        ) : null}
+        {page ? (
+          <a
+            href={page}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={t('plugins.discover.open_page_label', { title: hit.title })}
+            className="text-primary inline-flex items-center gap-1 text-sm underline-offset-4 hover:underline"
+          >
+            {t('plugins.discover.open_page')}
+            <ExternalLink aria-hidden="true" className="size-3.5" />
+          </a>
+        ) : null}
       </div>
     </li>
   )

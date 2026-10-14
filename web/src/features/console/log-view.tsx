@@ -41,7 +41,7 @@ export function LogView({ entries }: { entries: readonly LogEntry[] }) {
   const showJump = !atBottom && lastKey !== seenKey
 
   return (
-    <div className="relative">
+    <div className="relative flex min-h-0 flex-1 flex-col">
       <div
         ref={scrollRef}
         data-console-log=""
@@ -50,10 +50,10 @@ export function LogView({ entries }: { entries: readonly LogEntry[] }) {
         aria-label={t('console.log_label')}
         tabIndex={0}
         onScroll={onScroll}
-        className="h-[60vh] min-h-64 overflow-y-auto rounded-md bg-zinc-950 p-2 font-mono text-xs leading-5 text-zinc-100 sm:text-sm"
+        className="console-scope border-console-border min-h-0 flex-1 overflow-y-auto border p-2 font-mono text-xs leading-5 sm:text-sm"
       >
         {entries.length === 0 ? (
-          <p className="text-zinc-400">{t('console.empty')}</p>
+          <p className="text-mc-8">{t('console.empty')}</p>
         ) : (
           <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
             {virtualizer.getVirtualItems().map((item) => {
@@ -74,7 +74,7 @@ export function LogView({ entries }: { entries: readonly LogEntry[] }) {
         )}
       </div>
       {showJump ? (
-        <Button type="button" size="sm" className="absolute right-4 bottom-4 shadow" onClick={() => setAtBottom(true)}>
+        <Button type="button" size="sm" className="absolute right-4 bottom-4" onClick={() => setAtBottom(true)}>
           <ArrowDown aria-hidden="true" />
           {t('console.jump_to_bottom')}
         </Button>
@@ -89,8 +89,8 @@ function LineRow({ entry }: { entry: LineEntry }) {
       data-level={entry.level}
       className={cn(
         'px-1 break-words whitespace-pre-wrap',
-        entry.level === 'warn' && 'border-l-2 border-yellow-500 bg-yellow-500/10',
-        entry.level === 'error' && 'border-l-2 border-red-500 bg-red-500/10',
+        entry.level === 'warn' && 'border-mc-6 bg-mc-6/10 border-l-2',
+        entry.level === 'error' && 'border-mc-c bg-mc-c/10 border-l-2',
       )}
     >
       <LogText segments={entry.segments} />
@@ -101,18 +101,18 @@ function LineRow({ entry }: { entry: LineEntry }) {
 function CommandRow({ entry }: { entry: CommandEntry }) {
   const { t } = useTranslation()
   return (
-    <div data-command="" className="my-1 rounded-sm border border-zinc-700 bg-zinc-900 px-2 py-1">
-      <p className="break-words whitespace-pre-wrap text-sky-300">› {entry.command}</p>
+    <div data-command="" className="border-console-border my-1 border bg-white/5 px-2 py-1">
+      <p className="break-words whitespace-pre-wrap text-mc-b">› {entry.command}</p>
       {entry.status === 'pending' ? (
-        <p className="text-zinc-400">{t('console.command_pending')}</p>
+        <p className="text-mc-8">{t('console.command_pending')}</p>
       ) : entry.status === 'error' ? (
-        <p className="break-words whitespace-pre-wrap text-red-300">{entry.output}</p>
+        <p className="break-words whitespace-pre-wrap text-mc-c">{entry.output}</p>
       ) : entry.output ? (
         <p className="break-words whitespace-pre-wrap">
           <LogText segments={entry.segments} />
         </p>
       ) : (
-        <p className="text-zinc-400">{t('console.command_no_output')}</p>
+        <p className="text-mc-8">{t('console.command_no_output')}</p>
       )}
     </div>
   )

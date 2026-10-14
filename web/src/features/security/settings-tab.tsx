@@ -80,7 +80,7 @@ export function SettingsTab() {
 
   return (
     <form
-      className="max-w-2xl space-y-4"
+      className="max-w-3xl space-y-6"
       noValidate
       onSubmit={(e) => {
         e.preventDefault()
