@@ -18,6 +18,12 @@ export default defineConfig({
       testMatch: /(?<![\w-])(totp|smoke|servers|plugins|backups|monitoring)\.spec\.ts$/,
       use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${MOCK_PORT}`, locale: 'de-DE' },
     },
+    {
+      // Visual review only (make test-vm SUITE=shots); never part of CI or `npm run e2e`.
+      name: 'screenshots',
+      testMatch: /\.shots\.ts$/,
+      use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${MOCK_PORT}`, locale: 'de-DE' },
+    },
     ...(realBaseURL
       ? [
           {

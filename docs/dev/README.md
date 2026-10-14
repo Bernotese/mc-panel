@@ -124,6 +124,7 @@ make test-vm SUITE=go        # go test -race ./... (CGO_ENABLED=1)
 make test-vm SUITE=lint      # golangci-lint v2.14.0 (Linux, also auch die _linux-Dateien), eslint, tsc
 make test-vm SUITE=web       # Vitest
 make test-vm SUITE=e2e       # Playwright: echtes Backend (Dev-Modus) und Mock
+make test-vm SUITE=shots     # Screenshots aller web/e2e/shots/*.shots.ts gegen den Mock (nicht Teil von all)
 ```
 
 Die Suite `go` installiert beim ersten Lauf restic per `scripts/install-restic.sh` und setzt `MCPANEL_TEST_RESTIC=/usr/local/bin/restic`; ohne diese Variable (auf dem Mac immer) überspringen sich die Integrationstests des Dateidienstes mit echtem restic.
@@ -131,6 +132,7 @@ Die Suite `go` installiert beim ersten Lauf restic per `scripts/install-restic.s
 - `scripts/test-vm.sh` kopiert den Arbeitsstand per `rsync --delete` nach `~/mc-panel-test/<Name des Checkouts>/` auf der VM: getrackte und neue Dateien, ohne `.git` und ohne das, was `.gitignore` ausschließt (die Ausschlüsse stehen im Skript). Ein Push ist nicht nötig. Jeder Checkout bzw. Worktree bekommt sein eigenes Verzeichnis. Die Läufe aller Checkouts sind per `flock` serialisiert (parallele Race- und Vitest-Läufe mehrerer Teammates überlasten die VM und lassen zeitkritische Tests scheitern); ein wartender Lauf meldet „waiting for another test run on this VM“. `node_modules` und Build-Ausgaben bleiben zwischen Läufen erhalten.
 - Dann läuft dort `scripts/vm-test.sh <suite>` als normaler Benutzer `claude`. Beim ersten Bedarf richtet es ein: golangci-lint (Release-Archiv mit Prüfsumme nach `~/.local/bin`), `npm ci` (erneut nur, wenn sich `package-lock.json` ändert) und Playwright-Chromium samt Systempaketen (`sudo`, einmal pro Playwright-Version). Go und Node kommen aus `make deploy-testvm`; passt die Go-Version nicht zu `go.mod`, bricht das Skript mit einem Hinweis ab.
 - `e2e` baut UI und Binaries, startet agent, `files -dev` und `panel serve -dev` mit eigener Konfiguration (`.dev/panel-vm.toml`: Port 18080, das panel liefert die gebaute UI selbst aus), legt `e2e-admin` an und führt `npm run e2e:real` und `npm run e2e` (Mock, Port 5174) aus. Das deployte panel (systemd, Socket `/run/mc-panel-web/panel.sock`) bleibt unberührt.
+- `shots` führt das Playwright-Projekt `screenshots` (`web/e2e/shots/*.shots.ts`, Helfer `shoot()`/`signInMock()` in `web/e2e/shots/shoot.ts`) gegen den Mock aus: jede Seite in Dark und Light, Desktop (1440 px) und Mobil (390 px). Die PNGs kopiert `make test-vm` zurück nach `web/screenshots/` (gitignored). Nur zur Sichtprüfung beim UI-Redesign; nicht Teil von `all` und nicht in CI.
 - Einzelne Tests nach einem `make test-vm`: `ssh claude@192.168.1.117 'cd ~/mc-panel-test/<dir> && PATH=/usr/local/go/bin:$PATH go test ./internal/rbac -run TestName'` bzw. im Unterordner `web` mit `PATH=/usr/local/lib/nodejs/bin:$PATH npx vitest run <datei>`.
 - SSH zur VM braucht in Claude Code eine Bash ohne Sandbox.
 - Was nur in der CI läuft: die Root-Abnahmen (`nftables`, `instances`, `installer`; sie verändern den Host), `govulncheck`, `npm audit`, die sqlc- und `gen:api`-Aktualitätsprüfungen, OpenAPI-Lint und der GoReleaser-Snapshot.
@@ -229,7 +231,7 @@ Spec: `docs/superpowers/specs/2026-10-13-mc-panel-monitoring-design.md`; manuell
 | `make release` | GoReleaser-Snapshot nach `dist/`: Archive für linux/amd64 und linux/arm64 (mit `deploy/`), `install.sh` und `checksums.txt` |
 | `make installer` | fügt `scripts/install/` und `deploy/` zu `build/install.sh` zusammen (`INSTALLER_VERSION`, Standard aus `git describe`); nie auf dem Mac ausführen |
 | `make deploy-testvm` | baut `REF` (Standard `main`) auf der Test-VM aus GitHub und deployt ihn dort über den Installer (`install` beim ersten Mal, sonst `update`; siehe „Test-VM“) |
-| `make test-vm` | kopiert den Arbeitsstand auf die Test-VM und führt dort Tests aus, `SUITE=all\|go\|lint\|web\|e2e` (siehe „Tests auf der Test-VM“) |
+| `make test-vm` | kopiert den Arbeitsstand auf die Test-VM und führt dort Tests aus, `SUITE=all\|go\|lint\|web\|e2e\|shots` (siehe „Tests auf der Test-VM“) |
 | `make clean` | entfernt `bin/`, `dist/`, `.dev/` und das gebaute Frontend |
 
 ## CI
