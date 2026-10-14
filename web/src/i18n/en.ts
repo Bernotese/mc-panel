@@ -1330,6 +1330,7 @@ export const en: Messages = {
     action: 'Action',
     result_label: 'Result',
     result_all: 'All',
+    filters_label: 'Filters',
     from: 'From',
     to: 'To',
     result: {

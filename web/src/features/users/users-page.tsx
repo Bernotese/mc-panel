@@ -102,21 +102,23 @@ export function UsersPage() {
     {
       id: 'last_login',
       header: t('users.col.last_login'),
+      className: 'whitespace-nowrap tabular-nums',
       cell: (u) => (u.last_login_at ? fmt.dateTime(u.last_login_at) : t('users.never')),
     },
     {
       id: 'actions',
       header: t('users.col.actions'),
+      className: 'text-right',
       cell: (u) => (
-        <div className="flex flex-wrap gap-2">
-          <Button asChild size="sm" variant="outline">
+        <div className="flex flex-wrap justify-end gap-1.5">
+          <Button asChild size="xs" variant="outline">
             <Link to="/users/$id/permissions" params={{ id: String(u.id) }} aria-label={t('users.permissions_for', { name: u.username })}>
               {t('users.permissions')}
             </Link>
           </Button>
           <Button
             type="button"
-            size="sm"
+            size="xs"
             variant="outline"
             aria-label={t('users.reset_for', { name: u.username })}
             disabled={!u.totp_enabled && u.passkey_count === 0}
@@ -126,7 +128,7 @@ export function UsersPage() {
           </Button>
           <Button
             type="button"
-            size="sm"
+            size="xs"
             variant="ghost"
             className="text-destructive"
             aria-label={t('users.delete_for', { name: u.username })}
