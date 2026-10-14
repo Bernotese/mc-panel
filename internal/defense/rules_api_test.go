@@ -83,12 +83,12 @@ func TestCreatedDenyRuleBlocksImmediately(t *testing.T) {
 
 func TestCreateIPRuleRejectsSelfLockout(t *testing.T) {
 	e := newEnv(t)
-	for _, cidr := range []string{"198.51.100.0/24", "0.0.0.0/0", callerIP} {
+	for _, cidr := range []string{"198.51.100.0/24", "128.0.0.0/1", callerIP} {
 		wantStatus(t, e.call(t, http.MethodPost, "/security/ip-rules", ruleBody(cidr, "deny"), callerIP),
 			http.StatusConflict, httpx.CodeConflict)
 	}
 	// an IPv6 deny does not affect an IPv4 caller
-	wantStatus(t, e.call(t, http.MethodPost, "/security/ip-rules", ruleBody("::/0", "deny"), callerIP), http.StatusCreated, "")
+	wantStatus(t, e.call(t, http.MethodPost, "/security/ip-rules", ruleBody("2000::/3", "deny"), callerIP), http.StatusCreated, "")
 	// once the caller is allowlisted, a covering deny rule is fine
 	wantStatus(t, e.call(t, http.MethodPost, "/security/ip-rules", ruleBody(callerIP, "allow"), callerIP), http.StatusCreated, "")
 	wantStatus(t, e.call(t, http.MethodPost, "/security/ip-rules", ruleBody("198.51.100.0/24", "deny"), callerIP), http.StatusCreated, "")
@@ -154,4 +154,18 @@ func TestCreateAllowRuleRejectsOverlyBroadPrefixes(t *testing.T) {
 	}
 	// deny rules are not restricted by this limit
 	wantStatus(t, e.call(t, http.MethodPost, "/security/ip-rules", ruleBody("203.0.0.0/8", "deny"), callerIP), http.StatusCreated, "")
+}
+
+func TestCreateDenyRuleRejectsLoopback(t *testing.T) {
+	e := newEnv(t)
+	for _, cidr := range []string{"127.0.0.1", "127.0.0.0/8", "127.1.2.3/32", "96.0.0.0/3", "0.0.0.0/0", "::1", "::/0"} {
+		rec := e.call(t, http.MethodPost, "/security/ip-rules", ruleBody(cidr, "deny"), callerIP)
+		if rec.Code != http.StatusBadRequest || errCode(rec) != httpx.CodeValidation {
+			t.Errorf("%s: %d %s", cidr, rec.Code, rec.Body)
+		}
+	}
+	// next to loopback, and allow rules for loopback, stay possible
+	for _, b := range []map[string]any{ruleBody("128.0.0.0/8", "deny"), ruleBody("::2", "deny"), ruleBody("127.0.0.1", "allow")} {
+		wantStatus(t, e.call(t, http.MethodPost, "/security/ip-rules", b, callerIP), http.StatusCreated, "")
+	}
 }
