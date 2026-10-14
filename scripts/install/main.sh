@@ -317,6 +317,12 @@ main() {
   # Each command runs in a subshell with errexit on and outside any conditional context:
   # `cmd || rc=$?` would switch errexit off for the whole call tree (overview V4).
   local rc
+  if [[ $CMD == update ]]; then
+    # Ctrl-C, kill or a dropped SSH session must not end this shell while update rolls back in
+    # the subshell: caught here (not ignored, so the subshell can trap them itself), this shell
+    # waits for the subshell and exits with its code (update.sh).
+    trap : INT TERM HUP
+  fi
   set +e
   (
     set -e
