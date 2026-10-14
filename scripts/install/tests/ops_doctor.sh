@@ -39,7 +39,9 @@ ops_doctor_healthy() {
   doc_probe_resolve() { echo 203.0.113.5; }
   doc_probe_local_addrs() { printf '127.0.0.1\n203.0.113.5\n'; }
   doc_probe_nft_table() { printf 'table inet mcpanel_fw {\n\tchain input {\n\t\ttcp dport { 22, 80, 443, 25565 } accept\n\t}\n}\n'; }
-  doc_probe_ssh_port() { echo 22; }
+  if [[ -z ${OPS_REAL_SSH_PROBE:-} ]]; then
+    doc_probe_ssh_port() { echo 22; }
+  fi
   doc_probe_docker() { return 0; }
   doc_probe_restic_version() { echo 0.18.1; }
   doc_probe_pkg() { return 0; }
@@ -326,7 +328,8 @@ for c in d["checks"]:
 }
 
 test_ops_doctor_json_escapes_messages() {
-  assert_eq '"a \"quoted\"\\ path\nnext\tcol"' "$(doc_json_str "a \"quoted\"\\ path"$'\n'"next"$'\t'"col")"
+  assert_eq '"a \"quoted\"\\ path\u000anext\u0009col\u001b[0m\u0001"' \
+    "$(doc_json_str "a \"quoted\"\\ path"$'\n'"next"$'\t'"col"$'\e'"[0m"$'\x01')"
 }
 
 test_ops_doctor_summary_prints_only_problems() {
@@ -346,4 +349,25 @@ test_ops_doctor_domain_from_public_url() {
   assert_eq panel.example.com "$(doc_domain)"
   rm "$ROOT$ETC_PANEL/panel.toml"
   assert_eq "" "$(doc_domain)"
+}
+
+test_ops_doctor_without_root_and_unreadable_caddyfile_skips_import() {
+  ops_doctor_healthy
+  doc_probe_euid() { echo 1000; }
+  chmod 000 "$ROOT$CADDY_DIR/Caddyfile"
+  if [[ -r $ROOT$CADDY_DIR/Caddyfile ]]; then
+    echo "# skipped: running as root, the file stays readable"
+    return 0
+  fi
+  assert_exit 1 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "! caddy_import: skipped"
+}
+
+test_ops_doctor_ssh_ports_come_from_the_firewall_logic() {
+  # the real doc_probe_ssh_port asks fw_config_ports of firewall.sh (B1)
+  OPS_REAL_SSH_PROBE=1
+  ops_doctor_healthy
+  fw_config_ports() { printf '22\n2222\n'; }
+  assert_exit 2 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "SSH port 2222"
 }

@@ -85,8 +85,9 @@ doc_probe_cert_days() {
 doc_probe_resolve() { getent ahosts "$1" 2>/dev/null | awk '{ print $1 }' | sort -u; }
 doc_probe_local_addrs() { ip -o addr show 2>/dev/null | awk '{ print $4 }' | cut -d/ -f1; }
 doc_probe_nft_table() { nft list table inet mcpanel_fw 2>/dev/null; }
-# doc_probe_ssh_port: the ports sshd listens on, one per line (nothing if sshd -T fails).
-doc_probe_ssh_port() { sshd -T 2>/dev/null | awk '$1 == "port" { print $2 }'; }
+# doc_probe_ssh_port: the ports of sshd's configuration, one per line, with the logic of the
+# firewall step (fw_config_ports, B1: listenaddress ports win over Port).
+doc_probe_ssh_port() { fw_config_ports; }
 doc_probe_docker() { timeout 20 docker info >/dev/null 2>&1; }
 doc_probe_restic_version() { restic version 2>/dev/null | awk '{ print $2; exit }'; }
 doc_probe_pkg() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'; }
@@ -146,14 +147,17 @@ doc_domain() {
   printf '%s\n' "$url"
 }
 
-# doc_json_str S: S as a JSON string.
+# doc_json_str S: S as a JSON string (backslash, quote and every control character U+0001 to
+# U+001F escaped; Bash strings cannot hold U+0000).
 doc_json_str() {
-  local s="$1"
+  local s="$1" i c e
   s="${s//\\/\\\\}"
   s="${s//\"/\\\"}"
-  s="${s//$'\n'/\\n}"
-  s="${s//$'\r'/\\r}"
-  s="${s//$'\t'/\\t}"
+  for ((i = 1; i < 32; i++)); do
+    printf -v c '%b' "\\$(printf '%03o' "$i")"
+    printf -v e '\\u%04x' "$i"
+    s="${s//"$c"/"$e"}"
+  done
   printf '"%s"' "$s"
 }
 
@@ -185,7 +189,7 @@ doc_chk_services() {
 
 doc_chk_sockets() {
   local bad want=("/run/mc-panel-files/files.sock|mcpanel-mc:mcpanel 660" "/run/mc-panel-web/panel.sock|mcpanel:caddy 660")
-  # /run/mc-panel (RuntimeDirectory of the agent) is 0750 root:root: only root sees the socket
+  # /run/mc-panel (RuntimeDirectory of the agent) is root:mcpanel 0750: others cannot see the socket
   if doc_is_root; then want=("/run/mc-panel/agent.sock|root:mcpanel 660" "${want[@]}"); fi
   bad="$(doc_expect_stat "${want[@]}")"
   if [[ -z $bad ]]; then
@@ -242,24 +246,24 @@ doc_chk_update_state() {
 
 doc_chk_config() {
   doc_need_root config || return 0
-  local e file keys k missing=()
+  local e file keys k absent=()
   for e in "$ETC_PANEL/panel.toml|$DOC_REQ_PANEL" "$ETC_PANEL/agent.toml|$DOC_REQ_AGENT" "$ETC_FILES/files.toml|$DOC_REQ_FILES"; do
     file="${e%%|*}"
     keys="${e#*|}"
     if [[ ! -f $ROOT$file || -L $ROOT$file ]]; then
-      missing+=("$file (file)")
+      absent+=("$file (file)")
       continue
     fi
     for k in $keys; do
-      doc_toml_has_key "$ROOT$file" "$k" || missing+=("$file: $k")
+      doc_toml_has_key "$ROOT$file" "$k" || absent+=("$file: $k")
     done
   done
-  if ((${#missing[@]} == 0)); then
+  if ((${#absent[@]} == 0)); then
     doc_result ok config "configuration complete"
   else
     local joined
-    joined="$(printf '%s; ' "${missing[@]}")"
-    doc_result fail config "missing: ${joined%; }" "install.sh install with your --domain/--email (adds missing keys, keeps existing values)"
+    joined="$(printf '%s; ' "${absent[@]}")"
+    doc_result fail config "absent: ${joined%; }" "install.sh install with your --domain/--email (adds absent keys, keeps existing values)"
   fi
 }
 
@@ -291,7 +295,9 @@ doc_chk_caddy() {
       doc_result fail caddy_config "Caddy configuration is invalid" "caddy validate --config $CADDY_DIR/Caddyfile --adapter caddyfile"
     fi
   fi
-  if grep -qxF -- "$DOC_IMPORT_LINE" "$ROOT$CADDY_DIR/Caddyfile" 2>/dev/null && [[ -f $ROOT$CADDY_DIR/mc-panel.caddy ]]; then
+  if [[ -e $ROOT$CADDY_DIR/Caddyfile && ! -r $ROOT$CADDY_DIR/Caddyfile ]] && ! doc_is_root; then
+    doc_result warn caddy_import "caddy_import: skipped ($CADDY_DIR/Caddyfile is not readable)" "sudo bash install.sh doctor"
+  elif grep -qxF -- "$DOC_IMPORT_LINE" "$ROOT$CADDY_DIR/Caddyfile" 2>/dev/null && [[ -f $ROOT$CADDY_DIR/mc-panel.caddy ]]; then
     doc_result ok caddy_import "Caddy serves the panel site ($CADDY_DIR/mc-panel.caddy)"
   else
     doc_result fail caddy_import "the panel site is not imported in $CADDY_DIR/Caddyfile" "install.sh install with your --domain/--email"
@@ -333,7 +339,7 @@ doc_chk_caddy() {
 
 doc_chk_firewall() {
   doc_need_root firewall || return 0
-  local table ports p missing=()
+  local table ports p blocked=()
   table="$(doc_probe_nft_table)" || table=""
   if [[ -z $table ]]; then
     doc_result warn firewall "host firewall (table inet mcpanel_fw) is not loaded" "install.sh install without --no-firewall"
@@ -342,12 +348,12 @@ doc_chk_firewall() {
   ports="$(doc_probe_ssh_port)" || ports=""
   ports="${ports:-22}"
   for p in $ports; do
-    grep -E 'tcp dport' <<<"$table" | grep -Eq "(^|[^0-9])$p([^0-9]|$)" || missing+=("$p")
+    grep -E 'tcp dport' <<<"$table" | grep -Eq "(^|[^0-9])$p([^0-9]|$)" || blocked+=("$p")
   done
-  if ((${#missing[@]} == 0)); then
+  if ((${#blocked[@]} == 0)); then
     doc_result ok firewall "host firewall active, SSH port ${ports//$'\n'/, } allowed"
   else
-    doc_result fail firewall "the host firewall does not allow the SSH port ${missing[*]}" "install.sh install --ssh-port ${missing[0]} with your --domain/--email"
+    doc_result fail firewall "the host firewall does not allow the SSH port ${blocked[*]}" "install.sh install --ssh-port ${blocked[0]} with your --domain/--email"
   fi
 }
 
