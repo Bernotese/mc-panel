@@ -173,6 +173,10 @@ func TestDownloadReadTimeout(t *testing.T) {
 			w.(http.Flusher).Flush()
 		}
 		<-r.Context().Done() // "/silent": not even headers
+		// Abort instead of returning: a handler that returns sends an empty 200 (and for
+		// "/silent" that answer can win against the client's read timeout when the request
+		// context ends early, e.g. on an HTTP/2 stream reset).
+		panic(http.ErrAbortHandler)
 	})
 	c := newClient(t, nil, cdn, clock.NewFake(t0), func(o *upstream.Options) { o.ReadTimeout = 100 * time.Millisecond })
 	start := time.Now()

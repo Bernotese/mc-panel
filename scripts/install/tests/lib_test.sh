@@ -61,7 +61,7 @@ test_render_template_unresolved_braces_die() {
 test_every_deploy_template_renders() {
   local f rel
   KEY_DOMAIN=panel.example.com KEY_TLS="tls you@example.com" KEY_PANEL_UID=998 \
-    KEY_PUBLIC_URL=https://panel.example.com KEY_INSTANCES_DIR=/srv/mc-panel KEY_SSH_PORT="22, 2222" \
+    KEY_PUBLIC_URL=https://panel.example.com KEY_INSTANCES_DIR=/srv/mc-panel KEY_SSH_PORT="22, 2222" KEY_EXTRA_RULES="# none" \
     KEY_VERSION=1.2.3 KEY_RESTIC_BINARY=/usr/bin/restic KEY_PING_ADDR=127.0.0.1:25565
   while IFS= read -r f; do
     rel="${f#"$TEMPLATE_DIR"/}"
