@@ -1,11 +1,8 @@
-import { screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import type { BackupJob, BackupOverview, BackupSchedule, BackupSnapshot } from '@/api/types'
-import { ServerDetailPage } from '@/features/servers/server-detail-page'
-import { loginAs } from '@/mocks/db'
+import { renderServerTab } from '@/features/servers/tab-test-utils'
 import { server } from '@/mocks/node'
-import { renderWithProviders } from '@/test/render'
+import { BackupsTab } from './backups-tab'
 
 /** A valid 64-hex snapshot id that is unique per n. */
 export function snapshotId(n: number): string {
@@ -86,8 +83,11 @@ export function jobSequence(sequence: BackupJob[]) {
 }
 
 export async function openBackups(serverId = 1, username = 'admin', opts: { sudo?: boolean } = { sudo: true }) {
-  const user = userEvent.setup()
-  const { queryClient } = await renderWithProviders(<ServerDetailPage serverId={serverId} />, { me: loginAs(username, { sudo: opts.sudo }) })
-  await user.click(await screen.findByRole('tab', { name: 'Backups' }))
+  const { user, queryClient } = await renderServerTab((s) => <BackupsTab server={s} />, {
+    serverId,
+    username,
+    sudo: opts.sudo,
+    path: `/servers/${serverId}/backups`,
+  })
   return { user, queryClient }
 }
