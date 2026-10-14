@@ -95,3 +95,35 @@ export function externalHref(url: string | null | undefined): string | null {
     return null
   }
 }
+
+/** Issue #85: the "Ergebnisse von …" line links to the source's own listing (fixed URLs, never from an upstream answer). */
+export function sourceHomeUrl(source: PluginSource, kind: PluginKind): string {
+  if (source === 'hangar') return 'https://hangar.papermc.io/'
+  return kind === 'mod' ? 'https://modrinth.com/mods' : 'https://modrinth.com/plugins'
+}
+
+export type StatusFilter = 'all' | 'enabled' | 'disabled'
+export type OriginFilter = 'all' | InstalledJar['source']
+
+export interface JarFilter {
+  query: string
+  status: StatusFilter
+  origin: OriginFilter
+}
+
+export const NO_JAR_FILTER: JarFilter = { query: '', status: 'all', origin: 'all' }
+
+export function isJarFilterActive(f: JarFilter): boolean {
+  return f.query.trim() !== '' || f.status !== 'all' || f.origin !== 'all'
+}
+
+/** Issue #85: the "Installiert" filters; the name search matches the shown name and the file name, case-insensitively. */
+export function filterJars(jars: readonly InstalledJar[], f: JarFilter): InstalledJar[] {
+  const needle = f.query.trim().toLowerCase()
+  return jars.filter(
+    (jar) =>
+      (f.status === 'all' || jar.enabled === (f.status === 'enabled')) &&
+      (f.origin === 'all' || jar.source === f.origin) &&
+      (needle === '' || jarName(jar).toLowerCase().includes(needle) || jar.file.toLowerCase().includes(needle)),
+  )
+}
