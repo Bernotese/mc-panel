@@ -31,13 +31,13 @@ const SORT_KEYS: SortKey[] = ['name', 'size', 'mtime']
 
 export interface FilesTabProps {
   server: Server
-  /** Admins: link from the server.properties hint to the settings tab (Task 15). */
-  onOpenSettings?: () => void
-  /** Reports what leaving the tab would lose (unsaved editor changes, pending uploads) to the detail page. */
+  /** @deprecated Ignored; the files area guards itself with useBlocker. Removed by the lead after T2 is integrated. */
   onBusyChange?: (busy: FilesBusy | null) => void
+  /** @deprecated Ignored; the editor links to /servers/$id/settings itself. Removed by the lead after T2 is integrated. */
+  onOpenSettings?: () => void
 }
 
-export function FilesTab({ server, onOpenSettings, onBusyChange }: FilesTabProps) {
+export function FilesTab({ server }: FilesTabProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const notifyError = useErrorToast()
@@ -63,11 +63,7 @@ export function FilesTab({ server, onOpenSettings, onBusyChange }: FilesTabProps
   const unsaved = editorDirty && editing !== null
   const pendingUploads = uploads.active
   const busy: FilesBusy | null = unsaved || pendingUploads ? { unsaved, uploads: pendingUploads } : null
-  useEffect(() => {
-    onBusyChange?.(unsaved || pendingUploads ? { unsaved, uploads: pendingUploads } : null)
-  }, [unsaved, pendingUploads, onBusyChange])
-  useEffect(() => () => onBusyChange?.(null), [onBusyChange])
-  // Route changes and reloads; tab switches are asked by the detail page (onBusyChange). Leaving cancels the uploads.
+  // The only guard of the files area: any navigation away (other area, other server, logout link) and reloads. Leaving cancels the uploads.
   const blocker = useBlocker({ shouldBlockFn: () => busy !== null, enableBeforeUnload: () => busy !== null, withResolver: true })
   const leave = leaveTexts(busy ?? { unsaved: true, uploads: false }, t)
   const jobQuery = useFileJob(server.id, true)
@@ -251,7 +247,7 @@ export function FilesTab({ server, onOpenSettings, onBusyChange }: FilesTabProps
 
       <SectionCard title={t('files.title')} actions={editing === null && !neverStarted ? toolbar : undefined}>
         {editing !== null ? (
-          <FileEditor server={server} path={editing} onClose={() => setEditing(null)} onDirtyChange={setEditorDirty} onOpenSettings={onOpenSettings} />
+          <FileEditor server={server} path={editing} onClose={() => setEditing(null)} onDirtyChange={setEditorDirty} />
         ) : (
           <div
             className={dragging ? 'ring-primary relative space-y-3 rounded-md ring-2' : 'relative space-y-3'}
