@@ -51,7 +51,8 @@ Spawn-Prompt je Teammate: Plan-Datei, Branch, Worktree-Pfad, „alle Tasks des P
    - `features/profile/section-card.tsx` löschen (`grep -rn SectionCard web/src` muss leer sein);
    - `PowerIconButtons` → `PowerButtons compact`;
    - `index.css` `@layer base`: `html` bekommt `bg-background` (Screenshots über 900 px zeigen sonst einen Streifen ohne Hintergrund);
-   - `e2e/shots/shoot.ts`: Toaster folgt der gespeicherten Theme-Präferenz, nicht der Klasse – Theme über die App setzen (z. B. Theme-Umschalter klicken), damit Toasts im Dark-Screenshot dunkel sind.
+   - `e2e/shots/shoot.ts`: Toaster folgt der gespeicherten Theme-Präferenz, nicht der Klasse – Theme über die App setzen (z. B. Theme-Umschalter klicken), damit Toasts im Dark-Screenshot dunkel sind; außerdem vor dem Auslösen `*{transition:none!important}` injizieren (sonst fangen Light-Shots Badges mitten im Übergang ab, Befund T5);
+   - `pixel-pattern` im Dark Mode dezenter (wirkt mobil wie ein Transparenz-Schachbrett, Befund T5); NativeSelect-Höhe an Inputs angleichen (Audit-Filter).
    PR mit Basis `feat/ui-shell` öffnen, nach Merge von PR 2 auf `main` umstellen.
 4. Je PR: `make check`, `make test-vm SUITE=all`, `make test-vm SUITE=shots` – Auswahl an Screenshots (Startseite, Konsole, Dateien, Login; Dark/Light; Desktop/Mobil) dem Nutzer zeigen.
 5. Nach dem letzten Merge (nur nach Freigabe): `make deploy-testvm`, Abnahme nach Spec §7, `CLAUDE.md` (Frontend-Abschnitt: Navigation, Routen pro Server-Bereich, Design-Tokens/Utilities, Schriften, Suite `shots`) und Roadmap im Foundation-Spec um Teilprojekt 7 ergänzen, Spec-Status auf „umgesetzt“, Pläne löschen.
