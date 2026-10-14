@@ -109,6 +109,8 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Post("/servers/{id}/plugins/delete", rule, h.handleDelete)
 	api.Get("/servers/{id}/plugins/jobs", rule, h.handleJobs)
 	api.Get("/servers/{id}/plugins/icon", rule, h.handleIcon)
+	api.Post("/servers/{id}/plugins/mrpack/preview", rule, h.handleMrpackPreview)
+	api.Post("/servers/{id}/plugins/mrpack/import", rule, h.handleMrpackImport)
 }
 
 // Run blocks until ctx is done; then it cancels running jobs and waits for them.
@@ -216,6 +218,10 @@ var (
 	errTooManyJobs      = errors.New("too many plugin jobs are running, try again shortly")
 	errShuttingDown     = errors.New("the panel is shutting down")
 	errNoChecksum       = errors.New("the source announces no checksum")
+
+	errMrpackIncompatible = errors.New("the modpack is for another mod loader")
+	errMrpackMismatch     = errors.New("the modpack is for another Minecraft or loader version")
+	errNothingToImport    = errors.New("the modpack has nothing to install or update")
 )
 
 // classify maps an error to its API answer; ok is false for an internal error.
@@ -231,6 +237,12 @@ func classify(err error) (status int, code, msg string, ok bool) {
 		return http.StatusConflict, httpx.CodeConflict, errAlreadyInstalled.Error(), true
 	case errors.Is(err, errFileExists):
 		return http.StatusConflict, httpx.CodeFileExists, err.Error(), true
+	case errors.Is(err, errMrpackIncompatible):
+		return http.StatusConflict, httpx.CodeMrpackIncompatible, err.Error(), true
+	case errors.Is(err, errMrpackMismatch):
+		return http.StatusConflict, httpx.CodeMrpackVersionMismatch, err.Error(), true
+	case errors.Is(err, errNothingToImport):
+		return http.StatusConflict, httpx.CodeConflict, err.Error(), true
 	case errors.Is(err, errJobRunning):
 		return http.StatusConflict, httpx.CodeConflict, errJobRunning.Error(), true
 	case errors.Is(err, errTooManyJobs):

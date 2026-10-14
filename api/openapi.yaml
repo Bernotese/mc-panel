@@ -1032,6 +1032,52 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '502': { description: 'plugin_source_unavailable (fetch failed, larger than 256 KiB or not a PNG, JPEG, WebP or GIF image)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/{id}/plugins/mrpack/preview:
+    post:
+      operationId: previewMrpack
+      tags: [plugins]
+      summary: Plan of a Modrinth modpack import (.mrpack) into the mods of a fabric or neoforge server
+      description: 'The body is the modrinth.index.json of the pack (the browser unpacks it; downloads and fileSize may be left out and are never used). Only files mods/<name>.jar count, other paths are counted in ignored_files. Every mod is matched by its sha512 on Modrinth; the panel never downloads from a URL of the pack. A different Minecraft or loader version is reported in version_mismatch (200), a different loader answers 409 mrpack_incompatible. Rate limited like the other upstream lookups.'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MrpackIndex' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/MrpackPlan' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'plugins_unsupported (not fabric or neoforge) or mrpack_incompatible (the pack is for another loader, or names none)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: 'payload_too_large (the body exceeds 1 MiB)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/PluginSourceUnavailable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/plugins/mrpack/import:
+    post:
+      operationId: importMrpack
+      tags: [plugins]
+      summary: Start a job that installs and updates the server-side mods of a modpack (audited per jar and once for the import)
+      description: 'The plan is computed again (the preview is not trusted); its install and update entries without the excluded optional ones become the steps. A failed step does not stop the job; it then ends failed. Disabled jars stay disabled, jars that are not in the pack stay installed.'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MrpackImportRequest' } } }
+      responses:
+        '202': { description: Job started, content: { application/json: { schema: { $ref: '#/components/schemas/PluginJob' } } } }
+        '400': { description: 'validation_failed (invalid index, or exclude names a hash that is not an optional entry of the plan) or bad_request (malformed JSON)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'plugins_unsupported, mrpack_incompatible (another loader), mrpack_version_mismatch (the Minecraft or loader version differs and accept_mismatch is not set) or conflict (a plugin job of this server is running, or nothing to install or update)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: 'payload_too_large (the body exceeds 1 MiB)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/PluginSourceUnavailable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /servers/{id}/backups:
     get:
       operationId: getBackups
@@ -1484,7 +1530,7 @@ components:
       type: object
       required: [error, message]
       properties:
-        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, files_unavailable, file_exists, file_modified, not_text, not_regular, instance_running, insufficient_storage, plugins_unsupported, plugin_source_unavailable, plugin_not_downloadable, plugin_incompatible, backups_unavailable, backup_running, internal] }
+        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, files_unavailable, file_exists, file_modified, not_text, not_regular, instance_running, insufficient_storage, plugins_unsupported, plugin_source_unavailable, plugin_not_downloadable, plugin_incompatible, mrpack_incompatible, mrpack_version_mismatch, backups_unavailable, backup_running, internal] }
         message: { type: string }
         request_id: { type: string }
     Role: { type: string, enum: [admin, user] }
@@ -2086,7 +2132,7 @@ components:
       required: [file]
       properties:
         file: { type: string, minLength: 5, maxLength: 255, description: 'Base name ending in .jar or .jar.disabled' }
-    PluginJobKind: { type: string, enum: [install, update] }
+    PluginJobKind: { type: string, enum: [install, update, mrpack] }
     PluginJobState: { type: string, enum: [running, done, failed] }
     PluginJobStepState: { type: string, enum: [pending, downloading, done, failed, skipped] }
     PluginStepErrorCode: { type: string, enum: [download_failed, hash_mismatch, file_exists, insufficient_storage, files_unavailable, source_unavailable] }
@@ -2114,6 +2160,90 @@ components:
       required: [job]
       properties:
         job: { anyOf: [{ $ref: '#/components/schemas/PluginJob' }, { type: 'null' }] }
+    MrpackEnvSide: { type: string, enum: [required, optional, unsupported] }
+    MrpackFile:
+      type: object
+      required: [path, hashes]
+      description: 'A file entry of modrinth.index.json; unknown fields are ignored'
+      properties:
+        path: { type: string, minLength: 1, maxLength: 255, description: 'Relative, no "..", no backslash, no leading slash, no control characters; only mods/<name>.jar is used' }
+        hashes:
+          type: object
+          required: [sha512]
+          properties:
+            sha512: { type: string, pattern: '^[0-9A-Fa-f]{128}$' }
+            sha1: { type: string, pattern: '^[0-9A-Fa-f]{40}$' }
+        env:
+          type: object
+          properties:
+            client: { $ref: '#/components/schemas/MrpackEnvSide' }
+            server: { $ref: '#/components/schemas/MrpackEnvSide' }
+        downloads: { type: array, items: { type: string }, description: Ignored }
+        fileSize: { type: integer, format: int64, description: Ignored }
+    MrpackIndex:
+      type: object
+      required: [formatVersion, game, name, files, dependencies]
+      description: 'modrinth.index.json of a .mrpack (camelCase like the file); unknown fields are ignored because the format may grow'
+      properties:
+        formatVersion: { type: integer, enum: [1] }
+        game: { type: string, enum: [minecraft] }
+        versionId: { type: string, maxLength: 128 }
+        name: { type: string, minLength: 1, maxLength: 128 }
+        summary: { type: string, description: Ignored }
+        files: { type: array, maxItems: 2000, items: { $ref: '#/components/schemas/MrpackFile' }, description: 'sha512 and target names (case-insensitive) must be unique' }
+        dependencies:
+          type: object
+          description: 'minecraft (required) and one loader; keys only minecraft, fabric-loader, neoforge, forge, quilt-loader; versions ^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$'
+          additionalProperties: { type: string }
+    MrpackImportRequest:
+      type: object
+      additionalProperties: false
+      required: [index, exclude, accept_mismatch]
+      properties:
+        index: { $ref: '#/components/schemas/MrpackIndex' }
+        exclude: { type: array, maxItems: 2000, items: { type: string, pattern: '^[0-9A-Fa-f]{128}$' }, description: 'sha512 of optional entries not to install' }
+        accept_mismatch: { type: boolean, description: 'Import although version_mismatch is true' }
+    MrpackAction: { type: string, enum: [install, update, unchanged, skip] }
+    MrpackSkipReason: { type: string, enum: [client_only, not_on_modrinth, incompatible, file_exists] }
+    MrpackPlanEntry:
+      type: object
+      required: [file, sha512, action, reason, optional, project, version, replaces]
+      properties:
+        file: { type: string, description: 'Target file name in mods/ (the name from the pack; for skip not_on_modrinth exactly as in the pack, to upload it by hand)' }
+        sha512: { type: string, description: 'Lowercase hex, the key for exclude' }
+        action: { $ref: '#/components/schemas/MrpackAction' }
+        reason: { anyOf: [{ $ref: '#/components/schemas/MrpackSkipReason' }, { type: 'null' }], description: 'Set for skip, else null' }
+        optional: { type: boolean, description: 'env.server is optional: preselected, may be excluded' }
+        project: { anyOf: [{ $ref: '#/components/schemas/PluginProjectRef' }, { type: 'null' }], description: 'null if Modrinth does not know the file' }
+        version: { anyOf: [{ $ref: '#/components/schemas/PluginVersionRef' }, { type: 'null' }], description: 'Pack version of the mod; null if Modrinth does not know the file' }
+        replaces: { type: [string, 'null'], description: 'update: the installed jar that is replaced (its .disabled stays); else null' }
+    MrpackPlan:
+      type: object
+      required: [pack, game_version, loader, version_mismatch, entries, kept, ignored_files]
+      properties:
+        pack:
+          type: object
+          required: [name, version_id]
+          properties:
+            name: { type: string }
+            version_id: { type: string }
+        game_version:
+          type: object
+          required: [pack, server]
+          properties:
+            pack: { type: string }
+            server: { type: string, description: 'Game version of the instance (LATEST resolved)' }
+        loader:
+          type: object
+          required: [name, pack, server]
+          properties:
+            name: { type: string, enum: [fabric, neoforge] }
+            pack: { type: string, description: 'Loader version of the pack' }
+            server: { type: [string, 'null'], description: 'Fixed loader version of the instance; null = newest (never a mismatch)' }
+        version_mismatch: { type: boolean, description: 'The Minecraft version differs, or the loader version differs from a fixed one; the import then needs accept_mismatch' }
+        entries: { type: array, items: { $ref: '#/components/schemas/MrpackPlanEntry' }, description: 'One per mod of the pack, in pack order' }
+        kept: { type: array, items: { type: string }, description: 'Jars in mods/ (with .disabled) that no entry matches or replaces; they stay installed' }
+        ignored_files: { type: integer, description: 'Files of the pack outside mods/<name>.jar (configs, resource packs, ...)' }
     BackupKind: { type: string, enum: [scheduled, manual, pre-restore] }
     BackupSnapshot:
       type: object

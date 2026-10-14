@@ -73,6 +73,7 @@ const (
 	ActionPluginUpdate         = "plugin.update"
 	ActionPluginRemove         = "plugin.remove"
 	ActionPluginToggle         = "plugin.toggle"
+	ActionPluginMrpackImport   = "plugin.mrpack_import"
 	ActionBackupCreate         = "backup.create"
 	ActionBackupRestore        = "backup.restore"
 	ActionBackupDelete         = "backup.delete"

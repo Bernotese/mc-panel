@@ -291,6 +291,10 @@ func TestPluginsErrorsMatchOpenAPI(t *testing.T) {
 			append(slices.Clone(unsupported), answer{400, httpx.CodeValidation}, answer{409, httpx.CodeConflict})},
 		{"getPluginJob", nil, unsupported},
 		{"getPluginIcon", nil, []answer{{400, httpx.CodeValidation}, {404, httpx.CodeNotFound}, {502, httpx.CodePluginSourceUnavailable}}},
+		{"previewMrpack", []error{upstream.ErrUnavailable, filesapi.ErrUnavailable, plugins.ErrMrpackIncompatible},
+			append(append(slices.Clone(unsupported), lookup...), answer{413, httpx.CodePayloadTooLarge})},
+		{"importMrpack", []error{upstream.ErrUnavailable, filesapi.ErrUnavailable, plugins.ErrMrpackIncompatible, plugins.ErrMrpackMismatch, plugins.ErrNothingToImport},
+			append(append(slices.Clone(unsupported), lookup...), answer{409, httpx.CodeConflict}, answer{413, httpx.CodePayloadTooLarge})},
 	}
 	defaults := map[string]string{"BadRequest": httpx.CodeValidation, "NotFound": httpx.CodeNotFound, "TooManyRequests": httpx.CodeRateLimited}
 	for _, o := range ops {
