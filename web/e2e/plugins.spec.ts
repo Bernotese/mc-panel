@@ -12,7 +12,8 @@ test('admin installs ViaBackwards, disables a jar, installs an update and remove
   // Discover on Hangar and install with the dependency preview.
   await page.getByRole('tab', { name: 'Entdecken' }).click()
   const discover = page.getByRole('region', { name: 'Entdecken' })
-  await discover.getByRole('group', { name: 'Quelle' }).getByRole('button', { name: 'Hangar' }).click()
+  await discover.getByRole('tablist', { name: 'Quelle' }).getByRole('tab', { name: 'Hangar' }).click()
+  await expect(discover.getByRole('link', { name: 'Hangar öffnen (neues Fenster)' })).toBeVisible()
   await discover.getByLabel('Suchen').fill('ViaBack')
   await discover.getByRole('button', { name: 'ViaBackwards installieren' }).click()
   const dialog = page.getByRole('dialog', { name: 'ViaBackwards installieren' })
@@ -86,8 +87,8 @@ test('the mods tab of a fabric server offers only Modrinth', async ({ page }) =>
   await page.getByRole('tab', { name: 'Entdecken' }).click()
   const discover = page.getByRole('region', { name: 'Entdecken' })
   await expect(discover.getByRole('heading', { name: 'Beliebt auf Modrinth' })).toBeVisible()
-  await expect(discover.getByRole('group', { name: 'Quelle' })).toHaveCount(0)
-  await expect(discover.getByRole('button', { name: 'Hangar' })).toHaveCount(0)
+  await expect(discover.getByRole('tablist', { name: 'Quelle' })).toHaveCount(0)
+  await expect(discover.getByRole('tab', { name: 'Hangar' })).toHaveCount(0)
 })
 
 test('vanilla servers have neither a plugins nor a mods tab', async ({ page }) => {
