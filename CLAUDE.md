@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 mc-panel is a self-hosted Minecraft server panel: a Go backend with an embedded React SPA, released as static `linux/amd64` and `linux/arm64` binaries. Development happens locally on macOS (Apple Silicon); production is an Ubuntu 26.04 LTS VPS set up by the installer (`install.sh`, sub-project 6: panel, agent and the files service as systemd services behind Caddy). Project docs are written in German:
 
 - `docs/dev/README.md`: toolchain versions, CLI commands, CI jobs and how to reproduce them locally, lint conventions, release process, production setup.
-- `docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`: architecture, security requirements and the roadmap of sub-projects (1 foundation, 2 instances, 3a console, 3b files, 3c plugins, 4 backups, 5 monitoring and 6 installer are done).
+- `docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`: architecture, security requirements and the roadmap of sub-projects (1 foundation, 2 instances, 3a console, 3b files, 3c plugins, 4 backups, 5 monitoring, 6 installer and 7 UI redesign are done).
 - `docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md`: Minecraft instances (sub-project 2); manual acceptance checklist in `docs/dev/acceptance-tp2.md`.
 - `docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md`: console, live log and player management (sub-project 3a); manual acceptance checklist in `docs/dev/acceptance-tp3a.md`.
 - `docs/superpowers/specs/2026-10-11-mc-panel-files-design.md`: file browser through the unprivileged files service (sub-project 3b); manual acceptance checklist in `docs/dev/acceptance-tp3b.md`.
@@ -13,6 +13,7 @@ mc-panel is a self-hosted Minecraft server panel: a Go backend with an embedded 
 - `docs/superpowers/specs/2026-10-13-mc-panel-installer-design.md`: installer `install.sh` with install/update/doctor/uninstall (sub-project 6); manual acceptance checklist in `docs/dev/acceptance-tp6.md`.
 - `docs/superpowers/specs/2026-10-12-mc-panel-backups-design.md`: backups of the server data directories into local restic repositories through the files service (sub-project 4); manual acceptance checklist in `docs/dev/acceptance-tp4.md`.
 - `docs/superpowers/specs/2026-10-13-mc-panel-monitoring-design.md`: monitoring and alerts (sub-project 5); manual acceptance checklist in `docs/dev/acceptance-tp5.md`.
+- `docs/superpowers/specs/2026-10-14-mc-panel-ui-redesign-design.md`: UI redesign (sub-project 7: design tokens, navigation, pages); manual acceptance checklist in `docs/dev/acceptance-tp7.md`.
 
 ## Working rules
 
@@ -35,7 +36,7 @@ make check                  # the local check (format, vet, build for macOS + Li
 make preview                # UI preview in Docker at http://localhost:5180 (mock API); the user starts it, never Claude
 make generate               # sqlc generate + regenerate web/src/api/schema.d.ts from api/openapi.yaml
 
-make test-vm [SUITE=…]       # tests on the test VM (all|go|lint|web|e2e); the Mac never runs them
+make test-vm [SUITE=…]       # tests on the test VM (all|go|lint|web|e2e|shots); the Mac never runs them
 
 # CI and the test VM (via make test-vm) run these; never on the Mac:
 make test                   # go test ./... + vitest
@@ -102,7 +103,11 @@ Linux-specific code sits behind interfaces and is chosen with build tags (`_linu
 
 ### Frontend (`web/`)
 
-React + TypeScript + Vite, TanStack Router (file-based in `src/routes`) and Query, Tailwind and shadcn/ui (`src/components/ui`), react-i18next with `de` as the default and `en`. API types are generated from the OpenAPI spec, and the fetch wrapper in `src/api` sends the CSRF token (`X-CSRF-Token`) automatically. A global sudo dialog handles `sudo_required` and retries the action. No inline scripts or external CDNs are allowed (CSP). `npm run build` refuses to build with MSW active. The console tab reads the log with `EventSource` and renders it with `@tanstack/react-virtual`; ANSI and `§` colour codes become spans, never HTML.
+React + TypeScript + Vite, TanStack Router (file-based in `src/routes`) and Query, Tailwind and shadcn/ui (`src/components/ui`), react-i18next with `de` as the default and `en`. API types are generated from the OpenAPI spec, and the fetch wrapper in `src/api` sends the CSRF token (`X-CSRF-Token`) automatically. A global sudo dialog handles `sudo_required` and retries the action. No inline scripts or external CDNs are allowed (CSP). `npm run build` refuses to build with MSW active. The console reads the log with `EventSource` and renders it with `@tanstack/react-virtual`; ANSI and `§` colour codes become spans, never HTML.
+
+- **Design system (sub-project 7):** dark „M2“ and light „Clean“ are equal; all colours are hex tokens in `src/index.css` (shadcn names plus `--bevel-*`, `--slot-*`, `--status-*`, `--console-*`, `--mc-0…f`), and `src/styles/tokens.test.ts` checks their AA contrast in both modes — every new colour needs a value in `:root` and `.dark`. Utilities: `bevel`/`bevel-primary`/`bevel-danger`/`bevel-pressed`, `bevel-inset` (slots, inputs), `glow`, `pixel-heading`, `console-scope` (always-dark console with its own § colours), `pixel-pattern`. Fonts are self-hosted via fontsource: Space Grotesk (UI), Silkscreen (`font-heading`, only headings/labels/badges, ≥ 12 px), Pixelify Sans (`font-pixel`, numbers/MOTD), JetBrains Mono. Shared blocks in `src/components/`: `PageHeader`, `Section` (instead of ad-hoc cards), `StatSlot` (missing values show „–“, never 0), `PingBars`, `PixelIcon`, `McText`. shadcn components keep their APIs.
+- **Navigation:** icon rail plus server tree (`features/layout`, collapsed state in `localStorage` `mcpanel.tree`; flyout on tablet, drawer on mobile). Server areas are routes under the layout route `routes/_app/servers/$id` (index = overview, `monitoring`, `console`, `players`, `files`, `plugins`, `backups`, `settings`); `serverSections(server, isAdmin)` in `features/servers/sections.ts` alone decides which areas exist (tree, guards, breadcrumb), and `SectionGuard` redirects disallowed ones to the overview. The server header (status, address, power, stat slots) sits above every area; deleting a server is the danger zone at the end of its settings. The files area guards unsaved edits and running uploads itself (`useBlocker`).
+- **Screenshots:** `make test-vm SUITE=shots` runs `web/e2e/shots/*.shots.ts` (helpers `shoot`/`signInMock`) against the mock in dark/light and desktop/mobile and copies the PNGs to `web/screenshots/` (gitignored); use it to review UI changes, it is not part of CI. Section components are tested through `src/test/render-section.tsx`.
 
 ## Conventions
 
