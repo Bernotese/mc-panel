@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -48,6 +49,7 @@ type env struct {
 	gate    *fakeGate
 	purger  *fakePurger
 	logs    *bytes.Buffer // reconcile log output
+	hostMem uint64        // installed host memory in bytes; 0 = unknown
 	h       *servers.Handler
 	mux     http.Handler
 	rootID  int64
@@ -69,6 +71,12 @@ func newEnv(t *testing.T) *env {
 		DB: db, Clock: e.clk, Audit: e.rec, Box: box, Instances: e.agent,
 		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog, Gate: e.gate,
 		Backups: e.purger,
+		HostMemory: func() (uint64, error) {
+			if e.hostMem == 0 {
+				return 0, errors.New("host memory unknown")
+			}
+			return e.hostMem, nil
+		},
 	})
 	mux := chi.NewRouter()
 	e.h.Routes(rbac.NewRouter(mux, rbac.NewDBChecker(db), e.clk))

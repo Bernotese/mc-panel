@@ -199,6 +199,10 @@ func (h *Handler) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		writeValidation(w, r, err.Error())
 		return
 	}
+	if err := checkMemoryLimit(c.MemoryMiB, h.maxMemoryMiB(ctx)); err != nil {
+		writeValidation(w, r, err.Error())
+		return
+	}
 	propsJSON, err := c.propertiesJSON()
 	if err != nil {
 		httpx.Internal(w, r, err)
@@ -329,6 +333,10 @@ func (h *Handler) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := next.validate(set.CurseForgeKey); err != nil {
+		writeValidation(w, r, err.Error())
+		return
+	}
+	if err := checkMemoryLimit(next.MemoryMiB, h.maxMemoryMiB(ctx)); err != nil {
 		writeValidation(w, r, err.Error())
 		return
 	}
