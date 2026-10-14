@@ -1,8 +1,8 @@
-import { test } from '@playwright/test'
-import { openServer, serverSectionLink } from '../helpers'
+import { expect, test } from '@playwright/test'
+import { openServer, serverSectionLink, serverTree } from '../helpers'
 import { shoot, signInMock } from './shoot'
 
-test('shell: dashboard, server sections, collapsed tree', async ({ page }) => {
+test('shell: dashboard, server sections, collapsed tree, expanded rail', async ({ page }) => {
   await signInMock(page)
   await shoot(page, 'shell-dashboard')
   await openServer(page, 'survival')
@@ -13,6 +13,10 @@ test('shell: dashboard, server sections, collapsed tree', async ({ page }) => {
   await shoot(page, 'shell-server-settings')
   await page.getByRole('button', { name: 'Serverliste einklappen' }).click()
   await shoot(page, 'shell-tree-collapsed')
+  await page.getByRole('button', { name: 'Menü ausklappen' }).click()
+  await shoot(page, 'shell-rail-expanded')
+  await page.getByRole('button', { name: 'Serverliste ausklappen' }).click()
+  await shoot(page, 'shell-rail-expanded-tree')
 })
 
 test('shell: phone drawer and tablet flyout', async ({ page }) => {
@@ -27,4 +31,15 @@ test('shell: phone drawer and tablet flyout', async ({ page }) => {
   await page.getByRole('button', { name: 'Serverliste öffnen' }).click()
   await page.waitForTimeout(400)
   await page.screenshot({ path: 'screenshots/shell-flyout-tablet.png' })
+})
+
+test('shell: rail and tree stay in place on a long, scrolled page', async ({ page }) => {
+  await signInMock(page)
+  await serverTree(page).getByRole('link', { name: 'Neuer Server' }).click()
+  await expect(page.getByRole('button', { name: 'Server anlegen' })).toBeVisible()
+  await page.setViewportSize({ width: 1440, height: 700 })
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(300)
+  // A viewport shot (not fullPage): this is what a browser shows after scrolling down.
+  await page.screenshot({ path: 'screenshots/shell-scrolled-desktop.png' })
 })

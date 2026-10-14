@@ -12,7 +12,7 @@ function OverviewRoute() {
   if (server.instance === null) {
     // Pre-instance servers can only be deleted (spec §4.3: their only section is the overview).
     return (
-      <div className="max-w-3xl space-y-4">
+      <div className="space-y-4">
         <p className="text-muted-foreground">{t('servers.detail.not_configured')}</p>
         {isAdmin ? <DeleteServerSection server={server} /> : null}
       </div>

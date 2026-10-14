@@ -44,7 +44,7 @@ export function ServerHeader() {
   const iconState = status.state === 'running' ? 'online' : status.state === 'unknown' ? 'unknown' : 'offline'
 
   return (
-    <section aria-labelledby={id} className="flex flex-col gap-4">
+    <section aria-labelledby={id} className="flex flex-col gap-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <PixelIcon kind="server" state={iconState} size={36} className="hidden sm:block" />
@@ -65,7 +65,7 @@ export function ServerHeader() {
         ) : null}
       </div>
       {instance ? (
-        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-6">
           <StatSlot label={t('servers.header.players')} value={players} />
           <StatSlot label={t('servers.header.tps')} value={tps} tone={tpsTone(tpsValue)} />
           <StatSlot label={t('servers.header.memory')} value={memory} bar={running ? status.memory_bytes / status.memory_limit_bytes : null} />
