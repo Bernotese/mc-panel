@@ -348,7 +348,7 @@ export function FilesTab({ server }: FilesTabProps) {
         {editing === null ? (
           browser()
         ) : wide ? (
-          <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-6">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-6">
             <div className="min-w-0">{browser()}</div>
             <div className="min-w-0 border-l pl-6">
               <FileEditor key={editing} server={server} path={editing} onClose={() => setEditing(null)} onDirtyChange={setEditorDirty} />
