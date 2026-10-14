@@ -46,3 +46,9 @@ export function sectionFromPath(pathname: string): ServerSection {
   const seg = pathname.split('/')[3]
   return SECTION_ORDER.find((s) => s === seg) ?? 'overview'
 }
+
+/** Id of the server whose page is open (`/servers/<id>[/<section>]`), else null. Path-based: other routes have an `$id` param too. */
+export function serverIdFromPath(pathname: string): number | null {
+  const match = /^\/servers\/([1-9]\d*)(?:\/|$)/.exec(pathname)
+  return match ? Number(match[1]) : null
+}
