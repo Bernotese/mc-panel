@@ -17,19 +17,21 @@ import (
 
 var pluginsRule = rbac.Server(rbac.PermServerPlugins, "id")
 
-// wantRoutes are exactly the plugins operations of api/openapi.yaml (V3).
+// wantRoutes are exactly the plugins operations of api/openapi.yaml (V4).
 var wantRoutes = map[string]rbac.Rule{
-	"GET /api/servers/{id}/plugins":          pluginsRule,
-	"GET /api/servers/{id}/plugins/search":   pluginsRule,
-	"GET /api/servers/{id}/plugins/versions": pluginsRule,
-	"GET /api/servers/{id}/plugins/resolve":  pluginsRule,
-	"POST /api/servers/{id}/plugins/install": pluginsRule,
-	"GET /api/servers/{id}/plugins/updates":  pluginsRule,
-	"POST /api/servers/{id}/plugins/update":  pluginsRule,
-	"POST /api/servers/{id}/plugins/toggle":  pluginsRule,
-	"POST /api/servers/{id}/plugins/delete":  pluginsRule,
-	"GET /api/servers/{id}/plugins/jobs":     pluginsRule,
-	"GET /api/servers/{id}/plugins/icon":     pluginsRule,
+	"GET /api/servers/{id}/plugins":                 pluginsRule,
+	"GET /api/servers/{id}/plugins/search":          pluginsRule,
+	"GET /api/servers/{id}/plugins/versions":        pluginsRule,
+	"GET /api/servers/{id}/plugins/resolve":         pluginsRule,
+	"POST /api/servers/{id}/plugins/install":        pluginsRule,
+	"GET /api/servers/{id}/plugins/updates":         pluginsRule,
+	"POST /api/servers/{id}/plugins/update":         pluginsRule,
+	"POST /api/servers/{id}/plugins/toggle":         pluginsRule,
+	"POST /api/servers/{id}/plugins/delete":         pluginsRule,
+	"GET /api/servers/{id}/plugins/jobs":            pluginsRule,
+	"GET /api/servers/{id}/plugins/icon":            pluginsRule,
+	"POST /api/servers/{id}/plugins/mrpack/preview": pluginsRule,
+	"POST /api/servers/{id}/plugins/mrpack/import":  pluginsRule,
 }
 
 func TestRouteContract(t *testing.T) {
