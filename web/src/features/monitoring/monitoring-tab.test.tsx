@@ -58,6 +58,14 @@ describe('MonitoringTab', () => {
     expect(await screen.findByText('Der Agent ist gerade nicht erreichbar; es gibt keine aktuellen Werte.')).toBeInTheDocument()
   })
 
+  it('shows a dash for missing live values', async () => {
+    mockLive(liveMetrics({ tps: null, mspt: null }))
+    mockMetrics()
+    await openMonitoring()
+    const now = await screen.findByRole('region', { name: 'Jetzt' })
+    expect(await within(now).findAllByText('–')).toHaveLength(2)
+  })
+
   it('polls the live values every 5 s only while the tab is open', async () => {
     const live = mockLive((n) => liveMetrics({ players: n }))
     mockMetrics()
