@@ -243,7 +243,7 @@ describe('FilesTab', () => {
     async function zone() {
       const { region } = await openFiles()
       await within(region).findByRole('button', { name: 'plugins' })
-      return { region, zone: within(region).getByRole('table').closest('div.relative.space-y-3') as HTMLElement }
+      return { region, zone: within(region).getByRole('table').closest('div.relative.gap-3') as HTMLElement }
     }
 
     it('keeps the highlight while moving over children and clears it on a real exit', async () => {
