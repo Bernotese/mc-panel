@@ -17,6 +17,8 @@ export const serversKey = ['servers'] as const
 export const serverKey = (id: number) => ['servers', id] as const
 export const catalogKey = (type: InstanceType) => ['server-catalog', type] as const
 export const serverSettingsKey = ['server-settings'] as const
+/** Under the list prefix: creating, changing or deleting a server (which invalidate serversKey) changes allocated_mib. */
+export const memoryLimitsKey = ['servers', 'memory'] as const
 
 /** The panel caches catalogs for an hour; on errors the form switches to free text instead of retrying. */
 const CATALOG_STALE_MS = 60 * 60_000
@@ -45,6 +47,12 @@ export function catalogQueryOptions(type: InstanceType) {
 export const serverSettingsQueryOptions = queryOptions({
   queryKey: serverSettingsKey,
   queryFn: () => unwrap(api.GET('/servers/settings')),
+})
+
+/** Memory bounds of this host and the suggested size of a new server per type (issue #79). */
+export const memoryLimitsQueryOptions = queryOptions({
+  queryKey: memoryLimitsKey,
+  queryFn: () => unwrap(api.GET('/servers/memory')),
 })
 
 export function createServer(body: CreateServerRequest): Promise<Server> {
