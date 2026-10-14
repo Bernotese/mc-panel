@@ -97,14 +97,27 @@ suite_go() {
   CGO_ENABLED=1 go test -race -count=1 ./...
 }
 
+need_shellcheck() {
+  if ! command -v shellcheck > /dev/null 2>&1; then
+    log "installing shellcheck"
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q shellcheck > /dev/null
+  fi
+}
+
 suite_lint() {
   need_go
   need_golangci
   need_node_modules
+  need_shellcheck
   log "golangci-lint run ./..."
   golangci-lint run ./...
   log "eslint + tsc"
   (cd web && npm run lint && npm run typecheck)
+  # Like the CI job installer-lint (installer plan V5).
+  log "installer: assemble, shellcheck, Bash tests"
+  make installer INSTALLER_VERSION=0.0.0-vm
+  shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh
+  bash scripts/install/test.sh
 }
 
 suite_web() {

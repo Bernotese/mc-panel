@@ -2,7 +2,7 @@ SHELL := /bin/bash
 GO ?= go
 export CGO_ENABLED ?= 0
 
-.PHONY: generate check test test-go test-race test-web lint dev preview preview-logs preview-down web-build build release deploy-testvm test-vm clean
+.PHONY: generate check test test-go test-race test-web lint dev preview preview-logs preview-down web-build build release installer deploy-testvm test-vm clean
 
 generate:
 	sqlc generate
@@ -17,6 +17,8 @@ check:
 	GOOS=linux $(GO) vet -tags nftintegration,dockerintegration ./...
 	GOOS=linux GOARCH=arm64 $(GO) build ./...
 	cd web && npm run typecheck
+	@for f in scripts/install/*.sh scripts/install/tests/*.sh; do bash -n "$$f" || exit 1; done
+	scripts/install/assemble.sh 0.0.0-check build/install.sh && bash -n build/install.sh
 
 test: test-go test-web
 
@@ -59,6 +61,13 @@ build: web-build
 release:
 	goreleaser release --clean --snapshot
 
+# Version written into build/install.sh (release: the tag without v; goreleaser passes it).
+INSTALLER_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
+
+# Assembles the installer (installer spec §3) into build/install.sh.
+installer:
+	scripts/install/assemble.sh "$(INSTALLER_VERSION)" build/install.sh
+
 # Builds REF on the internal test VM from GitHub and (re)deploys it there (docs/dev/README.md, "Test-VM").
 TESTVM ?= claude@192.168.1.117
 REF ?= main
@@ -74,5 +83,5 @@ test-vm:
 	TESTVM=$(TESTVM) ./scripts/test-vm.sh $(SUITE)
 
 clean:
-	rm -rf bin dist .dev
+	rm -rf bin build dist .dev
 	find internal/webui/dist -mindepth 1 ! -name .gitkeep -delete

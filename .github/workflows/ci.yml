@@ -41,6 +41,7 @@ jobs:
       nftables: ${{ steps.diff.outputs.nftables }}
       instances: ${{ steps.diff.outputs.instances }}
       release: ${{ steps.diff.outputs.release }}
+      installer: ${{ steps.diff.outputs.installer }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,14 +75,15 @@ jobs:
             echo "$1=${v}"
           }
           gomod='^go\.(mod|sum)$'
-          out go "^(cmd|internal|api)/|${gomod}|^sqlc\.yaml$|^\.golangci\.yml$|^Makefile$|^scripts/install-restic\.sh$"
+          out go "^(cmd|internal|api|deploy)/|${gomod}|^sqlc\.yaml$|^\.golangci\.yml$|^Makefile$|^scripts/install-restic\.sh$"
           out web '^web/|^api/'
           out preview '^web/Dockerfile\.preview$|^compose\.preview\.yaml$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$'
           out openapi '^api/'
           out e2e "^(cmd|internal|api|web)/|${gomod}"
           out nftables "^internal/(agent|defense|auth)/|^cmd/(agent|panel)/|^scripts/ci-acceptance\.sh$|${gomod}"
           out instances "^(cmd|internal)/|^scripts/(ci-instances\.sh|mc-status\.py|install-restic\.sh)$|${gomod}"
-          out release "^cmd/|^internal/webui/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
+          out release "^cmd/|^internal/webui/|^deploy/|^scripts/install/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
+          out installer '^scripts/install/|^deploy/|^scripts/ci-installer\.sh$|^scripts/testvm-deploy\.sh$|^Makefile$|^\.goreleaser\.yaml$'
 
   go:
     name: Go (race tests, lint, vulns)
@@ -520,13 +522,44 @@ jobs:
               echo "::error::expected exactly one archive for ${arch}"
               exit 1
             fi
-            contents="$(tar -tzf "$1" | sort | paste -sd' ' -)"
-            if [ "${contents}" != "agent files panel" ]; then
-              echo "::error::$1 contains '${contents}', expected 'agent files panel'"
-              exit 1
-            fi
+            # The binaries plus the templates the installer uses with --from-dir (installer spec §3).
+            contents="$(tar -tzf "$1" | sort)"
+            for want in agent files panel deploy/systemd/mcpanel-panel.socket deploy/config/panel.toml; do
+              if ! grep -qx "${want}" <<<"${contents}"; then
+                echo "::error::$1 lacks ${want} (contents: $(paste -sd' ' <<<"${contents}"))"
+                exit 1
+              fi
+            done
           done
-          (cd dist && sha256sum -c checksums.txt)
+          # install.sh is a release asset outside dist/ (build/, assembled by the before hook).
+          (cd dist && sha256sum -c --ignore-missing checksums.txt)
+          want="$(sha256sum build/install.sh | awk '{ print $1 }')"
+          if ! grep -qx "${want}  install.sh" dist/checksums.txt; then
+            echo "::error::checksums.txt has no matching entry for install.sh"
+            exit 1
+          fi
+          grep -qx "MCPANEL_VERSION=${version}" build/install.sh
+
+  installer-lint:
+    name: Installer (shellcheck, Bash tests)
+    needs: changes
+    if: needs.changes.outputs.installer == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Assemble
+        run: make installer INSTALLER_VERSION=0.0.0-ci
+
+      - name: shellcheck
+        run: shellcheck --version && shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh
+
+      - name: Bash tests
+        run: bash scripts/install/test.sh
 
   # The one result to wait for (gh pr checks): green when every job either passed or was not
   # needed for this change.
@@ -542,6 +575,7 @@ jobs:
       - nftables
       - instances
       - build
+      - installer-lint
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

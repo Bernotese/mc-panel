@@ -1,0 +1,9 @@
+# Created by mc-panel install.sh {{VERSION}}. Later runs only add missing keys; your edits stay.
+listen = "unix:/run/mc-panel-web/panel.sock"
+public_url = "{{PUBLIC_URL}}"
+data_dir = "/var/lib/mc-panel"
+agent_socket = "/run/mc-panel/agent.sock"
+files_socket = "/run/mc-panel-files/files.sock"
+trusted_proxies = ["127.0.0.1/32", "::1/128"]
+monitoring_ping_addr = "{{PING_ADDR}}"
+instances_dir = "{{INSTANCES_DIR}}"

@@ -88,6 +88,10 @@ jobs:
       - name: Build frontend
         run: make web-build
 
+      # The installer is a release asset of its own (.goreleaser.yaml, before hook skipped).
+      - name: Assemble the installer
+        run: make installer INSTALLER_VERSION="${GITHUB_REF_NAME#v}"
+
       - name: GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
