@@ -40,9 +40,10 @@ upd_fetch_latest_json() {
 }
 
 # upd_probe_health: 0 when panel, agent and files answer on their sockets (the agent and the
-# files service accept root).
+# files service accept root). The panel rejects a socket request without X-Forwarded-For
+# (fail closed, 403 ip_blocked); Caddy always sets it.
 upd_probe_health() {
-  curl -fsS --max-time 5 --unix-socket /run/mc-panel-web/panel.sock http://panel/api/health >/dev/null 2>&1 </dev/null &&
+  curl -fsS --max-time 5 -H "X-Forwarded-For: 127.0.0.1" --unix-socket /run/mc-panel-web/panel.sock http://panel/api/health >/dev/null 2>&1 </dev/null &&
     curl -fsS --max-time 5 --unix-socket /run/mc-panel/agent.sock http://agent/v1/health 2>/dev/null </dev/null | grep -q '"status":"ok"' &&
     curl -fsS --max-time 5 --unix-socket /run/mc-panel-files/files.sock http://files/v1/health 2>/dev/null </dev/null | grep -q '"status":"ok"'
 }
