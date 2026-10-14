@@ -1,11 +1,12 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { useId, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { unwrap } from '@/api/errors'
 import type { SecurityRange } from '@/api/types'
+import { Section } from '@/components/section'
+import { StatSlot } from '@/components/stat-slot'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { errorMessage } from '@/lib/error-message'
 import { useFormat } from '@/lib/format'
 import { AgentStatusCard } from './agent-status-card'
@@ -16,12 +17,7 @@ const RANGES: SecurityRange[] = ['24h', '7d', '30d']
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <section aria-label={label}>
-      <Card className="h-full">
-        <CardHeader>
-          <CardDescription>{label}</CardDescription>
-          <p className="text-3xl font-semibold tabular-nums">{value}</p>
-        </CardHeader>
-      </Card>
+      <StatSlot label={label} value={value} className="h-full py-3 [&>div:nth-child(2)]:text-3xl" />
     </section>
   )
 }
@@ -33,29 +29,21 @@ interface ListItem {
 }
 
 function ListCard({ title, items, empty }: { title: string; items: ListItem[]; empty: string }) {
-  const id = useId()
   return (
-    <Card>
-      <CardHeader>
-        <h3 id={id} className="font-semibold">
-          {title}
-        </h3>
-      </CardHeader>
-      <CardContent>
-        {items.length === 0 ? (
-          <p className="text-muted-foreground text-sm">{empty}</p>
-        ) : (
-          <ul aria-labelledby={id} className="divide-y text-sm">
-            {items.map((item) => (
-              <li key={item.key} className="flex justify-between gap-3 py-1.5">
-                <span className="min-w-0 break-all">{item.label}</span>
-                <span className="text-muted-foreground shrink-0 tabular-nums">{item.value}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
+    <Section title={title} headingLevel={3}>
+      {items.length === 0 ? (
+        <p className="text-muted-foreground text-sm">{empty}</p>
+      ) : (
+        <ul aria-label={title} className="divide-y text-sm">
+          {items.map((item) => (
+            <li key={item.key} className="flex justify-between gap-3 py-1.5">
+              <span className="min-w-0 break-all">{item.label}</span>
+              <span className="text-muted-foreground font-pixel shrink-0 tabular-nums">{item.value}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
   )
 }
 
@@ -90,26 +78,24 @@ export function OverviewTab() {
         <p className="text-muted-foreground">{t('common.loading')}</p>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <Stat label={t('security.overview.failures_total')} value={fmt.number(data.failures_total)} />
             <Stat label={t('security.overview.active_jails')} value={fmt.number(data.active_jails)} />
             <AgentStatusCard />
           </div>
-          <Card>
-            <CardContent className="pt-6">
-              {data.series.length === 0 ? (
-                <p className="text-muted-foreground text-sm">{t('security.overview.no_data')}</p>
-              ) : (
-                <LoginBarChart
-                  data={data.series}
-                  title={t('security.overview.chart_title', { range: t(`security.overview.ranges.${data.range}`) })}
-                  formatTick={formatTick}
-                  labels={{ time: t('security.overview.time'), success: t('security.overview.success'), failure: t('security.overview.failure') }}
-                />
-              )}
-            </CardContent>
-          </Card>
-          <div className="grid gap-4 md:grid-cols-2">
+          <Section>
+            {data.series.length === 0 ? (
+              <p className="text-muted-foreground text-sm">{t('security.overview.no_data')}</p>
+            ) : (
+              <LoginBarChart
+                data={data.series}
+                title={t('security.overview.chart_title', { range: t(`security.overview.ranges.${data.range}`) })}
+                formatTick={formatTick}
+                labels={{ time: t('security.overview.time'), success: t('security.overview.success'), failure: t('security.overview.failure') }}
+              />
+            )}
+          </Section>
+          <div className="grid gap-6 md:grid-cols-2">
             <ListCard
               title={t('security.overview.top_ips')}
               empty={t('security.overview.no_data')}
