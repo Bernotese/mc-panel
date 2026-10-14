@@ -252,6 +252,7 @@ export const de = {
       base_domain_missing: 'Server lassen sich erst anlegen, wenn eine Basisdomain eingetragen ist.',
     },
     form: {
+      section: { basics: 'Grundlagen', resources: 'Ressourcen' },
       name: 'Name',
       name_hint: 'Wird Teil der Adresse: 2–32 Zeichen, Kleinbuchstaben, Ziffern und Bindestrich.',
       address_preview: 'Adresse: {{address}}',

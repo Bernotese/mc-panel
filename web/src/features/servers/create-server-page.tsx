@@ -37,7 +37,7 @@ export function CreateServerPage({ onCreated }: { onCreated(server: Server): voi
     body = (
       <>
         {settings.data.base_domain === null ? (
-          <div role="status" className="mb-6 max-w-3xl rounded-md border p-4 text-sm">
+          <div role="status" className="border-status-starting/60 bg-card mb-6 max-w-3xl border p-4 text-sm">
             <p className="font-medium">{t('servers.create.base_domain_missing_title')}</p>
             <p className="text-muted-foreground mt-1">{t('servers.create.base_domain_missing')}</p>
             <Link to="/settings" className="text-primary mt-2 inline-block underline underline-offset-4">

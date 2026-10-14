@@ -18,11 +18,11 @@ export function CollapsibleSection({
   const [open, setOpen] = useState(false)
   const expanded = open || forceOpen
   return (
-    <section className="rounded-md border">
-      <h2 className="text-base font-semibold">
+    <section className="bg-card border">
+      <h2>
         <button
           type="button"
-          className="hover:bg-muted/50 focus-visible:ring-ring flex w-full items-center justify-between gap-2 rounded-md px-4 py-3 text-left outline-none focus-visible:ring-2"
+          className="hover:bg-accent focus-visible:ring-ring pixel-heading flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm uppercase outline-none focus-visible:ring-2"
           aria-expanded={expanded}
           aria-controls={expanded ? contentId : undefined}
           onClick={() => setOpen(!expanded)}
@@ -33,7 +33,7 @@ export function CollapsibleSection({
       </h2>
       {description ? <p className="text-muted-foreground px-4 pb-3 text-sm">{description}</p> : null}
       {expanded ? (
-        <div id={contentId} className="space-y-4 border-t p-4">
+        <div id={contentId} className="flex flex-col gap-4 border-t p-4">
           {children}
         </div>
       ) : null}
