@@ -91,11 +91,11 @@ export function UsersPage() {
       header: t('users.col.twofa'),
       cell: (u) =>
         !u.totp_enabled && u.passkey_count === 0 ? (
-          <Badge variant="outline">{t('users.twofa_none')}</Badge>
+          <Badge variant="outline" className="text-foreground transition-none">{t('users.twofa_none')}</Badge>
         ) : (
           <span className="flex flex-wrap gap-1">
-            {u.totp_enabled ? <Badge variant="secondary">{t('users.twofa_totp')}</Badge> : null}
-            {u.passkey_count > 0 ? <Badge variant="secondary">{t('users.twofa_passkeys', { n: u.passkey_count })}</Badge> : null}
+            {u.totp_enabled ? <Badge variant="secondary" className="text-foreground transition-none">{t('users.twofa_totp')}</Badge> : null}
+            {u.passkey_count > 0 ? <Badge variant="secondary" className="text-foreground transition-none">{t('users.twofa_passkeys', { n: u.passkey_count })}</Badge> : null}
           </span>
         ),
     },
@@ -110,8 +110,8 @@ export function UsersPage() {
       header: t('users.col.actions'),
       className: 'text-right',
       cell: (u) => (
-        <div className="flex flex-wrap justify-end gap-1.5">
-          <Button asChild size="xs" variant="outline">
+        <div className="flex flex-wrap gap-1.5 md:justify-end">
+          <Button asChild size="xs" variant="outline" className="text-foreground">
             <Link to="/users/$id/permissions" params={{ id: String(u.id) }} aria-label={t('users.permissions_for', { name: u.username })}>
               {t('users.permissions')}
             </Link>

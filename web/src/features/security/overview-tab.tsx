@@ -17,7 +17,7 @@ const RANGES: SecurityRange[] = ['24h', '7d', '30d']
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <section aria-label={label}>
-      <StatSlot label={label} value={value} className="h-full py-3 [&>div:nth-child(2)]:text-3xl" />
+      <StatSlot label={label} value={value} className="flex h-full flex-col justify-center gap-1 py-4 [&>div:nth-child(2)]:text-4xl" />
     </section>
   )
 }
