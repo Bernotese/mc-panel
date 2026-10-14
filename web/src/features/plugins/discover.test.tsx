@@ -44,6 +44,18 @@ describe('Discover', () => {
     ])
   })
 
+  it('shows the results as a tile grid with the install action in each tile', async () => {
+    const { region } = await openDiscover()
+    await within(region).findAllByRole('listitem')
+    const list = within(region)
+      .getAllByRole('list')
+      .find((l) => l.getAttribute('data-layout') === 'grid')
+    expect(list).toBeDefined()
+    const tiles = within(list as HTMLElement).getAllByRole('listitem')
+    expect(tiles.length).toBeGreaterThan(0)
+    expect(within(tiles[0]).getByRole('heading', { level: 4 })).toBeInTheDocument()
+  })
+
   it('searches after a typing pause instead of on every key', async () => {
     // Fake timers jump over the typing pause instead of waiting 400 ms of real time.
     vi.useFakeTimers({ shouldAdvanceTime: true })
