@@ -1,9 +1,12 @@
 import { MoreHorizontal } from 'lucide-react'
+import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { InstalledJar, PluginInventory, PluginUpdate } from '@/api/types'
 import { DataList, type Column } from '@/components/data-list'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,7 +15,17 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
-import { externalHref, jarName, jarVersion } from './model'
+import {
+  externalHref,
+  filterJars,
+  isJarFilterActive,
+  jarName,
+  jarVersion,
+  NO_JAR_FILTER,
+  type JarFilter,
+  type OriginFilter,
+  type StatusFilter,
+} from './model'
 import { PluginIcon } from './plugin-icon'
 
 export interface InstalledListProps {
@@ -34,6 +47,12 @@ export interface InstalledListProps {
 /** Table on desktop, cards on a phone (DataList), spec §7.1. */
 export function InstalledList({ inventory, updates, busy = false, pendingFile = null, onToggle, onRemove, onChangeVersion, onUpdate }: InstalledListProps) {
   const { t } = useTranslation()
+  const searchId = useId()
+  const [filter, setFilter] = useState<JarFilter>(NO_JAR_FILTER)
+  const jars = filterJars(inventory.jars, filter)
+  const filtering = isJarFilterActive(filter)
+  const origins: OriginFilter[] = ['all', ...inventory.sources, 'manual']
+  const statuses: StatusFilter[] = ['all', 'enabled', 'disabled']
 
   function nameCell(jar: InstalledJar) {
     const name = jarName(jar)
@@ -122,13 +141,93 @@ export function InstalledList({ inventory, updates, busy = false, pendingFile = 
     { id: 'actions', header: t('plugins.installed.col.actions'), cell: menu, className: 'w-0 text-right' },
   ]
 
-  return (
+  const list = (
     <DataList
-      items={inventory.jars}
+      items={jars}
       columns={columns}
       rowKey={(jar) => jar.file}
       caption={t('plugins.installed.caption', { dir: inventory.dir })}
-      empty={t('plugins.installed.empty', { dir: inventory.dir })}
+      empty={filtering ? t('plugins.installed.filter.empty') : t('plugins.installed.empty', { dir: inventory.dir })}
     />
+  )
+  // Issue #85: the filters only make sense once there is something to filter.
+  if (inventory.jars.length === 0) return list
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
+        <div className="min-w-0 space-y-2 lg:w-64">
+          <Label htmlFor={searchId}>{t('plugins.installed.filter.search')}</Label>
+          <Input
+            id={searchId}
+            type="search"
+            value={filter.query}
+            placeholder={t('plugins.installed.filter.search_placeholder')}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(e) => setFilter({ ...filter, query: e.target.value })}
+          />
+        </div>
+        <FilterGroup
+          label={t('plugins.installed.filter.status')}
+          options={statuses.map((s) => ({ value: s, label: t(`plugins.installed.filter.status_${s}`) }))}
+          value={filter.status}
+          onChange={(status) => setFilter({ ...filter, status })}
+        />
+        <FilterGroup
+          label={t('plugins.installed.filter.origin')}
+          options={origins.map((o) => ({ value: o, label: o === 'all' ? t('plugins.installed.filter.all') : t(`plugins.source.${o}`) }))}
+          value={filter.origin}
+          onChange={(origin) => setFilter({ ...filter, origin })}
+        />
+        {filtering ? (
+          <Button type="button" variant="ghost" size="sm" onClick={() => setFilter(NO_JAR_FILTER)}>
+            {t('plugins.installed.filter.reset')}
+          </Button>
+        ) : null}
+      </div>
+      {filtering ? (
+        <p className="text-muted-foreground text-xs" aria-live="polite">
+          {t('plugins.installed.filter.count', { shown: jars.length, total: inventory.jars.length })}
+        </p>
+      ) : null}
+      {list}
+    </div>
+  )
+}
+
+/** A segmented single choice (buttons with aria-pressed). */
+function FilterGroup<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string
+  options: { value: T; label: string }[]
+  value: T
+  onChange(value: T): void
+}) {
+  const labelId = useId()
+  return (
+    <div className="space-y-2">
+      <p id={labelId} className="text-sm leading-none font-medium">
+        {label}
+      </p>
+      <div role="group" aria-labelledby={labelId} className="flex flex-wrap gap-1">
+        {options.map((o) => (
+          <Button
+            key={o.value}
+            type="button"
+            size="sm"
+            variant={o.value === value ? 'secondary' : 'outline'}
+            aria-pressed={o.value === value}
+            onClick={() => onChange(o.value)}
+          >
+            {o.label}
+          </Button>
+        ))}
+      </div>
+    </div>
   )
 }
