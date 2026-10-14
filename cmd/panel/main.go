@@ -45,6 +45,7 @@ const usageText = `usage:
   panel serve        [-config path] [-dev]
   panel admin create [-config path] [-dev] -username NAME   (password from stdin)
   panel admin unlock [-config path] [-dev]
+  panel admin list   [-config path] [-dev]
   panel audit verify [-config path] [-dev]
   panel version
 
@@ -70,7 +71,7 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		return 0
 	case "serve":
 		err = serve(args)
-	case "admin create", "admin unlock", "audit verify":
+	case "admin create", "admin unlock", "admin list", "audit verify":
 		err = runCLI(cmd, args, stdin, stdout, stderr)
 	default:
 		_, _ = fmt.Fprintln(stderr, usageText)
@@ -186,6 +187,13 @@ func runCLI(cmd string, args []string, stdin *os.File, stdout, stderr io.Writer)
 		return err
 	}
 	ctx := context.Background()
+	if cmd == "admin list" {
+		// Read-only (installer spec §4.10): no data directory, no migration, no new files.
+		if len(rest) > 0 {
+			return fmt.Errorf("unexpected arguments: %v", rest)
+		}
+		return adminListCommand(ctx, cfg, stdout)
+	}
 	db, err := openDB(ctx, cfg)
 	if err != nil {
 		return err
@@ -246,7 +254,7 @@ func serve(args []string) error {
 	}
 	defer a.Close()
 
-	l, err := listen(ctx, cfg) // closed by srv.Serve / srv.Shutdown (a unix socket file is removed)
+	l, err := listen(ctx, cfg) // closed by srv.Serve / srv.Shutdown (removes a socket file the panel created itself; one passed by systemd stays)
 	if err != nil {
 		return err
 	}
@@ -290,13 +298,34 @@ func serve(args []string) error {
 }
 
 // listen opens the configured listener: "unix:/path" (production default, behind the reverse
-// proxy; a stale socket is replaced only if nobody accepts on it, mode 0660 so the proxy's
-// group can connect) or host:port.
+// proxy) or host:port. For a unix path, a socket handed over by systemd (mcpanel-panel.socket,
+// installer spec §4.6) wins: systemd owns path, owner, caddy group and mode, so the panel needs
+// no membership in the proxy's group. Without activation the panel creates the socket itself
+// (a stale socket is replaced only if nobody accepts on it, mode 0660).
 func listen(ctx context.Context, cfg config.Panel) (net.Listener, error) {
-	if path, ok := cfg.ListenUnix(); ok {
-		return unixsock.Listen(path, 0o660, -1)
+	return listenWith(ctx, cfg, func() (net.Listener, error) {
+		return unixsock.Activated(os.Getenv, os.Unsetenv, os.Getpid())
+	})
+}
+
+func listenWith(ctx context.Context, cfg config.Panel, activated func() (net.Listener, error)) (net.Listener, error) {
+	path, ok := cfg.ListenUnix()
+	if !ok {
+		return (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Listen)
 	}
-	return (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Listen)
+	l, err := activated()
+	if err != nil {
+		return nil, err
+	}
+	if l != nil {
+		if got := l.Addr().String(); got != path {
+			_ = l.Close()
+			return nil, fmt.Errorf("socket activation: socket %q does not match listen %q", got, cfg.Listen)
+		}
+		slog.Info("using the socket passed by systemd", "socket", path)
+		return l, nil
+	}
+	return unixsock.Listen(path, 0o660, -1)
 }
 
 // newHTTPServer returns the panel's HTTP server. UnixConnContext marks connections from the

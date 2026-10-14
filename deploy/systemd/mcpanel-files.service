@@ -1,0 +1,31 @@
+# Managed by mc-panel install.sh {{VERSION}}; install.sh update rewrites this file.
+[Unit]
+Description=mc-panel files service (unprivileged, Minecraft data)
+Requires=mcpanel-files.socket
+Wants=mcpanel-agent.service
+After=network-online.target mcpanel-files.socket mcpanel-agent.service
+
+[Service]
+User=mcpanel-mc
+Group=mcpanel-mc
+ExecStart=/usr/local/bin/files -config /etc/mc-panel-files/files.toml
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ReadWritePaths={{INSTANCES_DIR}}/instances {{INSTANCES_DIR}}/backups
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+UMask=0027
+MemoryMax=1G
+TasksMax=512
+IOWeight=50
+CPUWeight=50
+
+[Install]
+WantedBy=multi-user.target

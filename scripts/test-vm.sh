@@ -25,7 +25,7 @@ dest="mc-panel-test/$(basename "${root}")"
 ssh "${vm}" "mkdir -p ~/${dest}"
 rsync -az --delete \
   --exclude=/.git \
-  --exclude=/bin --exclude=/dist --exclude=/.dev \
+  --exclude=/bin --exclude=/build --exclude=/dist --exclude=/.dev \
   --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' \
   --include=/internal/webui/dist/.gitkeep --exclude='/internal/webui/dist/*' \
   --exclude=/web/node_modules --exclude=/web/.tanstack \

@@ -1,0 +1,18 @@
+# Managed by mc-panel install.sh {{VERSION}}; install.sh update rewrites this file.
+# Host firewall of mc-panel (installer spec §4.8): its own nftables table inet mcpanel_fw,
+# never the agent's table inet mcpanel.
+[Unit]
+Description=mc-panel host firewall (nftables table inet mcpanel_fw)
+DefaultDependencies=no
+Wants=network-pre.target
+Before=network-pre.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/mc-panel/mcpanel_fw.nft
+ExecStop=/usr/sbin/nft delete table inet mcpanel_fw
+
+[Install]
+WantedBy=multi-user.target
