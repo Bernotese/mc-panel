@@ -35,7 +35,7 @@ export function SecurityPage() {
           </TabsList>
         </div>
         {TABS.map(({ id, Component }) => (
-          <TabsContent key={id} value={id} className="pt-4">
+          <TabsContent key={id} value={id} className="pt-6">
             <Component />
           </TabsContent>
         ))}
