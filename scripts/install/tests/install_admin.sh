@@ -6,7 +6,7 @@
 # stores the password it got on stdin in $WORK/created.pw.
 adm_fixture() {
   ADM_EXISTING=""
-  ADMIN_USER="" ADMIN_PASSWORD_FILE=""
+  ADMIN_USER="" ADMIN_PASSWORD_FILE="" ADM_STDIN_READ=0 ADM_STDIN_PW=""
   run_as() {
     printf 'run_as %s\n' "$*" >>"$WORK/calls.log"
     case "$*" in
@@ -134,18 +134,45 @@ test_install_adm_ensure_warns_and_continues_without_tty_and_user() {
   assert_not_called 'admin create'
 }
 
-test_install_adm_ensure_fails_when_create_fails() {
+test_install_adm_ensure_warns_and_continues_when_create_fails() {
   adm_fixture
   ADMIN_USER="admin"
   printf 'short\n' >"$WORK/pw"
   ADMIN_PASSWORD_FILE="$WORK/pw"
   run_as() {
+    printf 'run_as %s\n' "$*" >>"$WORK/calls.log"
     case "$*" in
     *"admin create"*) cat >/dev/null; return 1 ;;
     esac
   }
-  assert_fails adm_ensure
-  assert_contains "$(cat "$WORK/out")" "[warn] panel admin create failed"
+  local out
+  out="$(adm_ensure)"
+  assert_contains "$out" "[warn] panel admin create failed"
+  assert_contains "$out" "[warn] no admin was created; create one later with: sudo runuser -u mcpanel -- /usr/local/bin/panel admin create -config /etc/mc-panel/panel.toml -username <name>"
+  assert_not_contains "$out" "<password>"
+  assert_eq 1 "$(grep -c 'admin create' "$WORK/calls.log")" # a file password is tried once
+}
+
+test_install_adm_ensure_asks_again_at_the_terminal_when_create_fails() {
+  adm_fixture
+  stub adm_has_tty 'return 0'
+  echo 0 >"$WORK/n"
+  adm_read_line() {
+    local n
+    n=$(($(cat "$WORK/n") + 1))
+    echo "$n" >"$WORK/n"
+    echo "admin$n"
+  }
+  stub adm_read_secret 'echo long-enough-secret-1'
+  run_as() {
+    printf 'run_as %s\n' "$*" >>"$WORK/calls.log"
+    case "$*" in
+    *"-username admin1"*) cat >/dev/null; return 1 ;; # rejected (policy)
+    *"admin create"*) cat >"$WORK/created.pw" ;;
+    esac
+  }
+  assert_contains "$(adm_ensure)" "[changed] admin admin2 created"
+  assert_file_eq "$WORK/created.pw" long-enough-secret-1
 }
 
 test_install_adm_ensure_continues_when_list_fails() {
