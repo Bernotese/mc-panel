@@ -52,11 +52,11 @@ export function DataList<T>({ items, columns, rowKey, caption, empty }: DataList
     )
   }
   return (
-    <ul aria-label={caption} className="space-y-3">
+    <ul aria-label={caption} className="space-y-2">
       {items.map((item) => (
         <li key={rowKey(item)}>
-          <Card className="py-3">
-            <CardContent className="px-4">
+          <Card size="sm">
+            <CardContent>
               <dl className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-x-3 gap-y-1.5 text-sm">
                 {columns.map((c) => (
                   <Fragment key={c.id}>
