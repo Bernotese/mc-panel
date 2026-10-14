@@ -5,10 +5,17 @@
 # and dry-run mode, so nothing touches the system. TAP-like output; exit 1 if a test failed.
 set -euo pipefail
 
+umask 022 # lib.sh refuses to write below group-writable directories
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export MCPANEL_INSTALL_NO_MAIN=1 MCPANEL_INSTALL_DRYRUN=1
 # shellcheck source=main.sh
 . "$here/main.sh"
+# A second definition of a test_* name would silently replace the first one.
+_dups="$(grep -hoE '^[[:space:]]*test_[A-Za-z0-9_]+[[:space:]]*\(\)' "$here"/tests/*.sh | tr -d ' \t()' | LC_ALL=C sort | uniq -d)"
+if [[ -n $_dups ]]; then
+  echo "# duplicate test names: $(paste -sd' ' - <<<"$_dups")" >&2
+  exit 1
+fi
 for _f in "$here"/tests/*.sh; do
   # shellcheck disable=SC1090 # test files are found at run time
   . "$_f"
@@ -120,6 +127,7 @@ for t in $(declare -F | awk '{ print $3 }' | grep '^test_' | LC_ALL=C sort); do
     mkdir -p "$WORK"
     : >"$WORK/calls.log"
     DRYRUN=1
+    TTY="$WORK/no-tty" # never the real terminal; tests that need answers write this file
     trap 'rm -rf -- "$ROOT"' EXIT
     "$t"
   ) >"$out" 2>&1

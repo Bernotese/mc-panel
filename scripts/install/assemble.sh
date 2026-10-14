@@ -2,7 +2,11 @@
 # assemble.sh VERSION OUT - joins lib.sh, the step files (alphabetical) and main.sh into one
 # install.sh and embeds every file below deploy/ as a function tpl_<path> (installer plan V5).
 # Bash 3.2 compatible: make installer and make check run it on macOS.
+# The embedded templates are the fallback: render_template prefers the deploy/ of the release
+# being installed (extracted tarball or --from-dir), see lib.sh.
 set -euo pipefail
+# Byte-wise sorting and character classes: the output must not depend on the locale.
+export LC_ALL=C
 
 if [ "$#" -ne 2 ]; then
   echo "usage: assemble.sh VERSION OUT" >&2

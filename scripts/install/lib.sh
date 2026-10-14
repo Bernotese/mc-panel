@@ -42,6 +42,7 @@ reset_globals() {
   FORCE=0
   JSON=0
   ARCH=""
+  BIN_SOURCE_DIR="" # extracted release tarball (binaries.sh); its deploy/ wins in render_template
   WORK="${WORK:-}"
 }
 reset_globals
@@ -57,7 +58,7 @@ TEMPLATE_DIR="${TEMPLATE_DIR:-}"
 # _log TEXT appends to the install log when it exists (best effort, never fails).
 _log() {
   local f="$ROOT$LOG_FILE"
-  if [[ -w $f ]]; then
+  if [[ -w $f && ! -L $f ]]; then
     printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" >>"$f" 2>/dev/null || true
   fi
   return 0
@@ -97,13 +98,14 @@ die() {
 }
 
 # confirm PROMPT: 0 = yes. YES=1 answers yes without asking; without a terminal the answer
-# is no (curl | bash has no stdin, so the question goes to /dev/tty).
+# is no. curl | bash has no stdin and stdout may be a log, so prompt and answer both go
+# through $TTY (/dev/tty; read -p would print the prompt only when stdin is a terminal).
 confirm() {
   if [[ $YES == 1 ]]; then
     return 0
   fi
   local ans=""
-  if ! { [[ -r $TTY ]] && read -r -p "$1 [y/N] " ans <"$TTY"; } 2>/dev/null; then
+  if ! { [[ -r $TTY && -w $TTY ]] && printf '%s [y/N] ' "$1" >>"$TTY" && read -r ans <"$TTY"; } 2>/dev/null; then
     return 1
   fi
   [[ $ans =~ ^[yYjJ] ]]
@@ -111,8 +113,45 @@ confirm() {
 
 # --- versions ------------------------------------------------------------------------------
 
+# _prerelease_ge A B: 0 if pre-release A >= B (SemVer 11.4: dot-separated identifiers,
+# numeric ones compared as numbers and lower than alphanumeric ones, a shorter list of equal
+# identifiers is lower).
+_prerelease_ge() {
+  local LC_ALL=C i x y
+  local -a pa pb
+  IFS=. read -r -a pa <<<"$1"
+  IFS=. read -r -a pb <<<"$2"
+  for ((i = 0; ; i++)); do
+    if ((i >= ${#pb[@]})); then
+      return 0
+    fi
+    if ((i >= ${#pa[@]})); then
+      return 1
+    fi
+    x="${pa[i]}"
+    y="${pb[i]}"
+    if [[ $x =~ ^[0-9]+$ && $y =~ ^[0-9]+$ ]]; then
+      if ((10#$x > 10#$y)); then
+        return 0
+      fi
+      if ((10#$x < 10#$y)); then
+        return 1
+      fi
+    elif [[ $x =~ ^[0-9]+$ ]]; then
+      return 1
+    elif [[ $y =~ ^[0-9]+$ ]]; then
+      return 0
+    elif [[ $x > $y ]]; then
+      return 0
+    elif [[ $x < $y ]]; then
+      return 1
+    fi
+  done
+}
+
 # version_ge A B: 0 if version A >= B. MAJOR.MINOR.PATCH with optional leading v,
-# -prerelease (older than the release) and +build (ignored); 2 for a malformed version.
+# -prerelease (older than the release, compared per SemVer) and +build (ignored); 2 for a
+# malformed version.
 version_ge() {
   local a="${1#v}" b="${2#v}" ap="" bp="" i x y
   a="${a%%+*}"
@@ -150,7 +189,7 @@ version_ge() {
   if [[ -z $bp ]]; then
     return 1
   fi
-  [[ ! $ap < $bp ]]
+  _prerelease_ge "$ap" "$bp"
 }
 
 # --- templates -----------------------------------------------------------------------------
@@ -166,15 +205,17 @@ tpl_func_suffix() {
 }
 
 # render_template NAME: template NAME (path below deploy/) on stdout with every {{KEY}}
-# replaced by the value of KEY_<KEY>. Source: $FROM_DIR/deploy when FROM_DIR is set, else the
+# replaced by the value of KEY_<KEY>. Source (installer plan V5): the deploy/ of the release
+# being installed wins - ${BIN_SOURCE_DIR:-$FROM_DIR}/deploy, i.e. the extracted release
+# tarball (binaries.sh sets BIN_SOURCE_DIR) or the local build of --from-dir -, else the
 # function embedded by assemble.sh, else $TEMPLATE_DIR (source tree). A placeholder without
 # value or an unresolved "{{" ends the run.
 render_template() {
-  local name="$1" fn src out="" rest key var
+  local name="$1" dir="${BIN_SOURCE_DIR:-$FROM_DIR}" fn src out="" rest key var
   fn="tpl_$(tpl_func_suffix "$name")"
-  if [[ -n $FROM_DIR ]]; then
-    [[ -f $FROM_DIR/deploy/$name ]] || die "template deploy/$name is missing in $FROM_DIR"
-    src="$(cat -- "$FROM_DIR/deploy/$name")"
+  if [[ -n $dir ]]; then
+    [[ -f $dir/deploy/$name ]] || die "template deploy/$name is missing in $dir"
+    src="$(cat -- "$dir/deploy/$name")"
   elif declare -F "$fn" >/dev/null; then
     src="$("$fn")"
   elif [[ -n $TEMPLATE_DIR && -f $TEMPLATE_DIR/$name ]]; then
@@ -199,6 +240,15 @@ render_template() {
   printf '%s\n' "$out"
 }
 
+# write_template NAME DEST MODE OWNER GROUP: renders template NAME completely first and
+# writes it with write_file only if that succeeded, so a missing KEY_* never leaves DEST
+# empty or half-written. Prints changed/unchanged.
+write_template() {
+  local content
+  content="$(render_template "$1")" || return "$?"
+  printf '%s\n' "$content" | write_file "$2" "$3" "$4" "$5"
+}
+
 # --- files ---------------------------------------------------------------------------------
 
 # _owner_get PATH: "owner:group" of $ROOT$PATH. In dry-run mode (tests run as a normal user)
@@ -216,6 +266,26 @@ _owner_get() {
   fi
 }
 
+# _root_uid: the uid that must own the directories root writes into: 0, in dry-run mode the
+# test user.
+_root_uid() {
+  if [[ $DRYRUN == 1 ]]; then
+    id -u
+  else
+    echo 0
+  fi
+}
+
+# _dir_safe DIR SHOWN: DIR (with $ROOT) may receive files from root: no symlink, owned by root,
+# not writable by group or others - otherwise another user could swap what root writes there.
+_dir_safe() {
+  local st
+  [[ ! -L $1 ]] || die "$2 is a symlink; refusing to write below it"
+  st="$(stat -c '%u %a' -- "$1")" || die "cannot inspect $2"
+  [[ ${st%% *} == "$(_root_uid)" ]] || die "$2 is not owned by root; refusing to write below it"
+  (((8#${st#* } & 8#022) == 0)) || die "$2 is writable by group or others; refusing to write below it"
+}
+
 # _owner_set PATH OWNER GROUP MODE: records the simulated owner (dry-run only).
 _owner_set() {
   if [[ $DRYRUN == 1 ]]; then
@@ -223,33 +293,51 @@ _owner_set() {
   fi
 }
 
-# write_file DEST MODE OWNER GROUP < content: writes stdin to $ROOT$DEST atomically (temp file
-# in the same directory, then mv) unless content, mode and owner already match; prints
-# "changed" or "unchanged". The directory must exist.
+# write_file [--allow-empty] DEST MODE OWNER GROUP < content: writes stdin to $ROOT$DEST
+# atomically (temp file in the same directory, fsync, then rename) unless content, mode and
+# owner already match; prints "changed" or "unchanged". The directory must exist, belong to
+# root and not be writable by group or others. Empty input is refused unless --allow-empty
+# (a failed render must never truncate a file).
 write_file() {
+  local allow_empty=0
+  if [[ ${1:-} == --allow-empty ]]; then
+    allow_empty=1
+    shift
+  fi
   local dest="$ROOT$1" mode="$2" owner="$3" group="$4" tmp
+  _dir_safe "${dest%/*}" "${1%/*}"
   tmp="$(mktemp "${dest%/*}/.mcpanel-install.XXXXXX")" || die "cannot write to ${1%/*}"
   cat >"$tmp"
-  if [[ -f $dest ]] && cmp -s -- "$tmp" "$dest" && [[ $(stat -c '%a' -- "$dest") == "${mode#0}" ]] &&
+  if [[ $allow_empty == 0 && ! -s $tmp ]]; then
+    rm -f -- "$tmp"
+    die "refusing to write an empty $1"
+  fi
+  if [[ -f $dest && ! -L $dest ]] && cmp -s -- "$tmp" "$dest" && [[ $(stat -c '%a' -- "$dest") == "${mode#0}" ]] &&
     [[ $(_owner_get "$1") == "$owner:$group" ]]; then
     rm -f -- "$tmp"
     echo unchanged
     return 0
   fi
   chmod "$mode" -- "$tmp"
-  sys_chown "$owner:$group" "$tmp"
-  mv -f -- "$tmp" "$dest"
+  sys_chown -h "$owner:$group" "$tmp"
+  sync -- "$tmp"
+  mv -fT -- "$tmp" "$dest"
   _owner_set "$1" "$owner" "$group" "$mode"
   echo changed
 }
 
 # ensure_dir PATH MODE OWNER GROUP: creates $ROOT$PATH (with parents) or corrects mode and
-# owner of an existing directory; never follows a symlink at PATH. Prints changed/unchanged.
+# owner of an existing directory; never follows a symlink at PATH. The nearest existing parent
+# must belong to root and not be writable by group or others. Prints changed/unchanged.
 ensure_dir() {
-  local dir="$ROOT$1" mode="$2" owner="$3" group="$4" changed=0
+  local dir="$ROOT$1" mode="$2" owner="$3" group="$4" changed=0 parent="${1%/*}"
   if [[ -L $dir ]]; then
     die "$1 is a symlink; refusing to use it"
   fi
+  while [[ -n $parent && ! -e $ROOT$parent && ! -L $ROOT$parent ]]; do
+    parent="${parent%/*}"
+  done
+  _dir_safe "$ROOT${parent:-/}" "${parent:-/}"
   if [[ ! -d $dir ]]; then
     [[ ! -e $dir ]] || die "$1 exists but is not a directory"
     mkdir -p -- "$dir"
@@ -260,7 +348,7 @@ ensure_dir() {
     changed=1
   fi
   if [[ $changed == 1 || $(_owner_get "$1") != "$owner:$group" ]]; then
-    sys_chown "$owner:$group" "$dir"
+    sys_chown -h "$owner:$group" "$dir"
     _owner_set "$1" "$owner" "$group" "$mode"
     changed=1
   fi
@@ -271,7 +359,8 @@ ensure_dir() {
 # 5) when KEY is missing on the top level of FILE (before the first [section]); inserts it
 # before that section with a comment; never changes an existing value. Prints changed/unchanged.
 toml_ensure_key() {
-  local file="$ROOT$1" key="$2" value="$3" mode owner group
+  local file="$ROOT$1" key="$2" value="$3" mode og
+  [[ ! -L $file ]] || die "$1 is a symlink; refusing to use it"
   [[ -f $file ]] || die "$1 is missing"
   if awk -v k="$key" '
       /^[[:space:]]*\[/ { exit }
@@ -283,24 +372,25 @@ toml_ensure_key() {
     return 0
   fi
   mode="$(stat -c '%a' -- "$file")"
-  owner="$(stat -c '%U' -- "$file")"
-  group="$(stat -c '%G' -- "$file")"
+  og="$(_owner_get "$1")"
   awk -v line="$key = $value" -v note="# added by install.sh $MCPANEL_VERSION" '
       !done && /^[[:space:]]*\[/ { print note; print line; print ""; done = 1 }
       { print }
-      END { if (!done) { print note; print line } }' "$file" | write_file "$1" "0$mode" "$owner" "$group"
+      END { if (!done) { print note; print line } }' "$file" | write_file "$1" "0$mode" "${og%%:*}" "${og#*:}"
 }
 
 # --- downloads -----------------------------------------------------------------------------
 
-# fetch URL DEST: HTTPS only (also for redirects), TLS >= 1.2, 3 retries.
+# fetch URL DEST: HTTPS only (also for redirects), TLS >= 1.2, 3 retries; gives up after 10
+# minutes or when the transfer stays below 1 KiB/s for a minute.
 fetch() {
   case "$1" in
   https://*) ;;
   *) die "refusing a non-HTTPS download: $1" ;;
   esac
   curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL --retry 3 --retry-delay 2 \
-    --connect-timeout 15 -o "$2" -- "$1" || die "download failed: $1"
+    --connect-timeout 15 --max-time 600 --speed-limit 1024 --speed-time 60 \
+    -o "$2" -- "$1" || die "download failed: $1"
 }
 
 # sha256_verify FILE CHECKSUMS NAME: the single line for NAME in CHECKSUMS (sha256sum format,
@@ -318,7 +408,12 @@ sha256_verify() {
 
 # --- system wrappers -----------------------------------------------------------------------
 
-# _sys CMD...: runs CMD; in dry-run mode only appends "CMD..." to $WORK/calls.log and succeeds.
+# _sys CMD...: runs CMD; in dry-run mode only appends it to $WORK/calls.log and succeeds.
+# calls.log format: one line per call, the command and its arguments exactly as passed, joined
+# by single spaces ("$*"), e.g. "systemctl daemon-reload",
+# "env DEBIAN_FRONTEND=noninteractive apt-get -y -q install caddy", "chown -h root:root /x",
+# "runuser -u mcpanel -- /usr/local/bin/panel admin list". Tests match these lines as fixed
+# strings (assert_called).
 _sys() {
   if [[ $DRYRUN == 1 ]]; then
     printf '%s\n' "$*" >>"$WORK/calls.log"

@@ -123,7 +123,10 @@ parse_args() {
     doctor:--json) JSON=1 ;;
     uninstall:--purge) PURGE=1 ;;
     install:--yes | update:--yes | uninstall:--yes) YES=1 ;;
-    *) die "unknown option for $CMD: $opt (see install.sh --help)" ;;
+    *)
+      usage >&2
+      die "unknown option for $CMD: $opt"
+      ;;
     esac
   done
 }
@@ -156,7 +159,10 @@ validate_args() {
     # curl | bash: stdin is the script itself, so a password comes from a file (spec §4.10).
     [[ -n $ADMIN_USER ]] || die "--admin-password-file needs --admin-user"
     [[ -f $ADMIN_PASSWORD_FILE && ! -L $ADMIN_PASSWORD_FILE ]] || die "--admin-password-file: not a regular file"
-    [[ $(stat -c '%a' -- "$ADMIN_PASSWORD_FILE") == 600 ]] || die "--admin-password-file must have mode 0600"
+    local pw_st
+    pw_st="$(stat -c '%u %a' -- "$ADMIN_PASSWORD_FILE")"
+    [[ ${pw_st%% *} == "$(_root_uid)" ]] || die "--admin-password-file must belong to root"
+    [[ ${pw_st#* } == 600 || ${pw_st#* } == 400 ]] || die "--admin-password-file must have mode 0600 or 0400"
   fi
   if [[ $CMD != install ]]; then
     return 0
@@ -201,15 +207,27 @@ detect_arch() {
 
 setup_work() {
   # update hands over to the install.sh of the target version with exec (B2): the child takes
-  # the parent's WORK (downloads are already there) and removes it at exit.
-  if [[ -n ${MCPANEL_HANDOFF_WORK:-} && -d $MCPANEL_HANDOFF_WORK && $MCPANEL_HANDOFF_WORK == */mc-panel-install.* ]]; then
-    WORK="$MCPANEL_HANDOFF_WORK"
-    unset MCPANEL_HANDOFF_WORK
-  else
-    WORK="$(mktemp -d "${TMPDIR:-/tmp}/mc-panel-install.XXXXXX")"
+  # the parent's WORK (downloads are already there) and removes it at exit. Only a directory
+  # that setup_work itself would have created qualifies: exactly
+  # ${TMPDIR:-/tmp}/mc-panel-install.<alnum>, no symlink, owned by this user (root), mode 0700.
+  local handoff="${MCPANEL_HANDOFF_WORK:-}" base="${TMPDIR:-/tmp}" suffix st
+  unset MCPANEL_HANDOFF_WORK
+  base="${base%/}"
+  WORK=""
+  if [[ -n $handoff && $handoff == "$base"/mc-panel-install.* ]]; then
+    suffix="${handoff#"$base"/mc-panel-install.}"
+    if [[ $suffix =~ ^[A-Za-z0-9]+$ && -d $handoff && ! -L $handoff ]]; then
+      st="$(stat -c '%u %a' -- "$handoff")"
+      if [[ $st == "$(id -u) 700" ]]; then
+        WORK="$handoff"
+      fi
+    fi
+  fi
+  if [[ -z $WORK ]]; then
+    WORK="$(mktemp -d "$base/mc-panel-install.XXXXXX")"
   fi
   # shellcheck disable=SC2064 # expand WORK now: the trap must remove exactly this directory
-  trap "rm -rf -- '$WORK'" EXIT
+  trap "rm -rf -- $(printf '%q' "$WORK")" EXIT
 }
 
 setup_log() {
@@ -217,9 +235,13 @@ setup_log() {
   if [[ $(id -u) -ne 0 ]]; then
     return 0 # doctor without root: no log
   fi
-  if [[ ! -e $f ]]; then
-    (umask 077 && : >"$f")
+  if [[ -L $f ]]; then
+    die "$LOG_FILE is a symlink; refusing to log there"
   fi
+  if [[ ! -e $f ]]; then
+    (umask 077 && set -o noclobber && : >"$f") || die "cannot create $LOG_FILE"
+  fi
+  [[ -f $f && ! -L $f ]] || die "$LOG_FILE is not a regular file"
   chmod 0600 -- "$f"
 }
 
@@ -244,21 +266,27 @@ cmd_install() {
 
 # shellcheck disable=SC2034 # DOC_SUMMARY is read by cmd_doctor (doctor.sh)
 install_summary() {
-  local rc=0
+  local rc=0 admins=""
   DOC_SUMMARY=1
   cmd_doctor || rc=$?
   DOC_SUMMARY=0
+  admins="$(run_as mcpanel "$BIN_DIR/panel" admin list -config "$ETC_PANEL/panel.toml" 2>/dev/null)" || admins=""
   printf '\nmc-panel is installed: https://%s/\n' "$DOMAIN"
+  if [[ -n $admins ]]; then
+    printf 'Admin: %s\n' "${admins//$'\n'/, }"
+  else
+    printf 'No admin yet. Create one with:\n  sudo runuser -u mcpanel -- %s/panel admin create -config %s/panel.toml -username NAME\n' \
+      "$BIN_DIR" "$ETC_PANEL"
+  fi
   if [[ $rc -ne 0 ]]; then
     printf 'doctor reported %s; run: sudo bash install.sh doctor\n' "$([[ $rc -eq 1 ]] && echo warnings || echo errors)"
   fi
-  cat <<'EOF'
-Next steps:
-  1. Log in and set up two-factor authentication.
-  2. Settings: enter the base domain for Minecraft servers (wildcard DNS *.<domain> -> this host).
-  3. Settings: add a notification channel (Discord or ntfy).
-  4. Back up /srv/mc-panel/backups/keys/ - without it the backups cannot be read.
-EOF
+  printf '%s\n' \
+    "Next steps:" \
+    "  1. Log in and set up two-factor authentication." \
+    "  2. Settings: enter the base domain for Minecraft servers (wildcard DNS *.<domain> -> this host)." \
+    "  3. Settings: add a notification channel (Discord or ntfy)." \
+    "  4. Back up $INSTANCES_DIR/backups/keys/ - without it the backups cannot be read."
 }
 
 # shellcheck disable=SC2034 # ARCH is read by the step files (binaries.sh)
