@@ -9,9 +9,9 @@ import { useLogout } from '@/features/auth/use-logout'
 import { cn } from '@/lib/utils'
 import { navItemsFor, type NavItem } from './nav'
 
+// Hover styles only apply to inactive items: as plain classes they fought the active ones (white box on hover in light).
 const ITEM =
-  'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-ring flex size-10 items-center justify-center outline-none focus-visible:ring-2'
-const ACTIVE = 'bg-primary text-primary-foreground bevel-primary hover:bg-primary hover:text-primary-foreground'
+  'text-muted-foreground hover:not-data-[status=active]:bg-sidebar-accent hover:not-data-[status=active]:text-foreground focus-visible:ring-ring flex size-10 items-center justify-center outline-none focus-visible:ring-2 data-[status=active]:bg-primary data-[status=active]:text-primary-foreground data-[status=active]:bevel-primary'
 
 function RailLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }) {
   const { t } = useTranslation()
@@ -27,7 +27,7 @@ function RailLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void
         title={label}
         // Exact for "/": every path starts with it.
         activeOptions={{ exact: item.to === '/', includeSearch: false }}
-        activeProps={{ 'aria-current': 'page', className: ACTIVE }}
+        activeProps={{ 'aria-current': 'page' }}
         onClick={onNavigate}
         className={cn(ITEM, inServers && 'text-primary bg-sidebar-accent bevel')}
       >

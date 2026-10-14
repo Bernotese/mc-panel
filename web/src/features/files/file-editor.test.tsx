@@ -1,7 +1,10 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { renderServerTab } from '@/test/render-section'
 import { server } from '@/mocks/node'
+import { setViewport } from '@/test/media'
+import { FileEditor } from './file-editor'
 import { openFiles } from './test-utils'
 
 // jsdom cannot lay out CodeMirror; the page logic is tested against a textarea with the same contract.
@@ -32,12 +35,12 @@ vi.mock('./code-editor', () => ({
 }))
 
 async function openConfig() {
-  const { user, region } = await openFiles()
+  const { user, region, router } = await openFiles()
   await user.click(await within(region).findByRole('button', { name: 'plugins' }))
   await user.click(await within(region).findByRole('button', { name: 'Essentials' }))
   await user.click(await within(region).findByRole('button', { name: 'config.yml' }))
   const editor = await screen.findByRole('textbox', { name: 'Inhalt von config.yml' })
-  return { user, region, editor }
+  return { user, region, editor, router }
 }
 
 describe('FileEditor', () => {
@@ -100,13 +103,19 @@ describe('FileEditor', () => {
     expect(await within(region).findByRole('button', { name: 'config.yml' })).toBeInTheDocument()
   })
 
-  it('asks before switching tabs with unsaved changes', async () => {
-    const { user, editor } = await openConfig()
+  it('asks before navigating away with unsaved changes', async () => {
+    const { user, editor, router } = await openConfig()
     await user.type(editor, 'x')
-    await user.click(screen.getByRole('tab', { name: 'Übersicht' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Ungespeicherte Änderungen verwerfen?' })
+    act(() => void router.navigate({ to: '/' }))
+    let dialog = await screen.findByRole('dialog', { name: 'Ungespeicherte Änderungen verwerfen?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Abbrechen' }))
+    expect(router.state.location.pathname).toBe('/servers/1/files')
+    expect(screen.getByRole('textbox', { name: 'Inhalt von config.yml' })).toBeInTheDocument()
+
+    act(() => void router.navigate({ to: '/' }))
+    dialog = await screen.findByRole('dialog', { name: 'Ungespeicherte Änderungen verwerfen?' })
     await user.click(within(dialog).getByRole('button', { name: 'Verwerfen' }))
-    expect(await screen.findByRole('region', { name: 'Zustand' })).toBeInTheDocument()
+    await waitFor(() => expect(router.state.location.pathname).toBe('/'))
   })
 
   it('offers a download for files the editor cannot open', async () => {
@@ -126,19 +135,33 @@ describe('FileEditor', () => {
     const editor = await screen.findByRole('textbox', { name: 'Inhalt von server.properties' })
     expect((editor as HTMLTextAreaElement).value).toContain('rcon.password=********')
     expect(screen.getByText(/wird beim Start aus den panel-Einstellungen überschrieben/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Zu den Einstellungen' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Zu den Einstellungen' })).toHaveAttribute('href', '/servers/1/settings')
   })
 
-  it('asks before "Zu den Einstellungen" drops unsaved changes', async () => {
-    const { user, region } = await openFiles()
+  it('asks before "Zu den Einstellungen" drops unsaved changes and then navigates', async () => {
+    const { user, region, router } = await openFiles()
     await user.click(await within(region).findByRole('button', { name: 'server.properties' }))
     const editor = await screen.findByRole('textbox', { name: 'Inhalt von server.properties' })
     await user.type(editor, 'x')
-    await user.click(screen.getByRole('button', { name: 'Zu den Einstellungen' }))
+    await user.click(screen.getByRole('link', { name: 'Zu den Einstellungen' }))
     const dialog = await screen.findByRole('dialog', { name: 'Ungespeicherte Änderungen verwerfen?' })
-    expect(screen.getByRole('tab', { name: 'Dateien', hidden: true })).toHaveAttribute('aria-selected', 'true')
+    expect(router.state.location.pathname).toBe('/servers/1/files')
     await user.click(within(dialog).getByRole('button', { name: 'Verwerfen' }))
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'Einstellungen' })).toHaveAttribute('aria-selected', 'true'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/servers/1/settings'))
+  })
+
+  it('shows no settings link to non-admins', async () => {
+    server.use(
+      http.get('*/api/servers/:id/files/content', () =>
+        HttpResponse.json({ path: 'server.properties', content: 'motd=hi\n', mtime: 1, size: 8 }),
+      ),
+    )
+    await renderServerTab((s) => <FileEditor server={s} path="server.properties" onClose={() => {}} />, {
+      username: 'alice',
+      path: '/servers/1/files',
+    })
+    expect(await screen.findByText(/wird beim Start aus den panel-Einstellungen überschrieben/)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Zu den Einstellungen' })).not.toBeInTheDocument()
   })
 
   describe('after a conflicting save', () => {
@@ -185,5 +208,32 @@ describe('FileEditor', () => {
       expect((await screen.findAllByText('Der Agent ist nicht erreichbar.')).length).toBeGreaterThan(0)
       expect(screen.getByText('Ungespeicherte Änderungen')).toBeInTheDocument()
     })
+  })
+})
+
+describe('two panes from xl', () => {
+  afterEach(() => setViewport('desktop'))
+
+  it('keeps the list beside the editor and asks before switching files with unsaved changes', async () => {
+    // test/media.ts: "desktop" is 1280px = xl.
+    const { user, region, editor } = await openConfig()
+    expect(within(region).getByRole('button', { name: 'config.yml' })).toBeInTheDocument()
+    await user.type(editor, 'x')
+    await user.click(within(region).getByRole('button', { name: 'Server-Daten' }))
+    await user.click(await within(region).findByRole('button', { name: 'bukkit.yml' }))
+    let dialog = await screen.findByRole('dialog', { name: 'Ungespeicherte Änderungen verwerfen?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Abbrechen' }))
+    expect(screen.getByRole('textbox', { name: 'Inhalt von config.yml' })).toBeInTheDocument()
+
+    await user.click(within(region).getByRole('button', { name: 'bukkit.yml' }))
+    dialog = await screen.findByRole('dialog', { name: 'Ungespeicherte Änderungen verwerfen?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Verwerfen' }))
+    expect(await screen.findByRole('textbox', { name: 'Inhalt von bukkit.yml' })).toBeInTheDocument()
+  })
+
+  it('shows either list or editor below xl', async () => {
+    setViewport('mobile')
+    const { region } = await openConfig()
+    expect(within(region).queryByRole('button', { name: 'config.yml' })).not.toBeInTheDocument()
   })
 })

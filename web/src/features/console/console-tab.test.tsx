@@ -3,19 +3,18 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { playerListsKey } from '@/features/players/api'
-import { ServerDetailPage } from '@/features/servers/server-detail-page'
 import { loginAs } from '@/mocks/db'
 import { server } from '@/mocks/node'
-import { renderWithProviders } from '@/test/render'
+import { ConsoleTab } from './console-tab'
 import { FakeEventSource } from './testing/fake-event-source'
 import { stubLogViewport } from './testing/layout'
+import { renderSection } from '@/test/render-section'
 
 let eventSeq = 1_000
 
 async function openConsole(serverId = 1) {
   const user = userEvent.setup()
-  await renderWithProviders(<ServerDetailPage serverId={serverId} />, { me: loginAs('admin') })
-  await user.click(await screen.findByRole('tab', { name: 'Konsole' }))
+  await renderSection(serverId, (s) => <ConsoleTab server={s} />, { me: loginAs('admin') })
   await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
   const es = FakeEventSource.latest()
   act(() => es.open())
@@ -165,9 +164,8 @@ describe('ConsoleTab', () => {
 
   it('refreshes the player data after a command', async () => {
     const user = userEvent.setup()
-    const { queryClient } = await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
+    const { queryClient } = await renderSection(1, (s) => <ConsoleTab server={s} />, { me: loginAs('admin') })
     queryClient.setQueryData(playerListsKey(1), { ops: [], whitelist: [], bans: [], errors: [] })
-    await user.click(await screen.findByRole('tab', { name: 'Konsole' }))
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
     act(() => FakeEventSource.latest().open())
     expect(queryClient.getQueryState(playerListsKey(1))?.isInvalidated).toBe(false)

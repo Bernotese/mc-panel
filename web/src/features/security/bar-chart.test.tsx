@@ -33,6 +33,18 @@ describe('LoginBarChart', () => {
     expect(bars[2].querySelector('[data-series="failure"]')).toHaveAttribute('y', '100')
   })
 
+  it('uses the token colours for success and failure', () => {
+    render(<LoginBarChart data={data} title="Login-Versuche" formatTick={(t) => `T${t}`} labels={labels} />)
+    const success = document.querySelector('rect[data-series="success"]')
+    const failure = document.querySelector('rect[data-series="failure"]')
+    expect(success).toHaveClass('fill-chart-1')
+    expect(failure).toHaveClass('fill-status-error')
+    expect(success).toHaveAttribute('rx', '0')
+    const legend = screen.getByTestId('chart-legend')
+    expect(legend.querySelector('.bg-chart-1')).not.toBeNull()
+    expect(legend.querySelector('.bg-status-error')).not.toBeNull()
+  })
+
   it('shows a legend for both series', () => {
     render(<LoginBarChart data={data} title="Login-Versuche" formatTick={(t) => `T${t}`} labels={labels} />)
     const legend = screen.getByTestId('chart-legend')

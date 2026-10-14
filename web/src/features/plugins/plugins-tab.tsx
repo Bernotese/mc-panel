@@ -6,9 +6,9 @@ import { toast } from 'sonner'
 import { isApiError } from '@/api/errors'
 import type { InstalledJar, PluginKind, PluginUpdates, Server } from '@/api/types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { SectionCard } from '@/features/profile/section-card'
 import { usePower } from '@/features/servers/use-power'
 import { errorMessage } from '@/lib/error-message'
 import { useFormat } from '@/lib/format'
@@ -141,7 +141,7 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
     return (
       <div className="space-y-3">
         {inv.source_errors.length > 0 ? (
-          <p role="status" className="rounded-md border p-3 text-sm">
+          <p role="status" className="bevel-inset px-3 py-2 text-sm">
             {t('plugins.installed.source_errors')}
           </p>
         ) : null}
@@ -179,9 +179,9 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
   )
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-6">
       {inventory.data?.restart_needed ? (
-        <div role="status" className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div role="status" className="border-status-starting/60 bg-card flex flex-col gap-3 border p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
             <p className="font-medium">{t('plugins.restart.title')}</p>
             <p className="text-muted-foreground text-sm">{t('plugins.restart.description')}</p>
@@ -202,17 +202,17 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
           <TabsTrigger value="discover">{t('plugins.view.discover')}</TabsTrigger>
         </TabsList>
         <TabsContent value="installed" className="pt-4">
-          <SectionCard
+          <Section
             title={kind === 'plugin' ? t('plugins.installed.title_plugin') : t('plugins.installed.title_mod')}
             actions={inventory.isError ? undefined : updateActions}
           >
             {installedBody()}
-          </SectionCard>
+          </Section>
         </TabsContent>
         <TabsContent value="discover" className="pt-4">
-          <SectionCard title={t('plugins.discover.title')}>
+          <Section title={t('plugins.discover.title')}>
             <Discover serverId={server.id} sources={inventory.data?.sources ?? sourcesFor(kind)} busy={busy} onInstall={setInstalling} />
-          </SectionCard>
+          </Section>
         </TabsContent>
       </Tabs>
 

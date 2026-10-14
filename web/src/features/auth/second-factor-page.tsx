@@ -46,7 +46,7 @@ export function SecondFactorPage() {
       ) : (
         <Tabs defaultValue={methods[0]}>
           {methods.length > 1 ? (
-            <TabsList className="flex w-full">
+            <TabsList className="flex w-full flex-wrap group-data-horizontal/tabs:h-auto">
               {methods.map((m) => (
                 <TabsTrigger key={m} value={m} className="flex-1">
                   {t(`second_factor.tab_${m}`)}

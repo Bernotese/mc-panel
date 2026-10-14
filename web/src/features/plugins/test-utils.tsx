@@ -1,5 +1,4 @@
 import { screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import type {
   InstalledJar,
@@ -12,10 +11,10 @@ import type {
   PluginUpdate,
   PluginVersion,
 } from '@/api/types'
-import { ServerDetailPage } from '@/features/servers/server-detail-page'
-import { loginAs } from '@/mocks/db'
+import { renderServerTab } from '@/test/render-section'
 import { server } from '@/mocks/node'
-import { renderWithProviders } from '@/test/render'
+import { pluginKindOf } from './model'
+import { PluginsTab } from './plugins-tab'
 
 const slug = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 
@@ -123,9 +122,10 @@ export function update(file: string, from: string, to: string): PluginUpdate {
 }
 
 export async function openPlugins(serverId = 1, username = 'admin', tab: 'Plugins' | 'Mods' = 'Plugins') {
-  const user = userEvent.setup()
-  const { queryClient } = await renderWithProviders(<ServerDetailPage serverId={serverId} />, { me: loginAs(username) })
-  await user.click(await screen.findByRole('tab', { name: tab }))
+  const { user, queryClient } = await renderServerTab(
+    (s) => <PluginsTab server={s} kind={(s.instance && pluginKindOf(s.instance.type)) ?? (tab === 'Mods' ? 'mod' : 'plugin')} />,
+    { serverId, username, path: `/servers/${serverId}/plugins` },
+  )
   const region = await screen.findByRole('region', { name: tab === 'Plugins' ? 'Installierte Plugins' : 'Installierte Mods' })
   return { user, region, queryClient }
 }

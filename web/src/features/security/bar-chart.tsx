@@ -66,9 +66,9 @@ export function LoginBarChart({ data, title, formatTick, labels }: LoginBarChart
             <g key={d.t} data-testid="chart-bar">
               <title>{`${formatTick(d.t)} – ${labels.success}: ${d.success}, ${labels.failure}: ${d.failure}`}</title>
               <rect x={M.left + i * slot} y={M.top} width={slot} height={INNER_H} fill="transparent" />
-              {hs > 0 ? <rect data-series="success" x={x} y={BASELINE - hs} width={barW} height={hs} rx={2} className="fill-[var(--chart-2)]" /> : null}
+              {hs > 0 ? <rect data-series="success" x={x} y={BASELINE - hs} width={barW} height={hs} rx={0} className="fill-chart-1" /> : null}
               {hf > 0 ? (
-                <rect data-series="failure" x={x} y={BASELINE - hs - gap - hf} width={barW} height={hf} rx={2} className="fill-[var(--chart-1)]" />
+                <rect data-series="failure" x={x} y={BASELINE - hs - gap - hf} width={barW} height={hf} rx={0} className="fill-status-error" />
               ) : null}
               {i % tickEvery === 0 ? (
                 <text x={x + barW / 2} y={H - 8} textAnchor="middle" className="fill-muted-foreground text-[10px]">
@@ -81,11 +81,11 @@ export function LoginBarChart({ data, title, formatTick, labels }: LoginBarChart
       </svg>
       <figcaption data-testid="chart-legend" className="flex flex-wrap gap-4 text-sm">
         <span className="flex items-center gap-2">
-          <span aria-hidden="true" className="inline-block size-3 rounded-sm bg-[var(--chart-2)]" />
+          <span aria-hidden="true" className="inline-block size-3 bg-chart-1" />
           {labels.success}
         </span>
         <span className="flex items-center gap-2">
-          <span aria-hidden="true" className="inline-block size-3 rounded-sm bg-[var(--chart-1)]" />
+          <span aria-hidden="true" className="inline-block size-3 bg-status-error" />
           {labels.failure}
         </span>
       </figcaption>

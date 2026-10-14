@@ -29,6 +29,24 @@ describe('AuditPage', () => {
     expect(screen.queryByRole('button', { name: 'Mehr laden' })).not.toBeInTheDocument()
   })
 
+  it('puts all filters into one toolbar row', async () => {
+    await renderWithProviders(<AuditPage />, { me: loginAs('admin') })
+    const toolbar = await screen.findByRole('search', { name: 'Filter' })
+    for (const label of ['Akteur', 'Aktion', 'Ergebnis', 'Von', 'Bis']) {
+      expect(within(toolbar).getByLabelText(label)).toBeInTheDocument()
+    }
+    expect(toolbar).toHaveClass('flex-wrap')
+  })
+
+  it('shows the empty text when filters match nothing', async () => {
+    const user = userEvent.setup()
+    await renderWithProviders(<AuditPage />, { me: loginAs('admin') })
+    await screen.findByRole('table', { name: 'Audit-Einträge' })
+    await user.type(screen.getByLabelText('Aktion'), 'does.not.exist')
+    await user.click(screen.getByRole('button', { name: 'Filtern' }))
+    expect(await screen.findByText('Keine Einträge gefunden.')).toBeInTheDocument()
+  })
+
   it('filters by result', async () => {
     const user = userEvent.setup()
     await renderWithProviders(<AuditPage />, { me: loginAs('admin') })

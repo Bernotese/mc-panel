@@ -9,10 +9,12 @@ import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useMe } from '@/features/auth/me'
 import { errorMessage } from '@/lib/error-message'
 import { downloadUrl, fileContentKey, fileListsKey, readFile, writeFile } from './api'
 import { editorLanguage } from './format'
 import { baseName } from './path'
+import { ServerSettingsLink } from './settings-link'
 
 const CodeEditor = lazy(() => import('./code-editor'))
 
@@ -21,11 +23,11 @@ export interface FileEditorProps {
   path: string
   onClose(): void
   onDirtyChange?(dirty: boolean): void
-  onOpenSettings?(): void
 }
 
-export function FileEditor({ server, path, onClose, onDirtyChange, onOpenSettings }: FileEditorProps) {
+export function FileEditor({ server, path, onClose, onDirtyChange }: FileEditorProps) {
   const { t } = useTranslation()
+  const isAdmin = useMe()?.role === 'admin'
   const queryClient = useQueryClient()
   // The panel limits editor reads and saves (per account and in total): say so instead of "too many attempts".
   const message = (err: unknown) => (isApiError(err, 'rate_limited') ? t('files.editor.busy') : errorMessage(err, t))
@@ -54,7 +56,7 @@ export function FileEditor({ server, path, onClose, onDirtyChange, onOpenSetting
   }, [dirty, onDirtyChange])
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
 
-  // Route changes, reloads and tab switches are asked by the files tab and the detail page (onDirtyChange).
+  // Route changes and reloads are asked by the files area (useBlocker in FilesTab, fed by onDirtyChange).
 
   const save = useMutation({
     mutationFn: ({ content, mtime }: { content: string; mtime: number }) => writeFile(server.id, { path, content, expected_mtime: mtime }),
@@ -154,13 +156,9 @@ export function FileEditor({ server, path, onClose, onDirtyChange, onOpenSetting
         </Button>
       </div>
       {path === 'server.properties' ? (
-        <div role="note" className="flex flex-wrap items-center gap-2 rounded-md border p-3 text-sm">
+        <div role="note" className="bevel-inset flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
           <span>{t('files.editor.properties_hint')}</span>
-          {onOpenSettings ? (
-            <Button type="button" variant="link" className="h-auto p-0" onClick={onOpenSettings}>
-              {t('files.editor.open_settings')}
-            </Button>
-          ) : null}
+          {isAdmin ? <ServerSettingsLink serverId={server.id}>{t('files.editor.open_settings')}</ServerSettingsLink> : null}
         </div>
       ) : null}
       {body()}

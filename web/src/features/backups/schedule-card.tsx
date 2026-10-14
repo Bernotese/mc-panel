@@ -4,9 +4,9 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { BackupSchedule, BackupScheduleMode } from '@/api/types'
 import { NativeSelect } from '@/components/native-select'
+import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { SectionCard } from '@/features/profile/section-card'
 import { FieldRow } from '@/features/servers/field-row'
 import { useFormat } from '@/lib/format'
 import { setSchedule, updateBackupSchedule } from './api'
@@ -34,9 +34,9 @@ export function ScheduleCard({ serverId, schedule }: { serverId: number; schedul
   const { t } = useTranslation()
   const key = JSON.stringify([schedule.mode, schedule.interval_hours, schedule.time_of_day, schedule.weekday, ...KEEP_FIELDS.map((f) => schedule[f])])
   return (
-    <SectionCard title={t('backups.schedule.title')} description={t('backups.schedule.description')}>
+    <Section title={t('backups.schedule.title')} description={t('backups.schedule.description')}>
       <ScheduleForm key={key} serverId={serverId} schedule={schedule} />
-    </SectionCard>
+    </Section>
   )
 }
 

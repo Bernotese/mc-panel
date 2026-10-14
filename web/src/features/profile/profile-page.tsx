@@ -16,7 +16,7 @@ export function ProfilePage() {
   return (
     <>
       <PageHeader title={t('profile.title')} description={me ? t('nav.signed_in_as', { username: me.username }) : t('profile.description')} />
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="flex max-w-3xl flex-col gap-6">
         <LanguageCard />
         <PasswordCard />
         <TwoFactorCard />

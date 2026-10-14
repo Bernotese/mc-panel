@@ -6,11 +6,11 @@ import { api } from '@/api/client'
 import { unwrap } from '@/api/errors'
 import type { Locale } from '@/api/types'
 import { NativeSelect } from '@/components/native-select'
+import { Section } from '@/components/section'
 import { Label } from '@/components/ui/label'
 import { useMe } from '@/features/auth/me'
 import { SUPPORTED_LOCALES } from '@/i18n'
 import { useErrorToast } from '@/lib/error-message'
-import { SectionCard } from './section-card'
 
 export function LanguageCard() {
   const { t } = useTranslation()
@@ -24,7 +24,7 @@ export function LanguageCard() {
     onError: notifyError,
   })
   return (
-    <SectionCard title={t('profile.language.title')}>
+    <Section title={t('profile.language.title')}>
       <div className="space-y-2">
         <Label htmlFor={id}>{t('profile.language.label')}</Label>
         <NativeSelect
@@ -41,6 +41,6 @@ export function LanguageCard() {
           ))}
         </NativeSelect>
       </div>
-    </SectionCard>
+    </Section>
   )
 }

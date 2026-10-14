@@ -28,7 +28,7 @@ export function PowerButtons({
 
   return (
     <>
-      <div role="group" aria-label={t('servers.power_group', { name: server.name })} className="flex flex-wrap gap-2">
+      <div role="group" aria-label={t('servers.power_group', { name: server.name })} className={compact ? 'flex gap-1.5' : 'flex flex-wrap gap-2'}>
         {POWER_ACTIONS.map((action) => {
           const Icon = ICONS[action]
           const label = t(`servers.power.${action}`)
@@ -37,7 +37,8 @@ export function PowerButtons({
               key={action}
               type="button"
               size={compact ? 'icon-sm' : 'sm'}
-              variant={action === 'stop' ? 'outline' : 'default'}
+              // In lists only "start" is the call to action; in the header stop is the odd one out.
+              variant={compact ? (action === 'start' ? 'default' : 'secondary') : action === 'stop' ? 'outline' : 'default'}
               aria-label={compact ? label : undefined}
               title={compact ? label : undefined}
               disabled={power.isPending || !powerAllowed(server.status.state, action) || (extracting && action !== 'stop')}
