@@ -6,6 +6,11 @@ SELECT metric, at, value FROM metrics_raw
 WHERE series = sqlc.arg(series) AND at >= sqlc.arg(from_at) AND at < sqlc.arg(to_at)
 ORDER BY metric, at;
 
+-- name: MonitoringListRawMetric :many
+SELECT at, value FROM metrics_raw
+WHERE series = sqlc.arg(series) AND metric = sqlc.arg(metric) AND at >= sqlc.arg(from_at) AND at < sqlc.arg(to_at)
+ORDER BY at;
+
 -- name: MonitoringList5m :many
 SELECT metric, at, avg, min, max FROM metrics_5m
 WHERE series = sqlc.arg(series) AND at >= sqlc.arg(from_at) AND at < sqlc.arg(to_at)
@@ -73,3 +78,11 @@ ON CONFLICT (key) DO UPDATE SET firing = excluded.firing, since = excluded.since
 
 -- name: MonitoringDeleteAlertState :exec
 DELETE FROM alert_state WHERE key = ?;
+
+-- Earliest timestamp for the first rollup after a start; sql.ErrNoRows = empty table (sqlc types
+-- min(at) as interface{}, ORDER BY at LIMIT 1 keeps it an int64).
+-- name: MonitoringEarliestRaw :one
+SELECT at FROM metrics_raw ORDER BY at LIMIT 1;
+
+-- name: MonitoringEarliest5m :one
+SELECT at FROM metrics_5m ORDER BY at LIMIT 1;
