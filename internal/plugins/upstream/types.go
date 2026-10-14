@@ -62,11 +62,23 @@ type Version struct {
 	GameVersions []string // Modrinth game_versions, Hangar platformDependencies.PAPER
 	Loaders      []string // Modrinth only
 	File         *File    // nil = no downloadable jar
+	Files        []File   // Modrinth: every jar of the version (File is one of them)
 	ExternalURL  string   // Hangar: only available externally
 	Dependencies []Dependency
 }
 
 func (v Version) Downloadable() bool { return v.File != nil }
+
+// FileBySHA512 returns the jar of the version with this sha512 (lowercase hex), e.g. the file a
+// version_files lookup matched, which need not be the primary one.
+func (v Version) FileBySHA512(sum string) (File, bool) {
+	for _, f := range v.Files {
+		if f.SHA512 == sum {
+			return f, true
+		}
+	}
+	return File{}, false
+}
 
 // VersionFilter selects compatible versions.
 type VersionFilter struct {

@@ -74,9 +74,17 @@ func modrinthChannel(t string) Channel {
 	return Alpha // unknown types count as the least stable
 }
 
+func isModrinthJar(f mFile) bool {
+	return f.URL != "" && strings.HasSuffix(strings.ToLower(f.Filename), ".jar")
+}
+
+func (f mFile) norm() File {
+	return File{URL: f.URL, Name: f.Filename, Size: f.Size, SHA512: strings.ToLower(f.Hashes.SHA512)}
+}
+
 // pickModrinthFile returns the primary jar, else the first jar, else nil.
 func pickModrinthFile(files []mFile) *File {
-	isJar := func(f mFile) bool { return f.URL != "" && strings.HasSuffix(strings.ToLower(f.Filename), ".jar") }
+	isJar := isModrinthJar
 	i := slices.IndexFunc(files, func(f mFile) bool { return f.Primary && isJar(f) })
 	if i < 0 {
 		i = slices.IndexFunc(files, isJar)
@@ -84,8 +92,8 @@ func pickModrinthFile(files []mFile) *File {
 	if i < 0 {
 		return nil
 	}
-	f := files[i]
-	return &File{URL: f.URL, Name: f.Filename, Size: f.Size, SHA512: strings.ToLower(f.Hashes.SHA512)}
+	f := files[i].norm()
+	return &f
 }
 
 func (m mVersion) norm() Version {
@@ -93,6 +101,11 @@ func (m mVersion) norm() Version {
 		Source: Modrinth, ID: m.ID, ProjectID: m.ProjectID, Name: cmp.Or(m.VersionNumber, m.ID),
 		Channel: modrinthChannel(m.VersionType), PublishedAt: m.DatePublished,
 		GameVersions: m.GameVersions, Loaders: m.Loaders, File: pickModrinthFile(m.Files),
+	}
+	for _, f := range m.Files {
+		if isModrinthJar(f) {
+			v.Files = append(v.Files, f.norm())
+		}
 	}
 	for _, d := range m.Dependencies {
 		if d.DependencyType == "required" {
@@ -146,6 +159,13 @@ func (c *Client) modrinthSearch(ctx context.Context, q SearchQuery) (SearchResul
 	return out, nil
 }
 
+func (m mProject) norm() Project {
+	return Project{
+		Source: Modrinth, ID: m.ID, Slug: m.Slug, Title: cmp.Or(m.Title, m.Slug, m.ID), Description: m.Description,
+		IconURL: m.IconURL, ServerSide: m.ServerSide,
+	}
+}
+
 func (c *Client) modrinthProject(ctx context.Context, id string) (Project, error) {
 	var m mProject
 	if err := c.doJSON(ctx, http.MethodGet, c.bases.Modrinth+"/v2/project/"+url.PathEscape(id), nil, &m); err != nil {
@@ -154,10 +174,26 @@ func (c *Client) modrinthProject(ctx context.Context, id string) (Project, error
 	if !validRef(m.ID) {
 		return Project{}, fmt.Errorf("%w: modrinth project %q without a valid id", ErrUnavailable, id)
 	}
-	return Project{
-		Source: Modrinth, ID: m.ID, Slug: m.Slug, Title: cmp.Or(m.Title, m.Slug, m.ID), Description: m.Description,
-		IconURL: m.IconURL, ServerSide: m.ServerSide,
-	}, nil
+	return m.norm(), nil
+}
+
+// modrinthProjects fetches several projects by id in one request (unknown ids are left out).
+func (c *Client) modrinthProjects(ctx context.Context, ids []string) ([]Project, error) {
+	b, err := json.Marshal(ids)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	var resp []mProject
+	if err := c.doJSON(ctx, http.MethodGet, c.bases.Modrinth+"/v2/projects?"+url.Values{"ids": {string(b)}}.Encode(), nil, &resp); err != nil {
+		return nil, err
+	}
+	out := make([]Project, 0, len(resp))
+	for _, m := range resp {
+		if validRef(m.ID) {
+			out = append(out, m.norm())
+		}
+	}
+	return out, nil
 }
 
 func (c *Client) modrinthVersions(ctx context.Context, project string, loaders []string, gv string) ([]Version, error) {

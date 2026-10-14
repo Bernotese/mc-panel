@@ -41,6 +41,8 @@ const (
 	MaxVersions = 25
 	// MaxHashBatch is the most hashes per Modrinth version_files request.
 	MaxHashBatch = 500
+	// MaxProjectBatch is the most project ids per Modrinth /v2/projects request (URL length).
+	MaxProjectBatch = 100
 	// MaxCacheEntries bounds every cache (oldest first out).
 	MaxCacheEntries = 1000
 
