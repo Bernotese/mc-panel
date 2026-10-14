@@ -211,7 +211,7 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
         </TabsContent>
         <TabsContent value="discover" className="pt-4">
           <Section title={t('plugins.discover.title')}>
-            <Discover serverId={server.id} sources={inventory.data?.sources ?? sourcesFor(kind)} busy={busy} onInstall={setInstalling} />
+            <Discover serverId={server.id} kind={kind} sources={inventory.data?.sources ?? sourcesFor(kind)} busy={busy} onInstall={setInstalling} />
           </Section>
         </TabsContent>
       </Tabs>

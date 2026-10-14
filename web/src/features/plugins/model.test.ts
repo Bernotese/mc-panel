@@ -5,12 +5,16 @@ import {
   canInstall,
   defaultVersion,
   externalHref,
+  filterJars,
   iconSrc,
+  isJarFilterActive,
   isJobRunning,
   jarName,
   jarVersion,
   jobProgress,
+  NO_JAR_FILTER,
   pluginKindOf,
+  sourceHomeUrl,
   sourcesFor,
   uniqueHits,
   updatesByFile,
@@ -183,5 +187,36 @@ describe('URL filters', () => {
     expect(externalHref('data:text/html,hi')).toBeNull()
     expect(externalHref('not a url')).toBeNull()
     expect(externalHref(null)).toBeNull()
+  })
+})
+
+describe('installed filters', () => {
+  const jars: InstalledJar[] = [
+    { ...base, file: 'LuckPerms.jar', source: 'modrinth', project: { id: 'p', slug: 'luckperms', title: 'LuckPerms', page_url: '', icon_url: null } },
+    { ...base, file: 'Off.jar.disabled', enabled: false, source: 'hangar' },
+    { ...base, file: 'Tool.jar' },
+  ]
+  const files = (f: Parameters<typeof filterJars>[1]) => filterJars(jars, f).map((j) => j.file)
+
+  it('keeps everything without a filter', () => {
+    expect(files(NO_JAR_FILTER)).toHaveLength(3)
+    expect(isJarFilterActive(NO_JAR_FILTER)).toBe(false)
+    expect(isJarFilterActive({ ...NO_JAR_FILTER, query: '  ' })).toBe(false)
+  })
+
+  it('combines name, status and origin', () => {
+    expect(files({ ...NO_JAR_FILTER, query: ' LUCK ' })).toEqual(['LuckPerms.jar'])
+    expect(files({ ...NO_JAR_FILTER, query: 'disabled' })).toEqual(['Off.jar.disabled'])
+    expect(files({ ...NO_JAR_FILTER, status: 'enabled' })).toEqual(['LuckPerms.jar', 'Tool.jar'])
+    expect(files({ ...NO_JAR_FILTER, status: 'disabled', origin: 'hangar' })).toEqual(['Off.jar.disabled'])
+    expect(files({ ...NO_JAR_FILTER, status: 'disabled', origin: 'manual' })).toEqual([])
+  })
+})
+
+describe('sourceHomeUrl', () => {
+  it('links the listing that matches the kind', () => {
+    expect(sourceHomeUrl('modrinth', 'plugin')).toBe('https://modrinth.com/plugins')
+    expect(sourceHomeUrl('modrinth', 'mod')).toBe('https://modrinth.com/mods')
+    expect(sourceHomeUrl('hangar', 'plugin')).toBe('https://hangar.papermc.io/')
   })
 })
