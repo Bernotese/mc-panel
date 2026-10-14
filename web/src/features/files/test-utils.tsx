@@ -1,13 +1,13 @@
 import { screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { ServerDetailPage } from '@/features/servers/server-detail-page'
-import { loginAs } from '@/mocks/db'
-import { renderWithProviders } from '@/test/render'
+import { renderServerTab } from '@/features/servers/tab-test-utils'
+import { FilesTab } from './files-tab'
 
 export async function openFiles(serverId = 1, username = 'admin') {
-  const user = userEvent.setup()
-  await renderWithProviders(<ServerDetailPage serverId={serverId} />, { me: loginAs(username) })
-  await user.click(await screen.findByRole('tab', { name: 'Dateien' }))
+  const { user, router, queryClient } = await renderServerTab((server) => <FilesTab server={server} />, {
+    serverId,
+    username,
+    path: `/servers/${serverId}/files`,
+  })
   const region = await screen.findByRole('region', { name: 'Dateien' })
-  return { user, region }
+  return { user, region, router, queryClient }
 }
