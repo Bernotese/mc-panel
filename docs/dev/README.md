@@ -287,7 +287,7 @@ git tag -a v0.1.0 -m "mc-panel v0.1.0"
 git push origin v0.1.0
 ```
 
-Der Workflow `.github/workflows/release.yml` prüft zuerst, dass der getaggte Commit in `main` enthalten ist (sonst Abbruch), führt `make lint`, `make test` und `make test-race` aus, baut das Frontend und veröffentlicht mit GoReleaser (nur dieser letzte Schritt sieht `GITHUB_TOKEN`):
+Der Workflow `.github/workflows/release.yml` prüft zuerst, dass der getaggte Commit in `main` enthalten ist (sonst Abbruch). Der Job „Lint and tests“ führt `make lint`, `make test` und `make test-race` auf den selbst gehosteten Runnern der Test-VM aus (nur Lesezugriff, gleiche Sperre wie `make test-vm`; auf einem GitHub-Runner brauchte allein Vitest über 13 Minuten). Erst danach baut der Job „GoReleaser“ auf einem frischen GitHub-Runner ohne Caches das Frontend und veröffentlicht mit GoReleaser (nur dieser letzte Schritt sieht `GITHUB_TOKEN`):
 
 - `mc-panel_<version>_linux_amd64.tar.gz`, `mc-panel_<version>_linux_arm64.tar.gz` (je `panel`, `agent` und `files` sowie `deploy/` mit den Vorlagen des Installers)
 - `install.sh` (der zusammengefügte Installer dieser Version, `make installer` vor goreleaser)
