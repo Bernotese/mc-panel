@@ -14,6 +14,14 @@ import { serversQueryOptions } from '@/features/servers/api'
 import { errorMessage, useErrorToast } from '@/lib/error-message'
 import { fromMatrix, newlyGranted, sameMatrix, toggle, toMatrix, type Matrix } from './permission-matrix'
 
+function Warning({ children }: { children: string }) {
+  return (
+    <p role="status" data-tone="danger" className="bevel-inset text-foreground border-destructive mb-4 border-l-4 px-3 py-2 text-sm">
+      {children}
+    </p>
+  )
+}
+
 export function UserPermissionsPage({ userId }: { userId: number }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -60,10 +68,11 @@ export function UserPermissionsPage({ userId }: { userId: number }) {
       (p): Column<Server> => ({
         id: p,
         header: t(`permission.${p}`),
+        className: 'text-center',
         cell: (s) => (
           <input
             type="checkbox"
-            className="accent-primary size-4"
+            className="accent-primary size-4 align-middle"
             aria-label={t('permissions.checkbox', { server: s.name, permission: t(`permission.${p}`) })}
             checked={targetIsAdmin || (current[s.id]?.includes(p) ?? false)}
             disabled={targetIsAdmin || save.isPending}
@@ -102,21 +111,9 @@ export function UserPermissionsPage({ userId }: { userId: number }) {
           {t('permissions.unsaved')}
         </Badge>
       ) : null}
-      {filesWarning ? (
-        <p role="status" className="border-destructive/50 mb-4 rounded-md border p-3 text-sm">
-          {t('permissions.files_warning')}
-        </p>
-      ) : null}
-      {pluginsWarning ? (
-        <p role="status" className="border-destructive/50 mb-4 rounded-md border p-3 text-sm">
-          {t('permissions.plugins_warning')}
-        </p>
-      ) : null}
-      {backupsWarning ? (
-        <p role="status" className="border-destructive/50 mb-4 rounded-md border p-3 text-sm">
-          {t('permissions.backups_warning')}
-        </p>
-      ) : null}
+      {filesWarning ? <Warning>{t('permissions.files_warning')}</Warning> : null}
+      {pluginsWarning ? <Warning>{t('permissions.plugins_warning')}</Warning> : null}
+      {backupsWarning ? <Warning>{t('permissions.backups_warning')}</Warning> : null}
       <DataList items={servers.data} columns={columns} rowKey={(s) => s.id} caption={t('permissions.caption')} empty={t('permissions.no_servers')} />
     </>
   )

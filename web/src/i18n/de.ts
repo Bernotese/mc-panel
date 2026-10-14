@@ -1329,6 +1329,7 @@ export const de = {
     action: 'Aktion',
     result_label: 'Ergebnis',
     result_all: 'Alle',
+    filters_label: 'Filter',
     from: 'Von',
     to: 'Bis',
     result: {
