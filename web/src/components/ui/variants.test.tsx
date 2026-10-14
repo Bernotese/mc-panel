@@ -1,7 +1,11 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { NativeSelect } from '../native-select'
 import { Badge } from './badge'
 import { Button } from './button'
+import { Input } from './input'
+import { Select, SelectTrigger, SelectValue } from './select'
+import { Switch } from './switch'
 
 function cls(el: Element): string[] {
   return (el.getAttribute('class') ?? '').split(/\s+/)
@@ -59,5 +63,40 @@ describe('Badge', () => {
   it('destructive badge is solid red', () => {
     render(<Badge variant="destructive">Fehler</Badge>)
     expect(cls(screen.getByText('Fehler'))).toEqual(expect.arrayContaining(['bg-destructive-solid', 'bevel-danger']))
+  })
+})
+
+describe('form controls', () => {
+  it('input and native select are sunken slots with a focus outline', () => {
+    render(
+      <>
+        <Input aria-label="Name" />
+        <NativeSelect aria-label="Typ">
+          <option>a</option>
+        </NativeSelect>
+      </>,
+    )
+    for (const el of [screen.getByRole('textbox', { name: 'Name' }), screen.getByRole('combobox', { name: 'Typ' })]) {
+      expect(cls(el)).toEqual(expect.arrayContaining(['bevel-inset', 'h-9', 'focus-visible:outline-2', 'focus-visible:outline-ring']))
+      expect(cls(el).some((x) => /^(dark:)?bg-/.test(x))).toBe(false)
+    }
+  })
+  it('select trigger is a slot', () => {
+    render(
+      <Select>
+        <SelectTrigger aria-label="Version">
+          <SelectValue placeholder="–" />
+        </SelectTrigger>
+      </Select>,
+    )
+    const trigger = screen.getByRole('combobox', { name: 'Version' })
+    expect(trigger).toHaveAttribute('data-slot', 'select-trigger')
+    expect(cls(trigger)).toEqual(expect.arrayContaining(['bevel-inset', 'focus-visible:outline-ring']))
+  })
+  it('switch track shows the checked state in primary and never combines bevel-inset with bg', () => {
+    render(<Switch aria-label="An" defaultChecked />)
+    const sw = screen.getByRole('switch', { name: 'An' })
+    expect(cls(sw)).toEqual(expect.arrayContaining(['data-checked:bg-primary', 'data-unchecked:bg-slot']))
+    expect(cls(sw)).not.toContain('bevel-inset')
   })
 })
