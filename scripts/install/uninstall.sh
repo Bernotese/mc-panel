@@ -6,19 +6,29 @@
 # cmd_uninstall returns 0 (removed) or 1 (aborted).
 
 UNI_IMPORT_LINE='import mc-panel.caddy # managed by mc-panel'
-# Stop order: the panel first, the agent last (it must not recreate containers meanwhile).
-UNI_UNITS=(mcpanel-panel.service mcpanel-panel.socket mcpanel-files.service mcpanel-files.socket
+# Stop order: the panel first, the agent last (it must not recreate containers meanwhile); a
+# socket before its service, or socket activation would start the service again.
+UNI_UNITS=(mcpanel-panel.socket mcpanel-panel.service mcpanel-files.socket mcpanel-files.service
   mcpanel-agent.service mcpanel-fw.service)
+UNI_IMPORT_RE='^[[:space:]]*import[[:space:]]+mc-panel\.caddy([[:space:]]|$)'
+UNI_FAILED=() # what --purge could not delete
 UNI_TABLES=(mcpanel_fw mcpanel)
 UNI_SOCKETS=(/run/mc-panel-web/panel.sock /run/mc-panel-files/files.sock /run/mc-panel/agent.sock)
 
 # --- probes (tests redefine these) ---------------------------------------------------------
 
-uni_probe_containers() { docker ps -aq --filter label=mcpanel.instance 2>/dev/null; }
-uni_probe_has_router() { docker container inspect mcpanel-router >/dev/null 2>&1; }
-uni_probe_has_network() { docker network inspect mcpanel-mc >/dev/null 2>&1; }
-uni_probe_has_table() { nft list table inet "$1" >/dev/null 2>&1; }
+uni_probe_containers() { docker ps -aq --filter label=mcpanel.instance 2>/dev/null </dev/null; }
+uni_probe_running_containers() { docker ps -q --filter label=mcpanel.instance 2>/dev/null </dev/null; }
+# The router and the network only count as ours with the labels the agent sets (template.go).
+uni_probe_has_router() {
+  [[ $(docker container inspect -f '{{index .Config.Labels "mcpanel.router"}}' mcpanel-router 2>/dev/null </dev/null) == 1 ]]
+}
+uni_probe_has_network() {
+  [[ $(docker network inspect -f '{{index .Labels "mcpanel.network"}}' mcpanel-mc 2>/dev/null </dev/null) == 1 ]]
+}
+uni_probe_has_table() { nft list table inet "$1" >/dev/null 2>&1 </dev/null; }
 uni_probe_user_exists() { getent passwd "$1" >/dev/null 2>&1; }
+uni_probe_mountpoint() { mountpoint -q -- "$1" 2>/dev/null; }
 uni_userdel() { sys_userdel "$1"; }
 
 # uni_read_tty PROMPT: prints PROMPT on the terminal and the line typed there; 1 without a
@@ -67,8 +77,8 @@ uni_units() {
   local u removed=0
   for u in "${UNI_UNITS[@]}"; do
     [[ -f $ROOT$UNIT_DIR/$u || -L $ROOT$UNIT_DIR/$u ]] || continue
-    sys_systemctl stop "$u" || true
-    sys_systemctl disable "$u" || true
+    sys_systemctl stop "$u" </dev/null || true
+    sys_systemctl disable "$u" </dev/null || true
     rm -f -- "$ROOT$UNIT_DIR/$u"
     log_changed "removed $u"
     removed=1
@@ -93,9 +103,11 @@ uni_binaries() {
   fi
 }
 
-# uni_caddy removes exactly the marked import line (other sites stay) and mc-panel.caddy.
+# uni_caddy removes exactly the marked import line (other sites stay) and mc-panel.caddy. An
+# import line of the operator (unmarked) stays; mc-panel.caddy then becomes a comment-only file,
+# so Caddy still loads. The configuration is validated as caddy before the reload.
 uni_caddy() {
-  local file="$CADDY_DIR/Caddyfile" touched=0 mode og content
+  local file="$CADDY_DIR/Caddyfile" site="$CADDY_DIR/mc-panel.caddy" touched=0 mode og content foreign=0
   if [[ -f $ROOT$file && ! -L $ROOT$file ]] && grep -qxF -- "$UNI_IMPORT_LINE" "$ROOT$file"; then
     mode="$(stat -c '%a' -- "$ROOT$file")"
     og="$(_owner_get "$file")"
@@ -107,14 +119,28 @@ uni_caddy() {
     fi
     touched=1
   fi
-  if [[ -e $ROOT$CADDY_DIR/mc-panel.caddy || -L $ROOT$CADDY_DIR/mc-panel.caddy ]]; then
-    rm -f -- "$ROOT$CADDY_DIR/mc-panel.caddy"
+  if [[ -f $ROOT$file && ! -L $ROOT$file ]] && grep -vxF -- "$UNI_IMPORT_LINE" "$ROOT$file" | grep -qE "$UNI_IMPORT_RE"; then
+    foreign=1
+  fi
+  if [[ $foreign == 1 ]]; then
+    if [[ -e $ROOT$site || -L $ROOT$site ]] && ! grep -q '^# mc-panel was uninstalled' "$ROOT$site" 2>/dev/null; then
+      printf '%s\n' "# mc-panel was uninstalled; remove \"import mc-panel.caddy\" from $file and then this file." |
+        write_file "$site" 0644 root root >/dev/null
+      touched=1
+    fi
+    warn "$file still imports mc-panel.caddy (a line not written by install.sh); $site is now empty - remove that line and the file yourself"
+  elif [[ -e $ROOT$site || -L $ROOT$site ]]; then
+    rm -f -- "$ROOT$site"
     touched=1
   fi
-  if [[ $touched == 1 ]]; then
-    log_changed "removed the panel site from Caddy"
-    sys_systemctl reload caddy || warn "reloading Caddy failed; check $CADDY_DIR/Caddyfile (systemctl status caddy)"
+  [[ $touched == 1 ]] || return 0
+  log_changed "removed the panel site from Caddy"
+  # as caddy with its own HOME, like install (caddy.sh)
+  if ! run_as caddy env HOME=/var/lib/caddy caddy validate --config "$file" --adapter caddyfile </dev/null >/dev/null 2>&1; then
+    warn "caddy rejects $file now; Caddy was not reloaded - fix the file, then: systemctl reload caddy"
+    return 0
   fi
+  sys_systemctl reload caddy.service </dev/null || warn "reloading Caddy failed (systemctl status caddy)"
 }
 
 uni_firewall() {
@@ -126,23 +152,35 @@ uni_firewall() {
   done
 }
 
-# uni_docker removes the Minecraft containers (label mcpanel.instance), the router and the
-# network directly: the agent is stopped by now. Other containers are never touched.
+# uni_docker stops the Minecraft containers (label mcpanel.instance) with time to save the
+# worlds and removes them, then the router and the network (only with the agent's labels)
+# directly: the agent is stopped by now. Other containers are never touched.
 uni_docker() {
-  local ids=() id
+  local ids=() running=() id
   while IFS= read -r id; do
-    [[ $id =~ ^[0-9a-f]{12,64}$ ]] && ids+=("$id")
+    if [[ $id =~ ^[0-9a-f]{12,64}$ ]]; then running+=("$id"); fi
+  done < <(uni_probe_running_containers || true)
+  while IFS= read -r id; do
+    if [[ $id =~ ^[0-9a-f]{12,64}$ ]]; then ids+=("$id"); fi
   done < <(uni_probe_containers || true)
+  if ((${#running[@]} > 0)); then
+    # up to 60 s to save the worlds, as the agent gives them
+    if sys_docker stop -t 60 "${running[@]}" </dev/null; then
+      log_changed "stopped ${#running[@]} Minecraft server(s)"
+    else
+      warn "could not stop all Minecraft servers; they are removed anyway"
+    fi
+  fi
   if ((${#ids[@]} > 0)); then
-    sys_docker rm -f "${ids[@]}" || warn "could not remove all Minecraft containers"
+    sys_docker rm -f "${ids[@]}" </dev/null || warn "could not remove all Minecraft containers"
     log_changed "removed ${#ids[@]} Minecraft container(s); their data stays in $INSTANCES_DIR/instances"
   fi
   if uni_probe_has_router; then
-    sys_docker rm -f mcpanel-router || warn "could not remove mcpanel-router"
+    sys_docker rm -f mcpanel-router </dev/null || warn "could not remove mcpanel-router"
     log_changed "removed the container mcpanel-router"
   fi
   if uni_probe_has_network; then
-    sys_docker network rm mcpanel-mc || warn "could not remove the network mcpanel-mc"
+    sys_docker network rm mcpanel-mc </dev/null || warn "could not remove the network mcpanel-mc"
     log_changed "removed the network mcpanel-mc"
   fi
 }
@@ -161,28 +199,45 @@ uni_sockets() {
 }
 
 # uni_rm_tree PATH removes one of mc-panel's own trees (PATH without $ROOT) and nothing else; it
-# does not cross into other file systems mounted below it.
+# does not cross into other file systems below it. A mount point itself stays (its content
+# goes). A failure is recorded in UNI_FAILED.
 uni_rm_tree() {
   case "$1" in
   "$INSTANCES_DIR" | "$DATA_DIR" | "$ROLLBACK_DIR" | "$ETC_PANEL" | "$ETC_FILES") ;;
   *) die "refusing to delete $1" ;;
   esac
-  [[ -e $ROOT$1 || -L $ROOT$1 ]] || return 0
-  rm -rf --one-file-system -- "$ROOT$1"
-  log_changed "deleted $1"
+  local p="$ROOT$1"
+  [[ -e $p || -L $p ]] || return 0
+  if [[ -d $p && ! -L $p ]] && uni_probe_mountpoint "$p"; then
+    if find "$p" -mindepth 1 -maxdepth 1 -exec rm -rf --one-file-system -- {} + && [[ -z $(find "$p" -mindepth 1 -maxdepth 1 -print -quit) ]]; then
+      log_changed "deleted the content of $1 (a mount point; it stays)"
+    else
+      warn "could not delete everything in $1"
+      UNI_FAILED+=("$1")
+    fi
+    return 0
+  fi
+  if rm -rf --one-file-system -- "$p" && [[ ! -e $p && ! -L $p ]]; then
+    log_changed "deleted $1"
+  else
+    warn "could not delete $1 completely"
+    UNI_FAILED+=("$1")
+  fi
 }
 
 uni_purge() {
   local d u
+  UNI_FAILED=()
   for d in "$INSTANCES_DIR" "$DATA_DIR" "$ROLLBACK_DIR" "$ETC_PANEL" "$ETC_FILES"; do
     uni_rm_tree "$d"
   done
   for u in mcpanel-mc mcpanel; do
     uni_probe_user_exists "$u" || continue
-    if uni_userdel "$u"; then
+    if uni_userdel "$u" </dev/null; then
       log_changed "deleted the user $u"
     else
       warn "could not delete the user $u"
+      UNI_FAILED+=("user $u")
     fi
   done
 }
@@ -198,6 +253,10 @@ cmd_uninstall() {
   uni_sockets
   if [[ $PURGE == 1 ]]; then
     uni_purge
+    if ((${#UNI_FAILED[@]} > 0)); then
+      warn "mc-panel was removed, but --purge could not delete: ${UNI_FAILED[*]} (see the messages above)"
+      return 1
+    fi
     log_ok "mc-panel and all its data were removed (packages stay installed)"
   else
     log_ok "mc-panel was removed; kept: $INSTANCES_DIR (worlds, backups, keys), $DATA_DIR (database), $ROLLBACK_DIR, $ETC_PANEL, $ETC_FILES and the users mcpanel, mcpanel-mc"
