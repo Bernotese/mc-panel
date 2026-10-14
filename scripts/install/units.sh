@@ -26,11 +26,12 @@ unit_settled() {
 }
 
 # unit_panel_health: 0 once the panel answers /api/health on its socket (up to UNIT_WAIT
-# seconds). A query; tests stub it.
+# seconds). Without X-Forwarded-For the panel rejects a socket request (403 ip_blocked). A
+# query; tests stub it.
 unit_panel_health() {
   local i
   for ((i = 0; i < UNIT_WAIT; i++)); do
-    if curl -fsS -o /dev/null --max-time 5 --unix-socket "$PANEL_SOCKET" http://localhost/api/health 2>/dev/null; then
+    if curl -fsS -o /dev/null --max-time 5 -H "X-Forwarded-For: 127.0.0.1" --unix-socket "$PANEL_SOCKET" http://localhost/api/health 2>/dev/null; then
       return 0
     fi
     sleep 1
