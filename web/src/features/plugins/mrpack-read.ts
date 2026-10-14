@@ -13,7 +13,8 @@ const SIG_LOCAL = 0x04034b50
 const EOCD_MIN = 22
 const EOCD_SEARCH = EOCD_MIN + 0xffff
 
-export type MrpackReadErrorCode = 'not_zip' | 'unsupported' | 'no_index' | 'too_large' | 'invalid_json'
+/** too_large_to_send: the index without downloads/fileSize still exceeds the panel's 1 MiB body limit. */
+export type MrpackReadErrorCode = 'not_zip' | 'unsupported' | 'no_index' | 'too_large' | 'invalid_json' | 'too_large_to_send'
 
 export class MrpackReadError extends Error {
   readonly code: MrpackReadErrorCode
@@ -48,7 +49,7 @@ export async function readMrpackIndex(file: Blob): Promise<unknown> {
   }
   let value: unknown
   try {
-    value = JSON.parse(text.replace(/^﻿/, ''))
+    value = JSON.parse(text.replace(/^\uFEFF/, ''))
   } catch {
     throw new MrpackReadError('invalid_json', `${INDEX_NAME} is not valid JSON`)
   }

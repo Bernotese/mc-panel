@@ -47,7 +47,7 @@ describe('readMrpackIndex', () => {
   })
 
   it('reads a stored index and ignores a byte order mark', async () => {
-    const file = pack({ 'modrinth.index.json': strToU8(`﻿${JSON.stringify(INDEX)}`) }, 0)
+    const file = pack({ 'modrinth.index.json': strToU8(`\uFEFF${JSON.stringify(INDEX)}`) }, 0)
     expect(await readMrpackIndex(file)).toEqual(INDEX)
   })
 
