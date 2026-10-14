@@ -64,7 +64,7 @@ export function AuditPage() {
   const update = (patch: Partial<AuditFilters>) => setDraft({ ...draft, ...patch })
 
   const columns: Column<AuditEntry>[] = [
-    { id: 'time', header: t('audit.col.time'), cell: (e) => fmt.dateTime(e.ts) },
+    { id: 'time', header: t('audit.col.time'), className: 'whitespace-nowrap', cell: (e) => fmt.dateTime(e.ts) },
     {
       id: 'actor',
       header: t('audit.col.actor'),
@@ -95,6 +95,7 @@ export function AuditPage() {
     {
       id: 'hash',
       header: t('audit.col.hash'),
+      className: 'font-mono',
       cell: (e) => (
         <code className="text-muted-foreground text-xs" title={e.hash}>
           {e.hash.slice(0, 12)}
@@ -107,21 +108,23 @@ export function AuditPage() {
     <>
       <PageHeader title={t('audit.title')} description={t('audit.description')} actions={<ChainStatus />} />
       <form
-        className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:items-end"
+        role="search"
+        aria-label={t('audit.filters_label')}
+        className="mb-4 flex flex-wrap items-end gap-3"
         onSubmit={(e) => {
           e.preventDefault()
           setFilters(draft)
         }}
       >
-        <div className="space-y-1">
+        <div className="w-full space-y-1 sm:w-40">
           <Label htmlFor={`${id}-actor`}>{t('audit.actor')}</Label>
           <Input id={`${id}-actor`} value={draft.actor} onChange={(e) => update({ actor: e.target.value })} />
         </div>
-        <div className="space-y-1">
+        <div className="w-full space-y-1 sm:w-48">
           <Label htmlFor={`${id}-action`}>{t('audit.action')}</Label>
-          <Input id={`${id}-action`} value={draft.action} spellCheck={false} onChange={(e) => update({ action: e.target.value })} />
+          <Input id={`${id}-action`} className="font-mono" value={draft.action} spellCheck={false} onChange={(e) => update({ action: e.target.value })} />
         </div>
-        <div className="space-y-1">
+        <div className="w-full space-y-1 sm:w-36">
           <Label htmlFor={`${id}-result`}>{t('audit.result_label')}</Label>
           <NativeSelect id={`${id}-result`} className="w-full" value={draft.result} onChange={(e) => update({ result: e.target.value as AuditResult | '' })}>
             <option value="">{t('audit.result_all')}</option>
@@ -130,11 +133,11 @@ export function AuditPage() {
             <option value="denied">{t('audit.result.denied')}</option>
           </NativeSelect>
         </div>
-        <div className="space-y-1">
+        <div className="w-full space-y-1 sm:w-40">
           <Label htmlFor={`${id}-from`}>{t('audit.from')}</Label>
           <Input id={`${id}-from`} type="date" value={draft.from} onChange={(e) => update({ from: e.target.value })} />
         </div>
-        <div className="space-y-1">
+        <div className="w-full space-y-1 sm:w-40">
           <Label htmlFor={`${id}-to`}>{t('audit.to')}</Label>
           <Input id={`${id}-to`} type="date" value={draft.to} onChange={(e) => update({ to: e.target.value })} />
         </div>

@@ -4,11 +4,11 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { isApiError, unwrapVoid } from '@/api/errors'
+import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { errorMessage } from '@/lib/error-message'
-import { SectionCard } from './section-card'
 
 export function PasswordCard() {
   const { t } = useTranslation()
@@ -38,7 +38,7 @@ export function PasswordCard() {
     : null
 
   return (
-    <SectionCard title={t('profile.password.title')} description={t('profile.password.hint')}>
+    <Section title={t('profile.password.title')} description={t('profile.password.hint')}>
       <form
         className="space-y-4"
         noValidate
@@ -85,6 +85,6 @@ export function PasswordCard() {
           {t('profile.password.submit')}
         </Button>
       </form>
-    </SectionCard>
+    </Section>
   )
 }

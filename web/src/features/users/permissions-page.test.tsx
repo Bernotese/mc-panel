@@ -39,6 +39,8 @@ describe('UserPermissionsPage', () => {
     expect(screen.queryByText(/erlaubt Code-Ausführung/)).not.toBeInTheDocument()
     await user.click(screen.getByRole('checkbox', { name: 'survival: Dateien' }))
     expect(screen.getByText(/„Dateien“ erlaubt Code-Ausführung im Minecraft-Server/)).toBeInTheDocument()
+    const warning = await screen.findByRole('status')
+    expect(warning).toHaveAttribute('data-tone', 'danger')
   })
 
   it('warns before granting plugin access', async () => {
