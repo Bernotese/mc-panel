@@ -1,7 +1,7 @@
 # mc-panel – Teilprojekt 5: Monitoring + Alerts (Design-Spec)
 
 - **Datum:** 2026-10-13
-- **Status:** entworfen
+- **Status:** umgesetzt (PRs #61, #62, #65–#67, 2026-10-14)
 - **Autor:** Jannes Göbel (mit Claude)
 - **Baut auf:** `2026-10-08-mc-panel-foundation-design.md` (TP1), `2026-10-10-mc-panel-instances-design.md` (TP2), `2026-10-11-mc-panel-console-players-design.md` (TP3a), `2026-10-11-mc-panel-files-design.md` (TP3b), `2026-10-12-mc-panel-backups-design.md` (TP4)
 
