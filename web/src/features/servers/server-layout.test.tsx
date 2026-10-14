@@ -4,8 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { db, loginAs } from '@/mocks/db'
 import { server } from '@/mocks/node'
-import { renderWithProviders } from '@/test/render'
-import { ServerDetailPage } from './server-detail-page'
+import { renderApp } from './test-utils'
 
 const GIB = 1024 ** 3
 const LISTS_HINT = 'Whitelist, Operatoren und Bans verwaltest du im Tab „Spieler“ der Serverseite; Änderungen dort wirken sofort.'
@@ -16,8 +15,22 @@ function mockServer(id: number) {
   return server
 }
 
-describe('ServerDetailPage', () => {
-  it('shows status, address, resources and power buttons on the overview', async () => {
+function sectionList(name: string) {
+  return screen.getByRole('list', { name: `Bereiche von ${name}` })
+}
+function sectionLinks(name: string) {
+  return within(sectionList(name)).getAllByRole('link')
+}
+function sectionLink(name: string, label: string) {
+  return within(sectionList(name)).queryByRole('link', { name: label })
+}
+async function openSection(name: string, label: string) {
+  const user = userEvent.setup()
+  await user.click(within(await screen.findByRole('list', { name: `Bereiche von ${name}` })).getByRole('link', { name: label }))
+}
+
+describe('ServerLayout', () => {
+  it('shows status, address, resources and power buttons in the header and the details in the overview', async () => {
     const survival = mockServer(1)
     survival.status = {
       ...survival.status,
@@ -26,29 +39,20 @@ describe('ServerDetailPage', () => {
       cpu_percent: 12.5,
       started_at: Date.now() - 5 * 60_000,
     }
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { path: '/servers/1', me: loginAs('admin') })
+    await renderApp('/servers/1', loginAs('admin'))
 
     expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
-      'Übersicht',
-      'Monitoring',
-      'Konsole',
-      'Spieler',
-      'Dateien',
-      'Plugins',
-      'Backups',
-      'Einstellungen',
-      'Löschen',
-    ])
+    expect(sectionLinks('survival').map((l) => l.textContent)).toEqual(['Übersicht', 'Monitoring', 'Konsole', 'Spieler', 'Dateien', 'Plugins', 'Backups', 'Einstellungen'])
+    const header = screen.getByRole('region', { name: 'survival' })
+    expect(within(header).getByText('Läuft')).toBeInTheDocument()
+    expect(within(header).getByText('survival.mc.example.com')).toBeInTheDocument()
+    expect(within(header).getByText('2 / 5 GiB')).toBeInTheDocument()
+    expect(within(header).getByText('12,5 %')).toBeInTheDocument()
+    expect(within(header).getByRole('group', { name: 'Steuerung für survival' })).toBeInTheDocument()
     const state = screen.getByRole('region', { name: 'Zustand' })
-    expect(within(state).getByText('Läuft')).toBeInTheDocument()
-    expect(within(state).getByText('survival.mc.example.com')).toBeInTheDocument()
     expect(within(state).getByText('Paper 1.21.11')).toBeInTheDocument()
     expect(within(state).getByText('Java 21')).toBeInTheDocument()
-    expect(within(state).getByText('2 / 5 GiB')).toBeInTheDocument()
-    expect(within(state).getByText('12,5 %')).toBeInTheDocument()
     expect(within(state).getByText('vor 5 Minuten')).toBeInTheDocument()
-    expect(screen.getByRole('group', { name: 'Steuerung für survival' })).toBeInTheDocument()
     expect(screen.queryByText('Neustart nötig')).not.toBeInTheDocument()
     expect(await within(screen.getByRole('region', { name: 'Online-Spieler' })).findByText('2 / 20')).toBeInTheDocument()
   })
@@ -56,27 +60,27 @@ describe('ServerDetailPage', () => {
   it('shows admins the last error of a failed server', async () => {
     const survival = mockServer(1)
     survival.status = { ...survival.status, state: 'error', last_error: 'image pull failed: manifest unknown' }
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
+    await renderApp('/servers/1', loginAs('admin'))
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Letzter Fehler')
     expect(alert).toHaveTextContent('image pull failed: manifest unknown')
-    expect(within(screen.getByRole('region', { name: 'Zustand' })).getByText('Fehler')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'survival' })).getByText('Fehler')).toBeInTheDocument()
   })
 
   it('shows other users a generic error without the details', async () => {
     const survival = mockServer(1)
     survival.status = { ...survival.status, state: 'error', last_error: 'image pull failed: manifest unknown' }
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+    await renderApp('/servers/1', loginAs('alice'))
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Der Server meldet einen Fehler. Details sieht ein Admin.')
     expect(screen.queryByText('image pull failed: manifest unknown')).not.toBeInTheDocument()
-    expect(within(screen.getByRole('region', { name: 'Zustand' })).getByText('Fehler')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'survival' })).getByText('Fehler')).toBeInTheDocument()
   })
 
   it('offers no restart while the agent is unreachable', async () => {
     const survival = mockServer(1)
     survival.status = { ...survival.status, state: 'unknown' }
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
+    await renderApp('/servers/1', loginAs('admin'))
     const controls = await screen.findByRole('group', { name: 'Steuerung für survival' })
     expect(within(controls).getByRole('button', { name: 'Neu starten' })).toBeDisabled()
     expect(within(controls).getByRole('button', { name: 'Starten' })).toBeEnabled()
@@ -88,7 +92,7 @@ describe('ServerDetailPage', () => {
     survival.revision += 1
     survival.status = { ...survival.status, restart_required: true }
     const user = userEvent.setup()
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+    await renderApp('/servers/1', loginAs('alice'))
     expect(await screen.findByText('Neustart nötig')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Jetzt neu starten' }))
     expect(await screen.findByText('Neustart für „survival“ angefordert.')).toBeInTheDocument()
@@ -96,29 +100,30 @@ describe('ServerDetailPage', () => {
   })
 
   it('shows a restricted user only the overview and monitoring', async () => {
-    await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('alice') })
+    await renderApp('/servers/2', loginAs('alice'))
     expect(await screen.findByRole('heading', { name: 'creative', level: 1 })).toBeInTheDocument()
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Übersicht', 'Monitoring'])
+    expect(sectionLinks('creative').map((l) => l.textContent)).toEqual(['Übersicht', 'Monitoring'])
     expect(screen.queryByRole('group', { name: 'Steuerung für creative' })).not.toBeInTheDocument()
     expect(screen.getByText('Keine Berechtigung für Start/Stopp.')).toBeInTheDocument()
   })
 
   it('shows the console to a user with the console permission', async () => {
     db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.console'] }])
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
-    expect(await screen.findByRole('tab', { name: 'Konsole' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Spieler' })).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'Einstellungen' })).not.toBeInTheDocument()
+    await renderApp('/servers/1', loginAs('alice'))
+    await screen.findByRole('heading', { name: 'survival', level: 1 })
+    expect(sectionLink('survival', 'Konsole')).toBeInTheDocument()
+    expect(sectionLink('survival', 'Spieler')).toBeInTheDocument()
+    expect(sectionLink('survival', 'Einstellungen')).not.toBeInTheDocument()
   })
 
   it('explains a server the user may not see', async () => {
-    await renderWithProviders(<ServerDetailPage serverId={3} />, { me: loginAs('alice') })
+    await renderApp('/servers/3', loginAs('alice'))
     expect(await screen.findByText('Du hast keine Berechtigung, diesen Server anzusehen.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Zur Übersicht' })).toHaveAttribute('href', '/')
   })
 
   it('stops showing a server that was deleted while the page was open', async () => {
-    const { queryClient } = await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
+    const { queryClient } = await renderApp('/servers/1', loginAs('admin'))
     expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
     db.servers = db.servers.filter((s) => s.id !== 1)
     await queryClient.refetchQueries({ queryKey: ['servers', 1] })
@@ -127,7 +132,7 @@ describe('ServerDetailPage', () => {
   })
 
   it('stops showing a server after the view permission was revoked', async () => {
-    const { queryClient } = await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+    const { queryClient } = await renderApp('/servers/1', loginAs('alice'))
     expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
     db.grants.set(2, [])
     await queryClient.refetchQueries({ queryKey: ['servers', 1] })
@@ -135,15 +140,52 @@ describe('ServerDetailPage', () => {
   })
 
   it('explains a server that does not exist', async () => {
-    await renderWithProviders(<ServerDetailPage serverId={999} />, { me: loginAs('admin') })
+    await renderApp('/servers/999', loginAs('admin'))
     expect(await screen.findByText('Diesen Server gibt es nicht (mehr).')).toBeInTheDocument()
+  })
+
+  it('redirects a section the user may not open to the overview', async () => {
+    const { router } = await renderApp('/servers/1/files', loginAs('alice'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/servers/1'))
+    expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
+  })
+
+  it('leaves a section whose permission is revoked while it is open', async () => {
+    db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.console'] }])
+    const { router, queryClient } = await renderApp('/servers/1/players', loginAs('alice'))
+    expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/servers/1/players')
+    db.grants.set(2, [{ server_id: 1, permissions: ['server.view'] }])
+    await queryClient.refetchQueries({ queryKey: ['servers', 1] })
+    await waitFor(() => expect(router.state.location.pathname).toBe('/servers/1'))
+    expect(await screen.findByRole('region', { name: 'Zustand' })).toBeInTheDocument()
+  })
+
+  it('keeps the section after a reload', async () => {
+    const { router } = await renderApp('/servers/1/backups', loginAs('admin'))
+    expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/servers/1/backups')
+    expect(sectionLink('survival', 'Backups')).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('renders exactly one delete form in the settings', async () => {
+    await renderApp('/servers/1/settings', loginAs('admin', { sudo: true }))
+    expect(await screen.findAllByRole('button', { name: 'Server löschen' })).toHaveLength(1)
+  })
+
+  it('shows header slots with a dash for missing monitoring values', async () => {
+    server.use(http.get('*/api/monitoring/overview', () => HttpResponse.json({ servers: [], host: null })))
+    await renderApp('/servers/2', loginAs('admin'))
+    const header = await screen.findByRole('region', { name: 'creative' })
+    expect(within(header).getByText('Spieler').parentElement).toHaveTextContent('–')
+    expect(within(header).getByText('TPS').parentElement).toHaveTextContent('–')
+    expect(within(header).getByText('RAM').parentElement).toHaveTextContent('–')
   })
 
   it('saves settings and points out the pending restart', async () => {
     const user = userEvent.setup()
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin', { sudo: true }) })
-    await user.click(await screen.findByRole('tab', { name: 'Einstellungen' }))
-    expect(screen.getByText('Der Server läuft. Änderungen werden erst nach einem Neustart aktiv.')).toBeInTheDocument()
+    await renderApp('/servers/1/settings', loginAs('admin', { sudo: true }))
+    expect(await screen.findByText('Der Server läuft. Änderungen werden erst nach einem Neustart aktiv.')).toBeInTheDocument()
     const save = screen.getByRole('button', { name: 'Änderungen speichern' })
     expect(save).toBeDisabled()
     await screen.findByRole('option', { name: '1.21.11' })
@@ -162,15 +204,16 @@ describe('ServerDetailPage', () => {
 
     expect(await screen.findByText('Änderungen gespeichert. Sie werden beim nächsten Neustart aktiv.')).toBeInTheDocument()
     expect(mockServer(1).instance?.properties.motd).toBe('Willkommen')
-    await user.click(screen.getByRole('tab', { name: 'Übersicht' }))
+    // The header sits above every section: the banner shows up without leaving the settings.
     expect(await screen.findByText('Neustart nötig')).toBeInTheDocument()
+    await openSection('survival', 'Übersicht')
+    expect(await screen.findByRole('region', { name: 'Zustand' })).toBeInTheDocument()
   })
 
   it('deletes the server after typing its name', async () => {
     const user = userEvent.setup()
-    const { router } = await renderWithProviders(<ServerDetailPage serverId={1} />, { path: '/servers/1', me: loginAs('admin', { sudo: true }) })
-    await user.click(await screen.findByRole('tab', { name: 'Löschen' }))
-    expect(screen.getByText(/deleted\/survival-<Zeitpunkt>/)).toBeInTheDocument()
+    const { router } = await renderApp('/servers/1/settings', loginAs('admin', { sudo: true }))
+    expect(await screen.findByText(/deleted\/survival-<Zeitpunkt>/)).toBeInTheDocument()
     const submit = screen.getByRole('button', { name: 'Server löschen' })
     expect(submit).toBeDisabled()
     await user.type(screen.getByLabelText('Zum Bestätigen den Namen „survival“ eintippen'), 'survival')
@@ -183,20 +226,26 @@ describe('ServerDetailPage', () => {
 
   it('lets admins delete a server that was never set up', async () => {
     const user = userEvent.setup()
-    await renderWithProviders(<ServerDetailPage serverId={3} />, { path: '/servers/3', me: loginAs('admin', { sudo: true }) })
+    await renderApp('/servers/3', loginAs('admin', { sudo: true }))
     expect(
       await screen.findByText('Dieser Server stammt aus der Zeit vor der Instanzverwaltung und hat noch keine Minecraft-Instanz. Du kannst ihn nur löschen.'),
     ).toBeInTheDocument()
-    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+    expect(sectionLinks('lobby').map((l) => l.textContent)).toEqual(['Übersicht'])
     expect(screen.getByText('Der Eintrag und alle Rechte darauf werden entfernt. Serverdaten gibt es keine.')).toBeInTheDocument()
     await user.type(screen.getByLabelText('Zum Bestätigen den Namen „lobby“ eintippen'), 'lobby')
     await user.click(screen.getByRole('button', { name: 'Server löschen' }))
     expect(await screen.findByText('Server „lobby“ gelöscht.')).toBeInTheDocument()
   })
 
+  it('redirects a section of a server without instance to the overview', async () => {
+    const { router } = await renderApp('/servers/3/settings', loginAs('admin'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/servers/3'))
+    expect(await screen.findByLabelText('Zum Bestätigen den Namen „lobby“ eintippen')).toBeInTheDocument()
+  })
+
   it('shows no error after the user cancelled the sudo dialog', async () => {
     const user = userEvent.setup()
-    await renderWithProviders(<ServerDetailPage serverId={3} />, { me: loginAs('admin') })
+    await renderApp('/servers/3', loginAs('admin'))
     await user.type(await screen.findByLabelText('Zum Bestätigen den Namen „lobby“ eintippen'), 'lobby')
     await user.click(screen.getByRole('button', { name: 'Server löschen' }))
     const sudo = await screen.findByRole('dialog', { name: 'Aktion bestätigen' })
@@ -207,17 +256,10 @@ describe('ServerDetailPage', () => {
     expect(db.servers.some((s) => s.id === 3)).toBe(true)
   })
 
-  it('lets the tab bar scroll sideways instead of the page on narrow screens', async () => {
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('admin') })
-    const tabs = await screen.findByRole('tablist')
-    expect(within(tabs).getAllByRole('tab')).toHaveLength(9)
-    expect(tabs).toHaveClass('max-w-full', 'justify-start', 'overflow-x-auto')
-  })
-
-  it('shows the files tab only with the files permission', async () => {
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+  it('shows the files section only with the files permission', async () => {
+    await renderApp('/servers/1', loginAs('alice'))
     await screen.findByRole('heading', { name: 'survival', level: 1 })
-    expect(screen.queryByRole('tab', { name: 'Dateien' })).not.toBeInTheDocument()
+    expect(sectionLink('survival', 'Dateien')).not.toBeInTheDocument()
   })
 
   it('blocks starting while an extraction runs', async () => {
@@ -228,7 +270,7 @@ describe('ServerDetailPage', () => {
         }),
       ),
     )
-    await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('admin') })
+    await renderApp('/servers/2', loginAs('admin'))
     expect(await screen.findByText('Entpacken läuft – Starten ist erst danach möglich.')).toBeInTheDocument()
     const group = screen.getByRole('group', { name: 'Steuerung für creative' })
     expect(within(group).getByRole('button', { name: 'Starten' })).toBeDisabled()
@@ -237,37 +279,39 @@ describe('ServerDetailPage', () => {
   it('shows the data job lock text when the panel answers a start with 409', async () => {
     server.use(http.post('*/api/servers/:id/power', () => HttpResponse.json({ error: 'conflict', message: 'extracting' }, { status: 409 })))
     const user = userEvent.setup()
-    await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('admin') })
+    await renderApp('/servers/2', loginAs('admin'))
     const group = await screen.findByRole('group', { name: 'Steuerung für creative' })
     await user.click(within(group).getByRole('button', { name: 'Starten' }))
     expect(await screen.findByText('Gerade wird ein Archiv entpackt oder ein Backup wiederhergestellt – Starten ist erst danach möglich.')).toBeInTheDocument()
     expect(screen.queryByText('Konflikt mit dem aktuellen Zustand')).not.toBeInTheDocument()
   })
 
-  it('names the plugins tab after the server type', async () => {
-    await renderWithProviders(<ServerDetailPage serverId={4} />, { me: loginAs('admin') })
-    expect(await screen.findByRole('tab', { name: 'Mods' })).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'Plugins' })).not.toBeInTheDocument()
+  it('names the plugins section after the server type', async () => {
+    await renderApp('/servers/4', loginAs('admin'))
+    await screen.findByRole('heading', { name: 'modded', level: 1 })
+    expect(sectionLink('modded', 'Mods')).toBeInTheDocument()
+    expect(sectionLink('modded', 'Plugins')).not.toBeInTheDocument()
   })
 
-  it('shows no plugins tab on vanilla servers', async () => {
-    await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('admin') })
+  it('shows no plugins section on vanilla servers', async () => {
+    await renderApp('/servers/2', loginAs('admin'))
     expect(await screen.findByRole('heading', { name: 'creative', level: 1 })).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'Plugins' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'Mods' })).not.toBeInTheDocument()
+    expect(sectionLink('creative', 'Plugins')).not.toBeInTheDocument()
+    expect(sectionLink('creative', 'Mods')).not.toBeInTheDocument()
   })
 
-  it('shows the plugins tab only with the plugins permission', async () => {
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+  it('shows the plugins section only with the plugins permission', async () => {
+    await renderApp('/servers/1', loginAs('alice'))
     await screen.findByRole('heading', { name: 'survival', level: 1 })
-    expect(screen.queryByRole('tab', { name: 'Plugins' })).not.toBeInTheDocument()
+    expect(sectionLink('survival', 'Plugins')).not.toBeInTheDocument()
   })
 
-  it('shows the plugins tab to a user with the plugins permission', async () => {
+  it('shows the plugins section to a user with the plugins permission', async () => {
     db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.plugins'] }])
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
-    expect(await screen.findByRole('tab', { name: 'Plugins' })).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'Dateien' })).not.toBeInTheDocument()
+    await renderApp('/servers/1', loginAs('alice'))
+    await screen.findByRole('heading', { name: 'survival', level: 1 })
+    expect(sectionLink('survival', 'Plugins')).toBeInTheDocument()
+    expect(sectionLink('survival', 'Dateien')).not.toBeInTheDocument()
   })
 
   describe('when the job finishes', () => {
@@ -285,7 +329,7 @@ describe('ServerDetailPage', () => {
           return HttpResponse.json({ job: polls === 1 ? running : { ...running, state: 'done', finished_at: Date.now() } })
         }),
       )
-      await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('admin') })
+      await renderApp('/servers/2', loginAs('admin'))
       const group = await screen.findByRole('group', { name: 'Steuerung für creative' })
       expect((await screen.findAllByText('Entpacken läuft – Starten ist erst danach möglich.')).length).toBeGreaterThan(0)
       expect(within(group).getByRole('button', { name: 'Starten' })).toBeDisabled()
@@ -297,16 +341,17 @@ describe('ServerDetailPage', () => {
     })
   })
 
-  it('shows the backups tab only with the backups permission', async () => {
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { me: loginAs('alice') })
+  it('shows the backups section only with the backups permission', async () => {
+    await renderApp('/servers/1', loginAs('alice'))
     await screen.findByRole('heading', { name: 'survival', level: 1 })
-    expect(screen.queryByRole('tab', { name: 'Backups' })).not.toBeInTheDocument()
+    expect(sectionLink('survival', 'Backups')).not.toBeInTheDocument()
   })
 
-  it('shows the backups tab to a user with the backups permission, also on vanilla servers', async () => {
+  it('shows the backups section to a user with the backups permission, also on vanilla servers', async () => {
     db.grants.set(2, [{ server_id: 2, permissions: ['server.view', 'server.backups'] }])
-    await renderWithProviders(<ServerDetailPage serverId={2} />, { me: loginAs('alice') })
-    expect(await screen.findByRole('tab', { name: 'Backups' })).toBeInTheDocument()
+    await renderApp('/servers/2', loginAs('alice'))
+    await screen.findByRole('heading', { name: 'creative', level: 1 })
+    expect(sectionLink('creative', 'Backups')).toBeInTheDocument()
   })
 
   it('deletes the backups too when the checkbox is set', async () => {
@@ -318,9 +363,8 @@ describe('ServerDetailPage', () => {
         return new HttpResponse(null, { status: 204 })
       }),
     )
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { path: '/servers/1', me: loginAs('admin', { sudo: true }) })
-    await user.click(await screen.findByRole('tab', { name: 'Löschen' }))
-    expect(screen.getByText('Ohne diese Option bleiben die Backups des Servers auf dem Host liegen und belegen weiter Platz.')).toBeInTheDocument()
+    await renderApp('/servers/1/settings', loginAs('admin', { sudo: true }))
+    expect(await screen.findByText('Ohne diese Option bleiben die Backups des Servers auf dem Host liegen und belegen weiter Platz.')).toBeInTheDocument()
     await user.click(screen.getByRole('checkbox', { name: 'Backups ebenfalls löschen' }))
     await user.type(screen.getByLabelText('Zum Bestätigen den Namen „survival“ eintippen'), 'survival')
     await user.click(screen.getByRole('button', { name: 'Server löschen' }))
@@ -336,7 +380,7 @@ describe('ServerDetailPage', () => {
         return new HttpResponse(null, { status: 204 })
       }),
     )
-    await renderWithProviders(<ServerDetailPage serverId={3} />, { path: '/servers/3', me: loginAs('admin', { sudo: true }) })
+    await renderApp('/servers/3', loginAs('admin', { sudo: true }))
     await screen.findByLabelText('Zum Bestätigen den Namen „lobby“ eintippen')
     expect(screen.queryByRole('checkbox', { name: 'Backups ebenfalls löschen' })).not.toBeInTheDocument()
     await user.type(screen.getByLabelText('Zum Bestätigen den Namen „lobby“ eintippen'), 'lobby')
@@ -351,9 +395,8 @@ describe('ServerDetailPage', () => {
         HttpResponse.json({ error: 'conflict', message: 'a file or backup job is running for this server; try again when it is done' }, { status: 409 }),
       ),
     )
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { path: '/servers/1', me: loginAs('admin', { sudo: true }) })
-    await user.click(await screen.findByRole('tab', { name: 'Löschen' }))
-    await user.type(screen.getByLabelText('Zum Bestätigen den Namen „survival“ eintippen'), 'survival')
+    await renderApp('/servers/1/settings', loginAs('admin', { sudo: true }))
+    await user.type(await screen.findByLabelText('Zum Bestätigen den Namen „survival“ eintippen'), 'survival')
     await user.click(screen.getByRole('button', { name: 'Server löschen' }))
     expect(
       await screen.findByText('Für diesen Server wird gerade ein Archiv entpackt oder ein Backup wiederhergestellt. Lösche ihn, wenn der Auftrag fertig ist.'),
@@ -373,9 +416,8 @@ describe('ServerDetailPage', () => {
         return new HttpResponse(null, { status: 204 })
       }),
     )
-    await renderWithProviders(<ServerDetailPage serverId={1} />, { path: '/servers/1', me: loginAs('admin', { sudo: true }) })
-    await user.click(await screen.findByRole('tab', { name: 'Löschen' }))
-    const purge = screen.getByRole('checkbox', { name: 'Backups ebenfalls löschen' })
+    await renderApp('/servers/1/settings', loginAs('admin', { sudo: true }))
+    const purge = await screen.findByRole('checkbox', { name: 'Backups ebenfalls löschen' })
     expect(purge).toHaveAccessibleDescription('Ohne diese Option bleiben die Backups des Servers auf dem Host liegen und belegen weiter Platz.')
     await user.click(purge)
     await user.type(screen.getByLabelText('Zum Bestätigen den Namen „survival“ eintippen'), 'survival')

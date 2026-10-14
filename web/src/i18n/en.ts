@@ -146,7 +146,7 @@ export const en: Messages = {
   },
   nav: {
     label: 'Main navigation',
-    dashboard: 'Overview',
+    dashboard: 'Servers',
     users: 'Users',
     security: 'Security Center',
     audit: 'Audit log',
@@ -156,6 +156,15 @@ export const en: Messages = {
     menu_description: 'Navigation to all areas of the panel',
     skip: 'Skip to content',
     signed_in_as: 'Signed in as {{username}}',
+    servers: 'Servers',
+    server_sections: 'Sections of {{name}}',
+    new_server: 'New server',
+    tree_collapse: 'Collapse server list',
+    tree_expand: 'Expand server list',
+    open_servers: 'Open server list',
+    breadcrumb: 'Breadcrumb',
+    home: 'Home',
+    no_servers: 'No servers yet.',
   },
   permission: {
     server: {
@@ -342,6 +351,14 @@ export const en: Messages = {
     },
     memory_value: '{{used}} / {{limit}} GiB',
     cpu_value: '{{value}}%',
+    header: {
+      players: 'Players',
+      tps: 'TPS',
+      memory: 'RAM',
+      cpu: 'CPU',
+      memory_value: '{{used}} / {{limit}} GiB',
+      players_value: '{{players}}/{{max}}',
+    },
     detail: {
       tabs: {
         overview: 'Overview',
@@ -371,6 +388,7 @@ export const en: Messages = {
       last_error: 'Last error',
       error_hidden: 'The server reports an error. An admin can see the details.',
       controls: 'Controls',
+      memory_assigned: 'Assigned',
       unknown_hint: 'The agent is not responding. Shown is the last known desired state; actions are applied once it is reachable again.',
     },
     settings: {
