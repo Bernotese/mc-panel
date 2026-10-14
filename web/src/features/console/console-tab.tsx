@@ -43,7 +43,7 @@ export function ConsoleTab({ server }: { server: Server }) {
   const visible = useMemo(() => visibleEntries(stream.entries, { query, hideRcon }), [stream.entries, query, hideRcon])
   const running = server.status.state === 'running'
   const locked = LOCKED.includes(stream.connection)
-  const fill = useFillHeight<HTMLDivElement>()
+  const { ref: fillRef, height } = useFillHeight<HTMLDivElement>()
 
   async function send(command: string) {
     const id = stream.addCommand(command)
@@ -67,7 +67,7 @@ export function ConsoleTab({ server }: { server: Server }) {
   }
 
   return (
-    <div ref={fill.ref} className="flex flex-col gap-3" style={fill.height ? { height: fill.height } : undefined}>
+    <div ref={fillRef} className="flex flex-col gap-3" style={height ? { height } : undefined}>
       <div className="flex flex-wrap items-center gap-3">
         <span role="status">
           <Badge variant={CONNECTION_VARIANT[stream.connection]}>{t(`console.connection.${stream.connection}`)}</Badge>

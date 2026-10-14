@@ -4,6 +4,7 @@ import type { Server } from '@/api/types'
 import { serverQueryOptions } from '@/features/servers/api'
 import { renderWithProviders, type RenderOptions } from '@/test/render'
 
+// eslint-disable-next-line react-refresh/only-export-components -- test-only helper module, never hot-reloaded
 function WithServer({ serverId, children }: { serverId: number; children: (server: Server) => ReactNode }) {
   const query = useQuery(serverQueryOptions(serverId))
   return query.data ? <>{children(query.data)}</> : null

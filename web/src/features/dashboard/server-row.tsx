@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router'
+import { Users } from 'lucide-react'
 import { useId, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { OverviewServer, Server, ServerState } from '@/api/types'
@@ -67,6 +68,7 @@ export function ServerRow({ server, metrics }: { server: Server; metrics?: Overv
             {instance ? <AddressLine address={server.address} /> : null}
             {metrics && instance ? (
               <span className="flex items-center gap-2 sm:ml-auto">
+                <Users aria-hidden="true" className="text-muted-foreground size-3.5" />
                 <span className="font-pixel tabular-nums">
                   {metrics.players === null
                     ? missing
