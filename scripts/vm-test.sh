@@ -6,7 +6,7 @@
 # copies on the VM are serialised (one lock): parallel race and Vitest runs of several teammates
 # overload the VM and make timing-sensitive tests fail.
 #
-#   bash scripts/vm-test.sh [all|go|lint|web|e2e]
+#   bash scripts/vm-test.sh [all|go|lint|web|e2e|shots]
 set -euo pipefail
 
 export PATH="/usr/local/go/bin:/usr/local/lib/nodejs/bin:${HOME}/.local/bin:${PATH}"
@@ -182,6 +182,16 @@ EOF
   [ "${rc}" -eq 0 ] || die "e2e failed"
 }
 
+# Screenshots of the UI against the mock backend for visual review (web/screenshots/, copied back
+# by test-vm.sh). Not part of "all" and not run in CI.
+suite_shots() {
+  need_node_modules
+  need_playwright
+  rm -rf web/screenshots
+  log "Playwright screenshots (mock backend)"
+  (cd web && npm run shots)
+}
+
 # stop_stack ends the dev servers of suite_e2e and waits only for them.
 stack_pids=()
 stop_stack() {
@@ -212,12 +222,13 @@ case "${suite}" in
   lint) suite_lint ;;
   web) suite_web ;;
   e2e) suite_e2e ;;
+  shots) suite_shots ;;
   all)
     suite_lint
     suite_go
     suite_web
     suite_e2e
     ;;
-  *) die "unknown suite ${suite} (all|go|lint|web|e2e)" ;;
+  *) die "unknown suite ${suite} (all|go|lint|web|e2e|shots)" ;;
 esac
 log "vm-test ${suite}: OK"

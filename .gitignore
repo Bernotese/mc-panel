@@ -11,7 +11,11 @@ web/node_modules/
 web/.tanstack/
 web/test-results/
 web/playwright-report/
+web/screenshots/
 .DS_Store
 
 # Personal Claude Code overrides
 .claude/settings.local.json
+
+# Brainstorming companion (local mockups)
+.superpowers/
