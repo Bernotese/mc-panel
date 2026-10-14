@@ -1,109 +1,66 @@
 # mc-panel
 
-Selbst gehostetes Web-Panel für die eigenen Minecraft-Server auf einem Linux-VPS: ein Go-Backend mit eingebetteter React-Oberfläche, ausgeliefert als statische Binaries für `linux/amd64` und `linux/arm64`. Hobby- und Lernprojekt für einen Freundeskreis (ein VPS, wenige Server, keine Mandanten). Weil das Panel aus dem Internet erreichbar ist, hat Sicherheit Vorrang.
+A self-hosted web panel for your own Minecraft servers on a Linux VPS: a Go backend with an embedded React UI, shipped as static binaries for `linux/amd64` and `linux/arm64` and set up by a single installer. It is a hobby and learning project for a circle of friends (one VPS, a few servers, no multi-tenancy). Because the panel faces the internet, security comes first.
 
-## Funktionen
+## Features
 
-- **Minecraft-Server** als gehärtete Docker-Container (`itzg/minecraft-server`): Vanilla, Paper, Purpur, Fabric, NeoForge sowie Modrinth- und CurseForge-Modpacks. Versionen, Java, RAM und freigegebene `server.properties` sind einstellbar, Start/Stopp/Neustart mit Auto-Restart. Das Routing läuft über den Hostnamen (`<server>.<basisdomain>`) und einen gemeinsamen Port 25565 (mc-router).
-- **Konsole und Spieler:** Live-Log im Browser (läuft über Neustarts weiter), Befehle per RCON, Online-Spieler, Ops, Whitelist und Bans ohne Neustart pflegen (Kick, Ban, Entbannen, Op, Whitelist). Was im Spiel vergeben wird, bleibt erhalten.
-- **Anmeldung:** Passwort plus zweiter Faktor (TOTP oder Passkey, für Admins Pflicht), Wiederherstellungscodes, Sessions mit Idle- und Absolut-Timeout, Sudo-Modus für kritische Aktionen.
-- **Dateien:** Dateibrowser pro Server mit Editor für Konfigurationsdateien, Up- und Download (bis 4 GiB, Ordner als Zip), Anlegen, Umbenennen, Verschieben, Löschen und Entpacken von Zips (z. B. Welt-Upload bei gestopptem Server). Ausgeführt von einem eigenen, unprivilegierten Dienst; das RCON-Passwort bleibt verborgen.
-- **Plugins und Mods:** Plugins für Paper/Purpur aus Modrinth und Hangar, Mods für Fabric/NeoForge aus Modrinth suchen und mit einem Klick samt Pflicht-Abhängigkeiten installieren; installierte Jars (auch per Hand hochgeladene) sehen, aktualisieren, deaktivieren und entfernen. Der unprivilegierte Dateidienst schreibt jede Datei und prüft sie vorher gegen die Prüfsumme der Quelle.
-- **Backups:** Datenverzeichnis eines Servers per Klick oder nach Zeitplan (alle N Stunden, täglich, wöchentlich) sichern, auch im laufenden Betrieb (Speichern wird währenddessen angehalten). Aufbewahrung nach Stufen (letzte, täglich, wöchentlich, monatlich), wichtige Stände anpinnen, als Zip herunterladen und den ganzen Server auf einen Stand zurücksetzen; vor jedem Restore entsteht automatisch ein Sicherheits-Snapshot. Lokale, deduplizierte restic-Repos; fehlgeschlagene Läufe melden sich über Discord/ntfy.
-- **Monitoring und Alerts:** Spieler (mit Namen), TPS/MSPT, CPU und RAM pro Server sowie CPU, RAM, Load und Platte des Hosts im Dashboard und im Tab „Monitoring“, mit Verlauf über 30 Tage (eigene SVG-Diagramme). Alerts bei „Server down“, Crash-Loop und knappem Plattenplatz über Discord/ntfy, mit Schonfrist nach dem Start und ohne Doppelmeldungen nach Neustarts. Das Monitoring fragt TPS nur einmal pro Minute per RCON ab, damit das Server-Log ruhig bleibt.
-- **Rechte:** Admins und Benutzer mit Rechten pro Server (`server.view`, `server.power`, `server.console`, `server.files`, `server.plugins`, `server.backups`).
-- **Abwehr:** Rate-Limits, Jail nach Fehlversuchen (in der App und per nftables auf dem Host), IP-Regeln, Länderfilter (GeoIP), Security Center in der Oberfläche, Benachrichtigungen über Discord und ntfy.
-- **Audit-Log:** unveränderlich und hash-verkettet, prüfbar mit `panel audit verify`.
+- **Minecraft servers** as hardened Docker containers (`itzg/minecraft-server`): Vanilla, Paper, Purpur, Fabric, NeoForge, and Modrinth and CurseForge modpacks. Version, Java, memory and an allowlist of `server.properties` are configurable; start, stop and restart with automatic crash restarts. Every server is reachable by hostname (`<server>.<base domain>`) on the shared port 25565 (mc-router).
+- **Console and players:** live log in the browser (survives restarts), commands over RCON, online players, and ops, whitelist and bans without a restart (kick, ban, pardon, op, whitelist). What is changed in the game is kept.
+- **Files:** a file browser per server with an editor for configuration files, upload and download up to 4 GiB (folders as zip), create, rename, move, delete and extract zips (e.g. a world upload while the server is stopped). An unprivileged service does the work; the RCON password stays hidden.
+- **Plugins and mods:** search plugins for Paper/Purpur on Modrinth and Hangar and mods for Fabric/NeoForge on Modrinth, and install them with their required dependencies in one click. See installed jars (also uploaded ones), update, disable and remove them. Every jar is checked against the upstream checksum before it is written.
+- **Backups:** back up a server's data directory on demand or on a schedule (every N hours, daily, weekly), also while it runs (saving is paused meanwhile). Tiered retention (last, daily, weekly, monthly), pinning, zip download and restoring a whole server; every restore first takes a safety snapshot. Local, deduplicated restic repositories; failed runs are reported via Discord or ntfy.
+- **Monitoring and alerts:** players, TPS/MSPT, CPU and memory per server and CPU, memory, load and disk of the host, with 30 days of history. Alerts for "server down", crash loops and low disk space via Discord or ntfy, with a grace period after starts and no duplicates after restarts.
+- **Sign-in and permissions:** password plus a second factor (TOTP or passkey, mandatory for admins), recovery codes, sessions with idle and absolute timeouts, sudo mode for critical actions. Admins and users with per-server permissions (`server.view`, `server.power`, `server.console`, `server.files`, `server.plugins`, `server.backups`).
+- **Defense:** rate limits, jails after failed logins (in the app and in nftables on the host), IP rules, a country filter (GeoIP), a Security Center in the UI, and notifications via Discord and ntfy.
+- **Audit log:** append-only and hash-chained, verifiable with `panel audit verify`.
+- **Installer:** one command installs Docker, Caddy with Let's Encrypt, a host firewall, automatic security updates and the services; `update` rolls back automatically if the new version does not come up healthy, and `doctor` checks the whole setup.
 
-## Aufbau
+## Security model
 
-| Binary | läuft als | Aufgabe |
+mc-panel consists of three binaries separated by privilege:
+
+| Binary | Runs as | Job |
 |---|---|---|
-| `panel` | Benutzer `mcpanel` (unprivilegiert) | Weboberfläche und `/api`, SQLite-Datenbank, Downloads von Modrinth/Hangar, CLI (`serve`, `admin create`, `admin unlock`, `audit verify`) |
-| `agent` | root | schmale JSON-API über einen Unix-Socket, nur für das panel: nftables-Jails und Docker (Minecraft-Container, Router) |
-| `files` | Benutzer `mcpanel-mc` (wie die Minecraft-Container, ohne Capabilities) | Dateibrowser und Backups (restic als Kindprozess, ohne Netz): Dateioperationen im Datenverzeichnis eines Servers, nur für das panel (und root), über einen eigenen Unix-Socket |
+| `panel` | user `mcpanel` (unprivileged) | web UI and `/api`, SQLite database, downloads from Modrinth/Hangar, CLI |
+| `agent` | root | a narrow JSON API on a Unix socket, for the panel only: nftables jails and Docker (Minecraft containers, router) |
+| `files` | user `mcpanel-mc` (like the Minecraft containers; no capabilities, no network) | file browser and backups inside a server's data directory, for the panel only |
 
-Die Trennung soll verhindern, dass ein kompromittiertes panel Root-Rechte auf dem Host bekommt; Dateioperationen auf Daten, die ein Minecraft-Server kontrolliert, laufen nie als root. In Produktion terminiert Caddy TLS vor dem panel.
+The goal: a compromised panel does not get root on the host, and file operations on data a Minecraft server controls never run as root. The agent validates every request strictly and accepts connections only from the panel's user. In production Caddy terminates TLS in front of the panel, which listens on a Unix socket. Details are in the [foundation spec](docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md).
 
-## Installation (Produktion)
+## Requirements
 
-Voraussetzungen: ein VPS mit Ubuntu 26.04 LTS (`amd64` oder `arm64`), root bzw. `sudo`, eine Domain für das Panel (A/AAAA-Eintrag auf den VPS, Port 80 und 443 von außen erreichbar für Let's Encrypt) und ein Wildcard-Eintrag für die Minecraft-Server (z. B. `*.mc.example.com`).
+- A VPS with **Ubuntu 26.04 LTS** (`amd64` or `arm64`) and root access.
+- TCP ports 80, 443 and 25565 reachable from outside.
+- A DNS name for the panel (e.g. `panel.example.com`) and a wildcard name for the Minecraft servers (e.g. `*.mc.example.com`), both pointing to the VPS.
+
+## Quickstart
 
 ```bash
 curl -fsSL https://github.com/Bernotese/mc-panel/releases/latest/download/install.sh \
   | sudo bash -s -- install --domain panel.example.com --email you@example.com
 ```
 
-Der Installer richtet Docker, Caddy (mit Let's-Encrypt-Zertifikat), eine Host-Firewall (SSH, TCP 80, 443 und 25565, UDP 443 für HTTP/3), Sicherheitsupdates, die drei Dienste und den ersten Admin ein (Name und Passwort fragt er im Terminal ab) und prüft am Ende alles mit `doctor`. Jeder Schritt meldet `[ok]`, `[changed]`, `[skip]` oder `[warn]`; ein zweiter Lauf ändert nichts. Danach im Panel die Basisdomain der Minecraft-Server eintragen, 2FA und Benachrichtigungen einrichten und `/srv/mc-panel/backups/keys/` in die eigene Sicherung des Hosts aufnehmen.
+The installer asks for the first admin's name and password and checks everything with `doctor` at the end. Then:
 
-Wichtige Optionen von `install`: `--ssh-port N` (sonst aus `sshd -T`), `--allow-port PORT[/tcp|/udp]` (weitere offene Ports, mehrfach; bei jedem späteren `install` wieder angeben, sonst schließt er sie), `--no-firewall`, `--tls internal` (Caddys eigene CA statt Let's Encrypt), `--admin-user NAME --admin-password-file DATEI` (ohne Rückfrage), `--yes` (Warnungen nicht nachfragen). `install.sh --help` zeigt alle.
+1. Open `https://panel.example.com/`, log in and set up the second factor.
+2. Settings: enter the base domain of the Minecraft servers (`mc.example.com`).
+3. Security Center: add a Discord or ntfy notification channel.
+4. Add `/srv/mc-panel/backups/keys/` and `/var/lib/mc-panel/` to your own host backups.
+5. Create a server; players join it at `<server>.mc.example.com`.
 
-| Befehl | Wirkung |
+All installer options, updates, rollback, `doctor`, uninstalling and troubleshooting: **[docs/install.md](docs/install.md)**.
+
+## Documentation
+
+| Document | Content |
 |---|---|
-| `sudo bash install.sh doctor` | prüft Dienste, Sockets, Rechte, Konfiguration, Zertifikat, Firewall, Docker, restic, Speicher und warnt bei unsicherer SSH-Konfiguration (Exit-Code 0 ok, 1 Warnungen, 2 Fehler; `--json` für Skripte) |
-| `sudo bash install.sh update` | neueste Version mit Sicherung von DB, Konfiguration, Binaries und Units und automatischem Rollback, falls die neue Version nicht gesund startet (`--check` zeigt nur an, `--version vX.Y.Z` wählt eine Version; Exit-Code 3 = zurückgerollt) |
-| `sudo bash install.sh uninstall` | entfernt das Programm, behält Welten, Backups, Datenbank und Konfiguration (`--purge` löscht nach Eintippen der Panel-Domain alles) |
+| [`docs/install.md`](docs/install.md) | installation and operation: DNS, firewall, installer options, update, rollback, `doctor`, uninstall, backups, troubleshooting |
+| [`docs/dev/README.md`](docs/dev/README.md) | development: toolchain, build and dev setup, test VM, tests, CI, lint conventions, release, production details |
+| [`docs/dev/acceptance.md`](docs/dev/acceptance.md) | manual release acceptance checklist |
+| [`docs/superpowers/specs/`](docs/superpowers/specs/) | design specs of all sub-projects (architecture and security, instances, console, files, plugins, backups, monitoring, installer, UI) |
+| [`api/openapi.yaml`](api/openapi.yaml) | API contract (source of the TypeScript types) |
+| [`CLAUDE.md`](CLAUDE.md) | working rules and a short architecture overview for Claude Code |
 
-`install.sh` liegt jedem Release bei (`…/releases/download/<version>/install.sh`, Prüfsumme in `checksums.txt`). Für `doctor`, `update` und `uninstall` das Skript einmal herunterladen:
+## Releases
 
-```bash
-curl -fsSLO https://github.com/Bernotese/mc-panel/releases/latest/download/install.sh && sudo bash install.sh doctor
-```
-
-Protokoll: `/var/log/mc-panel-install.log`. Der Installer ändert SSH nicht und entfernt nie Pakete; ein eigenes Dateisystem für `/srv/mc-panel` (damit volle Welten die Panel-Datenbank nicht blockieren) richtet er nicht ein, `doctor` weist darauf hin.
-
-## Schnellstart (Entwicklung, macOS)
-
-```bash
-brew install go node sqlc goose golangci-lint goreleaser jq shellcheck
-(cd web && npm ci)
-make dev                    # agent + files + panel (-dev) + Vite, UI unter http://localhost:5173
-printf '%s\n' '<passwort>' | .dev/bin/panel admin create -dev -username admin   # zweites Terminal
-```
-
-Danach mit `admin` anmelden und den zweiten Faktor einrichten. Ohne Backend geht es auch: `cd web && npm run dev:mock`.
-
-Vor jedem Push: `make check` (Format, Vet, Build für macOS und Linux, TypeScript; ~10 s). Tests, Race-Detector, Lint und E2E laufen in der CI bei jedem PR.
-
-Zum Ausprobieren gegen das echte Backend mit Docker gibt es eine interne Test-VM: `make deploy-testvm [REF=<branch>]`.
-
-## Dokumentation
-
-| Dokument | Inhalt |
-|---|---|
-| [`docs/dev/README.md`](docs/dev/README.md) | Toolchain, Make-Targets, Test-VM, CI lokal nachstellen, Lint-Konventionen, Release, Hinweise zur Produktion |
-| [`docs/dev/acceptance-tp2.md`](docs/dev/acceptance-tp2.md) | manuelle Abnahme der Minecraft-Server auf einem Testserver |
-| [`docs/dev/acceptance-tp3a.md`](docs/dev/acceptance-tp3a.md) | manuelle Abnahme von Konsole, Logs und Spieler-Verwaltung auf der Test-VM |
-| [`docs/dev/acceptance-tp3b.md`](docs/dev/acceptance-tp3b.md) | manuelle Abnahme des Dateibrowsers auf der Test-VM |
-| [`docs/superpowers/specs/2026-10-11-mc-panel-files-design.md`](docs/superpowers/specs/2026-10-11-mc-panel-files-design.md) | Dateibrowser über den unprivilegierten Dienst `mcpanel-files` |
-| [`docs/dev/acceptance-tp3c.md`](docs/dev/acceptance-tp3c.md) | manuelle Abnahme von Plugins und Mods auf der Test-VM |
-| [`docs/superpowers/specs/2026-10-12-mc-panel-plugins-design.md`](docs/superpowers/specs/2026-10-12-mc-panel-plugins-design.md) | Plugins und Mods aus Modrinth und Hangar |
-| [`docs/dev/acceptance-tp4.md`](docs/dev/acceptance-tp4.md) | manuelle Abnahme der Backups auf der Test-VM |
-| [`docs/superpowers/specs/2026-10-12-mc-panel-backups-design.md`](docs/superpowers/specs/2026-10-12-mc-panel-backups-design.md) | Backups mit lokalen restic-Repos über den Dateidienst |
-| [`docs/dev/acceptance-tp5.md`](docs/dev/acceptance-tp5.md) | manuelle Abnahme von Monitoring und Alerts auf der Test-VM |
-| [`docs/superpowers/specs/2026-10-13-mc-panel-monitoring-design.md`](docs/superpowers/specs/2026-10-13-mc-panel-monitoring-design.md) | Monitoring (Sammler, Verlauf, Dashboard) und Alerts über notify |
-| [`docs/dev/acceptance-tp6.md`](docs/dev/acceptance-tp6.md) | manuelle Abnahme des Installers auf einem echten VPS (Let's Encrypt) und der Test-VM |
-| [`docs/superpowers/specs/2026-10-13-mc-panel-installer-design.md`](docs/superpowers/specs/2026-10-13-mc-panel-installer-design.md) | Installer `install.sh` (install, update, doctor, uninstall) |
-| [`docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`](docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md) | Architektur, Security-Anforderungen, Roadmap |
-| [`docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md`](docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md) | Minecraft-Instanzen (Docker, Router, Reconcile) |
-| [`docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md`](docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md) | Konsole, Live-Log, Spieler-Verwaltung (RCON, SSE) |
-| [`api/openapi.yaml`](api/openapi.yaml) | API-Vertrag (Quelle für die TypeScript-Typen) |
-| [`CLAUDE.md`](CLAUDE.md) | Arbeitsregeln und Architektur-Kurzfassung für Claude Code |
-
-## Stand
-
-| # | Teilprojekt | Stand |
-|---|---|---|
-| 1 | Fundament + Security | fertig |
-| 2 | Instanzen-Lifecycle | fertig |
-| 3a | Live-Betrieb: Konsole, Logs, Spieler | fertig |
-| 3b | Live-Betrieb: Dateibrowser | fertig |
-| 3c | Live-Betrieb: Plugins/Mods (Modrinth, Hangar) | fertig |
-| 4 | Backups (lokal; Offsite später) | umgesetzt |
-| 5 | Monitoring + Alerts | umgesetzt |
-| 6 | Installer-CLI (`install`/`update`/`doctor`, Caddy, VPS-Härtung) | umgesetzt |
-| 7 | UI-Redesign (Minecraft-/Gaming-Look, Navigation, Seiten) | umgesetzt |
-
-## Release
-
-Ein Tag `v*` auf `main` veröffentlicht über GitHub Actions ein Release mit `mc-panel_<version>_linux_{amd64,arm64}.tar.gz` (je `panel`, `agent`, `files` und `deploy/` mit den Vorlagen für Units, Caddy, nftables und Konfiguration), `install.sh` und `checksums.txt` (über alle Assets). Ablauf: `docs/dev/README.md`, Abschnitt „Release“.
+Each `v*` tag on `main` publishes a GitHub release with `mc-panel_<version>_linux_{amd64,arm64}.tar.gz` (`panel`, `agent`, `files` and the installer templates in `deploy/`), `install.sh` and `checksums.txt` (SHA-256 of all assets).

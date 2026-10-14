@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copies the working tree (tracked and new, not ignored files; no push needed) to the test VM and
-# runs test suites there: make test-vm [SUITE=all|go|lint|web|e2e|shots] (docs/dev/README.md, "Tests auf
-# der Test-VM"). Each checkout or worktree gets its own directory on the VM, so teammates can test
+# runs test suites there: make test-vm [SUITE=all|go|lint|web|e2e|shots] (docs/dev/README.md, "Tests
+# on the test VM"). Each checkout or worktree gets its own directory on the VM, so teammates can test
 # in parallel. Nothing runs as root and nothing touches the panel deployed on the VM.
 set -euo pipefail
 
