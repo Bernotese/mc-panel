@@ -1,0 +1,6 @@
+# Created by mc-panel install.sh {{VERSION}}. Later runs only add missing keys; your edits stay.
+socket = "/run/mc-panel/agent.sock"
+panel_uid = {{PANEL_UID}}
+firewall = "nftables"
+instances_dir = "{{INSTANCES_DIR}}"
+mc_user = "mcpanel-mc"
