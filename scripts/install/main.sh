@@ -27,6 +27,7 @@ usage: install.sh <command> [options]
 
   install    --domain FQDN --email ADDRESS [--version vX.Y.Z | --from-dir DIR]
              [--tls letsencrypt|internal] [--ssh-port N] [--no-firewall]
+             [--allow-port PORT[/tcp|/udp]]...
              [--admin-user NAME [--admin-password-file FILE]] [--yes]
   update     [--version vX.Y.Z | --from-dir DIR] [--check] [--force] [--yes]
   doctor     [--json]
@@ -117,6 +118,11 @@ parse_args() {
       ADMIN_PASSWORD_FILE="$1"
       shift
       ;;
+    install:--allow-port)
+      need_value "$opt" "$@"
+      FW_ALLOW_PORTS+=("$1") # firewall.sh
+      shift
+      ;;
     install:--no-firewall) NO_FIREWALL=1 ;;
     update:--check) CHECK_ONLY=1 ;;
     update:--force) FORCE=1 ;;
@@ -154,6 +160,12 @@ validate_args() {
   fi
   [[ -z $SSH_PORT || ($SSH_PORT =~ ^[0-9]+$ && $SSH_PORT -ge 1 && $SSH_PORT -le 65535) ]] ||
     die "--ssh-port: $SSH_PORT is not a port"
+  local ap
+  for ap in "${FW_ALLOW_PORTS[@]}"; do
+    if ! [[ $ap =~ ^([0-9]{1,5})(/(tcp|udp))?$ ]] || ((10#${BASH_REMATCH[1]} < 1 || 10#${BASH_REMATCH[1]} > 65535)); then
+      die "--allow-port: $ap is not PORT, PORT/tcp or PORT/udp"
+    fi
+  done
   [[ -z $ADMIN_USER || $ADMIN_USER =~ ^[A-Za-z0-9._-]{1,64}$ ]] || die "--admin-user: invalid name"
   if [[ -n $ADMIN_PASSWORD_FILE ]]; then
     # curl | bash: stdin is the script itself, so a password comes from a file (spec §4.10).
