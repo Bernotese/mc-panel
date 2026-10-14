@@ -14,7 +14,7 @@ export function AppToaster() {
       closeButton
       position="top-right"
       style={STYLE}
-      toastOptions={{ className: 'bevel! font-sans', classNames: { title: 'font-semibold' } }}
+      toastOptions={{ className: 'bevel! font-sans', classNames: { title: 'font-semibold', closeButton: 'rounded-none!' } }}
     />
   )
 }
