@@ -28,6 +28,7 @@ const (
 const (
 	jobInstall = "install"
 	jobUpdate  = "update"
+	jobMrpack  = "mrpack"
 
 	jobStateRunning = "running"
 	jobStateDone    = "done"
@@ -195,6 +196,13 @@ func (j *job) fail(i int, code, msg string) {
 	defer j.reg.mu.Unlock()
 	st := &j.view.Steps[i]
 	st.State, st.ErrorCode, st.Error = stepFailed, &code, msg
+}
+
+// snapshot returns a copy of the job's view.
+func (j *job) snapshot() jobView {
+	j.reg.mu.Lock()
+	defer j.reg.mu.Unlock()
+	return j.view.clone()
 }
 
 func (h *Handler) jobRunning(serverID int64) bool { return h.jobs.running(serverID) }

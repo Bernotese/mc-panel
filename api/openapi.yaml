@@ -2209,7 +2209,7 @@ components:
       type: object
       required: [file, sha512, action, reason, optional, project, version, replaces]
       properties:
-        file: { type: string, description: 'Target file name in mods/ (the name from the pack; for skip not_on_modrinth exactly as in the pack, to upload it by hand)' }
+        file: { type: string, description: 'install: the target file name (the name from the pack, or <slug>-<version>.jar if that is no valid jar name); update: the target name, with .disabled if the replaced jar is disabled; unchanged: the installed jar; skip: the name as in the pack (not_on_modrinth: to upload it by hand)' }
         sha512: { type: string, description: 'Lowercase hex, the key for exclude' }
         action: { $ref: '#/components/schemas/MrpackAction' }
         reason: { anyOf: [{ $ref: '#/components/schemas/MrpackSkipReason' }, { type: 'null' }], description: 'Set for skip, else null' }
