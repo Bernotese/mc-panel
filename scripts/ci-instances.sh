@@ -1337,6 +1337,89 @@ setpriv --reuid=mcpanel --regid=mcpanel --init-groups \
   fail "panel audit verify: $(cat "$po/verify.txt")"
 echo "OK: plugin.install x3 (incl. the dependency), plugin.toggle x2, plugin.remove x1 on server:$psrv by ci-admin; audit verify OK"
 
+echo "== plugins: mrpack import into a Fabric server (Fabric API installed, Sodium client_only, unknown hash not_on_modrinth)"
+papi POST /servers "$po/fserver.json" '{"name": "cimrpack", "type": "fabric", "version": "1.21.11", "java": "java21", "memory_mib": 2048, "eula_accepted": true}'
+[ "$pcode" = 201 ] || fail "create fabric server: HTTP $pcode $(cat "$po/fserver.json")"
+fsrv="$(jget "$po/fserver.json" 'd["id"]')"
+f_created() { [ "$(inst_field "$fsrv" 'i["state"]')" != absent ]; }
+pwait_for 300 "container of the fabric server (reconcile)" f_created
+# The index is built from the real Modrinth versions for 1.21.11 (the hashes are what the panel
+# matches); downloads point somewhere else on purpose: the panel must never use them.
+python3 -I - "$po/mrpack.json" <<'PY' || fail "build modrinth.index.json from Modrinth"
+import json, sys, time, urllib.parse, urllib.request
+
+def latest(project):
+    q = urllib.parse.urlencode({"loaders": '["fabric"]', "game_versions": '["1.21.11"]'})
+    req = urllib.request.Request("https://api.modrinth.com/v2/project/%s/version?%s" % (project, q),
+                                 headers={"User-Agent": "mc-panel-ci (https://github.com/Bernotese/mc-panel)"})
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                v = json.load(r)[0]
+            break
+        except Exception:
+            if attempt == 2:
+                raise
+            time.sleep(20)
+    f = next((f for f in v["files"] if f["primary"]), v["files"][0])
+    return f["filename"], f["hashes"]["sha512"]
+
+fapi, sod = latest("fabric-api"), latest("sodium")
+def entry(name, sha512, server):
+    return {"path": "mods/" + name, "hashes": {"sha512": sha512, "sha1": "0" * 40},
+            "env": {"client": "required", "server": server}, "downloads": ["https://example.invalid/" + name], "fileSize": 1}
+index = {"formatVersion": 1, "game": "minecraft", "versionId": "1.0.0", "name": "CI Pack",
+         "dependencies": {"minecraft": "1.21.11", "fabric-loader": "0.17.2"},
+         "files": [entry(fapi[0], fapi[1], "required"), entry(sod[0], sod[1], "required"),
+                   entry("ci-private.jar", "ab" * 64, "required"),
+                   {"path": "config/ci.json", "hashes": {"sha512": "cd" * 64}}]}
+json.dump(index, open(sys.argv[1], "w"))
+PY
+f_fapi="$(jget "$po/mrpack.json" 'd["files"][0]["path"][5:]')"
+papi_up POST "/servers/$fsrv/plugins/mrpack/preview" "$po/mpreview.json" "$(cat "$po/mrpack.json")"
+[ "$pcode" = 200 ] || fail "mrpack preview: HTTP $pcode $(cat "$po/mpreview.json")"
+jcheck "$po/mpreview.json" "mrpack plan" '
+  [(e["action"], e["reason"]) for e in d["entries"]] == [("install", None), ("skip", "client_only"), ("skip", "not_on_modrinth")]
+  and d["entries"][0]["file"] == a[0] and d["entries"][0]["project"]["slug"] == "fabric-api"
+  and d["entries"][1]["project"]["slug"] == "sodium" and d["entries"][2]["project"] is None
+  and d["kept"] == [] and d["ignored_files"] == 1 and d["pack"] == {"name": "CI Pack", "version_id": "1.0.0"}
+  and d["game_version"] == {"pack": "1.21.11", "server": "1.21.11"} and d["loader"]["name"] == "fabric"' "$f_fapi"
+# A NeoForge pack is refused on a Fabric server.
+papi POST "/servers/$fsrv/plugins/mrpack/preview" "$po/mneo.json" \
+  "$(python3 -I -c 'import json, sys; d = json.load(open(sys.argv[1])); d["dependencies"] = {"minecraft": "1.21.11", "neoforge": "21.11.1"}; print(json.dumps(d))' "$po/mrpack.json")"
+is_perror "$po/mneo.json" "$pcode" 409 mrpack_incompatible || fail "neoforge pack on fabric: HTTP $pcode $(cat "$po/mneo.json")"
+psrv_saved="$psrv"
+for attempt in 1 2; do
+  papi_up POST "/servers/$fsrv/plugins/mrpack/import" "$po/mimport.json" \
+    "$(python3 -I -c 'import json, sys; print(json.dumps({"index": json.load(open(sys.argv[1])), "exclude": [], "accept_mismatch": False}))' "$po/mrpack.json")"
+  [ "$pcode" = 202 ] || fail "mrpack import: HTTP $pcode $(cat "$po/mimport.json")"
+  pjob="$(jget "$po/mimport.json" 'd["id"]')"
+  psrv="$fsrv" # p_job_finished polls $psrv
+  pwait_for 300 "mrpack job" p_job_finished
+  psrv="$psrv_saved"
+  [ "$pjob_state" = "done" ] && break
+  [ "$attempt" = 1 ] || fail "mrpack import failed twice: $(cat "$po/job.json")"
+  echo "WARN: mrpack import failed, retrying once in 20 s: $(cat "$po/job.json")" >&2
+  sleep 20
+done
+jcheck "$po/job.json" "mrpack job" 'd["job"]["kind"] == "mrpack" and [(s["file"], s["state"]) for s in d["job"]["steps"]] == [(a[0], "done")]' "$f_fapi"
+papi GET "/servers/$fsrv/plugins" "$po/finv.json"
+[ "$pcode" = 200 ] || fail "fabric inventory: HTTP $pcode $(cat "$po/finv.json")"
+jcheck "$po/finv.json" "mods/ after the import" '
+  d["dir"] == "mods" and [(j["file"], j["source"], j["installed_by_panel"], j["project"]["slug"]) for j in d["jars"]] == [(a[0], "modrinth", True, "fabric-api")]' "$f_fapi"
+[ "$(stat -c '%U' "$work/mc/instances/$fsrv/mods/$f_fapi")" = mcpanel-mc ] || fail "mods/$f_fapi not written by the files service"
+papi GET "/audit?action=plugin.mrpack_import" "$po/maudit.json"
+[ "$pcode" = 200 ] || fail "audit: HTTP $pcode $(cat "$po/maudit.json")"
+jcheck "$po/maudit.json" "plugin.mrpack_import audited" '
+  any(e["action"] == "plugin.mrpack_import" and e["target"] == "server:" + a[0] and e["details"]["installed"] == 1
+      and e["details"]["skipped"] == 2 and e["details"]["failed"] == 0 for e in d["items"])' "$fsrv"
+p_sudo
+papi DELETE "/servers/$fsrv" "$po/fdel.json"
+[ "$pcode" = 204 ] || fail "delete fabric server: HTTP $pcode $(cat "$po/fdel.json")"
+f_gone() { [ "$(inst_field "$fsrv" i)" = absent ]; }
+pwait_for 180 "container of the fabric server removed" f_gone
+echo "OK: mrpack preview (install/client_only/not_on_modrinth, 1 ignored), NeoForge pack 409, import job wrote $f_fapi via the files service, audited"
+
 echo "== monitoring: history, live values and host values"
 install -d -m 0755 "$mo"
 # The collector samples every 30 s and asks for TPS once a minute; a live call switches TPS to
