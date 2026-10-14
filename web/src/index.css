@@ -1,13 +1,18 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "./shadcn-tailwind.css";
-@import "@fontsource-variable/geist";
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource/silkscreen/400.css";
+@import "@fontsource-variable/pixelify-sans";
+@import "@fontsource-variable/jetbrains-mono";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-    --font-heading: var(--font-sans);
-    --font-sans: 'Geist Variable', sans-serif;
+    --font-sans: 'Space Grotesk Variable', ui-sans-serif, system-ui, sans-serif;
+    --font-heading: 'Silkscreen', 'Space Grotesk Variable', ui-sans-serif, sans-serif;
+    --font-pixel: 'Pixelify Sans Variable', 'Space Grotesk Variable', ui-sans-serif, sans-serif;
+    --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -25,6 +30,8 @@
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
+    --color-destructive-solid: var(--destructive-solid);
+    --color-destructive-solid-foreground: var(--destructive-solid-foreground);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -39,6 +46,31 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
+    --color-surface-2: var(--surface-2);
+    --color-slot: var(--slot-bg);
+    --color-console: var(--console-bg);
+    --color-console-foreground: var(--console-fg);
+    --color-console-border: var(--console-border);
+    --color-status-online: var(--status-online);
+    --color-status-offline: var(--status-offline);
+    --color-status-starting: var(--status-starting);
+    --color-status-error: var(--status-error);
+    --color-mc-0: var(--mc-0);
+    --color-mc-1: var(--mc-1);
+    --color-mc-2: var(--mc-2);
+    --color-mc-3: var(--mc-3);
+    --color-mc-4: var(--mc-4);
+    --color-mc-5: var(--mc-5);
+    --color-mc-6: var(--mc-6);
+    --color-mc-7: var(--mc-7);
+    --color-mc-8: var(--mc-8);
+    --color-mc-9: var(--mc-9);
+    --color-mc-a: var(--mc-a);
+    --color-mc-b: var(--mc-b);
+    --color-mc-c: var(--mc-c);
+    --color-mc-d: var(--mc-d);
+    --color-mc-e: var(--mc-e);
+    --color-mc-f: var(--mc-f);
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -48,73 +80,237 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Light: "Clean" – warm off-white, bevels only hinted. Hex only: tokens.test.ts checks contrast. */
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --radius: 0.125rem;
+    --background: #f6f6f4;
+    --foreground: #1f2024;
+    --card: #ffffff;
+    --card-foreground: #1f2024;
+    --popover: #ffffff;
+    --popover-foreground: #1f2024;
+    --surface-2: #efefec;
+    --primary: #358027;
+    --primary-foreground: #ffffff;
+    --secondary: #e8e8e4;
+    --secondary-foreground: #1f2024;
+    --muted: #efefec;
+    --muted-foreground: #5a5b61;
+    --accent: #e3efdd;
+    --accent-foreground: #1f2024;
+    --destructive: #b3261e;
+    --destructive-solid: #b3261e;
+    --destructive-solid-foreground: #ffffff;
+    --border: #dcdcd8;
+    --input: #c9c9c4;
+    --ring: #358027;
+    --chart-1: #358027;
+    --chart-2: #2f6fb3;
+    --chart-3: #a86b00;
+    --chart-4: #8a3fb0;
+    --chart-5: #5a5b61;
+    --sidebar: #efefec;
+    --sidebar-foreground: #1f2024;
+    --sidebar-primary: #358027;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #ffffff;
+    --sidebar-accent-foreground: #1f2024;
+    --sidebar-border: #dcdcd8;
+    --sidebar-ring: #358027;
+    --rail: #ebebe8;
+
+    --bevel-hi: #ffffff;
+    --bevel-lo: #c4c4bf;
+    --bevel-edge: #bdbdb8;
+    --bevel-primary-hi: #5cb24a;
+    --bevel-primary-lo: #1f5216;
+    --bevel-danger-hi: #d9534a;
+    --bevel-danger-lo: #7a1712;
+    --slot-bg: #ffffff;
+    --slot-hi: #e4e4e0;
+    --slot-lo: #ffffff;
+    --slot-edge: #e2e2de;
+    --glow: #5cc14a33;
+    --pixel-shadow: none;
+
+    --status-online: #2f7a22;
+    --status-offline: #696a70;
+    --status-starting: #8a5a00;
+    --status-error: #b3261e;
+
+    --console-bg: #0b0c0e;
+    --console-fg: #c4c6cc;
+    --console-border: #23252b;
+
+    --mc-0: #000000;
+    --mc-1: #0000aa;
+    --mc-2: #1d7a1d;
+    --mc-3: #00737a;
+    --mc-4: #aa0000;
+    --mc-5: #8a008a;
+    --mc-6: #8a5a00;
+    --mc-7: #5a5b61;
+    --mc-8: #45464b;
+    --mc-9: #3333cc;
+    --mc-a: #2f7a22;
+    --mc-b: #00737a;
+    --mc-c: #c42b2b;
+    --mc-d: #a3289e;
+    --mc-e: #7a6600;
+    --mc-f: #1f2024;
 }
 
+/* Dark: "M2" – launcher base, block bevels, inventory slots. */
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --background: #101114;
+    --foreground: #d4d6dc;
+    --card: #16171b;
+    --card-foreground: #d4d6dc;
+    --popover: #1a1c21;
+    --popover-foreground: #d4d6dc;
+    --surface-2: #1a1c21;
+    --primary: #5cc14a;
+    --primary-foreground: #0c1a08;
+    --secondary: #2c2f37;
+    --secondary-foreground: #e6e7ea;
+    --muted: #1a1c21;
+    --muted-foreground: #8a8d96;
+    --accent: #22252b;
+    --accent-foreground: #ffffff;
+    --destructive: #ff6b6b;
+    --destructive-solid: #b3261e;
+    --destructive-solid-foreground: #ffffff;
+    --border: #2a2d34;
+    --input: #3a3d45;
+    --ring: #5cc14a;
+    --chart-1: #5cc14a;
+    --chart-2: #6ba8ff;
+    --chart-3: #f5c451;
+    --chart-4: #d08cff;
+    --chart-5: #8a8d96;
+    --sidebar: #16171b;
+    --sidebar-foreground: #d4d6dc;
+    --sidebar-primary: #5cc14a;
+    --sidebar-primary-foreground: #0c1a08;
+    --sidebar-accent: #22252b;
+    --sidebar-accent-foreground: #ffffff;
+    --sidebar-border: #0b0c0e;
+    --sidebar-ring: #5cc14a;
+    --rail: #0d0e11;
+
+    --bevel-hi: #575b66;
+    --bevel-lo: #24262c;
+    --bevel-edge: #000000;
+    --bevel-primary-hi: #8ad877;
+    --bevel-primary-lo: #2d6b21;
+    --bevel-danger-hi: #d9534a;
+    --bevel-danger-lo: #7a1712;
+    --slot-bg: #1a1c21;
+    --slot-hi: #0b0c0e;
+    --slot-lo: #2c2f37;
+    --slot-edge: transparent;
+    --glow: #5cc14a40;
+    --pixel-shadow: 2px 2px 0 #000000;
+
+    --status-online: #5cc14a;
+    --status-offline: #8a8d96;
+    --status-starting: #f5c451;
+    --status-error: #ff6b6b;
+
+    --mc-0: #8a8d96;
+    --mc-1: #7f8cff;
+    --mc-2: #3fc43f;
+    --mc-3: #3fc4c4;
+    --mc-4: #e05050;
+    --mc-5: #d070d0;
+    --mc-6: #ffaa00;
+    --mc-7: #c4c6cc;
+    --mc-8: #8a8d96;
+    --mc-9: #7f7fff;
+    --mc-a: #55ff55;
+    --mc-b: #55ffff;
+    --mc-c: #ff5555;
+    --mc-d: #ff55ff;
+    --mc-e: #ffff55;
+    --mc-f: #ffffff;
+}
+
+/* Raised block (buttons, badges). Compose with `glow`. */
+@utility bevel {
+    box-shadow: inset 2px 2px 0 var(--bevel-hi), inset -2px -2px 0 var(--bevel-lo), 0 0 0 1px var(--bevel-edge), var(--tw-glow, 0 0 #0000);
+    @media (forced-colors: active) {
+        box-shadow: none;
+        border: 1px solid ButtonText;
+    }
+}
+@utility bevel-primary {
+    box-shadow: inset 2px 2px 0 var(--bevel-primary-hi), inset -2px -2px 0 var(--bevel-primary-lo), 0 0 0 1px var(--bevel-edge), var(--tw-glow, 0 0 #0000);
+    @media (forced-colors: active) {
+        box-shadow: none;
+        border: 1px solid ButtonText;
+    }
+}
+@utility bevel-danger {
+    box-shadow: inset 2px 2px 0 var(--bevel-danger-hi), inset -2px -2px 0 var(--bevel-danger-lo), 0 0 0 1px var(--bevel-edge);
+    @media (forced-colors: active) {
+        box-shadow: none;
+        border: 1px solid ButtonText;
+    }
+}
+/* Pressed: swaps light and dark edge of the neutral bevel. */
+@utility bevel-pressed {
+    box-shadow: inset 2px 2px 0 var(--bevel-lo), inset -2px -2px 0 var(--bevel-hi), 0 0 0 1px var(--bevel-edge);
+}
+/* Sunken inventory slot (stat slots, inputs). */
+@utility bevel-inset {
+    background-color: var(--slot-bg);
+    box-shadow: inset 2px 2px 0 var(--slot-hi), inset -2px -2px 0 var(--slot-lo), 0 0 0 1px var(--slot-edge);
+    @media (forced-colors: active) {
+        box-shadow: none;
+        border: 1px solid CanvasText;
+    }
+}
+@utility glow {
+    --tw-glow: 0 0 16px var(--glow);
+    @media (prefers-reduced-motion: reduce) {
+        --tw-glow: 0 0 #0000;
+    }
+}
+@utility pixel-heading {
+    font-family: var(--font-heading);
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    text-shadow: var(--pixel-shadow);
+}
+/* Console surface: dark in both modes, with the dark § colour set. */
+@utility console-scope {
+    background-color: var(--console-bg);
+    color: var(--console-fg);
+    --mc-0: #8a8d96;
+    --mc-1: #7f8cff;
+    --mc-2: #3fc43f;
+    --mc-3: #3fc4c4;
+    --mc-4: #e05050;
+    --mc-5: #d070d0;
+    --mc-6: #ffaa00;
+    --mc-7: #c4c6cc;
+    --mc-8: #8a8d96;
+    --mc-9: #7f7fff;
+    --mc-a: #55ff55;
+    --mc-b: #55ffff;
+    --mc-c: #ff5555;
+    --mc-d: #ff55ff;
+    --mc-e: #ffff55;
+    --mc-f: #ffffff;
+}
+/* Subtle pixel checkerboard for the auth screens (pure CSS, no image). */
+@utility pixel-pattern {
+    background-color: var(--background);
+    background-image:
+        linear-gradient(45deg, var(--surface-2) 25%, transparent 25%, transparent 75%, var(--surface-2) 75%),
+        linear-gradient(45deg, var(--surface-2) 25%, transparent 25%, transparent 75%, var(--surface-2) 75%);
+    background-size: 32px 32px;
+    background-position: 0 0, 16px 16px;
 }
 
 @layer base {

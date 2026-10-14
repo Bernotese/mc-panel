@@ -1,5 +1,6 @@
 import { useRouter, type ErrorComponentProps } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
+import { PixelIcon } from '@/components/pixel-icon'
 import { Button } from '@/components/ui/button'
 import { errorMessage } from '@/lib/error-message'
 
@@ -9,7 +10,8 @@ export function RouteError({ error, reset }: ErrorComponentProps) {
   const router = useRouter()
   return (
     <main className="mx-auto flex min-h-svh max-w-md flex-col items-center justify-center gap-4 p-6 text-center">
-      <h1 className="text-xl font-semibold">{t('errors.title')}</h1>
+      <PixelIcon kind="grass" size={48} />
+      <h1 className="pixel-heading text-xl">{t('errors.title')}</h1>
       <p role="alert" className="text-muted-foreground text-sm">
         {errorMessage(error, t)}
       </p>
