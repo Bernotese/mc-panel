@@ -65,8 +65,11 @@ doc_probe_files_creds() {
       else print "ok"
     }' <<<"$status"
 }
+# As caddy with its own HOME, like cad_ensure (B1): validate provisions the TLS storage below
+# HOME, and root must not create files there.
 doc_probe_caddy_validate() {
-  timeout 30 caddy validate --config "$CADDY_DIR/Caddyfile" --adapter caddyfile >/dev/null 2>&1
+  runuser -u caddy -- env HOME=/var/lib/caddy timeout 30 caddy validate --config "$CADDY_DIR/Caddyfile" \
+    --adapter caddyfile </dev/null >/dev/null 2>&1
 }
 # doc_probe_cert_days DOMAIN: days until the certificate Caddy stores for DOMAIN expires
 # (negative = expired); nothing when there is none.
