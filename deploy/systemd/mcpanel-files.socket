@@ -1,0 +1,14 @@
+# Managed by mc-panel install.sh {{VERSION}}; install.sh update rewrites this file.
+[Unit]
+Description=mc-panel files service socket
+
+[Socket]
+ListenStream=/run/mc-panel-files/files.sock
+SocketUser=mcpanel-mc
+SocketGroup=mcpanel
+SocketMode=0660
+DirectoryMode=0755
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

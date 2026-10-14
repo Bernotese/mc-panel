@@ -1,0 +1,3 @@
+# Installer sources: main.sh sources lib.sh and the step files from its own directory.
+source-path=SCRIPTDIR
+external-sources=true
