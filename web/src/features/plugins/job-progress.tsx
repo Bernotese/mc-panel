@@ -7,6 +7,10 @@ import { Button } from '@/components/ui/button'
 import { jobProgress } from './model'
 
 function jobTitle(job: PluginJob, t: TFunction): string {
+  if (job.kind === 'mrpack') {
+    if (job.state === 'running') return t('plugins.mrpack.job.running')
+    return job.state === 'done' ? t('plugins.mrpack.job.done') : t('plugins.mrpack.job.failed')
+  }
   if (job.kind === 'install') {
     if (job.state === 'running') return t('plugins.job.install_running')
     return job.state === 'done' ? t('plugins.job.install_done') : t('plugins.job.install_failed')
