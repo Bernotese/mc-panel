@@ -30,7 +30,7 @@ upg_ensure() {
   fi
   a="$(upg_periodic | write_file "$UPG_PERIODIC" 0644 root root)" || return 1
   b="$(upg_options | write_file "$UPG_OPTIONS" 0644 root root)" || return 1
-  sys_systemctl enable --now unattended-upgrades.service || {
+  sys_systemctl enable --now unattended-upgrades.service </dev/null || {
     warn "unattended-upgrades.service does not start"
     return 1
   }

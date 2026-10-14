@@ -5,6 +5,8 @@
 unit_fixture() {
   render_template() { printf '# %s\n' "$1"; }
   systemd_wait_active() { return 0; }
+  stub unit_settled 'return 0'
+  stub unit_panel_health 'return 0'
   CMD=install
 }
 
@@ -27,6 +29,8 @@ test_install_unit_ensure_writes_reloads_enables_starts_in_order() {
 
 test_install_unit_ensure_renders_the_real_templates() {
   stub systemd_wait_active 'return 0'
+  stub unit_settled 'return 0'
+  stub unit_panel_health 'return 0'
   CMD=install
   KEY_VERSION=1.2.3 KEY_INSTANCES_DIR=/srv/mc-panel
   unit_ensure >/dev/null
@@ -103,4 +107,32 @@ test_install_unit_ensure_fails_without_template_value() {
   assert_fails unit_ensure
   assert_no_file "$ROOT$UNIT_DIR/mcpanel-files.service"
   assert_not_called 'systemctl'
+}
+
+test_install_unit_ensure_fails_when_a_service_does_not_stay_up() {
+  unit_fixture
+  # shellcheck disable=SC2016 # the body is code for the stub
+  stub unit_settled '[[ $1 != mcpanel-agent.service ]]'
+  assert_fails unit_ensure
+  assert_contains "$(cat "$WORK/out")" "mcpanel-agent.service does not stay active"
+  assert_eq mcpanel-agent.service "$(unit_started)"
+}
+
+test_install_unit_settled_reads_state_and_restarts() {
+  UNIT_SETTLE=0
+  stub systemctl 'printf "NRestarts=0\nActiveState=active\n"'
+  unit_settled mcpanel-panel.service
+  stub systemctl 'printf "ActiveState=active\nNRestarts=2\n"'
+  assert_fails unit_settled mcpanel-panel.service
+  stub systemctl 'printf "ActiveState=activating\nNRestarts=0\n"'
+  assert_fails unit_settled mcpanel-panel.service
+  stub systemctl 'printf "ActiveState=active\n"' # sockets have no NRestarts
+  unit_settled mcpanel-panel.socket
+}
+
+test_install_unit_ensure_fails_when_the_panel_does_not_answer() {
+  unit_fixture
+  stub unit_panel_health 'return 1'
+  assert_fails unit_ensure
+  assert_contains "$(cat "$WORK/out")" "does not answer on /run/mc-panel-web/panel.sock"
 }

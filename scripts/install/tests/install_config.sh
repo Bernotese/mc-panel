@@ -137,3 +137,15 @@ test_install_cfg_ensure_second_run_unchanged() {
   cfg_ensure >/dev/null
   assert_eq 0 "$CFG_CHANGED"
 }
+
+test_install_cfg_ensure_warns_when_listen_is_not_the_socket() {
+  cfg_fixture
+  cfg_ensure >/dev/null
+  sed -i 's|^listen = .*|listen = "127.0.0.1:8080"|' "$ROOT$ETC_PANEL/panel.toml"
+  local out
+  out="$(cfg_ensure)"
+  assert_contains "$out" '[warn] panel.toml: listen = "127.0.0.1:8080"'
+  assert_file_contains "$ROOT$ETC_PANEL/panel.toml" 'listen = "127.0.0.1:8080"'
+  sed -i 's|^listen = .*|listen = "unix:/run/mc-panel-web/panel.sock" # socket unit|' "$ROOT$ETC_PANEL/panel.toml"
+  assert_not_contains "$(cfg_ensure)" "[warn]"
+}
