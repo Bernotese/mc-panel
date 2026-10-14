@@ -45,25 +45,30 @@ export function CommandInput({
   }
 
   return (
-    <form onSubmit={submit} className="bg-background sticky bottom-0 space-y-1 pt-2">
+    <form onSubmit={submit} className="space-y-1">
       <div className="flex gap-2">
         <Label htmlFor={id} className="sr-only">
           {t('console.command')}
         </Label>
-        <Input
-          id={id}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={onKeyDown}
-          disabled={disabled}
-          autoComplete="off"
-          autoCapitalize="off"
-          spellCheck={false}
-          placeholder={disabled ? (lockedText ?? t('console.stopped_placeholder')) : t('console.command_placeholder')}
-          aria-invalid={problem ? true : undefined}
-          aria-describedby={problem ? `${errorId} ${hintId}` : hintId}
-          className="font-mono"
-        />
+        <div className="console-scope border-console-border focus-within:ring-ring flex min-w-0 flex-1 items-center gap-2 border px-3 focus-within:ring-2">
+          <span aria-hidden="true" className="text-mc-a font-mono">
+            &gt;
+          </span>
+          <Input
+            id={id}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={onKeyDown}
+            disabled={disabled}
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            placeholder={disabled ? (lockedText ?? t('console.stopped_placeholder')) : t('console.command_placeholder')}
+            aria-invalid={problem ? true : undefined}
+            aria-describedby={problem ? `${errorId} ${hintId}` : hintId}
+            className="text-console-foreground placeholder:text-mc-8 h-9 border-0 bg-transparent! px-0 font-mono shadow-none! focus-visible:ring-0"
+          />
+        </div>
         <Button type="submit" disabled={disabled}>
           <SendHorizontal aria-hidden="true" />
           {t('console.send')}
