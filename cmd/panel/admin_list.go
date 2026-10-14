@@ -3,12 +3,44 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"net/url"
+	"os"
 
+	"github.com/Bernotese/mc-panel/internal/config"
 	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
+
+// adminListCommand is `panel admin list`: it opens the database read-only (no data directory,
+// no migration, no new database file) and prints the admins. Without a database there is no
+// admin yet: no output, no error (installer spec §4.10).
+func adminListCommand(ctx context.Context, cfg config.Panel, w io.Writer) error {
+	path := cfg.DBPath()
+	fi, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("admin list: %w", err)
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("admin list: %s is not a regular file", path)
+	}
+	q := url.Values{}
+	q.Set("mode", "ro")
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "query_only(1)")
+	db, err := sql.Open("sqlite", "file:"+path+"?"+q.Encode()) // driver registered by internal/store
+	if err != nil {
+		return fmt.Errorf("admin list: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+	return runAdminList(ctx, db, w)
+}
 
 // runAdminList prints the username of every admin, one per line, sorted (installer spec
 // §4.10: install.sh asks for a first admin only when this prints nothing). Read-only.

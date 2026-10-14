@@ -187,6 +187,13 @@ func runCLI(cmd string, args []string, stdin *os.File, stdout, stderr io.Writer)
 		return err
 	}
 	ctx := context.Background()
+	if cmd == "admin list" {
+		// Read-only (installer spec §4.10): no data directory, no migration, no new files.
+		if len(rest) > 0 {
+			return fmt.Errorf("unexpected arguments: %v", rest)
+		}
+		return adminListCommand(ctx, cfg, stdout)
+	}
 	db, err := openDB(ctx, cfg)
 	if err != nil {
 		return err
@@ -210,11 +217,6 @@ func runCLI(cmd string, args []string, stdin *os.File, stdout, stderr io.Writer)
 		}
 		_, err := defense.Unlock(ctx, db, rec, clk, stdout)
 		return err
-	case "admin list":
-		if len(rest) > 0 {
-			return fmt.Errorf("unexpected arguments: %v", rest)
-		}
-		return runAdminList(ctx, db, stdout)
 	case "audit verify":
 		if len(rest) > 0 {
 			return fmt.Errorf("unexpected arguments: %v", rest)
@@ -252,7 +254,7 @@ func serve(args []string) error {
 	}
 	defer a.Close()
 
-	l, err := listen(ctx, cfg) // closed by srv.Serve / srv.Shutdown (a unix socket file is removed)
+	l, err := listen(ctx, cfg) // closed by srv.Serve / srv.Shutdown (removes a socket file the panel created itself; one passed by systemd stays)
 	if err != nil {
 		return err
 	}
