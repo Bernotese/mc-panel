@@ -67,6 +67,7 @@ test_ops_doctor_required_keys_match_install() {
     echo "# skipped: cfg_keys (config.sh, phase B1) is not merged yet"
     return 0
   fi
+  stub lay_uid 'echo 998'
   stub id 'echo 998'
   DOMAIN=panel.example.com TLS_MODE=internal PKG_RESTIC_BIN=/usr/bin/restic
   cfg_keys
