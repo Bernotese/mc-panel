@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { InstanceConfig, Permission, Server } from '@/api/types'
-import { sectionForSwitch, sectionFromPath, sectionHref, sectionLabelKey, serverSections } from './sections'
+import { sectionForSwitch, sectionFromPath, serverIdFromPath, sectionHref, sectionLabelKey, serverSections } from './sections'
 
 function instance(type: InstanceConfig['type']): InstanceConfig {
   return { type, version: '1.21.11', loader_version: null, modpack: null, java: 'java21', memory_mib: 4096, properties: {} as InstanceConfig['properties'] }
@@ -68,5 +68,11 @@ describe('sectionHref / sectionForSwitch / sectionFromPath', () => {
     expect(sectionFromPath('/servers/1/console')).toBe('console')
     expect(sectionFromPath('/servers/1/bogus')).toBe('overview')
     expect(sectionFromPath('/profile')).toBe('overview')
+  })
+  it('reads the open server id from a pathname', () => {
+    expect(serverIdFromPath('/servers/12')).toBe(12)
+    expect(serverIdFromPath('/servers/12/files')).toBe(12)
+    expect(serverIdFromPath('/servers/new')).toBeNull()
+    expect(serverIdFromPath('/users/12/permissions')).toBeNull()
   })
 })
