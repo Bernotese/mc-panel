@@ -319,16 +319,23 @@ func (f *fakeUp) serveAPI(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeJSON(w, out)
+	case r.Method == http.MethodGet && p == "/v2/projects":
+		var ids []string
+		_ = json.Unmarshal([]byte(q.Get("ids")), &ids)
+		out := []map[string]any{}
+		for _, id := range ids {
+			if pr, ok := f.mProjects[id]; ok && pr.ID == id {
+				out = append(out, f.mProjectJSON(pr))
+			}
+		}
+		writeJSON(w, out)
 	case r.Method == http.MethodGet && strings.HasPrefix(p, "/v2/project/"):
 		pr, ok := f.mProjects[strings.TrimPrefix(p, "/v2/project/")]
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		writeJSON(w, map[string]any{
-			"id": pr.ID, "slug": pr.Slug, "title": pr.Title, "description": pr.Title + " description",
-			"icon_url": f.iconURL(pr.ID), "server_side": pr.ServerSide, "client_side": "optional", "project_type": "mod",
-		})
+		writeJSON(w, f.mProjectJSON(pr))
 	case r.Method == http.MethodGet && strings.HasPrefix(p, "/v2/version/"):
 		id := strings.TrimPrefix(p, "/v2/version/")
 		for _, pid := range f.mOrder {
@@ -415,6 +422,13 @@ func (f *fakeUp) serveAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+func (f *fakeUp) mProjectJSON(pr *mProj) map[string]any {
+	return map[string]any{
+		"id": pr.ID, "slug": pr.Slug, "title": pr.Title, "description": pr.Title + " description",
+		"icon_url": f.iconURL(pr.ID), "server_side": pr.ServerSide, "client_side": "optional", "project_type": "mod",
 	}
 }
 

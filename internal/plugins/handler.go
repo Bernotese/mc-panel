@@ -125,6 +125,7 @@ type server struct {
 	Name    string
 	Type    instancespec.Type
 	Version string // the instance's version field, may be "LATEST"
+	Loader  string // the instance's fixed loader version; "" = newest
 	Kind    kindInfo
 }
 
@@ -163,7 +164,7 @@ func (h *Handler) loadServer(w http.ResponseWriter, r *http.Request, requireKind
 		httpx.WriteError(w, r, http.StatusConflict, httpx.CodePluginsUnsupported, "this server type has no plugins or mods")
 		return server{}, false
 	}
-	return server{ID: s.ID, Name: s.Name, Type: t, Version: inst.Version, Kind: k}, true
+	return server{ID: s.ID, Name: s.Name, Type: t, Version: inst.Version, Loader: inst.LoaderVersion.String, Kind: k}, true
 }
 
 // slowWriteTimeout is the write deadline of every plugin route: a jars listing alone may take
@@ -237,6 +238,8 @@ func classify(err error) (status int, code, msg string, ok bool) {
 		return http.StatusConflict, httpx.CodeConflict, errAlreadyInstalled.Error(), true
 	case errors.Is(err, errFileExists):
 		return http.StatusConflict, httpx.CodeFileExists, err.Error(), true
+	case errors.Is(err, errInvalidIndex):
+		return http.StatusBadRequest, httpx.CodeValidation, err.Error(), true
 	case errors.Is(err, errMrpackIncompatible):
 		return http.StatusConflict, httpx.CodeMrpackIncompatible, err.Error(), true
 	case errors.Is(err, errMrpackMismatch):

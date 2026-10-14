@@ -2227,7 +2227,7 @@ export interface components {
         /** @enum {string} */
         MrpackSkipReason: "client_only" | "not_on_modrinth" | "incompatible" | "file_exists";
         MrpackPlanEntry: {
-            /** @description Target file name in mods/ (the name from the pack; for skip not_on_modrinth exactly as in the pack, to upload it by hand) */
+            /** @description install: the target file name (the name from the pack, or <slug>-<version>.jar if that is no valid jar name); update: the target name, with .disabled if the replaced jar is disabled; unchanged: the installed jar; skip: the name as in the pack (not_on_modrinth: to upload it by hand) */
             file: string;
             /** @description Lowercase hex, the key for exclude */
             sha512: string;
