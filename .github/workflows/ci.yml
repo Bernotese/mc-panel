@@ -26,11 +26,18 @@ defaults:
 
 jobs:
   # Decides which jobs a pull request needs (git diff against the merge base, no third-party
-  # action). Pushes to main, the weekly run and manual runs always run everything, as does any
-  # change to this workflow.
+  # action). The weekly run, manual runs and any change to this workflow run everything. Pushes
+  # to main run every job on the self-hosted test-VM runners (free), but not the two root jobs
+  # on GitHub-hosted runners (instances, nftables): the pull request already ran them on the
+  # same tree, and they cost most of the billed minutes.
+  #
+  # Runner placement: jobs without root run on the self-hosted runners on the test VM (labels
+  # self-hosted + mcpanel-vm; two runners, see docs/dev/README.md). Their timing-sensitive test
+  # steps take the same lock as `make test-vm`, so CI and teammates never run them at once. The
+  # root jobs change the host (nftables, Docker, port 25565) and stay on GitHub-hosted runners.
   changes:
     name: Changes
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, mcpanel-vm]
     timeout-minutes: 5
     outputs:
       go: ${{ steps.diff.outputs.go }}
@@ -58,7 +65,11 @@ jobs:
           set -euo pipefail
           all=false
           files=""
-          if [ "${EVENT}" != pull_request ]; then
+          main_push=false
+          if [ "${EVENT}" = push ]; then
+            all=true
+            main_push=true
+          elif [ "${EVENT}" != pull_request ]; then
             all=true
           else
             files="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")"
@@ -67,9 +78,10 @@ jobs:
               all=true
             fi
           fi
-          out() { # out <name> <regex>
+          out() { # out <name> <regex> [root]
             local v=false
             if [ "${all}" = true ] || grep -qE "$2" <<<"${files}"; then v=true; fi
+            if [ "${3:-}" = root ] && [ "${main_push}" = true ]; then v=false; fi
             echo "$1=${v}" >> "${GITHUB_OUTPUT}"
             echo "$1=${v}"
           }
@@ -79,15 +91,15 @@ jobs:
           out preview '^web/Dockerfile\.preview$|^compose\.preview\.yaml$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$'
           out openapi '^api/'
           out e2e "^(cmd|internal|api|web)/|${gomod}"
-          out nftables "^internal/(agent|defense|auth)/|^cmd/(agent|panel)/|^scripts/ci-acceptance\.sh$|${gomod}"
-          out instances "^(cmd|internal)/|^scripts/(ci-instances\.sh|mc-status\.py|install-restic\.sh)$|${gomod}"
+          out nftables "^internal/(agent|defense|auth)/|^cmd/(agent|panel)/|^scripts/ci-acceptance\.sh$|${gomod}" root
+          out instances "^(cmd|internal)/|^scripts/(ci-instances\.sh|mc-status\.py|install-restic\.sh)$|${gomod}" root
           out release "^cmd/|^internal/webui/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
 
   go:
     name: Go (race tests, lint, vulns)
     needs: changes
     if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, mcpanel-vm]
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -147,7 +159,10 @@ jobs:
       - name: Tests (race detector)
         env:
           MCPANEL_TEST_RESTIC: /usr/local/bin/restic
-        run: make test-race
+        run: |
+          umask 022
+          mkdir -p ~/.cache
+          flock ~/.cache/mcpanel-vm-test.lock make test-race
 
       - name: golangci-lint (incl. gosec, gofmt, goimports)
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -161,7 +176,7 @@ jobs:
     name: Web (lint, typecheck, test, build, audit)
     needs: changes
     if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, mcpanel-vm]
     timeout-minutes: 20
     defaults:
       run:
@@ -189,7 +204,10 @@ jobs:
         run: npm run typecheck
 
       - name: Unit tests
-        run: npm test
+        run: |
+          umask 022
+          mkdir -p ~/.cache
+          flock ~/.cache/mcpanel-vm-test.lock npm test
 
       - name: Build
         run: npm run build
@@ -211,13 +229,13 @@ jobs:
       # The UI preview image (make preview) must keep building; it is never started in CI.
       - name: Build UI preview image
         if: needs.changes.outputs.preview == 'true'
-        run: docker build --file Dockerfile.preview --tag mcpanel-preview:ci .
+        run: sudo docker build --file Dockerfile.preview --tag mcpanel-preview:ci .
 
   openapi:
     name: OpenAPI lint
     needs: changes
     if: needs.changes.outputs.openapi == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, mcpanel-vm]
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -237,73 +255,24 @@ jobs:
     name: E2E (Playwright, real backend)
     needs: changes
     if: needs.changes.outputs.e2e == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    runs-on: [self-hosted, mcpanel-vm]
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Set up Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
-
-      - name: Build binaries
-        run: |
-          mkdir -p .dev/bin
-          go build -o .dev/bin/ ./cmd/...
-
-      - name: Start stack
-        run: |
-          .dev/bin/agent -dev > agent.log 2>&1 &
-          .dev/bin/files -dev > files.log 2>&1 &
-          .dev/bin/panel serve -dev > panel.log 2>&1 &
-          (cd web && npx vite --port 5173 --strictPort > ../vite.log 2>&1 &)
-          for _ in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8080/api/health > /dev/null && break
-            sleep 1
-          done
-          for _ in $(seq 1 30); do
-            curl -sf http://localhost:5173/api/health > /dev/null && break
-            sleep 1
-          done
-          curl -sf http://localhost:5173/api/health
-          printf '%s\n' 'ci e2e admin password 1' | .dev/bin/panel admin create -dev -username e2e-admin
-
-      - name: Install Playwright browsers
-        working-directory: web
-        run: npx playwright install --with-deps chromium
-
-      - name: Playwright (real backend)
-        working-directory: web
-        env:
-          E2E_BASE_URL: http://localhost:5173
-          E2E_ADMIN_USER: e2e-admin
-          E2E_ADMIN_PASSWORD: ci e2e admin password 1
-        run: npm run e2e:real
-
-      - name: Playwright (mock backend)
-        if: success() || failure()
-        working-directory: web
-        run: npm run e2e
+      # The same suite as `make test-vm SUITE=e2e`: real backend in dev mode on its own ports
+      # (panel 18080, Playwright mock 5174), so the panel deployed on the VM (8080) is not
+      # touched; it takes the VM test lock itself. Go and Node come from the VM
+      # (scripts/testvm-deploy.sh).
+      - name: Playwright (real and mock backend)
+        run: bash scripts/vm-test.sh e2e
 
       - name: Logs on failure
         if: failure()
-        run: tail -n 200 agent.log files.log panel.log vite.log
+        run: tail -n 200 .dev/agent.log .dev/files.log .dev/panel.log || true
 
       - name: Upload Playwright results
         if: failure()
@@ -420,7 +389,7 @@ jobs:
     name: Build & release snapshot
     needs: changes
     if: needs.changes.outputs.release == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, mcpanel-vm]
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -542,7 +511,7 @@ jobs:
       - nftables
       - instances
       - build
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, mcpanel-vm]
     timeout-minutes: 5
     steps:
       - name: All needed jobs passed
