@@ -1,325 +1,325 @@
-# mc-panel – Teilprojekt 4: Backups (Design-Spec)
+# mc-panel – Sub-project 4: Backups (design spec)
 
-- **Datum:** 2026-10-12
-- **Status:** umgesetzt (PRs #52–#57, 2026-10-13); Offsite-Backends zurückgestellt
-- **Autor:** Jannes Göbel (mit Claude)
-- **Baut auf:** `2026-10-08-mc-panel-foundation-design.md` (TP1), `2026-10-10-mc-panel-instances-design.md` (TP2), `2026-10-11-mc-panel-console-players-design.md` (TP3a), `2026-10-11-mc-panel-files-design.md` (TP3b), `2026-10-12-mc-panel-plugins-design.md` (TP3c)
+- **Date:** 2026-10-12
+- **Status:** implemented (PRs #52–#57, 2026-10-13); offsite backends deferred
+- **Author:** Jannes Göbel (with Claude)
+- **Builds on:** `2026-10-08-mc-panel-foundation-design.md` (sub-project 1), `2026-10-10-mc-panel-instances-design.md` (sub-project 2), `2026-10-11-mc-panel-console-players-design.md` (sub-project 3a), `2026-10-11-mc-panel-files-design.md` (sub-project 3b), `2026-10-12-mc-panel-plugins-design.md` (sub-project 3c)
 
-## 1. Ziel und Kontext
+## 1. Goal and context
 
-Teilprojekt 4 bringt Backups der Server-Datenverzeichnisse: manuell und nach Zeitplan, mit gestufter Aufbewahrung, konsistent bei laufendem Server und mit vollständigem Restore. Die Backups liegen in diesem Teilprojekt **nur lokal** auf dem VPS (restic-Repos); ein Offsite-Ziel ist ausdrücklich zurückgestellt. Damit eine Welt trotzdem vom VPS herunterkommt, lässt sich jeder Snapshot als Zip herunterladen.
+Sub-project 4 adds backups of the server data directories: manual and scheduled, with tiered retention, consistent while the server is running, and with a full restore. In this sub-project the backups live **only locally** on the VPS (restic repos); an offsite target is explicitly deferred. So that a world can still get off the VPS, every snapshot can be downloaded as a zip.
 
-### 1.1 Erfolg
+### 1.1 Success
 
-Ein Nutzer mit `server.backups` erstellt für einen Server ein Backup mit optionaler Notiz, stellt einen Zeitplan (alle N Stunden, täglich oder wöchentlich zu einer Uhrzeit) und eine Aufbewahrung (letzte / täglich / wöchentlich / monatlich) ein, pinnt wichtige geplante Snapshots gegen die Aufbewahrung, lädt einen Snapshot als Zip herunter und setzt den Server auf einen Snapshot zurück. Während das Backup eines laufenden Servers entsteht, speichert der Server nicht; der Snapshot ist dadurch konsistent. Fehlgeschlagene geplante Backups und Restores melden sich über die vorhandenen Benachrichtigungen (Discord, ntfy).
+A user with `server.backups` creates a backup for a server with an optional note, sets a schedule (every N hours, daily or weekly at a time of day) and a retention (last / daily / weekly / monthly), pins important scheduled snapshots against the retention, downloads a snapshot as a zip and rolls the server back to a snapshot. While the backup of a running server is being made, the server does not save; this makes the snapshot consistent. Failed scheduled backups and restores are reported through the existing notifications (Discord, ntfy).
 
-### 1.2 Leitlinie
+### 1.2 Guiding principle
 
-Unverändert gilt TP1 §3: Ein kompromittiertes panel bekommt keinen Root. Dazu kommt aus TP3b §1.2: Daten, die ein Minecraft-Server kontrolliert, berührt **nie** ein root-Prozess. Backups gehen darüber hinaus: restic selbst liest und schreibt **nie** im Datenverzeichnis. Der Dateidienst `mcpanel-files` (Benutzer `mcpanel-mc`) erzeugt beim Backup einen tar-Stream über sein `os.Root` und entpackt beim Restore einen tar-Stream mit denselben Regeln wie beim Zip-Entpacken. Ein laufender, möglicherweise bösartiger Server kann so weder durch einen Symlink-Tausch während des Backups Daten eines anderen Servers in seinen Snapshot schmuggeln noch beim Restore außerhalb seines Verzeichnisses schreiben.
+Sub-project 1 §3 still applies: a compromised panel does not gain root. Sub-project 3b §1.2 adds: data controlled by a Minecraft server is **never** touched by a root process. Backups go further: restic itself **never** reads or writes in the data directory. The file service `mcpanel-files` (user `mcpanel-mc`) produces a tar stream from its `os.Root` for a backup and extracts a tar stream for a restore with the same rules as zip extraction. A running, possibly malicious server can therefore neither smuggle another server's data into its snapshot by swapping in a symlink during the backup, nor write outside its directory during a restore.
 
-### 1.3 Nicht-Ziele (TP4)
+### 1.3 Non-goals (sub-project 4)
 
-- Offsite-Backends (S3, SFTP, …) und `restic copy`; späteres Teilprojekt. Dann wandert die restic-Ausführung in einen eigenen Dienst mit Netz, der Dateidienst bleibt ohne Netz.
-- Wiederherstellen einzelner Pfade, Snapshot-Browser, Restore in einen neuen Server.
-- Backup der panel-Datenbank.
-- Cron-Ausdrücke, mehrere Zeitpläne pro Server, Zeitzone pro Server.
-- Drosselung über `IOWeight`/`CPUWeight` der Unit hinaus; Quoten für die Repo-Größe.
-- Hochladen eines Backups (Import); zum Einspielen einer Welt dient weiterhin das Zip-Entpacken aus TP3b.
+- Offsite backends (S3, SFTP, …) and `restic copy`; a later sub-project. Then restic execution moves into a separate service with network access, and the file service stays without network.
+- Restoring individual paths, a snapshot browser, restoring into a new server.
+- Backup of the panel database.
+- Cron expressions, several schedules per server, a time zone per server.
+- Throttling beyond the unit's `IOWeight`/`CPUWeight`; quotas for the repo size.
+- Uploading a backup (import); to bring in a world, the zip extraction from sub-project 3b remains the way.
 
-## 2. Entscheidungen
+## 2. Decisions
 
-| Bereich | Entscheidung | Begründung |
+| Area | Decision | Reason |
 |---|---|---|
-| Werkzeug | restic ≥ 0.17 als externes Binary (CI/VM: 0.19.1, per SHA-256 gepinnt) | Deduplizierung über Snapshots hinweg (eine Welt × viele Tage bleibt klein), Verschlüsselung und Prüfsummen, spätere Offsite-Ziele ohne neues Format; restic ist nicht als Go-Bibliothek gedacht |
-| Ausführender Prozess | Dateidienst `mcpanel-files` startet restic als Kindprozess | Kein neuer Dienst; gleicher Benutzer, gleiche Härtung, kein Netz; der Dienst hat bereits `os.Root`, Jobs, Entpack- und Zip-Logik |
-| Datenweg | Backup = tar-Stream aus dem Dienst → `restic backup --stdin`; Restore/Download = `restic dump` → tar-Stream → Dienst | restic öffnet nie Pfade im Datenverzeichnis (§1.2); Restore schreibt nur über die geprüfte Entpack-Logik |
-| Repos | Ein Repo pro Server: `<instances_dir>/backups/repos/<id>`, Passwort `backups/keys/<id>` | Isolierte Sperren (Prune von A blockiert B nicht), Löschen eines Servers = Repo löschen; Server-IDs werden nie wiederverwendet (Migration 00003) |
-| Wahrheit | Die Snapshot-Liste kommt immer aus restic; Art, Pin und Notiz sind restic-Tags | Wie bei Plugins (TP3c): die Platte ist maßgeblich, die DB hält nur Zeitplan und letzten Lauf |
-| Konsistenz | Laufender Server: `save-off`, `save-all flush`, Backup, danach immer `save-on` (RCON über den agent) | Standardverfahren ohne Stopp; schlägt RCON fehl, entsteht kein Snapshot |
-| Restore | Nur ganzer Stand; Server stoppen, Sicherheits-Snapshot `pre-restore`, entpacken, oberste Ebene tauschen, Neustart über den Abgleich | Einfach zu prüfen; der Sicherheits-Snapshot macht jeden Restore umkehrbar |
-| Zeitplan | Pro Server `off`/`interval`/`daily`/`weekly`, globale Zeitzone | Leicht zu bedienen und zu testen; Cron wäre fehleranfällig |
-| Retention | `restic forget --keep-*` nur für `kind=scheduled`, mit `--keep-tag pinned` | Manuelle und Pre-Restore-Snapshots verschwinden nie automatisch |
-| Orchestrierung | Panel-Paket `internal/backups`: Ticker, Warteschlange, Jobs, RCON-Schritte | Nur das panel kennt Zeitplan, Rechte, Ist-Zustand und RCON |
+| Tool | restic ≥ 0.17 as an external binary (CI/VM: 0.19.1, pinned by SHA-256) | Deduplication across snapshots (one world × many days stays small), encryption and checksums, later offsite targets without a new format; restic is not meant to be used as a Go library |
+| Executing process | The file service `mcpanel-files` starts restic as a child process | No new service; same user, same hardening, no network; the service already has `os.Root`, jobs, extraction and zip logic |
+| Data path | Backup = tar stream from the service → `restic backup --stdin`; restore/download = `restic dump` → tar stream → service | restic never opens paths in the data directory (§1.2); a restore only writes through the checked extraction logic |
+| Repos | One repo per server: `<instances_dir>/backups/repos/<id>`, password `backups/keys/<id>` | Isolated locks (a prune of A does not block B), deleting a server = deleting the repo; server IDs are never reused (migration 00003) |
+| Source of truth | The snapshot list always comes from restic; kind, pin and note are restic tags | As with plugins (sub-project 3c): the disk is authoritative, the DB only holds the schedule and the last run |
+| Consistency | Running server: `save-off`, `save-all flush`, backup, then always `save-on` (RCON through the agent) | Standard procedure without a stop; if RCON fails, no snapshot is made |
+| Restore | Whole state only; stop the server, safety snapshot `pre-restore`, extract, swap the top level, restart through the reconcile loop | Easy to verify; the safety snapshot makes every restore reversible |
+| Schedule | Per server `off`/`interval`/`daily`/`weekly`, global time zone | Easy to use and to test; cron would be error-prone |
+| Retention | `restic forget --keep-*` only for `kind=scheduled`, with `--keep-tag pinned` | Manual and pre-restore snapshots never disappear automatically |
+| Orchestration | Panel package `internal/backups`: ticker, queue, jobs, RCON steps | Only the panel knows schedule, permissions, actual state and RCON |
 
-### 2.1 Verworfene Alternativen
+### 2.1 Rejected alternatives
 
-- **Eigener Dienst `mcpanel-backup`:** saubere Trennung und offsite-bereit, aber die `os.Root`-tar-Logik müsste doppelt existieren oder das panel zwei Dienste per Stream koppeln; ein Binary, eine Unit, ein Socket und eine Konfiguration mehr für „nur lokal“.
-- **restic in einem Container, gestartet vom agent:** der root-agent müsste Restore-Ziele und den Verzeichnistausch orchestrieren (widerspricht TP3b §1.2).
-- **restic liest das Datenverzeichnis direkt (`restic backup <dir>`):** restic folgt Symlinks zwar nicht, aber zwischen Verzeichnis-Lesen und Öffnen kann ein laufender Server einen Ordner gegen einen Symlink tauschen; der Inhalt eines anderen Servers läge dann im Snapshot und wäre per Download lesbar. Restore direkt ins Datenverzeichnis hätte dasselbe Problem beim Schreiben.
-- **Eigene tar.zst-Archive ohne restic:** keine externe Abhängigkeit, aber keine Deduplizierung (7 tägliche Stände einer 5-GiB-Welt = 35 GiB) und ein eigenes Format für spätere Offsite-Ziele.
-- **Server für jedes Backup stoppen:** konsistent, aber Ausfall für Spieler bei jedem Lauf.
+- **Separate service `mcpanel-backup`:** clean separation and ready for offsite, but the `os.Root` tar logic would have to exist twice or the panel would have to couple two services by stream; one more binary, unit, socket and configuration for "local only".
+- **restic in a container, started by the agent:** the root agent would have to orchestrate restore targets and the directory swap (contradicts sub-project 3b §1.2).
+- **restic reads the data directory directly (`restic backup <dir>`):** restic does not follow symlinks, but between reading a directory and opening it a running server can swap a folder for a symlink; another server's content would then be in the snapshot and readable through the download. Restoring directly into the data directory would have the same problem when writing.
+- **Own tar.zst archives without restic:** no external dependency, but no deduplication (7 daily states of a 5 GiB world = 35 GiB) and an own format for later offsite targets.
+- **Stop the server for every backup:** consistent, but downtime for players on every run.
 
-## 3. Architektur
+## 3. Architecture
 
 ```
 Browser ─/api/servers/{id}/backups/*─▶ panel: internal/backups
-                                        · Rechte (server.backups), CSRF, Audit, Sudo (Restore, Löschen)
-                                        · Jobs pro Server, Warteschlange, Zeitplan-Ticker (clock.Clock)
-                                        ├─▶ agent (root): RCON save-off/save-all flush/save-on, power stop, Ist-Zustand
+                                        · permissions (server.backups), CSRF, audit, sudo (restore, delete)
+                                        · jobs per server, queue, schedule ticker (clock.Clock)
+                                        ├─▶ agent (root): RCON save-off/save-all flush/save-on, power stop, actual state
                                         └─▶ mcpanel-files (mcpanel-mc): /v1/backups/*
-                                              tar über os.Root ⇄ restic (Kindprozess, kein Netz)
+                                              tar via os.Root ⇄ restic (child process, no network)
                                               /srv/mc-panel/backups/repos/<id>
 ```
 
-- **panel:** neues Paket `internal/backups` (Handler, Routen, Zeitplan, Warteschlange, Jobs, Audit, Benachrichtigung); Client-Methoden und Draht-Typen in `internal/files/filesapi` (gemeinsam mit dem Dienst).
-- **Dienst:** neue Dateien in `internal/files` (restic-Ausführung hinter einem Interface, tar-Erzeugung, tar-Entpacken, Tausch, tar→Zip, Jobs der Arten `backup|restore|forget`).
-- **agent:** einzige Änderung: `ensureLayout` legt `<instances_dir>/backups` an (§3.1). Keine neue agent-API; RCON und Power gibt es schon.
+- **panel:** new package `internal/backups` (handler, routes, schedule, queue, jobs, audit, notification); client methods and wire types in `internal/files/filesapi` (shared with the service).
+- **Service:** new files in `internal/files` (restic execution behind an interface, tar creation, tar extraction, swap, tar→zip, jobs of kinds `backup|restore|forget`).
+- **agent:** only change: `ensureLayout` creates `<instances_dir>/backups` (§3.1). No new agent API; RCON and power already exist.
 
-### 3.1 Dateisystem
+### 3.1 File system
 
 ```
 /srv/mc-panel/                     root:root 0755   (instances_dir)
-├── instances/<id>/                mcpanel-mc 0750  (unverändert)
-├── backups/                       mcpanel-mc 0700  (neu, vom agent angelegt)
-│   ├── repos/<id>/                restic-Repo des Servers
-│   ├── keys/<id>                  Repo-Passwort (32 Zufallsbytes, base64), 0600
-│   └── restore-journal/<id>       Restore-Journal (§4.3): nur während des Tauschs oder bei `stuck`
-└── deleted/                       unverändert
+├── instances/<id>/                mcpanel-mc 0750  (unchanged)
+├── backups/                       mcpanel-mc 0700  (new, created by the agent)
+│   ├── repos/<id>/                the server's restic repo
+│   ├── keys/<id>                  repo password (32 random bytes, base64), 0600
+│   └── restore-journal/<id>       restore journal (§4.3): only during the swap or when `stuck`
+└── deleted/                       unchanged
 ```
 
-- Der agent legt `backups/` in `ensureLayout` mit Besitzer `mcpanel-mc` und Modus 0700 an (wie `instances/<id>`) und korrigiert Besitzer/Modus, falls abweichend; den Inhalt berührt er nie. `repos/`, `keys/` und `restore-journal/` legt der Dienst selbst an.
-- Kein Container sieht `backups/`; das panel (`mcpanel`) hat keinen Zugriff.
-- Ein Repo wird beim ersten Backup eines Servers angelegt (`restic init`); vorher ist die Snapshot-Liste leer.
-- **Schlüssel:** Für ein lokales Repo schützt das Passwort nicht vor dem Host selbst; es wird gebraucht, weil restic immer verschlüsselt, und es macht spätere Offsite-Kopien sicher. Ohne `keys/<id>` ist das Repo unlesbar: Die Betriebsdoku sagt, dass `backups/keys/` bei jeder Sicherung des Hosts mitgehört.
-- Dateisystem: `backups/` liegt in Produktion auf demselben Dateisystem wie `instances/` (Vorgabe für den Installer, TP6); der Restore entpackt ins Datenverzeichnis und braucht dort Platz (§4.3).
+- The agent creates `backups/` in `ensureLayout` with owner `mcpanel-mc` and mode 0700 (like `instances/<id>`) and corrects owner/mode if they differ; it never touches the content. The service creates `repos/`, `keys/` and `restore-journal/` itself.
+- No container sees `backups/`; the panel (`mcpanel`) has no access.
+- A repo is created at a server's first backup (`restic init`); before that the snapshot list is empty.
+- **Key:** for a local repo the password does not protect against the host itself; it is needed because restic always encrypts, and it makes later offsite copies safe. Without `keys/<id>` the repo is unreadable: the operations docs say that `backups/keys/` belongs in every backup of the host.
+- File system: in production `backups/` is on the same file system as `instances/` (a requirement for the installer, sub-project 6); a restore extracts into the data directory and needs space there (§4.3).
 
-### 3.2 Konfiguration und systemd
+### 3.2 Configuration and systemd
 
-Neue Schlüssel in `files.toml` (mit Defaults; unbekannte Schlüssel weiterhin abgelehnt):
+New keys in `files.toml` (with defaults; unknown keys are still rejected):
 
 ```toml
-restic_binary = "/usr/bin/restic"   # Dev: "restic" (Suche im PATH)
+restic_binary = "/usr/bin/restic"   # Dev: "restic" (looked up in PATH)
 [limits]
-max_backup_bytes   = 68719476736    # 64 GiB je Snapshot (tar-Inhalt)
+max_backup_bytes   = 68719476736    # 64 GiB per snapshot (tar content)
 max_backup_entries = 1000000
-max_backup_jobs    = 1              # gleichzeitige restic-Jobs im Dienst (backup, restore, forget)
+max_backup_jobs    = 1              # concurrent restic jobs in the service (backup, restore, forget)
 ```
 
-- Beim Start ruft der Dienst `restic version` auf (Frist 10 s). Fehlt das Binary oder ist die Version < 0.17, sind die Backup-Endpunkte aus: `GET /v1/backups/status` meldet `{available: false, reason}`, alle anderen `/v1/backups/*` außer `purge` antworten `503 unavailable` (`purge` löscht nur Verzeichnisse und braucht restic nicht). Der übrige Dienst läuft normal (so auch auf dem Mac ohne restic).
-- `mcpanel-files.service`: `ReadWritePaths` um `<instances_dir>/backups` ergänzt, `MemoryMax=1G` (statt 512M; restic hält Index und Pack-Puffer im Speicher), `TasksMax=512`, neu `IOWeight=50` und `CPUWeight=50`. `RestrictAddressFamilies=AF_UNIX` bleibt: restic braucht für lokale Repos kein Netz.
-- `ensureLayout` im **Dev-Modus**: Der dev-Dateidienst legt `<instances_dir>/backups` selbst an, wenn es fehlt (wie `instances/<id>` in TP3b §3.1).
+- At start the service runs `restic version` (deadline 10 s). If the binary is missing or the version is < 0.17, the backup endpoints are off: `GET /v1/backups/status` reports `{available: false, reason}`, all other `/v1/backups/*` except `purge` answer `503 unavailable` (`purge` only deletes directories and does not need restic). The rest of the service runs normally (also on the Mac without restic).
+- `mcpanel-files.service`: `ReadWritePaths` extended by `<instances_dir>/backups`, `MemoryMax=1G` (instead of 512M; restic keeps the index and pack buffers in memory), `TasksMax=512`, new `IOWeight=50` and `CPUWeight=50`. `RestrictAddressFamilies=AF_UNIX` stays: restic needs no network for local repos. (Now: the installer writes this unit from `deploy/systemd/mcpanel-files.service` and sets `restic_binary` in `files.toml` to the restic it found.)
+- `ensureLayout` in **dev mode**: the dev file service creates `<instances_dir>/backups` itself if it is missing (like `instances/<id>` in sub-project 3b §3.1).
 
-### 3.3 restic-Aufrufe
+### 3.3 restic calls
 
-- Feste argv ohne Shell, über ein Interface (`resticRunner`), das die Tests durch einen Fake ersetzen. Umgebung ist **leer** bis auf `RESTIC_REPOSITORY=<backups>/repos/<id>`, `RESTIC_PASSWORD_FILE=<backups>/keys/<id>`, `HOME=<backups>`, `TZ=<backup_timezone>` (bei `backup` und `forget`: restic speichert die Snapshot-Zeit in der Zone des Backup-Prozesses und bildet daraus die Tages-/Wochen-/Monatsgruppen von `forget`, §5.4) und `RESTIC_PROGRESS_FPS=1`. Jeder Aufruf mit `--no-cache` (lokales Repo) und `--json` wo verfügbar.
-- Vor jedem Job `restic unlock` (entfernt nur verwaiste Sperren eines abgestürzten Laufs). Lesen der Snapshot-Liste mit `--no-lock`, damit sie auch während eines Prune funktioniert.
-- `backup --stdin --stdin-filename data.tar --host mcpanel --tag mcpanel --tag kind=<kind> [--tag note=<base64url>]`; das Ergebnis (`snapshot_id`, `total_bytes_processed`) kommt aus der JSON-Zusammenfassung.
-- `snapshots --json --no-lock --host mcpanel`; nur Snapshots mit Tag `mcpanel` zählen.
-- `dump <snapshot> /data.tar` liefert den tar auf stdout.
-- `tag --set …` für Pin/Unpin; restic schreibt den Snapshot dabei neu, die **ID ändert sich**. Der Dienst liest die neue ID danach aus `snapshots` (gleiche Zeit, gleiche Art).
-- `forget --prune --max-unused 10% --host mcpanel --group-by host …` (§5.4) bzw. `forget --prune <ids…>` für einzelnes Löschen.
-- Fehlerausgaben von restic (stderr, auf 4 KiB gekürzt) gehen ins Log; in `job.error` landet nur eine feste Kurzmeldung plus restics letzte Zeile ohne Host-Pfade (wie TP3b §4).
-- Snapshot-IDs aus Anfragen: genau 64 Zeichen `[0-9a-f]`; der Dienst prüft, dass die ID in der Liste dieses Repos vorkommt, bevor er sie an restic gibt (sonst `404 not_found`).
+- Fixed argv without a shell, through an interface (`resticRunner`) that the tests replace with a fake. The environment is **empty** except for `RESTIC_REPOSITORY=<backups>/repos/<id>`, `RESTIC_PASSWORD_FILE=<backups>/keys/<id>`, `HOME=<backups>`, `TZ=<backup_timezone>` (for `backup` and `forget`: restic stores the snapshot time in the backup process's zone and derives the daily/weekly/monthly groups of `forget` from it, §5.4) and `RESTIC_PROGRESS_FPS=1`. Every call with `--no-cache` (local repo) and `--json` where available.
+- Before every job `restic unlock` (removes only stale locks of a crashed run). The snapshot list is read with `--no-lock` so that it also works during a prune.
+- `backup --stdin --stdin-filename data.tar --host mcpanel --tag mcpanel --tag kind=<kind> [--tag note=<base64url>]`; the result (`snapshot_id`, `total_bytes_processed`) comes from the JSON summary.
+- `snapshots --json --no-lock --host mcpanel`; only snapshots with the tag `mcpanel` count.
+- `dump <snapshot> /data.tar` returns the tar on stdout.
+- `tag --set …` for pin/unpin; restic rewrites the snapshot, and the **ID changes**. The service then reads the new ID from `snapshots` (same time, same kind).
+- `forget --prune --max-unused 10% --host mcpanel --group-by host …` (§5.4), or `forget --prune <ids…>` for deleting single snapshots.
+- restic's error output (stderr, cut to 4 KiB) goes to the log; `job.error` only gets a fixed short message plus restic's last line without host paths (as in sub-project 3b §4).
+- Snapshot IDs from requests: exactly 64 characters `[0-9a-f]`; the service checks that the ID is in this repo's list before passing it to restic (otherwise `404 not_found`).
 
-## 4. Dienst `mcpanel-files`
+## 4. Service `mcpanel-files`
 
-### 4.1 Neue Endpunkte
+### 4.1 New endpoints
 
-Wie bisher feste Pfade, `DisallowUnknownFields`, Fehler `{error, code}`.
+As before fixed paths, `DisallowUnknownFields`, errors `{error, code}`.
 
-| Methode, Pfad | Body / Query | Antwort |
+| Method, path | Body / query | Response |
 |---|---|---|
 | `GET /v1/backups/status` | – | `{available, version, reason}` |
-| `POST /v1/backups/list` | `{id}` | `{snapshots: [{id, short_id, time, kind, pinned, note, bytes}]}`; neueste zuerst; ohne Repo `[]` |
+| `POST /v1/backups/list` | `{id}` | `{snapshots: [{id, short_id, time, kind, pinned, note, bytes}]}`; newest first; without a repo `[]` |
 | `POST /v1/backups/create` | `{id, kind, note, timezone}`; `kind` ∈ `manual\|scheduled\|pre-restore` | `202 {job}` |
-| `POST /v1/backups/restore` | `{id, snapshot}` | Vorprüfung synchron (Snapshot vorhanden, Platz §4.3), dann `202 {job}` |
-| `POST /v1/backups/forget` | `{id, snapshots}` **oder** `{id, policy: {keep_last, keep_daily, keep_weekly, keep_monthly}, timezone}` | `202 {job}` |
-| `POST /v1/backups/pin` | `{id, snapshot, pinned}` | `{snapshot}` (mit neuer ID); nur `kind=scheduled`, sonst `400 invalid` |
-| `GET /v1/backups/download` | Query `id`, `snapshot` | Zip-Stream (§4.4) |
-| `POST /v1/backups/purge` | `{id}` | `204`; löscht `repos/<id>` und `keys/<id>` |
-| `POST /v1/jobs/cancel` | `{id}` | `204`; bricht den laufenden Job der Instanz ab (§4.5) |
+| `POST /v1/backups/restore` | `{id, snapshot}` | Synchronous pre-check (snapshot exists, space §4.3), then `202 {job}` |
+| `POST /v1/backups/forget` | `{id, snapshots}` **or** `{id, policy: {keep_last, keep_daily, keep_weekly, keep_monthly}, timezone}` | `202 {job}` |
+| `POST /v1/backups/pin` | `{id, snapshot, pinned}` | `{snapshot}` (with the new ID); only `kind=scheduled`, otherwise `400 invalid` |
+| `GET /v1/backups/download` | Query `id`, `snapshot` | Zip stream (§4.4) |
+| `POST /v1/backups/purge` | `{id}` | `204`; deletes `repos/<id>` and `keys/<id>` |
+| `POST /v1/jobs/cancel` | `{id}` | `204`; cancels the instance's running job (§4.5) |
 
-- `GET /v1/jobs` (TP3b) liefert alle Job-Arten. `filesapi.Job` bekommt `kind` (`extract|backup|restore|forget`), `snapshot` (Ergebnis bzw. Quelle), `skipped` (ausgelassene Einträge) und `code` (Wire-Code des Fehlers eines `failed`-Jobs, z. B. `too_large`, `insufficient_storage`); vorhandene Felder bleiben, Extract-Jobs setzen `kind=extract`.
-- Ein Job pro Instanz über alle Arten (Entpacken, Backup, Restore, Forget schließen sich gegenseitig aus); `pin` und `purge` brauchen eine Instanz ohne Job (sonst `429 busy`). Insgesamt höchstens `max_backup_jobs` restic-Jobs und weiterhin zwei Entpack-Jobs.
-- `create` braucht `instances/<id>` (sonst `404 not_found`); `restore` legt es nicht an.
-- `note`: höchstens 64 Zeichen, gültiges UTF-8, keine Steuerzeichen; als Tag `note=<base64url ohne Padding>`. `pinned` = Tag `pinned`.
-- Neue Fehlercodes des Dienstes: `unavailable` (503, restic fehlt). Sonst die vorhandenen: `not_found`, `busy`, `invalid`, `too_large`, `insufficient_storage`.
+- `GET /v1/jobs` (sub-project 3b) returns all job kinds. `filesapi.Job` gets `kind` (`extract|backup|restore|forget`), `snapshot` (result or source), `skipped` (skipped entries) and `code` (wire code of the error of a `failed` job, e.g. `too_large`, `insufficient_storage`); existing fields stay, extract jobs set `kind=extract`.
+- One job per instance across all kinds (extract, backup, restore, forget exclude each other); `pin` and `purge` need an instance without a job (otherwise `429 busy`). In total at most `max_backup_jobs` restic jobs and still two extract jobs.
+- `create` needs `instances/<id>` (otherwise `404 not_found`); `restore` does not create it.
+- `note`: at most 64 characters, valid UTF-8, no control characters; as tag `note=<base64url without padding>`. `pinned` = tag `pinned`.
+- New service error codes: `unavailable` (503, restic missing). Otherwise the existing ones: `not_found`, `busy`, `invalid`, `too_large`, `insufficient_storage`.
 
-### 4.2 Backup-Job
+### 4.2 Backup job
 
-- Durchlauf über `os.Root(instances/<id>)` in fester Reihenfolge (Namen sortiert), wie der Ordner-Zip-Download (TP3b §4): vor jedem Öffnen `Lstat`, danach `Stat` + `os.SameFile`, Öffnen mit `O_NONBLOCK`. Symlinks, Sonderdateien, verborgene Einträge (`.mcpanel-*` auf jeder Ebene, `.rcon-cli.*` oben) und Namen, die die Pfadregeln (`filesapi.CleanPath`) verletzen, werden ausgelassen und in `skipped` gezählt.
-- tar im PAX-Format, nur Ordner und reguläre Dateien, Name relativ zur Wurzel, Modus `& 0777`, mtime; keine Besitzer (uid/gid 0, leere Namen).
-- `server.properties` (oberste Ebene) wird geschwärzt wie beim Download (`rcon.password=********`); itzg schreibt das Passwort beim Start neu (TP3b §3.4).
-- Eine Datei, die während des Lesens wächst oder schrumpft, wird mit der Größe aus dem `Stat` geschrieben (abgeschnitten bzw. mit Nullen aufgefüllt, `skipped` unverändert); bei gestopptem Server oder mit `save-off` kommt das bei Weltdaten nicht vor.
-- Grenzen: mehr als `max_backup_entries` Einträge oder `max_backup_bytes` Inhalt → Job `failed` (`too_large`), restic wird abgebrochen, ein Snapshot entsteht nicht (restic legt ihn erst beim Ende des Streams an).
-- Vor dem Start: freier Platz auf `backups/` ≥ `reserve_bytes` (TP3b), sonst `507`. Weiter kann der Dienst wegen der Deduplizierung nicht vorab rechnen; läuft die Platte trotzdem voll, scheitert restic und der Job ist `failed`.
-- Fortschritt: `bytes`/`entries` (gelesener tar-Inhalt).
+- Walk over `os.Root(instances/<id>)` in a fixed order (names sorted), like the folder zip download (sub-project 3b §4): `Lstat` before every open, `Stat` + `os.SameFile` afterwards, open with `O_NONBLOCK`. Symlinks, special files, hidden entries (`.mcpanel-*` on every level, `.rcon-cli.*` at the top) and names that violate the path rules (`filesapi.CleanPath`) are skipped and counted in `skipped`.
+- tar in PAX format, only folders and regular files, name relative to the root, mode `& 0777`, mtime; no owners (uid/gid 0, empty names).
+- `server.properties` (top level) is redacted as for the download (`rcon.password=********`); itzg rewrites the password at start (sub-project 3b §3.4).
+- A file that grows or shrinks while it is read is written with the size from the `Stat` (truncated or padded with zeros, `skipped` unchanged); with a stopped server or with `save-off` this does not happen to world data.
+- Limits: more than `max_backup_entries` entries or `max_backup_bytes` of content → job `failed` (`too_large`), restic is aborted, no snapshot is made (restic only creates it at the end of the stream).
+- Before the start: free space on `backups/` ≥ `reserve_bytes` (sub-project 3b), otherwise `507`. Because of deduplication the service cannot calculate further in advance; if the disk fills up anyway, restic fails and the job is `failed`.
+- Progress: `bytes`/`entries` (tar content read).
 
-### 4.3 Restore-Job
+### 4.3 Restore job
 
-1. Vorprüfung in der Anfrage: Snapshot gehört zum Repo; freier Platz auf `instances/<id>` ≥ `bytes` des Snapshots + `reserve_bytes` (sonst `507`).
-2. Temp-Ordner `instances/<id>/.mcpanel-tmp-<token>-<zufall>/new` per `root.Mkdir`; `restic dump` → tar-Leser → Entpacken mit den Regeln aus TP3b §4.2: Pfadregeln, keine verborgenen Namen, nur Ordner und reguläre Dateien (andere tar-Typen → Job `failed`), keine doppelten Namen, Bytes und Einträge neu gezählt gegen `max_backup_bytes`/`max_backup_entries`, Dateien 0644 (0755, wenn im tar ein Ausführbit gesetzt ist), Ordner 0755, umask 0027 des Dienstes wirkt zusätzlich, mtime aus dem tar. Fehler → Temp-Ordner löschen, Datenverzeichnis unverändert.
-3. Tausch der obersten Ebene (nur `rename` über das `os.Root`, kein Kopieren): alle sichtbaren Einträge des Datenverzeichnisses nach `<tmp>/old/`, dann alle Einträge aus `<tmp>/new/` nach oben, dann `<tmp>` rekursiv löschen. Verborgene Einträge (`.rcon-cli.*`, `.mcpanel-*`) bleiben an Ort und Stelle.
-4. Abbrechen (§4.5) wirkt nur bis zum Beginn des Tauschs; der Tausch selbst läuft ohne Abbruchpunkt durch. Nur während der Umbenennungen führt der Dienst ein Restore-Journal in `backups/restore-journal/<id>` (außerhalb des Datenverzeichnisses, das der Container kontrolliert; Inhalt: `<tmp>` und die Phase `old_moving`, `new_moving` oder `stuck`, jeweils atomar geschrieben). Stirbt der Dienst mitten im Tausch, schließt er die Umbenennungen beim nächsten Start synchron ab, bevor er Anfragen annimmt: bei `old_moving` zurück (der vorige Stand kommt aus `<tmp>/old` wieder nach oben), bei `new_moving` vorwärts (der Rest aus `<tmp>/new`; der Snapshot war vollständig geprüft). Danach verschwinden `<tmp>` (Temp-Bereinigung, TP3b §3.3) und der Journal-Eintrag. Ein Temp-Ordner ohne Journal-Eintrag ist ein gewöhnlicher Rest und wird nur gelöscht, nie zurückgerollt.
-   - **Phase `stuck`:** Scheitert der Tausch und auch der Rücktausch (oder die Wiederherstellung beim Start), bleibt `<tmp>` mit dem vorigen Stand in `old/` liegen, die Temp-Bereinigung lässt ihn in Ruhe, und der Eintrag bleibt mit Phase `stuck`. Neue Restores dieses Servers lehnt der Dienst ab, bis ein Betreiber den Fall gelöst hat (Runbook in `docs/dev/README.md`: Log lesen, `<tmp>` prüfen, Inhalte von Hand zurückverschieben, dann den Eintrag löschen). Server löschen mit `purge_backups` entfernt den Eintrag ebenfalls.
-   - Der Pre-Restore-Snapshot des panels (§5.5) bleibt die Rückfallebene.
+1. Pre-check in the request: the snapshot belongs to the repo; free space on `instances/<id>` ≥ the snapshot's `bytes` + `reserve_bytes` (otherwise `507`).
+2. Temp folder `instances/<id>/.mcpanel-tmp-<token>-<random>/new` via `root.Mkdir`; `restic dump` → tar reader → extraction with the rules from sub-project 3b §4.2: path rules, no hidden names, only folders and regular files (other tar types → job `failed`), no duplicate names, bytes and entries re-counted against `max_backup_bytes`/`max_backup_entries`, files 0644 (0755 if an execute bit is set in the tar), folders 0755, the service's umask 0027 applies on top, mtime from the tar. Error → delete the temp folder, data directory unchanged.
+3. Swap of the top level (only `rename` through the `os.Root`, no copying): all visible entries of the data directory to `<tmp>/old/`, then all entries from `<tmp>/new/` to the top, then delete `<tmp>` recursively. Hidden entries (`.rcon-cli.*`, `.mcpanel-*`) stay in place.
+4. Cancelling (§4.5) only works until the swap begins; the swap itself runs through without a cancellation point. Only during the renames the service keeps a restore journal in `backups/restore-journal/<id>` (outside the data directory that the container controls; content: `<tmp>` and the phase `old_moving`, `new_moving` or `stuck`, each written atomically). If the service dies in the middle of the swap, it finishes the renames synchronously at the next start before it accepts requests: for `old_moving` backwards (the previous state comes back up from `<tmp>/old`), for `new_moving` forwards (the rest from `<tmp>/new`; the snapshot was fully checked). After that `<tmp>` (temp cleanup, sub-project 3b §3.3) and the journal entry disappear. A temp folder without a journal entry is an ordinary leftover and is only deleted, never rolled back.
+   - **Phase `stuck`:** if the swap fails and the swap back fails too (or the recovery at start), `<tmp>` stays with the previous state in `old/`, the temp cleanup leaves it alone, and the entry stays with phase `stuck`. The service rejects new restores of this server until an operator has resolved the case (runbook in `docs/dev/README.md` ("Backups"): read the log, check `<tmp>`, move the contents back by hand, then delete the entry). Deleting the server with `purge_backups` also removes the entry.
+   - The panel's pre-restore snapshot (§5.5) remains the fallback.
 
 ### 4.4 Download
 
-- `restic dump` → tar-Leser → Zip-Stream (`application/zip`, Dateiname `<server>-<zeit>.zip` setzt das panel), mit denselben Ausschlüssen für Namen, die sich nicht sicher in einer Zip speichern lassen, wie der Ordner-Zip-Download (TP3b §4). Der tar enthält bereits nur Ordner und reguläre Dateien und ein geschwärztes `rcon.password`.
-- Zählt zu den 4 gleichzeitigen Ordner-Zips (TP3b §4.1); läuft für die Instanz ein `forget`-Job, → `429 busy` (Prune hält eine exklusive Sperre). Während eines Backups ist ein Download möglich.
-- Fristen wie beim Ordner-Zip: 60 s pro Lese-/Schreibvorgang, keine Gesamtfrist.
-- Namensgrenze: Der Zip-Stream übernimmt die Grenze des Ordner-Zips von 16 MiB für alle Pfadnamen zusammen (TP3b). Backup und Restore erlauben 64 MiB; ein Snapshot mit mehr als 16 MiB sichtbarer Pfadnamen lässt sich daher wiederherstellen, aber nicht als Zip herunterladen (der Download scheitert mit `too_large`).
+- `restic dump` → tar reader → zip stream (`application/zip`, the panel sets the filename `<server>-<time>.zip`), with the same exclusions for names that cannot be stored safely in a zip as the folder zip download (sub-project 3b §4). The tar already contains only folders and regular files and a redacted `rcon.password`.
+- Counts towards the 4 concurrent folder zips (sub-project 3b §4.1); if a `forget` job runs for the instance → `429 busy` (prune holds an exclusive lock). A download is possible during a backup.
+- Deadlines as for the folder zip: 60 s per read/write, no overall deadline.
+- Name limit: the zip stream takes over the folder zip's limit of 16 MiB for all path names together (sub-project 3b). Backup and restore allow 64 MiB; a snapshot with more than 16 MiB of visible path names can therefore be restored but not downloaded as a zip (the download fails with `too_large`).
 
-### 4.5 Abbrechen und Beenden
+### 4.5 Cancelling and shutdown
 
-- `POST /v1/jobs/cancel` bricht `backup`- und `forget`-Jobs sofort ab (restic bekommt `SIGINT`, nach 10 s `SIGKILL`; ein abgebrochenes Backup hinterlässt keinen Snapshot, ein abgebrochenes Prune nur ungenutzte Packs, die der nächste Prune entfernt) und `restore`-Jobs bis zum Beginn des Tauschs. Für Entpack-Jobs ändert sich nichts (`400 invalid`).
-- Beim Beenden bricht der Dienst laufende Jobs ab wie bisher (`svc.Close`), restic-Kinder eingeschlossen; ein laufender Tausch wird noch beendet.
+- `POST /v1/jobs/cancel` cancels `backup` and `forget` jobs immediately (restic gets `SIGINT`, `SIGKILL` after 10 s; a cancelled backup leaves no snapshot, a cancelled prune only unused packs that the next prune removes) and `restore` jobs until the swap begins. Nothing changes for extract jobs (`400 invalid`).
+- At shutdown the service cancels running jobs as before (`svc.Close`), including restic children; a running swap is still finished.
 
 ## 5. panel
 
-### 5.1 Datenmodell (Migration 00006)
+### 5.1 Data model (migration 00006)
 
 ```sql
 CREATE TABLE backup_schedules (
     server_id        INTEGER PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
     mode             TEXT    NOT NULL DEFAULT 'off' CHECK (mode IN ('off','interval','daily','weekly')),
     interval_hours   INTEGER NOT NULL DEFAULT 24 CHECK (interval_hours BETWEEN 1 AND 168),
-    time_of_day      INTEGER NOT NULL DEFAULT 240 CHECK (time_of_day BETWEEN 0 AND 1439), -- Minuten
-    weekday          INTEGER NOT NULL DEFAULT 0 CHECK (weekday BETWEEN 0 AND 6),          -- 0 = Sonntag
+    time_of_day      INTEGER NOT NULL DEFAULT 240 CHECK (time_of_day BETWEEN 0 AND 1439), -- minutes
+    weekday          INTEGER NOT NULL DEFAULT 0 CHECK (weekday BETWEEN 0 AND 6),          -- 0 = Sunday
     keep_last        INTEGER NOT NULL DEFAULT 24,
     keep_daily       INTEGER NOT NULL DEFAULT 7,
     keep_weekly      INTEGER NOT NULL DEFAULT 4,
     keep_monthly     INTEGER NOT NULL DEFAULT 6,
-    next_run_at      INTEGER,          -- NULL bei mode = 'off'
+    next_run_at      INTEGER,          -- NULL when mode = 'off'
     last_run_at      INTEGER,
     last_status      TEXT CHECK (last_status IN ('ok','failed','running')),
     last_error       TEXT,
     last_snapshot_id TEXT,
-    saveoff_since    INTEGER,          -- gesetzt, solange das panel save-off gesendet hat
+    saveoff_since    INTEGER,          -- set while the panel has sent save-off
     updated_at       INTEGER NOT NULL
 );
 ALTER TABLE instance_settings ADD COLUMN backup_timezone TEXT NOT NULL DEFAULT 'Europe/Berlin';
 ```
 
-- Eine Zeile entsteht beim ersten Lesen oder Schreiben (Defaults wie oben); `keep_*` 0–1000, bei `mode ≠ off` mindestens ein Wert > 0. `last_*` beschreibt den letzten **geplanten** Lauf.
-- Queries in `internal/store/queries/backups.sql`, Präfix `Backups…`.
-- `backup_timezone` ist ein IANA-Name, geprüft mit `time.LoadLocation`; das panel bettet `time/tzdata` ein (statisches Binary, Hosts ohne Zoneinfo).
+- A row is created on the first read or write (defaults as above); `keep_*` 0–1000, with `mode ≠ off` at least one value > 0. `last_*` describes the last **scheduled** run.
+- Queries in `internal/store/queries/backups.sql`, prefix `Backups…`.
+- `backup_timezone` is an IANA name, checked with `time.LoadLocation`; the panel embeds `time/tzdata` (static binary, hosts without zoneinfo).
 
-### 5.2 Zeitplan
+### 5.2 Schedule
 
-- Ticker jede Minute über `clock.Clock`. Fällig ist jede Zeile mit `mode ≠ off` und `next_run_at ≤ jetzt`; sie kommt in die Warteschlange (§5.3), außer der Server hat schon einen wartenden oder laufenden Job (dann beim nächsten Tick wieder prüfen).
-- `next_run_at` wird beim Speichern des Zeitplans, beim Ändern der Zeitzone und nach jedem geplanten Lauf (Erfolg oder Fehler) neu berechnet:
-  - `interval`: Start des letzten Laufs + N Stunden; ohne bisherigen Lauf jetzt + N Stunden.
-  - `daily`: nächster Zeitpunkt `time_of_day` nach jetzt in der Zeitzone.
-  - `weekly`: nächster `weekday` + `time_of_day` nach jetzt in der Zeitzone.
-  - Sommerzeit: fällt die Uhrzeit in eine Lücke, gilt die Normalisierung von `time.Date` (02:30 → 03:30); doppelte Stunden zählen einmal (frühester Zeitpunkt).
-- Verpasste Termine (panel war aus): beim Start ist `next_run_at` in der Vergangenheit, der Lauf startet einmal, danach wird ab jetzt neu gerechnet. Es gibt kein Nachholen mehrerer Läufe.
-- Server, deren Instanz fehlt oder deren Datenverzeichnis noch nicht existiert (nie gestartet), laufen als `failed` mit verständlichem Fehler, ohne Benachrichtigung.
+- Ticker every minute through `clock.Clock`. Every row with `mode ≠ off` and `next_run_at ≤ now` is due; it goes into the queue (§5.3), unless the server already has a waiting or running job (then check again at the next tick).
+- `next_run_at` is recomputed when the schedule is saved, when the time zone changes, and after every scheduled run (success or failure):
+  - `interval`: start of the last run + N hours; without a previous run now + N hours.
+  - `daily`: next point in time `time_of_day` after now in the time zone.
+  - `weekly`: next `weekday` + `time_of_day` after now in the time zone.
+  - Daylight saving time: if the time falls into a gap, the normalisation of `time.Date` applies (02:30 → 03:30); repeated hours count once (earliest point in time).
+- Missed runs (panel was off): at start `next_run_at` is in the past, the run starts once, and then the next time is computed from now. Several missed runs are not caught up.
+- Servers whose instance is missing or whose data directory does not exist yet (never started) run as `failed` with an understandable error, without a notification.
 
-### 5.3 Warteschlange und Jobs
+### 5.3 Queue and jobs
 
-- Ein Job pro Server im Speicher: `{id, kind: backup|restore|delete, trigger: manual|scheduled, state: queued|running|done|failed, step, bytes, snapshot, error, queued_at, started_at, finished_at}`; das letzte Ergebnis bleibt bis zum nächsten Job oder Neustart des panels.
+- One job per server in memory: `{id, kind: backup|restore|delete, trigger: manual|scheduled, state: queued|running|done|failed, step, bytes, snapshot, error, queued_at, started_at, finished_at}`; the last result stays until the next job or a panel restart.
 - `step` ∈ `queued`, `saving` (save-off/flush), `backing_up`, `resuming` (save-on), `pruning`, `stopping`, `pre_restore`, `restoring`, `deleting`.
-- **Panel-weit läuft höchstens ein Job gleichzeitig** (FIFO-Warteschlange über alle Server); manuelle und geplante Jobs teilen sie. Ein zweiter Job für denselben Server → `409 backup_running`.
-- Das panel fragt den Dienst-Job alle 2 s ab (`GET /v1/jobs`) und spiegelt `bytes` in den eigenen Job.
-- Beim Beenden bricht das panel den laufenden Dienst-Job ab (`/v1/jobs/cancel`), sendet `save-on`, falls nötig, und wartet höchstens 20 s.
+- **Panel-wide at most one job runs at a time** (FIFO queue across all servers); manual and scheduled jobs share it. A second job for the same server → `409 backup_running`.
+- The panel polls the service job every 2 s (`GET /v1/jobs`) and mirrors `bytes` into its own job.
+- At shutdown the panel cancels the running service job (`/v1/jobs/cancel`), sends `save-on` if needed, and waits at most 20 s.
 
-### 5.4 Backup-Ablauf
+### 5.4 Backup flow
 
-1. Ist-Zustand beim agent abfragen. Läuft der Container: `saveoff_since` setzen, RCON `save-off`, dann `save-all flush` (Frist je 60 s). Schlägt eines fehl → sofort `save-on` versuchen, Job `failed` mit `rcon_unavailable`. Gestoppt: kein RCON.
-2. Dienst-Job `create` (Art `manual` bzw. `scheduled`) bis `done`/`failed`.
-3. **Immer** (auch nach Fehler, Abbruch oder Zeitüberschreitung in Schritt 2): RCON `save-on`, dann `saveoff_since` löschen. Schlägt `save-on` fehl (Server inzwischen gestoppt), ist das unschädlich: ein Neustart setzt das Speichern ohnehin wieder ein.
-4. Nur bei geplanten Läufen nach Erfolg: Dienst-Job `forget` mit der Policy des Servers und `backup_timezone`. restic bekommt `--tag kind=scheduled --keep-tag pinned --keep-last … --keep-daily … --keep-weekly … --keep-monthly …` (Werte 0 weggelassen). Scheitert nur dieser Schritt, gilt der Lauf als `ok` mit Hinweis in `last_error`.
-5. `last_*` und `next_run_at` schreiben (nur geplant).
+1. Query the actual state from the agent. If the container is running: set `saveoff_since`, RCON `save-off`, then `save-all flush` (deadline 60 s each). If one of them fails → try `save-on` immediately, job `failed` with `rcon_unavailable`. Stopped: no RCON.
+2. Service job `create` (kind `manual` or `scheduled`) until `done`/`failed`.
+3. **Always** (also after an error, cancellation or timeout in step 2): RCON `save-on`, then clear `saveoff_since`. If `save-on` fails (server stopped in the meantime), that is harmless: a restart turns saving back on anyway.
+4. Only for scheduled runs after success: service job `forget` with the server's policy and `backup_timezone`. restic gets `--tag kind=scheduled --keep-tag pinned --keep-last … --keep-daily … --keep-weekly … --keep-monthly …` (values of 0 left out). If only this step fails, the run counts as `ok` with a note in `last_error`.
+5. Write `last_*` and `next_run_at` (scheduled only).
 
-**Absturz des panels:** Beim Start sucht das panel Zeilen mit `saveoff_since ≠ NULL`; für jede bricht es einen laufenden Dienst-Job der Instanz ab, sendet `save-on` (wenn der Container läuft) und löscht die Markierung. Zeilen mit `last_status = running` werden `failed` („panel neu gestartet“).
+**Panel crash:** at start the panel looks for rows with `saveoff_since ≠ NULL`; for each it cancels a running service job of the instance, sends `save-on` (if the container is running) and clears the marker. Rows with `last_status = running` become `failed` ("panel restarted").
 
-### 5.5 Restore-Ablauf
+### 5.5 Restore flow
 
-1. **Sperre setzen.** Das bisherige `servers.ExtractGate` wird zu `servers.DataGate` (`DataJobRunning(ctx, id)`): wahr, wenn beim Dienst ein `extract`- oder `restore`-Job läuft (wie bisher über `GET /v1/jobs`) **oder** das panel für den Server einen Restore-Job hält. Solange blockieren Start/Neustart (`409 conflict`) und der Abgleich startet den Server nicht. Stop bleibt erlaubt.
-2. Läuft der Container: Stop über den agent (gleicher Weg wie die Power-Aktion, `desired_state` bleibt unverändert), warten bis gestoppt (Frist 120 s, sonst `failed`).
-3. Sicherheits-Snapshot: Dienst-Job `create` mit `kind=pre-restore` (gestoppt, also ohne RCON). Scheitert er, bricht der Restore ab; das Datenverzeichnis bleibt unverändert.
-4. Dienst-Job `restore` bis `done`/`failed`.
-5. Sperre lösen. Ist `desired_state = running`, startet der Abgleich den Server beim nächsten Durchlauf; das panel stößt ihn sofort an.
-- Ein Absturz des panels in Schritt 2–3 lässt das Datenverzeichnis unverändert; nach dem Neustart fehlt die panel-Sperre und der Abgleich startet den Server wieder (Restore fand nicht statt). In Schritt 4 läuft der Dienst-Job weiter; die Sperre greift über den Dienst-Job, bis er endet.
+1. **Set the gate.** The former `servers.ExtractGate` becomes `servers.DataGate` (`DataJobRunning(ctx, id)`): true if an `extract` or `restore` job runs in the service (as before through `GET /v1/jobs`) **or** the panel holds a restore job for the server. While it is set, start/restart are blocked (`409 conflict`) and the reconcile loop does not start the server. Stop stays allowed.
+2. If the container is running: stop through the agent (same path as the power action, `desired_state` stays unchanged), wait until stopped (deadline 120 s, otherwise `failed`).
+3. Safety snapshot: service job `create` with `kind=pre-restore` (stopped, so without RCON). If it fails, the restore aborts; the data directory stays unchanged.
+4. Service job `restore` until `done`/`failed`.
+5. Release the gate. If `desired_state = running`, the reconcile loop starts the server on its next pass; the panel triggers it immediately.
+- A panel crash in steps 2–3 leaves the data directory unchanged; after the restart the panel gate is gone and the reconcile loop starts the server again (the restore did not take place). In step 4 the service job keeps running; the gate holds through the service job until it ends.
 
-### 5.6 Löschen
+### 5.6 Deletion
 
-- Einzelner Snapshot: Job `delete` → Dienst-Job `forget` mit genau dieser ID; auch angepinnte und Pre-Restore-Snapshots.
-- Server löschen (`DELETE /servers/{id}`, vorhanden, Admin + Sudo) bekommt den optionalen Query-Parameter `purge_backups=1`: nach dem Entfernen beim agent ruft das panel `POST /v1/backups/purge` auf (wartende Jobs des Servers werden vorher verworfen, ein laufender abgebrochen). Ohne den Parameter bleibt das Repo verwaist liegen (wie `deleted/`); der Zeitplan verschwindet mit dem Server. Das Purge läuft unabhängig vom Abbruch der Anfrage (eigene Frist, verlängerte Schreibfrist der Antwort). Scheitert es, ist der Server trotzdem gelöscht; die Antwort bleibt `204`, das Audit-Detail vermerkt `backups_purged: false` (nach Erfolg `true`).
+- Single snapshot: job `delete` → service job `forget` with exactly this ID; also pinned and pre-restore snapshots.
+- Deleting a server (`DELETE /servers/{id}`, existing, admin + sudo) gets the optional query parameter `purge_backups=1`: after the removal at the agent the panel calls `POST /v1/backups/purge` (the server's waiting jobs are discarded first, a running one is cancelled). Without the parameter the repo stays behind orphaned (like `deleted/`); the schedule disappears with the server. The purge runs independently of the request being cancelled (own deadline, extended write deadline of the response). If it fails, the server is deleted anyway; the response stays `204`, and the audit detail records `backups_purged: false` (`true` after success).
 
 ### 5.7 API
 
-Alle Routen mit `rbac.Server(server.backups, "id")`, schreibende mit CSRF; Restore und Löschen zusätzlich `.WithSudo()`.
+All routes with `rbac.Server(server.backups, "id")`, writing ones with CSRF; restore and delete additionally `.WithSudo()`.
 
-| Methode, Pfad | Body | Antwort |
+| Method, path | Body | Response |
 |---|---|---|
-| `GET /servers/{id}/backups` | – | `{available, snapshots, job, schedule}`; `schedule` inkl. `next_run_at`, `last_*`, `timezone` |
-| `POST /servers/{id}/backups` | `{note?}` | `202 {job}` (manuelles Backup) |
-| `GET /servers/{id}/backups/job` | – | `{job}` (`null`, wenn noch keiner lief) |
+| `GET /servers/{id}/backups` | – | `{available, snapshots, job, schedule}`; `schedule` incl. `next_run_at`, `last_*`, `timezone` |
+| `POST /servers/{id}/backups` | `{note?}` | `202 {job}` (manual backup) |
+| `GET /servers/{id}/backups/job` | – | `{job}` (`null` if none has run yet) |
 | `PUT /servers/{id}/backups/schedule` | `{mode, interval_hours, time_of_day, weekday, keep_last, keep_daily, keep_weekly, keep_monthly}` | `{schedule}` |
-| `POST /servers/{id}/backups/{snapshot}/pin` | `{pinned}` | `{snapshot}` (neue ID) |
+| `POST /servers/{id}/backups/{snapshot}/pin` | `{pinned}` | `{snapshot}` (new ID) |
 | `POST /servers/{id}/backups/{snapshot}/restore` | – | `202 {job}` |
 | `DELETE /servers/{id}/backups/{snapshot}` | – | `202 {job}` |
-| `GET /servers/{id}/backups/{snapshot}/download` | – | Zip-Stream, `Content-Disposition: attachment; filename="<name>-<YYYYMMDD-HHMMSS>.zip"` |
+| `GET /servers/{id}/backups/{snapshot}/download` | – | Zip stream, `Content-Disposition: attachment; filename="<name>-<YYYYMMDD-HHMMSS>.zip"` |
 
-- `backup_timezone` kommt in die vorhandenen Einstellungen (`GET`/`PUT /servers/settings`, Admin, Sudo beim Schreiben); keine neue Route.
-- `available = false` (restic fehlt, Dienst nicht erreichbar): `snapshots: []`, Aktionen antworten `503 backups_unavailable` (restic fehlt) bzw. `503 files_unavailable` (Dienst weg).
-- Download: wie der Datei-Download (TP3b) ohne Puffern, mit Fristen pro Operation statt der Server-Timeouts; höchstens 2 gleichzeitige Backup-Downloads pro Benutzer (`429 rate_limited`).
-- Snapshot-IDs im Pfad: 64 Hex-Zeichen, sonst `400 validation_failed`; unbekannt → `404 not_found`.
+- `backup_timezone` goes into the existing settings (`GET`/`PUT /servers/settings`, admin, sudo for writing); no new route.
+- `available = false` (restic missing, service unreachable): `snapshots: []`, actions answer `503 backups_unavailable` (restic missing) or `503 files_unavailable` (service gone).
+- Download: like the file download (sub-project 3b) without buffering, with per-operation deadlines instead of the server timeouts; at most 2 concurrent backup downloads per user (`429 rate_limited`).
+- Snapshot IDs in the path: 64 hex characters, otherwise `400 validation_failed`; unknown → `404 not_found`.
 
-### 5.8 Fehlercodes
+### 5.8 Error codes
 
-Neu in `internal/httpx/errors.go` und im OpenAPI-Enum: `backups_unavailable` (503), `backup_running` (409). Weiter genutzt: `files_unavailable`, `agent_unavailable`, `rcon_unavailable` (nur im Job-Fehler, nicht als HTTP-Antwort, weil Backups asynchron laufen), `insufficient_storage` (507, Restore-Vorprüfung), `not_found`, `conflict` (Server ohne Instanz oder Datenverzeichnis), `validation_failed`, `rate_limited`.
+New in `internal/httpx/errors.go` and in the OpenAPI enum: `backups_unavailable` (503), `backup_running` (409). Also used: `files_unavailable`, `agent_unavailable`, `rcon_unavailable` (only in the job error, not as an HTTP response, because backups run asynchronously), `insufficient_storage` (507, restore pre-check), `not_found`, `conflict` (server without an instance or data directory), `validation_failed`, `rate_limited`.
 
-### 5.9 Audit und Benachrichtigung
+### 5.9 Audit and notification
 
-- Audit (Nutzeraktionen): `backup.create` (Notiz), `backup.restore` (Snapshot, Zeit), `backup.delete`, `backup.pin`, `backup.unpin`, `backup.download`, `backup.schedule_update` (alter/neuer Zeitplan), Änderung von `backup_timezone` im vorhandenen Einstellungs-Eintrag. Geplante Läufe sind keine Nutzeraktion und werden nicht auditiert; ihr Ergebnis steht in `last_*`.
-- Neues `notify.EventType` `backup.failed`: für fehlgeschlagene geplante Backups und für jeden fehlgeschlagenen Restore (auch manuell ausgelöst). Titel nennt den Server, Nachricht den Fehler ohne Host-Pfade. Das panel meldet pro Server und Art höchstens einmal in 6 h (eigene Sperre mit `clock.Clock`); ein Erfolg setzt sie zurück. Ein fehlgeschlagener `forget`-Schritt allein meldet nichts.
+- Audit (user actions): `backup.create` (note), `backup.restore` (snapshot, time), `backup.delete`, `backup.pin`, `backup.unpin`, `backup.download`, `backup.schedule_update` (old/new schedule), a change of `backup_timezone` in the existing settings entry. Scheduled runs are not user actions and are not audited; their result is in `last_*`.
+- New `notify.EventType` `backup.failed`: for failed scheduled backups and for every failed restore (also when triggered manually). The title names the server, the message the error without host paths. The panel reports at most once in 6 h per server and kind (own throttle with `clock.Clock`); a success resets it. A failed `forget` step alone reports nothing.
 
-### 5.10 Rechte
+### 5.10 Permissions
 
-`server.backups` bedeutet: alle Dateien des Servers lesen (über den Download, inkl. Plugin-Konfigurationen mit Geheimnissen) und den Stand zurücksetzen. Die Benutzerverwaltung zeigt beim Vergeben einen Hinweis wie bei `server.files`. Wie bisher setzt jedes Server-Recht `server.view` voraus.
+`server.backups` means: read all of the server's files (through the download, including plugin configurations with secrets) and roll back its state. User management shows a hint when granting it, as for `server.files`. As before, every server permission requires `server.view`.
 
 ## 6. Frontend
 
-### 6.1 Tab „Backups“
+### 6.1 Tab "Backups"
 
-- Sichtbar mit `server.backups`. Kopf: Button „Backup erstellen“ (Dialog mit optionaler Notiz), darunter der aktuelle Job (Schritt, Bytes, Warteschlangen-Position als „wartet“) mit Polling alle 2 s, solange er `queued`/`running` ist.
-- Snapshot-Liste: Zeit (Browser-Zeitzone, relativ + absolut), Art als Badge (geplant / manuell / vor Restore), Notiz, Größe, Pin-Symbol. Aktionen: Anpinnen/Lösen (nur geplante), Herunterladen, Wiederherstellen, Löschen.
-- Wiederherstellen: Bestätigungsdialog, der Stopp, Sicherheits-Snapshot und automatischen Neustart erklärt und das Abtippen des Servernamens verlangt; danach greift der globale Sudo-Dialog. Löschen: einfache Bestätigung + Sudo.
-- Karte „Zeitplan“: Modus, je nach Modus Intervall / Uhrzeit / Wochentag, Retention-Felder mit Kurzerklärung, Hinweis auf die Zeitzone des panels, nächster Lauf, letzter Status mit Fehlertext.
-- `available = false`: nur ein Hinweis („Backups sind auf diesem Host nicht verfügbar: restic fehlt“), keine Aktionen.
+- Visible with `server.backups`. Header: button "Create backup" (dialog with an optional note), below it the current job (step, bytes, queue position as "waiting") with polling every 2 s while it is `queued`/`running`.
+- Snapshot list: time (browser time zone, relative + absolute), kind as a badge (scheduled / manual / before restore), note, size, pin icon. Actions: pin/unpin (scheduled only), download, restore, delete.
+- Restore: confirmation dialog that explains the stop, the safety snapshot and the automatic restart and requires typing the server name; after that the global sudo dialog takes over. Delete: simple confirmation + sudo.
+- Card "Schedule": mode, depending on the mode interval / time of day / weekday, retention fields with a short explanation, a note on the panel's time zone, next run, last status with error text.
+- `available = false`: only a hint ("Backups are not available on this host: restic is missing"), no actions.
 
-### 6.2 Weitere Stellen
+### 6.2 Other places
 
-- Einstellungen (Admin): Feld „Zeitzone für Backup-Zeitpläne“ (Auswahl aus `Intl.supportedValuesOf('timeZone')`).
-- Server löschen: Checkbox „Backups ebenfalls löschen“ (Standard aus) mit Hinweis, dass sie sonst auf dem Host bleiben.
-- Benutzerverwaltung: Hinweis zu `server.backups` (§5.10).
-- i18n `de`/`en`; MSW-Mocks für alle neuen Operationen, mit simuliertem Job-Ablauf (queued → running → done) und `available`-Schalter.
+- Settings (admin): field "Time zone for backup schedules" (choice from `Intl.supportedValuesOf('timeZone')`).
+- Delete server: checkbox "Also delete backups" (default off) with a hint that they otherwise stay on the host.
+- User management: hint on `server.backups` (§5.10).
+- i18n `de`/`en`; MSW mocks for all new operations, with a simulated job flow (queued → running → done) and an `available` switch.
 
-## 7. Entwicklung, Betrieb und CI
+## 7. Development, operation and CI
 
-- **Mac (`make dev`):** Backups funktionieren nur mit `MCPANEL_DEV_DOCKER=1` und einem restic im `PATH`, das der Nutzer selbst installiert hat (`brew install restic`; Claude installiert nichts). Ohne restic zeigt der Tab den Hinweis aus §6.1. Ohne erreichbares Docker scheitern Backup und Restore mit „Docker is not reachable“ (Job-Code `agent_unavailable`): Das panel kennt den Zustand des Containers nicht, und ein hängender dockerd darf nicht als gestoppter Server gelten. Liste, Zeitplan, Anpinnen, Download und Löschen von Snapshots laufen nur über den Dateidienst und gehen auch ohne Docker. Dev-Daten unter `.dev/mc/backups`.
-- **Test-VM und CI:** `scripts/vm-test.sh` und die CI-Jobs installieren restic 0.19.1 aus dem GitHub-Release (`restic_0.19.1_linux_<arch>.bz2`) mit fest eingetragener SHA-256 nach `/usr/local/bin/restic` und setzen `MCPANEL_TEST_RESTIC` für die Go-Integrationstests.
-- **Produktion:** Bis zum Installer (TP6) installiert der Betreiber restic (Ubuntu-Paket `restic` oder das gepinnte Release) und ergänzt die Unit gemäß §3.2; `docs/dev/README.md` beschreibt das, inklusive Mitsichern von `backups/keys/`.
-- **CI-Abnahme** (`scripts/ci-instances.sh`, Produktionsmodus, echter Paper-Server): Datei in der Welt anlegen, manuelles Backup bei laufendem Server (Log zeigt `save-off`/`save-on`), Datei ändern, Restore (Server stoppt, Pre-Restore-Snapshot existiert, Datei hat alten Inhalt, Server läuft wieder), Download als Zip enthält die Datei und kein `rcon.password`, Pin ändert die ID, Löschen entfernt den Snapshot, Server löschen mit `purge_backups=1` entfernt das Repo.
-- Manuelle Abnahme-Checkliste: `docs/dev/acceptance-tp4.md`. CLAUDE.md bekommt einen Absatz zu Backups unter „Minecraft instances“ und den neuen Spec-Link.
+- **Mac (`make dev`):** backups only work with `MCPANEL_DEV_DOCKER=1` and a restic in `PATH` that the user installed themselves (`brew install restic`; Claude installs nothing). Without restic the tab shows the hint from §6.1. Without a reachable Docker, backup and restore fail with "Docker is not reachable" (job code `agent_unavailable`): the panel does not know the container's state, and a hanging dockerd must not count as a stopped server. Listing, schedule, pinning, download and deletion of snapshots only go through the file service and also work without Docker. Dev data under `.dev/mc/backups`.
+- **Test VM and CI:** `scripts/vm-test.sh` and the CI jobs install restic 0.19.1 from the GitHub release (`restic_0.19.1_linux_<arch>.bz2`) with a hard-coded SHA-256 to `/usr/local/bin/restic` (shared script `scripts/install-restic.sh`) and set `MCPANEL_TEST_RESTIC` for the Go integration tests.
+- **Production:** the installer (sub-project 6) installs restic (Ubuntu package `restic`, at least 0.17), sets `restic_binary` in `files.toml` and writes the unit as in §3.2; the agent creates `backups/`. `docs/dev/README.md` ("Backups") describes operation, including backing up `backups/keys/`. (Until the installer existed, the operator did this by hand.)
+- **CI acceptance** (`scripts/ci-instances.sh`, production mode, real Paper server): create a file in the world, manual backup while the server is running (log shows `save-off`/`save-on`), change the file, restore (server stops, pre-restore snapshot exists, file has the old content, server runs again), the zip download contains the file and no `rcon.password`, pinning changes the ID, deleting removes the snapshot, deleting the server with `purge_backups=1` removes the repo.
+- Manual acceptance checklist: `docs/dev/acceptance.md` ("Backups"). CLAUDE.md has a paragraph on backups under "Minecraft instances" and the spec link.
 
 ## 8. Tests
 
-- **Dienst (Go, Standardbibliothek):**
-  - tar-Erzeugung: Auslassen von Symlinks, Sonderdateien, verborgenen Einträgen und ungültigen Namen; Symlink-Tausch eines Ordners während des Durchlaufs (Hook wie bei den Entpack-Tests) liest nichts außerhalb; Schwärzung; Grenzen.
-  - tar-Entpacken: alle Regeln aus TP3b §4.2 auf tar übertragen (Pfad-Tricks, Symlink-/Hardlink-/Gerät-Einträge, doppelte Namen, falsche Größen, Grenzen); Tausch der obersten Ebene inklusive verborgener Einträge; Abbruch vor dem Tausch lässt alles unverändert.
-  - tar→Zip: Namensregeln, Inhalt.
-  - Jobs: ein Job pro Instanz über alle Arten, `max_backup_jobs`, Abbrechen, Beenden mit laufendem restic.
-  - restic-Aufrufe gegen einen Fake-`resticRunner` (argv, Umgebung, Tags, JSON-Auswertung, Fehlertexte ohne Pfade); Integrationstests mit echtem restic (init, backup, list, pin, forget mit Policy und Zeitzone, dump, restore, purge), wenn `MCPANEL_TEST_RESTIC` gesetzt ist, sonst `t.Skip`.
+- **Service (Go, standard library):**
+  - tar creation: skipping symlinks, special files, hidden entries and invalid names; a symlink swap of a folder during the walk (hook as in the extraction tests) reads nothing outside; redaction; limits.
+  - tar extraction: all rules from sub-project 3b §4.2 carried over to tar (path tricks, symlink/hardlink/device entries, duplicate names, wrong sizes, limits); swap of the top level including hidden entries; cancelling before the swap leaves everything unchanged.
+  - tar→zip: name rules, content.
+  - Jobs: one job per instance across all kinds, `max_backup_jobs`, cancelling, shutdown with restic running.
+  - restic calls against a fake `resticRunner` (argv, environment, tags, JSON parsing, error texts without paths); integration tests with a real restic (init, backup, list, pin, forget with policy and time zone, dump, restore, purge) if `MCPANEL_TEST_RESTIC` is set, otherwise `t.Skip`.
 - **panel:**
-  - Zeitplan-Berechnung mit Fake-Clock: alle Modi, Sommerzeit-Lücke und -Doppelung, verpasste Termine, Zeitzonenwechsel.
-  - Warteschlange und Jobs gegen Fakes von agent und Dienst: Reihenfolge, ein Job panel-weit, `409 backup_running`, `save-on` nach jedem Fehler und nach Abbruch, Wiederanlauf nach Absturz (`saveoff_since`), `forget` nur nach geplanten Erfolgen.
-  - Restore: Sperre gegen Power-Aktionen und Abgleich (auch über einen laufenden Dienst-Job), Stopp, Pre-Restore-Snapshot, Fehler in jedem Schritt.
-  - Routen/OpenAPI-Abgleich, Rechte (inkl. Sudo), Audit-Einträge, `backup.failed`-Benachrichtigung mit Drosselung, `purge_backups` beim Löschen.
-- **Frontend:** Vitest für Zeitplan-Formular (Validierung, Moduswechsel) und Job-Anzeige; Playwright gegen den Mock: Backup erstellen, Pin, Restore-Dialog mit Namensbestätigung und Sudo, Zeitplan speichern, Hinweis bei `available=false`.
+  - Schedule computation with a fake clock: all modes, DST gap and repeated hour, missed runs, time zone change.
+  - Queue and jobs against fakes of agent and service: order, one job panel-wide, `409 backup_running`, `save-on` after every error and after cancellation, recovery after a crash (`saveoff_since`), `forget` only after scheduled successes.
+  - Restore: gate against power actions and the reconcile loop (also through a running service job), stop, pre-restore snapshot, error in every step.
+  - Routes/OpenAPI match, permissions (incl. sudo), audit entries, `backup.failed` notification with throttling, `purge_backups` on deletion.
+- **Frontend:** Vitest for the schedule form (validation, mode change) and the job display; Playwright against the mock: create a backup, pin, restore dialog with name confirmation and sudo, save the schedule, hint for `available=false`.
 
-## 9. Abnahmekriterien
+## 9. Acceptance criteria
 
-1. Ein manuelles Backup eines laufenden Paper-Servers entsteht mit `save-off`/`save-all flush`/`save-on` im Log und erscheint in der Liste als „manuell“ mit Notiz und Größe.
-2. Ein Zeitplan (z. B. stündlich) erzeugt Snapshots zur erwarteten Zeit in der eingestellten Zeitzone; `forget` hält die Retention ein, manuelle, Pre-Restore- und angepinnte Snapshots bleiben.
-3. Restore stoppt den Server, legt einen Pre-Restore-Snapshot an, stellt den Stand vollständig wieder her (verborgene Dateien unberührt) und startet den Server wieder, wenn er laufen soll; währenddessen sind Start/Neustart gesperrt.
-4. Der Download liefert ein Zip des Snapshots ohne `rcon.password`.
-5. Symlinks im Datenverzeichnis landen nie im Snapshot, und kein Restore schreibt außerhalb von `instances/<id>`.
-6. Ein fehlgeschlagenes geplantes Backup erscheint mit Fehler in der UI und als Benachrichtigung (höchstens einmal in 6 h).
-7. Ohne restic auf dem Host läuft alles andere normal; der Tab zeigt den Hinweis.
-8. Ein Absturz des panels während eines Backups hinterlässt keinen Server mit dauerhaftem `save-off`.
-9. Löschen eines Servers mit „Backups ebenfalls löschen“ entfernt Repo und Schlüssel; ohne die Option bleiben beide.
+1. A manual backup of a running Paper server is made with `save-off`/`save-all flush`/`save-on` in the log and appears in the list as "manual" with note and size.
+2. A schedule (e.g. hourly) creates snapshots at the expected time in the configured time zone; `forget` keeps the retention, and manual, pre-restore and pinned snapshots stay.
+3. A restore stops the server, creates a pre-restore snapshot, restores the state completely (hidden files untouched) and starts the server again if it is supposed to run; start/restart are blocked meanwhile.
+4. The download returns a zip of the snapshot without `rcon.password`.
+5. Symlinks in the data directory never end up in the snapshot, and no restore writes outside `instances/<id>`.
+6. A failed scheduled backup appears with its error in the UI and as a notification (at most once in 6 h).
+7. Without restic on the host everything else runs normally; the tab shows the hint.
+8. A panel crash during a backup leaves no server with a permanent `save-off`.
+9. Deleting a server with "Also delete backups" removes repo and key; without the option both stay.

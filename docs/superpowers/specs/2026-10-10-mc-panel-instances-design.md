@@ -1,111 +1,113 @@
-# mc-panel – Teilprojekt 2: Instanzen-Lifecycle (Design-Spec)
+# mc-panel – Sub-project 2: Instance lifecycle (design spec)
 
-- **Datum:** 2026-10-10
-- **Status:** umgesetzt (PRs #9–#16, 2026-10-11)
-- **Autor:** Jannes Göbel (mit Claude)
-- **Baut auf:** `2026-10-08-mc-panel-foundation-design.md` (Teilprojekt 1)
+- **Date:** 2026-10-10
+- **Status:** implemented (PRs #9–#16, 2026-10-11)
+- **Author:** Jannes Göbel (with Claude)
+- **Builds on:** `2026-10-08-mc-panel-foundation-design.md` (sub-project 1)
 
-## 1. Ziel und Kontext
+## 1. Goal and context
 
-Teilprojekt 1 hat Fundament und Security geliefert; Server existieren dort nur als Stub-Datensätze für Rechte-Tests. Teilprojekt 2 macht daraus echte Minecraft-Server: anlegen, starten, stoppen, konfigurieren, automatisch neu starten – als Docker-Container mit `itzg/minecraft-server`.
+Sub-project 1 delivered the foundation and security; there, servers exist only as stub records for permission tests. Sub-project 2 turns them into real Minecraft servers: create, start, stop, configure, restart automatically, as Docker containers with `itzg/minecraft-server`.
 
-### 1.1 Einsatz
+### 1.1 Use case
 
-mc-panel betreibt die eigenen Server des Betreibers für einen Freundeskreis: ein VPS, etwa 1–5 Instanzen. Andere Nutzer bekommen höchstens Power- (und ab Teilprojekt 3 Konsolen-)Rechte auf einzelne Server. Daraus folgt: Komfort beim Anlegen ist wichtig, Mandantentrennung und harte Quoten sind es nicht (Spec TP1 §1.2: keine Mandanten, kein Billing).
+mc-panel runs the operator's own servers for a circle of friends: one VPS, about 1–5 instances. Other users get at most power permissions (and, from sub-project 3 on, console permissions) on individual servers. It follows that convenience when creating a server matters, while tenant separation and hard quotas do not (spec of sub-project 1 §1.2: no tenants, no billing).
 
-### 1.2 Erfolg
+### 1.2 Success
 
-Ein Admin legt im UI einen Server an (Art, Version, RAM, Name), startet und stoppt ihn, sieht Status und Ressourcen und ändert die wichtigsten `server.properties`. Freunde verbinden sich über `<name>.<basisdomain>`. Ein abgestürzter Server startet selbst neu, nach einem Host-Neustart laufen die Server wieder, die laufen sollen.
+An admin creates a server in the UI (type, version, RAM, name), starts and stops it, sees its status and resources and changes the most important `server.properties`. Friends connect through `<name>.<base domain>`. A crashed server restarts by itself; after a host reboot, the servers that should run are running again.
 
-### 1.3 Unveränderte Leitlinie
+### 1.3 Unchanged guideline
 
-Ein kompromittiertes panel darf keinen Root auf dem Host bekommen (TP1 §3). Zugriff auf den Docker-Socket ist Root-äquivalent – das panel bekommt ihn deshalb nicht.
+A compromised panel must not get root on the host (sub-project 1 §3). Access to the Docker socket is equivalent to root, so the panel does not get it.
 
-### 1.4 Nicht-Ziele (Teilprojekt 2)
+### 1.4 Non-goals (sub-project 2)
 
-- Konsole, Logs, Dateibrowser, Plugins/Mods-Verwaltung, Spieler-Verwaltung (Teilprojekt 3).
-- Backups (Teilprojekt 4), Spieler-/TPS-Monitoring und Alerts (Teilprojekt 5).
-- Installation von Docker auf dem VPS (Teilprojekt 6; in der CI ist Docker auf dem Runner vorinstalliert).
-- Bedrock Edition (UDP, kein Routing nach Hostname).
-- Eigener Port pro Server, schlafende Server (Auto-Pause/Wake), Umbenennen von Servern.
-- Jails aus TP1 auf Minecraft-Verkehr anwenden (Docker leitet ihn über die Forward-Chain, die Jail-Regel greift nur für das panel).
+- Console, logs, file browser, plugin/mod management, player management (sub-project 3).
+- Backups (sub-project 4), player/TPS monitoring and alerts (sub-project 5).
+- Installing Docker on the VPS (sub-project 6; in CI, Docker is preinstalled on the runner). (Now: the installer installs `docker.io` if no Docker daemon answers, see `scripts/install/packages.sh`.)
+- Bedrock Edition (UDP, no routing by hostname).
+- A separate port per server, sleeping servers (auto-pause/wake), renaming servers.
+- Applying the jails from sub-project 1 to Minecraft traffic (Docker passes it through the forward chain; the jail rule only applies to the panel).
 
-## 2. Entscheidungen
+## 2. Decisions
 
-| Bereich | Entscheidung | Begründung |
+| Area | Decision | Reason |
 |---|---|---|
-| Laufzeit | Docker + `itzg/minecraft-server` | Deckt alle gewünschten Arten ab, pflegt Java-Images, setzt `server.properties` aus Umgebungsvariablen |
-| Docker-Zugriff | Nur der agent (root) spricht mit Docker | Hält TP1-Sicherheitsmodell; Alternativen siehe §2.1 |
-| Docker-Client | Eigener schmaler Client über `net/http` auf dem Unix-Socket | Nur die nötigen Aufrufe, keine große SDK-Abhängigkeit |
-| Erreichbarkeit | Subdomain pro Server über `itzg/mc-router` auf Port 25565 | Ein Port für alle, keine Port-Verwaltung; braucht Wildcard-DNS |
-| Subdomain | = Servername (`^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$` ist ein gültiges DNS-Label) | Kein zusätzliches Feld |
-| Konfiguration | Allowlist-Eigenschaften in der DB, als itzg-Umgebungsvariablen gesetzt | Kein Dateizugriff für das panel; freies Editieren kommt mit TP3 |
-| Arten | vanilla, paper, purpur, fabric, neoforge, modrinth, curseforge | Wunsch des Betreibers |
+| Runtime | Docker + `itzg/minecraft-server` | Covers all wanted types, maintains Java images, sets `server.properties` from environment variables |
+| Docker access | Only the agent (root) talks to Docker | Keeps the security model of sub-project 1; alternatives in §2.1 |
+| Docker client | Own narrow client over `net/http` on the Unix socket | Only the calls we need, no large SDK dependency |
+| Reachability | Subdomain per server through `itzg/mc-router` on port 25565 | One port for all, no port management; needs wildcard DNS |
+| Subdomain | = server name (`^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$` is a valid DNS label) | No extra field |
+| Configuration | Allowlisted properties in the DB, set as itzg environment variables | No file access for the panel; free editing comes with sub-project 3 |
+| Types | vanilla, paper, purpur, fabric, neoforge, modrinth, curseforge | Operator's wish |
 
-### 2.1 Verworfene Alternativen
+### 2.1 Rejected alternatives
 
-- **panel spricht über einen filternden Docker-Socket-Proxy:** Wer Container anlegen darf, kann `privileged` setzen oder `/` mounten; Pfadfilter verhindern das nicht.
-- **Rootless Podman/Docker unter eigenem Benutzer, direkt vom panel angesprochen:** Hält den Host sicher, aber Rootless-Netzwerk kostet Latenz im Spielverkehr, Speicherlimits brauchen delegierte cgroups, der Host-Setup (TP6) wird schwerer, und es weicht vom Modell „panel unprivilegiert, agent privilegiert“ ab.
+- **The panel talks through a filtering Docker socket proxy:** whoever may create containers can set `privileged` or mount `/`; path filters do not prevent that.
+- **Rootless Podman/Docker under a separate user, addressed directly by the panel:** keeps the host safe, but rootless networking adds latency to game traffic, memory limits need delegated cgroups, the host setup (sub-project 6) gets harder, and it departs from the model "panel unprivileged, agent privileged".
 
-## 3. Architektur
+## 3. Architecture
 
 ```
-Browser ──▶ panel (mcpanel, unprivilegiert)            agent (root)
+Browser ──▶ panel (mcpanel, unprivileged)              agent (root)
             internal/servers                  ──JSON──▶ internal/agent/instances
-            · DB: Instanzen, Einstellungen     Socket   · validiert InstanceSpec
-            · Versionskataloge (HTTP, Cache)            · baut feste Container-Vorlage
-            · Abgleich Soll ↔ Ist                       · Docker Engine API (/var/run/docker.sock)
-                                                        · schreibt Routen-Datei für mc-router
+            · DB: instances, settings          socket   · validates InstanceSpec
+            · version catalogs (HTTP, cache)            · builds fixed container template
+            · reconcile desired ↔ actual                · Docker Engine API (/var/run/docker.sock)
+                                                        · writes route file for mc-router
                                                                  │
-                    Docker-Netz "mcpanel-mc" (kein Port nach außen außer Router)
+                    Docker network "mcpanel-mc" (no port to the outside except the router)
             ┌──────────────┐     ┌────────────────────┐ ┌──────────────────┐
  :25565 ───▶│ mcpanel-router│──▶ │ mcpanel-mc-1 (itzg)│ │ mcpanel-mc-2 …   │
             └──────────────┘     └────────────────────┘ └──────────────────┘
                                   /srv/mc-panel/instances/<id> → /data
 ```
 
-### 3.1 panel: Paket `internal/servers`
+### 3.1 panel: package `internal/servers`
 
-- Übernimmt die Server-Handler aus `internal/users/servers.go` (Liste, Anlegen, Details, Löschen, Power) samt Power-Limiter (`internal/users/powerlimit.go`, wird nur von der Power-Route genutzt). Die Rechtevergabe (`/users/{id}/permissions`) bleibt in `internal/users`.
-- Die DB ist Quelle der Wahrheit für den **Soll-Zustand** jeder Instanz.
-- Ein Abgleich (§5.3) bringt den Ist-Zustand beim agent dorthin.
-- Versionskataloge (§6) holt das panel selbst; der agent braucht keinen Internetzugang außer für Image-Pulls durch Docker.
-- Ist der agent nicht erreichbar, bleibt die UI bedienbar; der Ist-Zustand wird als „unbekannt“ angezeigt, Änderungen am Soll-Zustand werden gespeichert und später angewandt.
+- Takes over the server handlers from `internal/users/servers.go` (list, create, details, delete, power) together with the power limiter (`internal/users/powerlimit.go`, used only by the power route). Granting permissions (`/users/{id}/permissions`) stays in `internal/users`.
+- The DB is the source of truth for the **desired state** of each instance.
+- A reconcile loop (§5.3) brings the actual state at the agent there.
+- The panel fetches the version catalogs (§6) itself; the agent needs no internet access except for image pulls by Docker.
+- If the agent is unreachable, the UI stays usable; the actual state is shown as "unknown", changes to the desired state are stored and applied later.
 
-### 3.2 agent: Paket `internal/agent/instances`
+### 3.2 agent: package `internal/agent/instances`
 
-- **`spec`:** Validierung von `InstanceSpec` (§5.2) im eigenen Paket `internal/agent/instancespec`, analog zu `banrules`: das panel prüft damit vor dem Speichern, der agent prüft jede Anfrage erneut mit demselben Code (Verteidigung in der Tiefe: der agent vertraut dem panel nicht).
-- **`docker`:** schmaler Client für die Docker Engine API über den Unix-Socket, fest auf API-Version `/v1.44` (älteste von Docker 29 akzeptierte; Ubuntu 26.04 liefert Docker 29.1.3). Unterstützt nur: Image inspizieren/ziehen, Netz inspizieren/anlegen, Container anlegen/starten/stoppen/entfernen/inspizieren/auflisten (Filter auf Label), Stats (ein Snapshot, kein Stream).
-- **`template`:** reine Funktion `Spec → Docker-Container-Konfiguration` (§5.4).
-- **`router`:** erzeugt die Routen-Datei für mc-router und schreibt sie atomar (temporäre Datei + `rename`).
-- **Worker:** eine serielle Warteschlange pro Instanz für alle schreibenden Operationen (§5.1).
+- **`spec`:** validation of `InstanceSpec` (§5.2) in its own package `internal/agent/instancespec`, like `banrules`: the panel checks with it before saving, and the agent checks every request again with the same code (defense in depth: the agent does not trust the panel).
+- **`docker`:** narrow client for the Docker Engine API over the Unix socket, pinned to API version `/v1.44` (the oldest that Docker 29 accepts; Ubuntu 26.04 ships Docker 29.1.3). Supports only: inspect/pull image, inspect/create network, create/start/stop/remove/inspect/list containers (filter on label), stats (one snapshot, no stream).
+- **`template`:** pure function `Spec → Docker container configuration` (§5.4).
+- **`router`:** generates the route file for mc-router and writes it atomically (temporary file + `rename`).
+- **Worker:** one serial queue per instance for all writing operations (§5.1).
 
-Der agent hält keinen eigenen persistenten Zustand. Welche Container er verwaltet, liest er aus Docker (Label `mcpanel.instance`). Container ohne dieses Label fasst er nie an.
+The agent keeps no persistent state of its own. It reads which containers it manages from Docker (label `mcpanel.instance`). It never touches containers without this label.
 
-### 3.3 Dateisystem auf dem Host
+### 3.3 File system on the host
 
 ```
 /srv/mc-panel/                     root:root 0755   (instances_dir)
-├── instances/<id>/                mcpanel-mc 0750  → /data im Container
-├── router/                        root:root 0755   → /config (ro) im Router-Container
+├── instances/<id>/                mcpanel-mc 0750  → /data in the container
+├── router/                        root:root 0755   → /config (ro) in the router container
 │   └── routes.json                root:root 0644
-└── deleted/<name>-<zeitstempel>/  verschobene Daten gelöschter Server
+└── deleted/<name>-<timestamp>/    moved data of deleted servers
 ```
 
-- `mcpanel-mc` ist ein eigener Systembenutzer (kein Login, keine Shell), in der CI angelegt von `scripts/ci-acceptance.sh` bzw. `scripts/ci-instances.sh`, auf dem VPS später vom Installer. Die Container laufen direkt als `<uid>:<gid>` von `mcpanel-mc` (Docker `User`); itzg überspringt dann Benutzerwechsel und `chown`, deshalb legt der agent `instances/<id>` mit diesem Besitzer an.
-- Das panel (`mcpanel`) hat keinen Zugriff auf `/srv/mc-panel/instances`.
-- `deleted/` wird nicht automatisch geleert; das dokumentiert die UI beim Löschen.
-- Plattenplatz begrenzt das panel nicht selbst: In Produktion liegen `instances_dir` und Dockers Datenverzeichnis auf einem eigenen Dateisystem (oder mit Quotas), damit ein volllaufender Server nicht die panel-Datenbank und Logs blockiert – Vorgabe für den Installer (Teilprojekt 6).
+- `mcpanel-mc` is a separate system user (no login, no shell), created in CI by `scripts/ci-acceptance.sh` or `scripts/ci-instances.sh`, and later on the VPS by the installer. (Now: the installer creates it, see `scripts/install/layout.sh`.) The containers run directly as `<uid>:<gid>` of `mcpanel-mc` (Docker `User`); itzg then skips switching users and `chown`, so the agent creates `instances/<id>` with this owner.
+- The panel (`mcpanel`) has no access to `/srv/mc-panel/instances`.
+- `deleted/` is not emptied automatically; the UI says so when deleting.
+- The panel does not limit disk space itself: in production, `instances_dir` and Docker's data directory sit on a separate file system (or with quotas), so that a server filling up does not block the panel database and logs. This is a requirement for the installer (sub-project 6).
 
-### 3.4 Konfiguration
+(Now: the agent also keeps `instances/` at `root:mcpanel-mc` 0750 and `deleted/` at `root:root` 0700; sub-project 4 added `backups/` (`mcpanel-mc` 0700), see `internal/agent/instances/datadir.go`.)
 
-Neue Schlüssel in `agent.toml` (alle mit Defaults; der Validator lehnt unbekannte Schlüssel weiterhin ab):
+### 3.4 Configuration
+
+New keys in `agent.toml` (all with defaults; the validator still rejects unknown keys):
 
 ```toml
 docker_socket = "/var/run/docker.sock"
 instances_dir = "/srv/mc-panel"
 mc_user       = "mcpanel-mc"
-[images]                                  # Defaults im Code, per Digest gepinnt
+[images]                                  # defaults in the code, pinned by digest
 java8  = "itzg/minecraft-server:java8@sha256:…"
 java17 = "itzg/minecraft-server:java17@sha256:…"
 java21 = "itzg/minecraft-server:java21@sha256:…"
@@ -113,70 +115,70 @@ java25 = "itzg/minecraft-server:java25@sha256:…"
 router = "itzg/mc-router@sha256:…"
 ```
 
-- Image-Referenzen müssen einen Digest enthalten; ohne Digest startet der agent nicht.
-- Das panel wählt nur einen Schlüssel aus dem Enum `java8|java17|java21|java25`, nie ein Image.
-- Im Dev-Modus (`make dev` auf macOS) ist Docker aus: kein Manager, keine Container, Status „Docker nicht verfügbar“ (auf dem Mac entsteht nichts ungefragt). Nur mit `MCPANEL_DEV_DOCKER=1` nutzt der dev-agent den Docker-Socket von OrbStack/Docker Desktop, wenn vorhanden.
+- Image references must contain a digest; without one, the agent does not start.
+- The panel only picks a key from the enum `java8|java17|java21|java25`, never an image.
+- In dev mode (`make dev` on macOS), Docker is off: no manager, no containers, status "Docker not available" (nothing is created on the Mac without asking). Only with `MCPANEL_DEV_DOCKER=1` does the dev agent use the Docker socket of OrbStack/Docker Desktop, if present.
 
-`panel.toml` bekommt keine neuen Pflichtschlüssel; Basisdomain und CurseForge-Key sind Laufzeit-Einstellungen in der DB (§4).
+`panel.toml` gets no new required keys; the base domain and the CurseForge key are runtime settings in the DB (§4).
 
-## 4. Datenmodell
+## 4. Data model
 
-Neue Migration `internal/store/migrations/00002_instances.sql`. `servers` bleibt unverändert.
+New migration `internal/store/migrations/00002_instances.sql`. `servers` stays unchanged.
 
 ```sql
 CREATE TABLE instances (
     server_id      INTEGER PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
     type           TEXT    NOT NULL CHECK (type IN ('vanilla', 'paper', 'purpur', 'fabric',
                                                     'neoforge', 'modrinth', 'curseforge')),
-    version        TEXT    NOT NULL,          -- 'LATEST' oder z. B. '1.21.4'
-    loader_version TEXT,                      -- nur fabric/neoforge; NULL = neueste
-    modpack        TEXT,                      -- nur modrinth/curseforge
+    version        TEXT    NOT NULL,          -- 'LATEST' or e.g. '1.21.4'
+    loader_version TEXT,                      -- only fabric/neoforge; NULL = latest
+    modpack        TEXT,                      -- only modrinth/curseforge
     java           TEXT    NOT NULL CHECK (java IN ('java8', 'java17', 'java21', 'java25')),
     memory_mib     INTEGER NOT NULL CHECK (memory_mib BETWEEN 1024 AND 32768),
-    properties     TEXT    NOT NULL,          -- JSON-Objekt, nur Allowlist-Schlüssel (§7)
+    properties     TEXT    NOT NULL,          -- JSON object, allowlisted keys only (§7)
     desired_state  TEXT    NOT NULL CHECK (desired_state IN ('running', 'stopped')),
-    revision       INTEGER NOT NULL,          -- +1 bei jeder Spec-Änderung
+    revision       INTEGER NOT NULL,          -- +1 on every spec change
     created_at     INTEGER NOT NULL,
     updated_at     INTEGER NOT NULL
 );
 
 CREATE TABLE instance_settings (
     id                 INTEGER PRIMARY KEY CHECK (id = 1),
-    base_domain        TEXT,                  -- z. B. 'mc.example.com'
-    curseforge_api_key BLOB,                  -- verschlüsselt mit internal/secretbox
+    base_domain        TEXT,                  -- e.g. 'mc.example.com'
+    curseforge_api_key BLOB,                  -- encrypted with internal/secretbox
     updated_at         INTEGER NOT NULL
 );
 ```
 
-- sqlc-Queries in `internal/store/queries/servers.sql`, Präfix `Servers…`.
-- Ein Server ohne `instances`-Zeile (Stub aus TP1) heißt im UI „nicht eingerichtet“ und kann nur gelöscht werden.
-- `revision` beginnt bei 1. Der Container trägt die Revision als Label; Abweichung = „Neustart nötig“.
-- Server-IDs werden nie wiederverwendet (Zähler-Tabelle aus Migration `00003`): sonst könnte ein neuer Server Container und Welt eines gelöschten Servers erben, dessen Entfernen gescheitert ist.
-- `base_domain`: gültiger DNS-Name aus Labels nach `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`, mindestens zwei Labels, gesamt ≤ 200 Zeichen, kleingeschrieben gespeichert. FQDN eines Servers = `<name>.<base_domain>` (≤ 253 Zeichen).
+- sqlc queries in `internal/store/queries/servers.sql`, prefix `Servers…`.
+- A server without an `instances` row (stub from sub-project 1) is called "not set up" in the UI and can only be deleted.
+- `revision` starts at 1. The container carries the revision as a label; a mismatch = "restart required".
+- Server IDs are never reused (counter table from migration `00003`): otherwise a new server could inherit the container and world of a deleted server whose removal failed.
+- `base_domain`: valid DNS name made of labels matching `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`, at least two labels, ≤ 200 characters in total, stored in lower case. A server's FQDN = `<name>.<base_domain>` (≤ 253 characters).
 
-## 5. Lebenszyklus
+## 5. Lifecycle
 
-### 5.1 agent-API
+### 5.1 agent API
 
-Feste Pfade wie in TP1, IDs im Body, `DisallowUnknownFields`, Peer-UID-Prüfung unverändert. Body-Limit für `/v1/instances/*` 16 KiB (übrige Pfade weiter 4 KiB).
+Fixed paths as in sub-project 1, IDs in the body, `DisallowUnknownFields`, peer UID check unchanged. Body limit for `/v1/instances/*` 16 KiB (other paths still 4 KiB).
 
-| Methode, Pfad | Body | Antwort |
+| Method, path | Body | Response |
 |---|---|---|
-| `GET /v1/health` | – | wie bisher plus `docker: "ok" \| "unavailable"` |
+| `GET /v1/health` | – | as before plus `docker: "ok" \| "unavailable"` |
 | `GET /v1/instances` | – | `{instances: [InstanceStatus], router: RouterStatus}` |
 | `POST /v1/instances/ensure` | `{id, name, fqdn, revision, spec, recreate}` | `202` |
-| `POST /v1/instances/power` | `{id, action}` mit `start\|stop\|restart` | `202` |
+| `POST /v1/instances/power` | `{id, action}` with `start\|stop\|restart` | `202` |
 | `POST /v1/instances/remove` | `{id}` | `202` |
 
-`InstanceStatus` (RAM = `memory_stats.usage` minus `memory_stats.stats.inactive_file` bzw. `cache`, CPU nach der Formel der Docker-API aus `cpu_stats`/`precpu_stats`): `id`, `revision`, `state` (`created\|running\|restarting\|exited\|missing`), `exit_code`, `started_at` (Unix-ms), `memory_bytes`, `memory_limit_bytes`, `cpu_percent`, `operation` (`""\|pulling\|creating\|starting\|stopping\|removing`), `last_error` (Text, ≤ 500 Zeichen, ohne Secrets).
+`InstanceStatus` (RAM = `memory_stats.usage` minus `memory_stats.stats.inactive_file` or `cache`, CPU by the Docker API formula from `cpu_stats`/`precpu_stats`): `id`, `revision`, `state` (`created\|running\|restarting\|exited\|missing`), `exit_code`, `started_at` (Unix ms), `memory_bytes`, `memory_limit_bytes`, `cpu_percent`, `operation` (`""\|pulling\|creating\|starting\|stopping\|removing`), `last_error` (text, ≤ 500 characters, without secrets).
 
-- **ensure:** stellt sicher, dass `mcpanel-mc-<id>` in genau dieser Revision existiert. Fehlt das Image, wird es gezogen. Existiert ein Container mit älterer Revision und `recreate` ist `false`, passiert nichts. Mit `recreate: true` wird er gestoppt, entfernt und neu angelegt; lief er vorher, wird er danach gestartet. Legt das Datenverzeichnis an (Besitzer `mcpanel-mc`), falls es fehlt. Schreibt danach die Routen-Datei neu.
-- **power:** wirkt auf den vorhandenen Container; fehlt er, setzt der Worker `last_error`.
-- **remove:** stoppt und entfernt den Container, verschiebt `instances/<id>` nach `deleted/<name>-<UTC-Zeitstempel>`, schreibt die Routen-Datei neu.
-- Alle schreibenden Aufrufe kehren sofort mit `202` zurück und landen in der Warteschlange der Instanz. Eine neue Operation ersetzt keine laufende; die Warteschlange hat eine Länge von höchstens 4 (sonst `429`).
-- `id` ist die Server-ID (int64 > 0); `name` erfüllt die Namens-Regex; `fqdn` beginnt mit `<name>.` und ist ein gültiger DNS-Name (≤ 253 Zeichen).
+- **ensure:** makes sure that `mcpanel-mc-<id>` exists in exactly this revision. If the image is missing, it is pulled. If a container with an older revision exists and `recreate` is `false`, nothing happens. With `recreate: true` it is stopped, removed and created again; if it was running before, it is started afterwards. Creates the data directory (owner `mcpanel-mc`) if it is missing. Then rewrites the route file.
+- **power:** acts on the existing container; if it is missing, the worker sets `last_error`.
+- **remove:** stops and removes the container, moves `instances/<id>` to `deleted/<name>-<UTC timestamp>`, rewrites the route file.
+- All writing calls return `202` immediately and go into the instance's queue. A new operation does not replace a running one; the queue holds at most 4 entries (otherwise `429`).
+- `id` is the server ID (int64 > 0); `name` matches the name regex; `fqdn` starts with `<name>.` and is a valid DNS name (≤ 253 characters).
 
-Der Router-Container `mcpanel-router` wird beim agent-Start und bei jedem ensure sichergestellt, sobald Docker verfügbar ist. `RouterStatus`: `state`, `last_error`.
+The router container `mcpanel-router` is ensured at agent start and on every ensure, as soon as Docker is available. `RouterStatus`: `state`, `last_error`.
 
 ### 5.2 InstanceSpec
 
@@ -193,100 +195,101 @@ Der Router-Container `mcpanel-router` wird beim agent-Start und bei jedem ensure
 }
 ```
 
-Regeln (panel und agent):
+Rules (panel and agent):
 
-| Feld | Regel |
+| Field | Rule |
 |---|---|
-| `type` | Enum aus §4 |
-| `version` | `LATEST` oder `^[0-9A-Za-z][0-9A-Za-z.\-+_]{0,63}$`; bei modrinth/curseforge ignoriert und leer |
-| `loader_version` | nur fabric/neoforge, sonst `null`; Format wie `version` |
-| `modpack` | nur modrinth: `^[a-z0-9-]{1,64}$`; nur curseforge: Slug wie Modrinth oder `https://www.curseforge.com/minecraft/modpacks/<slug>`; sonst `null` |
-| `java` | Enum aus §4 |
-| `memory_mib` | 1024–32768, Vielfaches von 256 |
-| `properties` | nur Schlüssel und Typen aus §7 |
-| `curseforge_api_key` | nur bei `type = curseforge`, Pflicht dort; `^[A-Za-z0-9$./_-]{1,128}$` |
-| Kombination | `type = curseforge` verlangt `java != java8` (das java8-Image unterstützt CurseForge nicht) |
+| `type` | Enum from §4 |
+| `version` | `LATEST` or `^[0-9A-Za-z][0-9A-Za-z.\-+_]{0,63}$`; ignored and empty for modrinth/curseforge |
+| `loader_version` | only fabric/neoforge, otherwise `null`; format like `version` |
+| `modpack` | only modrinth: `^[a-z0-9-]{1,64}$`; only curseforge: slug like Modrinth or `https://www.curseforge.com/minecraft/modpacks/<slug>`; otherwise `null` |
+| `java` | Enum from §4 |
+| `memory_mib` | 1024–32768, multiple of 256 |
+| `properties` | only keys and types from §7 |
+| `curseforge_api_key` | only with `type = curseforge`, required there; `^[A-Za-z0-9$./_-]{1,128}$` |
+| Combination | `type = curseforge` requires `java != java8` (the java8 image does not support CurseForge) |
 
-Zusätzlich prüft der agent jeden Wert, der in eine Umgebungsvariable geht, auf `=`-freie Schlüssel (fest im Code) und Werte ohne Steuerzeichen (`\x00`–`\x1f`, `\x7f`).
+In addition, the agent checks every value that goes into an environment variable for keys without `=` (fixed in the code) and values without control characters (`\x00`–`\x1f`, `\x7f`).
 
-### 5.3 Abgleich im panel
+### 5.3 Reconciliation in the panel
 
-Eine Schleife läuft alle 10 s (über `clock.Clock`) und zusätzlich sofort nach jeder Nutzeraktion (Signal über einen Kanal, nicht blockierend). Pro Instanz:
+A loop runs every 10 s (through `clock.Clock`) and additionally right after every user action (signal over a channel, non-blocking). Per instance:
 
-| Soll | Ist | Aktion |
+| Desired | Actual | Action |
 |---|---|---|
-| beliebig | `missing` | `ensure` (recreate `false`), danach ggf. `start` |
-| beliebig | ältere Revision, nicht laufend | `ensure` mit `recreate: true` (ein Server startet nie mit alter Konfiguration; bei Soll `running` folgt im nächsten Durchlauf `start`) |
-| `running` | ältere Revision, laufend | nichts; `restart_required = true` |
+| any | `missing` | `ensure` (recreate `false`), then `start` if needed |
+| any | older revision, not running | `ensure` with `recreate: true` (a server never starts with an old configuration; with desired `running`, `start` follows in the next pass) |
+| `running` | older revision, running | nothing; `restart_required = true` |
 | `running` | `exited`/`created` | `power start` |
 | `stopped` | `running`/`restarting` | `power stop` |
-| beliebig | `operation != ""` | nichts (agent arbeitet) |
+| any | `operation != ""` | nothing (agent is working) |
 
-- „Neustart“ durch einen Nutzer: Ist die Revision aktuell → `power restart`; sonst `ensure` mit `recreate: true` (das startet wieder, weil der Container vorher lief).
-- Container mit `mcpanel.instance`-Label, die die DB nicht kennt: Log-Warnung und Anzeige in den Einstellungen; kein automatisches Löschen.
-- Fehler des agents (nicht erreichbar, `docker_unavailable`) brechen den Durchlauf ab und werden geloggt; der nächste Durchlauf versucht es erneut.
-- Hat ein Durchlauf etwas ausgelöst, folgt der nächste sofort (z. B. `ensure`, dann `start`). Wiederholt sich dieselbe Aktion für eine Instanz ohne Erfolg (dauerhafter `last_error`), wartet der Abgleich exponentiell: 10 s, 20 s, 40 s … höchstens 5 min.
-- Abstürze und automatische Neustarts erscheinen nur im Log, nicht im Audit-Log.
+- "Restart" by a user: if the revision is current → `power restart`; otherwise `ensure` with `recreate: true` (this starts it again because the container was running before).
+- Containers with a `mcpanel.instance` label that the DB does not know: log warning and shown in the settings; no automatic deletion.
+- Agent errors (unreachable, `docker_unavailable`) abort the pass and are logged; the next pass tries again.
+- If a pass triggered something, the next one follows immediately (e.g. `ensure`, then `start`). If the same action repeats for an instance without success (persistent `last_error`), the reconcile loop backs off exponentially: 10 s, 20 s, 40 s … at most 5 min.
+- Crashes and automatic restarts appear only in the log, not in the audit log.
 
-### 5.4 Container-Vorlage
+### 5.4 Container template
 
-Der agent erzeugt aus einer gültigen Spec genau diese Konfiguration; nichts davon ist vom panel steuerbar:
+From a valid spec the agent generates exactly this configuration; none of it can be controlled by the panel:
 
-- Name `mcpanel-mc-<id>`, Hostname `<name>`.
-- Image aus `[images].<java>`.
-- `User: "<uid>:<gid>"` von `mcpanel-mc` – der Container startet nie als root (itzg-Doku „Running as alternate user/group ID“).
+- Name `mcpanel-mc-<id>`, hostname `<name>`.
+- Image from `[images].<java>`.
+- `User: "<uid>:<gid>"` of `mcpanel-mc`: the container never starts as root (itzg docs "Running as alternate user/group ID").
 - Labels: `mcpanel.instance=<id>`, `mcpanel.revision=<revision>`, `mcpanel.name=<name>`, `mcpanel.fqdn=<fqdn>`.
-- Netz: nur `mcpanel-mc` (bridge, vom agent angelegt). Keine veröffentlichten Ports.
-- Mount: `/srv/mc-panel/instances/<id>` → `/data` (bind, rw). Keine weiteren Mounts.
-- `HostConfig`: `CapDrop: ["ALL"]` ohne `CapAdd`, `SecurityOpt: ["no-new-privileges:true"]`, `Privileged: false`, `ReadonlyRootfs: false` (itzg schreibt außerhalb von `/data`), `Memory = memory_mib × 1.25 MiB`, `MemorySwap = Memory`, `PidsLimit: 1024`, `RestartPolicy: unless-stopped`, `LogConfig`: `json-file` mit `max-size=10m`, `max-file=3`.
+- Network: only `mcpanel-mc` (bridge, created by the agent). No published ports.
+- Mount: `/srv/mc-panel/instances/<id>` → `/data` (bind, rw). No other mounts.
+- `HostConfig`: `CapDrop: ["ALL"]` without `CapAdd`, `SecurityOpt: ["no-new-privileges:true"]`, `Privileged: false`, `ReadonlyRootfs: false` (itzg writes outside `/data`), `Memory = memory_mib × 1.25 MiB`, `MemorySwap = Memory`, `PidsLimit: 1024`, `RestartPolicy: unless-stopped`, `LogConfig`: `json-file` with `max-size=10m`, `max-file=3`.
 - `StopTimeout: 60`.
-- `CPUShares: 256` (cgroup-v2-Gewicht unter dem der Host-Dienste), damit ein ausgelasteter Server panel und agent nicht verdrängt.
-- Ein vorhandener `mcpanel-mc-<id>`, dessen Label `mcpanel.name` nicht zur Anfrage passt (die FQDN darf sich ändern, z. B. nach einem Wechsel der Basisdomain), gehört zu einem anderen Server: der agent übernimmt, startet oder ersetzt ihn nie, sondern meldet `last_error`. Teilen sich zwei Container eine FQDN, routet mc-router zum Container mit der höchsten ID.
-- Umgebung, fest: `EULA=TRUE`, `TYPE`, `VERSION`, `MEMORY=<memory_mib>M`, `ENABLE_AUTOPAUSE=false`, `ENABLE_RCON=true` (nur im internen Netz erreichbar; für TP3), `OVERRIDE_SERVER_PROPERTIES=true`; je nach Art `FABRIC_LOADER_VERSION`, `NEOFORGE_VERSION`, `MODRINTH_MODPACK` (bei `TYPE=MODRINTH`), `CF_SLUG`/`CF_PAGE_URL` und `CF_API_KEY` (bei `TYPE=AUTO_CURSEFORGE`; `type` → `TYPE`: vanilla→`VANILLA`, paper→`PAPER`, purpur→`PURPUR`, fabric→`FABRIC`, neoforge→`NEOFORGE`, modrinth→`MODRINTH`, curseforge→`AUTO_CURSEFORGE`).
-- Umgebung aus `properties` gemäß §7, dazu fest `EXISTING_OPS_FILE=SYNCHRONIZE` und `EXISTING_WHITELIST_FILE=SYNCHRONIZE`: Ops und Whitelist entsprechen nach jedem (Neu-)Start genau den Listen im panel (im Spiel vergebene Einträge werden überschrieben; die UI weist darauf hin). Sind die Listen leer bzw. ist die Whitelist aus, leert der agent vor dem Anlegen `ops.json` bzw. `whitelist.json`. Alle anderen itzg-Variablen (`JVM_OPTS`, `GENERIC_PACK`, `MODS`, `PLUGINS`, …) sind nicht setzbar.
+- `CPUShares: 256` (cgroup v2 weight below that of the host services), so that a busy server does not crowd out the panel and agent.
+- An existing `mcpanel-mc-<id>` whose label `mcpanel.name` does not match the request (the FQDN may change, e.g. after a change of the base domain) belongs to a different server: the agent never adopts, starts or replaces it, but reports `last_error`. If two containers share an FQDN, mc-router routes to the container with the highest ID.
+- Environment, fixed: `EULA=TRUE`, `TYPE`, `VERSION`, `MEMORY=<memory_mib>M`, `ENABLE_AUTOPAUSE=false`, `ENABLE_RCON=true` (reachable only in the internal network; for sub-project 3), `OVERRIDE_SERVER_PROPERTIES=true`; depending on the type `FABRIC_LOADER_VERSION`, `NEOFORGE_VERSION`, `MODRINTH_MODPACK` (with `TYPE=MODRINTH`), `CF_SLUG`/`CF_PAGE_URL` and `CF_API_KEY` (with `TYPE=AUTO_CURSEFORGE`; `type` → `TYPE`: vanilla→`VANILLA`, paper→`PAPER`, purpur→`PURPUR`, fabric→`FABRIC`, neoforge→`NEOFORGE`, modrinth→`MODRINTH`, curseforge→`AUTO_CURSEFORGE`).
+- Environment from `properties` according to §7, plus fixed `EXISTING_OPS_FILE=SYNCHRONIZE` and `EXISTING_WHITELIST_FILE=SYNCHRONIZE`: after every (re)start, ops and whitelist match exactly the lists in the panel (entries granted in-game are overwritten; the UI points this out). If the lists are empty or the whitelist is off, the agent empties `ops.json` or `whitelist.json` before creating the container. All other itzg variables (`JVM_OPTS`, `GENERIC_PACK`, `MODS`, `PLUGINS`, …) cannot be set.
+  (Now: since sub-project 3a the panel sets neither `OPS`/`WHITELIST` nor `EXISTING_*_FILE`; ops and whitelist belong to the server's own `ops.json`/`whitelist.json` and are changed through RCON, see `internal/agent/instancespec/env.go`. Only `whitelist_enabled` (`ENABLE_WHITELIST`) is still a property.)
 
-Router-Container `mcpanel-router`: Image `[images].router`, Netz `mcpanel-mc`, Port `25565/tcp` auf dem Host veröffentlicht, Mount `/srv/mc-panel/router` → `/config` (ro, Verzeichnis statt Einzeldatei, damit ein `rename` sichtbar wird), Start mit `-routes-config /config/routes.json` **ohne** `-routes-config-watch`, gleiche `HostConfig`-Härtung, `RestartPolicy: unless-stopped`; das Image läuft bereits als UID 65532. Routen-Datei: `{"mappings": {"<fqdn>": "mcpanel-mc-<id>:25565"}}`. Nach jedem Schreiben sendet der agent `SIGHUP` (`POST /containers/mcpanel-router/kill?signal=SIGHUP`): nur das Neuladen per SIGHUP entfernt gelöschte Routen, die Dateiüberwachung von mc-router fügt nur hinzu (verifiziert gegen mc-router 1.47.2). Der Router bekommt keinen Docker-Socket.
+Router container `mcpanel-router`: image `[images].router`, network `mcpanel-mc`, port `25565/tcp` published on the host, mount `/srv/mc-panel/router` → `/config` (ro, a directory instead of a single file so that a `rename` becomes visible), started with `-routes-config /config/routes.json` **without** `-routes-config-watch`, same `HostConfig` hardening, `RestartPolicy: unless-stopped`; the image already runs as UID 65532. Route file: `{"mappings": {"<fqdn>": "mcpanel-mc-<id>:25565"}}`. After every write the agent sends `SIGHUP` (`POST /containers/mcpanel-router/kill?signal=SIGHUP`): only reloading via SIGHUP removes deleted routes, mc-router's file watching only adds (verified against mc-router 1.47.2). The router gets no Docker socket.
 
-### 5.5 Automatischer Neustart
+### 5.5 Automatic restart
 
-- Absturz: Docker startet neu (`unless-stopped`, mit Docker-eigenem Backoff).
-- Host-Neustart: Docker startet Container mit `unless-stopped` wieder, die nicht explizit gestoppt waren; der Abgleich korrigiert alles Übrige anhand von `desired_state`.
-- `desired_state` ändert nur ein Nutzer (Power-Aktion), nie der Abgleich.
+- Crash: Docker restarts the container (`unless-stopped`, with Docker's own backoff).
+- Host reboot: Docker restarts containers with `unless-stopped` that were not explicitly stopped; the reconcile loop corrects everything else based on `desired_state`.
+- Only a user changes `desired_state` (power action), never the reconcile loop.
 
-## 6. Versionskataloge
+## 6. Version catalogs
 
-`GET /api/servers/catalog/{type}` (Admin). Das panel fragt feste Upstream-URLs ab; nur das Enum `type` wählt die Quelle.
+`GET /api/servers/catalog/{type}` (admin). The panel queries fixed upstream URLs; only the enum `type` picks the source.
 
-| Art | Quelle | Liefert |
+| Type | Source | Returns |
 |---|---|---|
-| vanilla | `https://piston-meta.mojang.com/mc/game/version_manifest_v2.json` | Releases, neueste zuerst |
-| paper | PaperMC Fill-API v3 (`https://fill.papermc.io/v3/projects/paper/versions`, je Version `…/versions/{v}/builds?channel=STABLE`) | MC-Versionen mit mindestens einem STABLE-Build (itzg nutzt per Default nur STABLE/RECOMMENDED; z. B. hat 26.3 derzeit keinen) |
-| purpur | `https://api.purpurmc.org/v2/purpur` | MC-Versionen bis einschließlich `metadata.current` (neuere gelten als experimentell) |
-| fabric | `https://meta.fabricmc.net/v2/versions/game`, `…/loader` | stabile Spielversionen, Loader-Versionen |
-| neoforge | NeoForged-Maven-API (`https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge`) | NeoForge-Versionen ohne `-beta`/`-alpha`, nach MC-Version gruppiert (`20.4.x` → 1.20.4, `21.0.x` → 1.21, `26.1.2.x` → 26.1.2, `26.2.0.x` → 26.2) |
-| modrinth, curseforge | – | `404`; das Pack bestimmt die Version |
+| vanilla | `https://piston-meta.mojang.com/mc/game/version_manifest_v2.json` | Releases, newest first |
+| paper | PaperMC Fill API v3 (`https://fill.papermc.io/v3/projects/paper/versions`, per version `…/versions/{v}/builds?channel=STABLE`) | MC versions with at least one STABLE build (itzg by default uses only STABLE/RECOMMENDED; e.g. 26.3 currently has none) |
+| purpur | `https://api.purpurmc.org/v2/purpur` | MC versions up to and including `metadata.current` (newer ones count as experimental) |
+| fabric | `https://meta.fabricmc.net/v2/versions/game`, `…/loader` | stable game versions, loader versions |
+| neoforge | NeoForged Maven API (`https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge`) | NeoForge versions without `-beta`/`-alpha`, grouped by MC version (`20.4.x` → 1.20.4, `21.0.x` → 1.21, `26.1.2.x` → 26.1.2, `26.2.0.x` → 26.2) |
+| modrinth, curseforge | – | `404`; the pack determines the version |
 
-- Antwort: `{versions: [{id, java}], loaders?: [string]}`; `java` ist die abgeleitete Empfehlung (§6.1).
-- Cache im Speicher 1 h pro Art; Timeout 10 s, Antwortgröße ≤ 5 MiB; Fehler → `502 catalog_unavailable` (das Formular bietet dann Freitext).
-- Die Endpunkte und Formate sind gegen die Live-Dienste geprüft (2026-10-10); gekürzte echte Antworten liegen als Beispielantworten in `testdata/`. Die Fill-API verlangt einen User-Agent mit Kontakt: `mc-panel/<version> (https://github.com/Bernotese/mc-panel)` (gilt für alle Katalog-Abrufe). Paper fragt die STABLE-Builds nur für die neuesten 10 Versionen ab (ältere haben alle STABLE-Builds).
+- Response: `{versions: [{id, java}], loaders?: [string]}`; `java` is the derived recommendation (§6.1).
+- In-memory cache of 1 h per type; timeout 10 s, response size ≤ 5 MiB; errors → `502 catalog_unavailable` (the form then offers free text).
+- The endpoints and formats were checked against the live services (2026-10-10); shortened real responses are kept as sample responses in `testdata/`. The Fill API requires a User-Agent with contact details: `mc-panel/<version> (https://github.com/Bernotese/mc-panel)` (used for all catalog requests). Paper queries the STABLE builds only for the newest 10 versions (older ones all have STABLE builds).
 
-### 6.1 Java-Ableitung
+### 6.1 Java derivation
 
-| MC-Version | Java |
+| MC version | Java |
 |---|---|
 | ≤ 1.16.5 | java8 |
 | 1.17 – 1.20.4 | java17 |
 | 1.20.5 – 1.21.x | java21 |
-| ≥ 26.1 (Jahresschema) und `LATEST` | java25 |
-| Modpacks | java21 (Default) |
+| ≥ 26.1 (year scheme) and `LATEST` | java25 |
+| Modpacks | java21 (default) |
 
-Ein Admin kann den Wert unter „Erweitert“ überschreiben. Die Ableitung liegt im panel (Go) und wird für das Formular im Katalog mitgeliefert; das Frontend rechnet für Freitext-Versionen mit derselben Tabelle (gemeinsame Testfälle).
+An admin can override the value under "Advanced". The derivation lives in the panel (Go) and is delivered with the catalog for the form; the frontend computes free-text versions with the same table (shared test cases).
 
-## 7. Eigenschaften (Allowlist)
+## 7. Properties (allowlist)
 
-| Schlüssel (`properties`) | Typ / Grenzen | itzg-Variable | Default |
+| Key (`properties`) | Type / limits | itzg variable | Default |
 |---|---|---|---|
-| `motd` | Text ≤ 150 Zeichen, druckbar, ohne Zeilenumbruch | `MOTD` | Servername |
+| `motd` | text ≤ 150 characters, printable, no line break | `MOTD` | server name |
 | `difficulty` | `peaceful\|easy\|normal\|hard` | `DIFFICULTY` | `normal` |
 | `gamemode` | `survival\|creative\|adventure\|spectator` | `MODE` | `survival` |
 | `max_players` | 1–500 | `MAX_PLAYERS` | 20 |
@@ -294,102 +297,105 @@ Ein Admin kann den Wert unter „Erweitert“ überschreiben. Die Ableitung lieg
 | `hardcore` | bool | `HARDCORE` | `false` |
 | `allow_flight` | bool | `ALLOW_FLIGHT` | `false` |
 | `enable_command_block` | bool | `ENABLE_COMMAND_BLOCK` | `false` |
-| `online_mode` | bool (UI warnt bei `false`) | `ONLINE_MODE` | `true` |
+| `online_mode` | bool (UI warns on `false`) | `ONLINE_MODE` | `true` |
 | `whitelist_enabled` | bool | `ENABLE_WHITELIST` | `false` |
-| `whitelist` | ≤ 200 Namen `^[A-Za-z0-9_]{3,16}$` | `WHITELIST` (kommagetrennt) | leer |
-| `ops` | ≤ 50 Namen, wie oben | `OPS` | leer |
+| `whitelist` | ≤ 200 names `^[A-Za-z0-9_]{3,16}$` | `WHITELIST` (comma-separated) | empty |
+| `ops` | ≤ 50 names, as above | `OPS` | empty |
 | `view_distance` | 3–32 | `VIEW_DISTANCE` | 10 |
 | `simulation_distance` | 3–32 | `SIMULATION_DISTANCE` | 10 |
 | `spawn_protection` | 0–256 | `SPAWN_PROTECTION` | 16 |
-| `seed` | Text ≤ 64, druckbar | `SEED` | leer |
+| `seed` | text ≤ 64, printable | `SEED` | empty |
 | `level_type` | `normal\|flat\|large_biomes\|amplified` | `LEVEL_TYPE` (`minecraft:…`) | `normal` |
 
-- Fehlende Schlüssel = Default; unbekannte Schlüssel → `400 validation_failed` (panel) bzw. `400` (agent).
-- `seed` und `level_type` wirken nur bei einer neuen Welt; das UI sagt das.
+- Missing keys = default; unknown keys → `400 validation_failed` (panel) or `400` (agent).
+- `seed` and `level_type` only take effect for a new world; the UI says so.
+- (Now: sub-project 3a removed `whitelist` and `ops` from the allowlist; see the note in §5.4 and `internal/agent/instancespec/properties.go`.)
 
-## 8. panel-API
+## 8. panel API
 
-Alle Routen über `*rbac.Router`, in `api/openapi.yaml` beschrieben, mit MSW-Mock.
+All routes go through `*rbac.Router`, are described in `api/openapi.yaml` and have an MSW mock.
 
-| Route | Regel | Inhalt |
+| Route | Rule | Content |
 |---|---|---|
-| `GET /servers` | Authenticated | wie bisher plus `type`, `version`, `state`, `address`, `restart_required`; `null`-Felder für nicht eingerichtete Server |
-| `POST /servers` | Admin + Sudo | Name + Instanz-Konfiguration + `eula_accepted: true` (Pflicht); `201` mit `state: "creating"` (bzw. `"unknown"`, wenn der agent gerade nicht erreichbar ist); `409 base_domain_missing` ohne Basisdomain, `409 conflict` bei vergebenem Namen |
-| `GET /servers/{id}` | `server.view` | plus Konfiguration, `properties`, Ist-Zustand (`InstanceStatus` ohne interne Felder), `restart_required`, `last_error` |
-| `PATCH /servers/{id}` | Admin + Sudo | `version`, `loader_version`, `modpack`, `java`, `memory_mib`, `properties` (teilweise); erhöht `revision`; Antwort enthält `restart_required` |
-| `DELETE /servers/{id}` | Admin + Sudo | `remove` an den agent; DB-Zeilen weg, sobald der agent `202` geantwortet hat; Daten nach `deleted/` |
-| `POST /servers/{id}/power` | `server.power` | `start\|stop\|restart` setzt `desired_state` (bzw. löst Neustart aus, §5.3); `202`; Power-Limiter wie TP1 |
+| `GET /servers` | Authenticated | as before plus `type`, `version`, `state`, `address`, `restart_required`; `null` fields for servers that are not set up |
+| `POST /servers` | Admin + sudo | name + instance configuration + `eula_accepted: true` (required); `201` with `state: "creating"` (or `"unknown"` if the agent is currently unreachable); `409 base_domain_missing` without a base domain, `409 conflict` if the name is taken |
+| `GET /servers/{id}` | `server.view` | plus configuration, `properties`, actual state (`InstanceStatus` without internal fields), `restart_required`, `last_error` |
+| `PATCH /servers/{id}` | Admin + sudo | `version`, `loader_version`, `modpack`, `java`, `memory_mib`, `properties` (partial); increments `revision`; the response contains `restart_required` |
+| `DELETE /servers/{id}` | Admin + sudo | `remove` to the agent; DB rows are gone as soon as the agent has answered `202`; data goes to `deleted/` |
+| `POST /servers/{id}/power` | `server.power` | `start\|stop\|restart` sets `desired_state` (or triggers a restart, §5.3); `202`; power limiter as in sub-project 1 |
 | `GET /servers/catalog/{type}` | Admin | §6 |
-| `GET /servers/settings` | Admin | `base_domain`, `curseforge_api_key_set`, `docker` (Status), `unknown_containers` |
-| `PUT /servers/settings` | Admin + Sudo | `base_domain`, `curseforge_api_key` (String setzt, `null` entfernt, fehlend = unverändert) |
+| `GET /servers/settings` | Admin | `base_domain`, `curseforge_api_key_set`, `docker` (status), `unknown_containers` |
+| `PUT /servers/settings` | Admin + sudo | `base_domain`, `curseforge_api_key` (a string sets it, `null` removes it, missing = unchanged) |
 
-- `address` = `<name>.<base_domain>`; ohne Basisdomain `null`.
-- Ist der agent nicht erreichbar, liefern Lese-Endpunkte den Soll-Zustand mit `state: "unknown"`; schreibende Endpunkte speichern den Soll-Zustand und antworten normal (der Abgleich holt es nach). Ausnahme `DELETE` eines eingerichteten Servers: ohne agent `503 agent_unavailable`, damit keine verwaisten Container entstehen. Nicht eingerichtete Server (ohne `instances`-Zeile) löscht das panel ohne agent.
-- Scheitert ein `remove` nach dem `202` asynchron, bleibt der Container zurück und erscheint als unbekannter Container in den Einstellungen.
-- `last_error` sehen nur Admins im Klartext; andere Nutzer bekommen einen leeren Text und die UI einen allgemeinen Hinweis (Docker-Fehler enthalten Pfade, UIDs und Image-Digests).
-- Eine Änderung des CurseForge-Keys erhöht die `revision` aller CurseForge-Instanzen; laufende zeigen „Neustart nötig“.
-- Die FQDN gehört zur Container-Konfiguration (Label, Routen-Datei). Eine Änderung der Basisdomain erhöht deshalb die `revision` aller Instanzen: gestoppte Server legt der Abgleich neu an, laufende zeigen „Neustart nötig“ und sind bis dahin unter der alten Adresse erreichbar.
+- `address` = `<name>.<base_domain>`; `null` without a base domain.
+- If the agent is unreachable, read endpoints return the desired state with `state: "unknown"`; writing endpoints store the desired state and answer normally (the reconcile loop catches up). Exception: `DELETE` of a set-up server answers `503 agent_unavailable` without the agent, so that no orphaned containers remain. Servers that are not set up (without an `instances` row) are deleted by the panel without the agent.
+- If a `remove` fails asynchronously after the `202`, the container stays behind and shows up as an unknown container in the settings.
+- Only admins see `last_error` in plain text; other users get an empty text and the UI a general notice (Docker errors contain paths, UIDs and image digests).
+- Changing the CurseForge key increments the `revision` of all CurseForge instances; running ones show "restart required".
+- The FQDN is part of the container configuration (label, route file). A change of the base domain therefore increments the `revision` of all instances: the reconcile loop recreates stopped servers, running ones show "restart required" and stay reachable under the old address until then.
 
-### 8.1 Fehlercodes
+### 8.1 Error codes
 
-Neu in `internal/httpx/errors.go` und im Enum des Vertrags:
+New in `internal/httpx/errors.go` and in the contract's enum:
 
-| Code | Status | Wann |
+| Code | Status | When |
 |---|---|---|
-| `docker_unavailable` | 503 | agent erreichbar, Docker nicht |
-| `base_domain_missing` | 409 | Server anlegen ohne Basisdomain |
-| `catalog_unavailable` | 502 | Upstream-Katalog nicht erreichbar |
+| `docker_unavailable` | 503 | agent reachable, Docker not |
+| `base_domain_missing` | 409 | creating a server without a base domain |
+| `catalog_unavailable` | 502 | upstream catalog unreachable |
 
-Fehlender CurseForge-Key → `400 validation_failed`. Asynchrone Fehler des agents erscheinen als `last_error`, nicht als HTTP-Fehler.
+Missing CurseForge key → `400 validation_failed`. Asynchronous agent errors appear as `last_error`, not as HTTP errors.
 
 ### 8.2 Audit
 
-`server.create` (Konfiguration ohne Secrets), `server.update` (Diff der geänderten Felder), `server.delete`, `server.power` (wie TP1), `server.settings_update` (Basisdomain alt/neu, `curseforge_api_key` nur als `set`/`removed`). Neu als Konstanten in `internal/audit/types.go`: `ActionServerUpdate`, `ActionServerSettingsUpdate`.
+`server.create` (configuration without secrets), `server.update` (diff of the changed fields), `server.delete`, `server.power` (as in sub-project 1), `server.settings_update` (base domain old/new, `curseforge_api_key` only as `set`/`removed`). New as constants in `internal/audit/types.go`: `ActionServerUpdate`, `ActionServerSettingsUpdate`.
 
 ## 9. Frontend
 
-Bestehende shadcn-Komponenten; kein visuelles Redesign in diesem Teilprojekt.
+Existing shadcn components; no visual redesign in this sub-project.
 
-- **Dashboard (`/`):** `ServerCard` mit Name, Adresse (Kopieren), Status-Badge (läuft, gestoppt, startet, Fehler, unbekannt, nicht eingerichtet), Art/Version, RAM-Belegung, Power-Buttons bei `server.power`, Hinweis „Neustart nötig“, Link zur Detailseite. Fehlt die Basisdomain, sehen Admins einen Hinweis mit Link zu den Einstellungen, „Server anlegen“ ist gesperrt.
-- **Server anlegen (`/servers/new`, Admin):** ersetzt `create-server-dialog.tsx`. Abschnitte: Name (mit Live-Adresse), Art (mit Kurzbeschreibung), Version/Loader/Modpack (Katalog, Freitext als Fallback, Java abgeleitet, „Erweitert“), RAM (1–32 GiB, Default 4 GiB), Eigenschaften (eingeklappt, Defaults aus §7), EULA-Checkbox mit Link (Pflicht). Button „Server anlegen“ → Sudo → Detailseite.
-- **Detailseite (`/servers/$id`):** Tabs Übersicht (`server.view`: Status, Adresse, RAM/CPU, Startzeit, `last_error`, Power-Buttons, Banner „Neustart nötig“ mit „Jetzt neu starten“), Einstellungen (Admin: Formular ohne Name/Art, „Änderungen speichern“, Hinweis bei laufendem Server), Löschen (Admin: Namen eintippen, Text nennt den Zielordner).
-- **Einstellungen (`/settings`, Admin, neuer Navigationspunkt):** Abschnitt „Minecraft-Server“ mit Basisdomain (Beispiel für den DNS-Eintrag `*.<basisdomain>`), CurseForge-Key (nur schreibbar, „hinterlegt“, Entfernen), Docker-/agent-Status, unbekannte Container.
-- **Aktualisierung:** TanStack Query alle 3 s, solange eine Operation läuft oder der Zustand von `desired_state` abweicht, sonst alle 15 s.
-- Texte `de`/`en`, mobil bedienbar, MSW-Mocks für alle neuen Operationen.
+- **Dashboard (`/`):** `ServerCard` with name, address (copy), status badge (running, stopped, starting, error, unknown, not set up), type/version, RAM usage, power buttons with `server.power`, notice "restart required", link to the detail page. If the base domain is missing, admins see a notice with a link to the settings, and "Create server" is disabled.
+- **Create server (`/servers/new`, admin):** replaces `create-server-dialog.tsx`. Sections: name (with live address), type (with short description), version/loader/modpack (catalog, free text as fallback, Java derived, "Advanced"), RAM (1–32 GiB, default 4 GiB), properties (collapsed, defaults from §7), EULA checkbox with link (required). Button "Create server" → sudo → detail page.
+- **Detail page (`/servers/$id`):** tabs Overview (`server.view`: status, address, RAM/CPU, start time, `last_error`, power buttons, banner "restart required" with "Restart now"), Settings (admin: form without name/type, "Save changes", notice while the server is running), Delete (admin: type the name, the text names the target folder).
+- **Settings (`/settings`, admin, new navigation item):** section "Minecraft servers" with base domain (example for the DNS record `*.<base domain>`), CurseForge key (write-only, "stored", remove), Docker/agent status, unknown containers.
+- **Refresh:** TanStack Query every 3 s while an operation is running or the state differs from `desired_state`, otherwise every 15 s.
+- Texts `de`/`en`, usable on mobile, MSW mocks for all new operations.
 
-## 10. Entwicklung, CI und Abnahme
+(Now: sub-project 7 replaced the tabs with routes under `/servers/$id` (overview, `monitoring`, `console`, `players`, `files`, `plugins`, `backups`, `settings`); deleting a server is the danger zone at the end of its settings.)
 
-- **Mac:** nur `make check` (CLAUDE.md). `make dev` läuft ohne Docker (§3.4); die UI-Vorschau (`make preview`, Mock-API) zeigt die neuen Seiten ohne Backend.
-- **CI:** Unit-, Integrations- und Playwright-Tests wie bisher; zusätzlich die Docker-Integrationstests des agents (`dockerintegration`, Job `nftables`) und der neue Job `instances`: `scripts/ci-instances.sh` startet auf dem Wegwerf-Runner den echten agent mit Docker, legt einen Paper-Server an und prüft Routing über mc-router (Minecraft-Status-Ping mit Hostname, `scripts/mc-status.py`), Härtung, Absturz-Neustart und Löschen.
-- **Manuelle Abnahme:** echte Minecraft-Clients, mehrere Server-Arten und Host-Neustarts prüft der Nutzer getrennt auf einem Testserver anhand von `docs/dev/acceptance-tp2.md`.
+## 10. Development, CI and acceptance
+
+- **Mac:** only `make check` (CLAUDE.md). `make dev` runs without Docker (§3.4); the UI preview (`make preview`, mock API) shows the new pages without a backend.
+- **CI:** unit, integration and Playwright tests as before; in addition the agent's Docker integration tests (`dockerintegration`, job `nftables`) and the new job `instances`: `scripts/ci-instances.sh` starts the real agent with Docker on the throwaway runner, creates a Paper server and checks routing through mc-router (Minecraft status ping with hostname, `scripts/mc-status.py`), hardening, crash restart and deletion.
+- **Manual acceptance:** the user checks real Minecraft clients, several server types and host reboots separately on a test server with `docs/dev/acceptance.md` ("Instances").
 
 ## 11. Tests
 
-| Ebene | Inhalt |
+| Level | Content |
 |---|---|
-| agent `spec` | Tabellentests für jede Regel aus §5.2 und §7, inkl. Injektionsversuchen (`=`, Zeilenumbruch, Null-Byte, überlange Werte, unbekannte Schlüssel) |
-| agent `template` | Golden-Test: Spec → exakt erwartete Container-Konfiguration (Caps, Mounts, Limits, Labels, Env); Negativtest: keine Spec erzeugt zusätzliche Mounts, Ports oder Env-Variablen |
-| agent `docker` | Fake-Docker-Server (`httptest` auf Unix-Socket): Lebenszyklus, Label-Filter (fremde Container werden nie angefasst), Fehlerpfade, Timeouts |
-| agent `router` | Routen-Datei aus Container-Liste, atomares Schreiben, leere Liste |
-| agent Worker | Serielle Abarbeitung pro Instanz, Warteschlangenlimit, `last_error` |
-| agent Integration | Build-Tag `dockerintegration` (nur Linux): echter Docker-Daemon, kleines gepinntes Test-Image statt itzg (über die `[images]`-Konfiguration); neuer Schritt im bestehenden Linux-CI-Job |
-| panel `servers` | Handler mit `storetest` + Fake-agent: Rechte (view/power/admin), Sudo, Validierung, Audit-Einträge, agent nicht erreichbar |
-| panel Abgleich | Fake-Clock + Fake-agent: jede Zeile der Tabelle in §5.3, agent fällt aus und kommt wieder, veraltete Revision, Basisdomain-Wechsel |
-| panel Katalog | `httptest`-Upstreams mit Beispielantworten aus `testdata/`, Cache, Timeout, Größenlimit, Java-Ableitung |
-| Vertrag | bestehende Tests: OpenAPI ↔ Routen, Fehlercodes ↔ Enum, Mock pro Operation |
-| Frontend | Vitest: Java-Ableitung (gleiche Fälle wie Go), Formular-Validierung, Status-Badge; Playwright gegen Mock: Server anlegen → Detailseite → Einstellung ändern → „Neustart nötig“ → Neustart |
+| agent `spec` | Table tests for every rule from §5.2 and §7, incl. injection attempts (`=`, line break, null byte, overlong values, unknown keys) |
+| agent `template` | Golden test: spec → exactly the expected container configuration (caps, mounts, limits, labels, env); negative test: no spec produces extra mounts, ports or env variables |
+| agent `docker` | Fake Docker server (`httptest` on a Unix socket): lifecycle, label filter (foreign containers are never touched), error paths, timeouts |
+| agent `router` | Route file from the container list, atomic write, empty list |
+| agent worker | Serial processing per instance, queue limit, `last_error` |
+| agent integration | Build tag `dockerintegration` (Linux only): real Docker daemon, a small pinned test image instead of itzg (through the `[images]` configuration); new step in the existing Linux CI job |
+| panel `servers` | Handlers with `storetest` + fake agent: permissions (view/power/admin), sudo, validation, audit entries, agent unreachable |
+| panel reconcile | Fake clock + fake agent: every row of the table in §5.3, agent fails and comes back, outdated revision, base domain change |
+| panel catalog | `httptest` upstreams with sample responses from `testdata/`, cache, timeout, size limit, Java derivation |
+| Contract | existing tests: OpenAPI ↔ routes, error codes ↔ enum, mock per operation |
+| Frontend | Vitest: Java derivation (same cases as Go), form validation, status badge; Playwright against the mock: create server → detail page → change a setting → "restart required" → restart |
 
-Konventionen aus TP1 gelten unverändert (nur Standardbibliothek in Go-Tests, `clock.Clock`, Kontexte überall).
+The conventions from sub-project 1 apply unchanged (only the standard library in Go tests, `clock.Clock`, contexts everywhere).
 
-## 12. Abnahmekriterien
+## 12. Acceptance criteria
 
-Automatisch in der CI: 1, 7 sowie die agent-Seite von 2, 6 und 8 (`scripts/ci-instances.sh`). Manuell durch den Nutzer auf einem Testserver: 2–6 und 8 mit echtem Client (`docs/dev/acceptance-tp2.md`).
+Automatically in CI: 1, 7 and the agent side of 2, 6 and 8 (`scripts/ci-instances.sh`). Manually by the user on a test server: 2–6 and 8 with a real client (`docs/dev/acceptance.md` ("Instances")).
 
-1. Alle CI-Jobs grün, inklusive `dockerintegration` und `instances`.
-2. Ein Admin legt einen Paper-Server an; er startet, und ein Minecraft-Client verbindet sich über `<name>.<basisdomain>`.
-3. Je ein Server mit Vanilla, Fabric, NeoForge und einem Modrinth-Pack startet.
-4. Ein Nutzer mit `server.power` auf Server A kann A starten und stoppen, aber nicht ändern; Zugriff auf Server B → `403`.
-5. RAM oder MOTD ändern → „Neustart nötig“; nach dem Neustart gilt die neue Konfiguration, die Welt ist erhalten.
-6. Ein Absturz des Servers (z. B. `rcon-cli stop` im Container) → automatischer Neustart; nach einem Neustart des Hosts laufen alle Server mit `desired_state = running` wieder.
-7. `docker inspect` belegt: Caps auf das Minimum aus §5.4 reduziert, `no-new-privileges`, Speicherlimit, nur `/data` gemountet, keine veröffentlichten Ports außer am Router. Der panel-Benutzer hat keinen Zugriff auf `docker.sock` und `/srv/mc-panel/instances`.
-8. Löschen entfernt Container und Route, die Daten liegen unter `deleted/`; alle Admin-Aktionen stehen im Audit-Log, `panel audit verify` meldet OK.
+1. All CI jobs green, including `dockerintegration` and `instances`.
+2. An admin creates a Paper server; it starts, and a Minecraft client connects through `<name>.<base domain>`.
+3. One server each with Vanilla, Fabric, NeoForge and a Modrinth pack starts.
+4. A user with `server.power` on server A can start and stop A but not change it; access to server B → `403`.
+5. Changing RAM or MOTD → "restart required"; after the restart the new configuration applies and the world is kept.
+6. A server crash (e.g. `rcon-cli stop` in the container) → automatic restart; after a host reboot, all servers with `desired_state = running` are running again.
+7. `docker inspect` shows: caps reduced to the minimum from §5.4, `no-new-privileges`, memory limit, only `/data` mounted, no published ports except at the router. The panel user has no access to `docker.sock` and `/srv/mc-panel/instances`.
+8. Deleting removes the container and the route, the data is under `deleted/`; all admin actions appear in the audit log, `panel audit verify` reports OK.

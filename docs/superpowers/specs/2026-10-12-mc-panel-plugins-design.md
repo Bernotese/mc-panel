@@ -1,136 +1,136 @@
-# mc-panel – Teilprojekt 3c: Plugins und Mods (Design-Spec)
+# mc-panel – Sub-project 3c: Plugins and mods (design spec)
 
-- **Datum:** 2026-10-12
-- **Status:** umgesetzt (PRs #36–#46, 2026-10-12)
-- **Autor:** Jannes Göbel (mit Claude)
-- **Baut auf:** `2026-10-08-mc-panel-foundation-design.md` (TP1), `2026-10-10-mc-panel-instances-design.md` (TP2), `2026-10-11-mc-panel-console-players-design.md` (TP3a), `2026-10-11-mc-panel-files-design.md` (TP3b)
+- **Date:** 2026-10-12
+- **Status:** implemented (PRs #36–#46, 2026-10-12)
+- **Author:** Jannes Göbel (with Claude)
+- **Builds on:** `2026-10-08-mc-panel-foundation-design.md` (sub-project 1), `2026-10-10-mc-panel-instances-design.md` (sub-project 2), `2026-10-11-mc-panel-console-players-design.md` (sub-project 3a), `2026-10-11-mc-panel-files-design.md` (sub-project 3b)
 
-## 1. Ziel und Kontext
+## 1. Goal and context
 
-Teilprojekt 3 („Live-Betrieb“) ist dreigeteilt: 3a Konsole/Logs/Spieler und 3b Dateibrowser sind umgesetzt, **3c Plugins/Mods** ist dieses Dokument.
+Sub-project 3 ("live operation") has three parts: 3a console/logs/players and 3b file browser are implemented, **3c plugins/mods** is this document.
 
-### 1.1 Erfolg
+### 1.1 Success
 
-Ein Nutzer mit `server.plugins` sucht auf einem Paper- oder Purpur-Server Plugins in Modrinth und Hangar, auf einem Fabric- oder NeoForge-Server Mods in Modrinth, und installiert sie samt Pflicht-Abhängigkeiten mit einem Klick. Er sieht alle installierten Jars – auch per Hand hochgeladene –, prüft und installiert Updates, deaktiviert und entfernt Jars.
+A user with `server.plugins` searches Modrinth and Hangar for plugins on a Paper or Purpur server, or Modrinth for mods on a Fabric or NeoForge server, and installs them together with their required dependencies in one click. The user sees all installed jars, including ones uploaded by hand, checks for and installs updates, and disables and removes jars.
 
-### 1.2 Leitlinie
+### 1.2 Guiding principle
 
-Unverändert: Ein kompromittiertes panel darf keinen Root auf dem Host bekommen (TP1 §3), und Dateien in Datenverzeichnissen schreibt nur der unprivilegierte Dienst `mcpanel-files` (TP3b §1.2). Das panel lädt Jars aus dem Internet und reicht sie als Stream an den Dienst weiter; der Dienst bekommt keinen Netzzugang, der root-agent ändert sich nicht.
+Unchanged: a compromised panel must not gain root on the host (sub-project 1 §3), and only the unprivileged service `mcpanel-files` writes files in data directories (sub-project 3b §1.2). The panel downloads jars from the internet and passes them to the service as a stream; the service gets no network access, and the root agent does not change.
 
-### 1.3 Nicht-Ziele (3c)
+### 1.3 Non-goals (3c)
 
-- CurseForge-Mods, Spigot/SpigotMC, Bukkit.org und andere Quellen als Modrinth und Hangar.
-- Plugins/Mods auf vanilla- und Modpack-Servern (`modrinth`, `curseforge`): dort bestimmt das Pack den Inhalt.
-- Datapacks, Resourcepacks, Shader, Proxy-Plugins (Velocity, BungeeCord).
-- Herunterladen von nur extern verlinkten Dateien (Hangar `externalUrl`): keine Prüfsumme, beliebige Hosts.
-- Plugin-Konfiguration bearbeiten (dafür gibt es den Dateien-Tab), Plugins im laufenden Server laden oder entladen (kein Hot-Reload).
-- Automatische Updates ohne Klick.
+- CurseForge mods, Spigot/SpigotMC, Bukkit.org and any source other than Modrinth and Hangar.
+- Plugins/mods on vanilla and modpack servers (`modrinth`, `curseforge`): there the pack decides the content.
+- Datapacks, resource packs, shaders, proxy plugins (Velocity, BungeeCord).
+- Downloading files that are only linked externally (Hangar `externalUrl`): no checksum, arbitrary hosts.
+- Editing plugin configuration (the Files tab exists for that), loading or unloading plugins in a running server (no hot reload).
+- Automatic updates without a click.
 
-## 2. Entscheidungen
+## 2. Decisions
 
-| Bereich | Entscheidung | Begründung |
+| Area | Decision | Reason |
 |---|---|---|
-| Quellen | paper/purpur: Plugins aus Modrinth und Hangar; fabric/neoforge: Mods aus Modrinth | Wunsch des Betreibers; Hangar hat keine Mods |
-| Download | panel lädt von festen CDN-Hosts, streamt an `mcpanel-files`, der Dienst prüft die Prüfsumme vor dem `rename` | Einziger Weg, der Hangar abdeckt und sofort wirkt, ohne einem Dienst neue Rechte zu geben (§2.1) |
-| Quelle der Wahrheit | Die Platte (`plugins/` bzw. `mods/`); die DB merkt sich nur die Herkunft panel-installierter Jars | Jars können auch über den Dateien-Tab, im Spiel oder vom Server selbst kommen und gehen |
-| Zuordnung | DB-Eintrag (Dateiname + sha512), sonst Modrinth per Hash, sonst „manuell“ mit Metadaten aus dem Jar | Hangar hat keine Hash-Suche; Modrinth erkennt die meisten manuell hochgeladenen Jars |
-| Ablauf | Installieren und Aktualisieren als Job im panel (einer pro Server), Abfrage des Fortschritts | Mehrere Downloads samt Abhängigkeiten passen nicht in eine Anfrage |
-| Laufender Server | Alles jederzeit erlaubt; Banner „Neustart nötig“ | Jars werden nur beim Start geladen; Linux ersetzt Dateien per `rename`, ohne dem laufenden Server die offene Datei zu nehmen |
-| Recht | `server.plugins` (in TP1 bereits angelegt), volles Vertrauen, Hinweis beim Vergeben | Ein Plugin führt Code im Container aus |
-| Icons | Proxy im panel | CSP (`img-src 'self'`) bleibt unverändert, der Browser kontaktiert keine Dritten |
+| Sources | paper/purpur: plugins from Modrinth and Hangar; fabric/neoforge: mods from Modrinth | Operator's request; Hangar has no mods |
+| Download | The panel downloads from fixed CDN hosts and streams to `mcpanel-files`; the service checks the checksum before the `rename` | The only way that covers Hangar and takes effect immediately without giving a service new rights (§2.1) |
+| Source of truth | The disk (`plugins/` or `mods/`); the DB only remembers the origin of panel-installed jars | Jars can also come and go through the Files tab, in game or by the server itself |
+| Matching | DB entry (filename + sha512), else Modrinth by hash, else "manual" with metadata from the jar | Hangar has no hash lookup; Modrinth recognises most manually uploaded jars |
+| Flow | Install and update run as a job in the panel (one per server), progress is polled | Several downloads including dependencies do not fit in one request |
+| Running server | Everything allowed at any time; banner "restart required" | Jars are only loaded at start; Linux replaces files by `rename` without taking the open file away from the running server |
+| Permission | `server.plugins` (already created in sub-project 1), full trust, warning when granting | A plugin runs code in the container |
+| Icons | Proxy in the panel | CSP (`img-src 'self'`) stays unchanged, the browser contacts no third parties |
 
-### 2.1 Verworfene Alternativen
+### 2.1 Rejected alternatives
 
-- **Deklarativ über itzg (`MODRINTH_PROJECTS`):** passt zum Soll-Zustand-Modell, aber itzg kennt Hangar nicht, Änderungen wirken erst beim Neustart, und manuelle Jars blieben außen vor. Außerdem erlaubt TP2 §5.4 bewusst keine weiteren itzg-Variablen.
-- **`mcpanel-files` lädt selbst herunter:** bräuchte Netzzugang (heute `RestrictAddressFamilies=AF_UNIX`) und machte den Dateidienst zum Internet-Client.
-- **Prüfsumme nur im panel:** das panel müsste das letzte Byte zurückhalten, bis die Prüfsumme stimmt. Die Prüfung im Dienst vor dem `rename` ist einfacher und schützt auch gegen Fehler auf dem Weg panel → Dienst.
+- **Declarative through itzg (`MODRINTH_PROJECTS`):** fits the desired-state model, but itzg does not know Hangar, changes only take effect at restart, and manual jars would be left out. Also, sub-project 2 §5.4 deliberately allows no further itzg variables.
+- **`mcpanel-files` downloads itself:** would need network access (today `RestrictAddressFamilies=AF_UNIX`) and would turn the file service into an internet client.
+- **Checksum only in the panel:** the panel would have to hold back the last byte until the checksum matches. Checking in the service before the `rename` is simpler and also protects against errors on the way from panel to service.
 
-## 3. Architektur
+## 3. Architecture
 
 ```
-Browser ──/api/servers/{id}/plugins/*──▶ panel: internal/plugins ──HTTPS, feste Hosts──▶ api.modrinth.com, hangar.papermc.io
-                                           │ Suche, Auflösen, Jobs, Inventar,          ◀── Jar/Icon von cdn.modrinth.com,
-                                           │ DB, Audit, Icon-Proxy                          hangarcdn.papermc.io
-                                           └──Unix-Socket──▶ mcpanel-files: /v1/jars, /v1/upload (+Prüfsumme), rename, delete, mkdir
+Browser ──/api/servers/{id}/plugins/*──▶ panel: internal/plugins ──HTTPS, fixed hosts──▶ api.modrinth.com, hangar.papermc.io
+                                           │ search, resolve, jobs, inventory,          ◀── jar/icon from cdn.modrinth.com,
+                                           │ DB, audit, icon proxy                          hangarcdn.papermc.io
+                                           └──Unix socket──▶ mcpanel-files: /v1/jars, /v1/upload (+checksum), rename, delete, mkdir
 ```
 
-- **panel:** neues Paket `internal/plugins` (Handler, Routen, Inventar, Auflösen, Jobs, Icon-Proxy) mit Unterpaket `internal/plugins/upstream` (Clients für Modrinth und Hangar, Download, Cache). Verdrahtung in `cmd/panel/app.go`.
-- **Dienst:** neue Operation `jars` in `internal/files` (Auflisten mit Prüfsummen und Metadaten), Erweiterung von `upload` um eine Prüfsumme; Draht-Typen und Client in `internal/files/filesapi`.
-- **agent:** keine Änderung. Das panel nutzt nur den vorhandenen Ist-Zustand (`state`, `started_at`).
+- **panel:** new package `internal/plugins` (handler, routes, inventory, resolving, jobs, icon proxy) with sub-package `internal/plugins/upstream` (clients for Modrinth and Hangar, download, cache). Wired in `cmd/panel/app.go`.
+- **Service:** new operation `jars` in `internal/files` (listing with checksums and metadata), `upload` extended with a checksum; wire types and client in `internal/files/filesapi`.
+- **agent:** no change. The panel only uses the existing actual state (`state`, `started_at`).
 
-### 3.1 Server-Arten und Kompatibilität
+### 3.1 Server types and compatibility
 
-| Art | Ordner | Art im UI | Modrinth `project_type` | Modrinth-Loader | Hangar |
+| Type | Folder | Type in UI | Modrinth `project_type` | Modrinth loader | Hangar |
 |---|---|---|---|---|---|
-| paper | `plugins/` | Plugins | `plugin` | `paper`, `spigot`, `bukkit` | Plattform `PAPER` |
-| purpur | `plugins/` | Plugins | `plugin` | `purpur`, `paper`, `spigot`, `bukkit` | Plattform `PAPER` |
+| paper | `plugins/` | Plugins | `plugin` | `paper`, `spigot`, `bukkit` | platform `PAPER` |
+| purpur | `plugins/` | Plugins | `plugin` | `purpur`, `paper`, `spigot`, `bukkit` | platform `PAPER` |
 | fabric | `mods/` | Mods | `mod` | `fabric` | – |
 | neoforge | `mods/` | Mods | `mod` | `neoforge` | – |
-| vanilla, modrinth, curseforge | – | kein Tab | – | – | – |
+| vanilla, modrinth, curseforge | – | no tab | – | – | – |
 
-- **Spielversion** = `version` der Instanz. `LATEST` löst das panel über den vorhandenen Versionskatalog (`internal/servers/catalog`, neueste Version der Art) auf; ist der Katalog nicht erreichbar, liefern Suche, Versionen, Auflösen, Installieren und Updates `502 catalog_unavailable`, das Inventar funktioniert weiter (`game_version: null`).
-- **Client-Mods:** Bei Mods filtert die Suche auf `server_side` ∈ `required|optional`; Projekte mit `server_side: unsupported` gelten als inkompatibel (auch als Abhängigkeit).
-- **Kanäle:** Modrinth `version_type` (`release|beta|alpha`) wird übernommen; bei Hangar wird der Kanal `Release` (Groß-/Kleinschreibung egal) zu `release`, jeder andere zu `beta`.
+- **Game version** = the instance's `version`. The panel resolves `LATEST` through the existing version catalog (`internal/servers/catalog`, newest version of the type); if the catalog is unreachable, search, versions, resolve, install and updates return `502 catalog_unavailable`, and the inventory keeps working (`game_version: null`).
+- **Client mods:** for mods the search filters on `server_side` ∈ `required|optional`; projects with `server_side: unsupported` count as incompatible (also as a dependency).
+- **Channels:** Modrinth `version_type` (`release|beta|alpha`) is taken over; for Hangar the channel `Release` (case-insensitive) becomes `release`, every other one `beta`.
 
 ## 4. Upstreams (`internal/plugins/upstream`)
 
-Feste Basis-URLs (in Tests überschreibbar), geprüft gegen die Live-Dienste am 2026-10-12; gekürzte echte Antworten liegen in `testdata/`. User-Agent wie bei den Katalogen: `mc-panel/<version> (https://github.com/Bernotese/mc-panel)`.
+Fixed base URLs (overridable in tests), checked against the live services on 2026-10-12; trimmed real responses are in `testdata/`. User-Agent as for the catalogs: `mc-panel/<version> (https://github.com/Bernotese/mc-panel)`.
 
-| Zweck | Modrinth (`https://api.modrinth.com`) | Hangar (`https://hangar.papermc.io`) |
+| Purpose | Modrinth (`https://api.modrinth.com`) | Hangar (`https://hangar.papermc.io`) |
 |---|---|---|
-| Suche | `GET /v2/search?query=&facets=&index=&offset=&limit=20`; Facets `project_type:<t>`, `categories:<loader>` (ODER über die Loader), `versions:<gv>`, bei Mods `server_side:required` ODER `server_side:optional`; `index=relevance` mit Suchbegriff, sonst `downloads` | `GET /api/v1/projects?q=&platform=PAPER&version=<gv>&sort=-downloads&offset=&limit=20` |
-| Projekt | `GET /v2/project/{id}` | `GET /api/v1/projects/{slugOrId}` |
-| Versionen | `GET /v2/project/{id}/version?loaders=[…]&game_versions=[<gv>]` | `GET /api/v1/projects/{slugOrId}/versions?platform=PAPER&platformVersion=<gv>&limit=25` |
-| Version | `GET /v2/version/{id}` | `GET /api/v1/projects/{slugOrId}/versions/{name}` (der Versionsname ist die ID) |
-| Hash-Zuordnung | `POST /v2/version_files {hashes, algorithm: "sha512"}` (bis 500 Hashes) | – |
-| Updates | `POST /v2/version_files/update {hashes, algorithm, loaders, game_versions, version_types}` | Versionsliste, neueste im passenden Kanal |
-| Abhängigkeiten | `dependencies[]` mit `dependency_type = required`, `project_id`, optional `version_id` | `pluginDependencies.PAPER[]` mit `required = true`; `projectId` (Hangar) oder `externalUrl` (extern) |
-| Datei | `files[]`: `primary = true`, sonst die erste `.jar`; `url`, `filename`, `size`, `hashes.sha512` | `downloads.PAPER.fileInfo` (`name`, `sizeBytes`, `sha256Hash`) und `downloadUrl`; `fileInfo = null` mit `externalUrl` → nur extern |
+| Search | `GET /v2/search?query=&facets=&index=&offset=&limit=20`; facets `project_type:<t>`, `categories:<loader>` (OR across the loaders), `versions:<gv>`, for mods `server_side:required` OR `server_side:optional`; `index=relevance` with a search term, else `downloads` | `GET /api/v1/projects?q=&platform=PAPER&version=<gv>&sort=-downloads&offset=&limit=20` |
+| Project | `GET /v2/project/{id}` | `GET /api/v1/projects/{slugOrId}` |
+| Versions | `GET /v2/project/{id}/version?loaders=[…]&game_versions=[<gv>]` | `GET /api/v1/projects/{slugOrId}/versions?platform=PAPER&platformVersion=<gv>&limit=25` |
+| Version | `GET /v2/version/{id}` | `GET /api/v1/projects/{slugOrId}/versions/{name}` (the version name is the ID) |
+| Hash matching | `POST /v2/version_files {hashes, algorithm: "sha512"}` (up to 500 hashes) | – |
+| Updates | `POST /v2/version_files/update {hashes, algorithm, loaders, game_versions, version_types}` | Version list, newest in the matching channel |
+| Dependencies | `dependencies[]` with `dependency_type = required`, `project_id`, optional `version_id` | `pluginDependencies.PAPER[]` with `required = true`; `projectId` (Hangar) or `externalUrl` (external) |
+| File | `files[]`: `primary = true`, else the first `.jar`; `url`, `filename`, `size`, `hashes.sha512` | `downloads.PAPER.fileInfo` (`name`, `sizeBytes`, `sha256Hash`) and `downloadUrl`; `fileInfo = null` with `externalUrl` → external only |
 
-- **Grenzen:** Timeout 10 s pro API-Anfrage, Antworten ≤ 5 MiB, Fehler/Status ≠ 2xx/kaputtes JSON → `502 plugin_source_unavailable`. Modrinth-Ratelimit (300/min pro IP) wird respektiert: Antwort `429` des Upstreams → ebenfalls `502` mit Meldung.
-- **Cache im Speicher:** Suche 5 min, Projekte und Versionslisten 15 min, Hash-Zuordnung 1 h (auch „unbekannt“), Updates 1 h pro Server. Gleichzeitige gleiche Abfragen teilen sich einen Aufruf (wie `catalog`). Höchstens 1000 Einträge je Cache, älteste zuerst verdrängt.
-- **Downloads und Icons** nur von `https://cdn.modrinth.com/` und `https://hangarcdn.papermc.io/`; Weiterleitungen nur auf diese Hosts und nur über HTTPS (höchstens 3). Andere Hosts (auch aus Upstream-Antworten) → Schritt-Fehler bzw. `400 validation_failed`.
-- **Jar-Download:** ≤ 256 MiB (`size` aus der API, sonst Abbruch), Frist 60 s pro Lesevorgang, keine Gesamtfrist. Weicht der `Content-Length` des CDN von der API-Größe ab, bricht das panel vor dem Weiterreichen ab.
-- **Dateiname:** Der Upstream-Name muss `^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}\.jar$` erfüllen und `filesapi.CleanPath` bestehen; sonst `<slug>-<version>.jar`, unzulässige Zeichen durch `-` ersetzt und auf 128 Zeichen gekürzt.
+- **Limits:** timeout 10 s per API request, responses ≤ 5 MiB, error/status ≠ 2xx/broken JSON → `502 plugin_source_unavailable`. The Modrinth rate limit (300/min per IP) is respected: an upstream `429` → also `502` with a message.
+- **In-memory cache:** search 5 min, projects and version lists 15 min, hash matching 1 h (including "unknown"), updates 1 h per server. Concurrent identical queries share one call (like `catalog`). At most 1000 entries per cache, oldest evicted first.
+- **Downloads and icons** only from `https://cdn.modrinth.com/` and `https://hangarcdn.papermc.io/`; redirects only to these hosts and only over HTTPS (at most 3). Other hosts (also from upstream responses) → step error or `400 validation_failed`.
+- **Jar download:** ≤ 256 MiB (`size` from the API, else abort), deadline 60 s per read, no overall deadline. If the CDN's `Content-Length` differs from the API size, the panel aborts before passing anything on.
+- **Filename:** the upstream name must match `^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}\.jar$` and pass `filesapi.CleanPath`; otherwise `<slug>-<version>.jar`, with invalid characters replaced by `-` and cut to 128 characters.
 
-## 5. Dienst `mcpanel-files`
+## 5. Service `mcpanel-files`
 
 ### 5.1 `POST /v1/jars`
 
-Body `{id, dir}`, `dir` ∈ `plugins|mods`. Antwort `{jars: [{name, enabled, size, mtime, sha256, sha512, meta}], truncated}`.
+Body `{id, dir}`, `dir` ∈ `plugins|mods`. Response `{jars: [{name, enabled, size, mtime, sha256, sha512, meta}], truncated}`.
 
-- Listet reguläre Dateien der obersten Ebene von `dir` mit Endung `.jar` (`enabled: true`) oder `.jar.disabled` (`enabled: false`), Groß-/Kleinschreibung egal; Symlinks, Ordner und Sonderdateien werden ausgelassen (Regeln aus TP3b §3.2: `Lstat`, `O_NOFOLLOW|O_NONBLOCK`, `os.SameFile`). Höchstens 500 Jars (`truncated: true`). Fehlt `dir` oder ist es kein Ordner → leere Liste.
-- **Prüfsummen** sha256 und sha512 in einem Durchlauf; ohne Prüfsummen (`""`) bleiben Jars > 256 MiB, Sparse-Dateien (belegte Blöcke < Größe) und alles, was über das Budget von 2 GiB gelesener Bytes pro Anfrage hinausgeht (Cache-Treffer kosten kein Budget; Jars ohne Prüfsumme kommen nicht in den Cache). Cache im Speicher nach (Gerät, Inode, Größe, mtime, ctime) – die ctime kann der Container nicht zurücksetzen –, höchstens 4096 Einträge; ändert sich eine Datei während des Lesens, gibt es weder Prüfsummen noch Cache-Eintrag. Höchstens ein Hash-Durchlauf pro Instanz und 2 im Dienst (sonst wartet die Anfrage); Client-Frist 2 min.
-- **Metadaten** (`meta`, best-effort, sonst `null`): Der Dienst öffnet das Jar als Zip (Zentralverzeichnis ≤ 100 000 Einträge und ≤ 16 MiB; das Entpacken behält 64 MiB) und liest höchstens eine Datei ≤ 64 KiB, in dieser Reihenfolge:
+- Lists regular files at the top level of `dir` ending in `.jar` (`enabled: true`) or `.jar.disabled` (`enabled: false`), case-insensitive; symlinks, folders and special files are skipped (rules from sub-project 3b §3.2: `Lstat`, `O_NOFOLLOW|O_NONBLOCK`, `os.SameFile`). At most 500 jars (`truncated: true`). If `dir` is missing or not a folder → empty list.
+- **Checksums** sha256 and sha512 in one pass; jars > 256 MiB, sparse files (allocated blocks < size) and everything beyond the budget of 2 GiB read bytes per request get no checksums (`""`) (cache hits cost no budget; jars without a checksum are not cached). In-memory cache keyed by (device, inode, size, mtime, ctime) – the container cannot reset the ctime –, at most 4096 entries; if a file changes while it is read, there are neither checksums nor a cache entry. At most one hash pass per instance and 2 in the service (otherwise the request waits); client deadline 2 min.
+- **Metadata** (`meta`, best-effort, else `null`): the service opens the jar as a zip (central directory ≤ 100 000 entries and ≤ 16 MiB; extraction keeps 64 MiB) and reads at most one file ≤ 64 KiB, in this order:
 
-| Datei | `kind` | Felder |
+| File | `kind` | Fields |
 |---|---|---|
-| `paper-plugin.yml`, `plugin.yml` | `plugin` | `name`, `version` (Schlüssel der obersten Ebene, einfache Zeilen `key: value`, Anführungszeichen entfernt; kein YAML-Parser) |
+| `paper-plugin.yml`, `plugin.yml` | `plugin` | `name`, `version` (top-level keys, simple `key: value` lines, quotes removed; no YAML parser) |
 | `fabric.mod.json` | `mod` | `id`, `name`, `version` |
-| `META-INF/neoforge.mods.toml` | `mod` | erster `[[mods]]`-Eintrag: `modId`, `displayName`, `version`; `${file.jarVersion}` → `Implementation-Version` aus `META-INF/MANIFEST.MF` (≤ 64 KiB), sonst leer |
+| `META-INF/neoforge.mods.toml` | `mod` | first `[[mods]]` entry: `modId`, `displayName`, `version`; `${file.jarVersion}` → `Implementation-Version` from `META-INF/MANIFEST.MF` (≤ 64 KiB), else empty |
 
-  Werte werden auf 128 Zeichen gekürzt, Steuerzeichen entfernt. Ein kaputtes Jar liefert `meta: null`, nie einen Fehler der ganzen Liste.
+  Values are cut to 128 characters, control characters removed. A broken jar yields `meta: null`, never an error for the whole list.
 
-### 5.2 Upload mit Prüfsumme
+### 5.2 Upload with checksum
 
-`PUT /v1/upload` bekommt die optionalen Query-Parameter `sha512` (128 Hex-Zeichen) und `sha256` (64 Hex-Zeichen), höchstens einer. Ist einer gesetzt, berechnet der Dienst beim Schreiben der Temp-Datei sha256 und sha512, vergleicht vor `fsync`/`rename` und antwortet bei Abweichung `400 hash_mismatch` (Temp-Datei weg, Ziel unverändert). Erfolg: `201 {size, sha256, sha512}` (ohne Parameter wie bisher `{size}`). Neuer Fehlercode des Dienstes `hash_mismatch` (400).
+`PUT /v1/upload` gets the optional query parameters `sha512` (128 hex characters) and `sha256` (64 hex characters), at most one of them. If one is set, the service computes sha256 and sha512 while writing the temp file, compares before `fsync`/`rename` and answers `400 hash_mismatch` on a mismatch (temp file gone, target unchanged). Success: `201 {size, sha256, sha512}` (without a parameter `{size}` as before). New service error code `hash_mismatch` (400).
 
 ## 6. panel
 
-### 6.1 Datenmodell
+### 6.1 Data model
 
-Migration `internal/store/migrations/00005_plugins.sql`, Queries in `internal/store/queries/plugins.sql` (Präfix `Plugins…`):
+Migration `internal/store/migrations/00005_plugins.sql`, queries in `internal/store/queries/plugins.sql` (prefix `Plugins…`):
 
 ```sql
 CREATE TABLE plugin_installs (
     server_id    INTEGER NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
-    filename     TEXT    NOT NULL,   -- Dateiname ohne ".disabled"
+    filename     TEXT    NOT NULL,   -- filename without ".disabled"
     sha512       TEXT    NOT NULL,
     source       TEXT    NOT NULL CHECK (source IN ('modrinth', 'hangar')),
-    project_id   TEXT    NOT NULL,   -- Modrinth-ID bzw. Hangar-ID (Zahl als Text)
+    project_id   TEXT    NOT NULL,   -- Modrinth ID or Hangar ID (number as text)
     project_slug TEXT    NOT NULL,
     title        TEXT    NOT NULL,
-    version_id   TEXT    NOT NULL,   -- Modrinth-Versions-ID bzw. Hangar-Versionsname
+    version_id   TEXT    NOT NULL,   -- Modrinth version ID or Hangar version name
     version_name TEXT    NOT NULL,
     channel      TEXT    NOT NULL CHECK (channel IN ('release', 'beta', 'alpha')),
     installed_at INTEGER NOT NULL,
@@ -138,136 +138,136 @@ CREATE TABLE plugin_installs (
 );
 ```
 
-Ein Eintrag gilt nur, wenn ein Jar dieses Namens (mit oder ohne `.disabled`) mit genau dieser sha512 auf der Platte liegt; sonst löscht das Inventar ihn beim Lesen.
+An entry only counts if a jar of that name (with or without `.disabled`) with exactly this sha512 is on disk; otherwise the inventory deletes it when reading.
 
-### 6.2 Inventar
+### 6.2 Inventory
 
-`GET /servers/{id}/plugins` fragt `/v1/jars` und ordnet jedes Jar zu:
+`GET /servers/{id}/plugins` queries `/v1/jars` and matches each jar:
 
-1. DB-Eintrag mit gleichem Namen und gleicher sha512 → Quelle aus der DB (`installed_by_panel: true`).
-2. sonst Modrinth `version_files` per sha512 (Cache 1 h) → Quelle `modrinth` mit Projekt (Titel, Slug über `GET /v2/project`, gecacht) und Version.
-3. sonst `manual` mit `meta`.
+1. DB entry with the same name and the same sha512 → source from the DB (`installed_by_panel: true`).
+2. Otherwise Modrinth `version_files` by sha512 (cache 1 h) → source `modrinth` with project (title, slug via `GET /v2/project`, cached) and version.
+3. Otherwise `manual` with `meta`.
 
-Ist Modrinth nicht erreichbar, bleiben die betroffenen Jars `manual` und die Antwort trägt `source_errors: ["modrinth"]`. `restart_needed` ist `true`, wenn der Server läuft und das panel seit `started_at` des Containers eine Plugin-Änderung für ihn ausgeführt hat (Zeitpunkt im Speicher; nach einem Neustart des panels vergessen).
+If Modrinth is unreachable, the affected jars stay `manual` and the response carries `source_errors: ["modrinth"]`. `restart_needed` is `true` if the server is running and the panel has performed a plugin change for it since the container's `started_at` (timestamp in memory; forgotten after a panel restart).
 
-### 6.3 Auflösen
+### 6.3 Resolving
 
-`resolve` und jeder Job bauen denselben Plan aus Projekt und gewünschter Version (fehlt sie: neueste kompatible `release`, sonst die neueste kompatible überhaupt):
+`resolve` and every job build the same plan from the project and the requested version (if missing: newest compatible `release`, else the newest compatible one at all):
 
-- Pflicht-Abhängigkeiten rekursiv bis Tiefe 5, höchstens 20 Pakete im Plan; Zyklen werden erkannt. Tiefe, Plan-Größe und bereits gesehene Projekte werden vor jedem Upstream-Aufruf geprüft; je Version zählen höchstens 50 Pflicht-Abhängigkeiten (der Rest wird ein Eintrag `incompatible` mit `too_many`), eine Auflösung macht höchstens 80 Upstream-Aufrufe. Modrinth-Abhängigkeit mit `version_id` → genau diese Version (muss kompatibel sein), sonst neueste kompatible `release`. Hangar-Abhängigkeit mit `projectId` → neueste kompatible Version im Kanal `Release`, sonst die neueste.
-- Bereits installiert ist ein Projekt, wenn das Inventar ein Jar mit derselben Quelle und Projekt-ID hat (aktiv oder deaktiviert) → `already`, wird nicht angefasst. Abhängigkeiten über Quellen hinweg werden nicht abgeglichen. Für das **angefragte** Projekt gilt: ohne `version` oder mit der installierten Version → `already`; mit einer anderen `version` → Plan-Eintrag, der das vorhandene Jar ersetzt (Versionswechsel, Ablauf wie ein Update in §6.4).
-- Extern verlinkte Abhängigkeit (Hangar `externalUrl`) → `external` mit Name und Link. Abhängigkeit ohne kompatible herunterladbare Version → `incompatible`; dann ist der Plan nicht ausführbar (`409 plugin_incompatible`). Gewünschte Version nur extern → `409 plugin_not_downloadable`.
-- Plan-Eintrag: `{source, project_id, slug, title, version_id, version_name, channel, filename, size, required_by}`.
+- Required dependencies recursively up to depth 5, at most 20 packages in the plan; cycles are detected. Depth, plan size and already seen projects are checked before every upstream call; per version at most 50 required dependencies count (the rest becomes an `incompatible` entry with `too_many`), and one resolution makes at most 80 upstream calls. Modrinth dependency with `version_id` → exactly that version (must be compatible), else newest compatible `release`. Hangar dependency with `projectId` → newest compatible version in channel `Release`, else the newest.
+- A project counts as already installed if the inventory has a jar with the same source and project ID (enabled or disabled) → `already`, left untouched. Dependencies are not matched across sources. For the **requested** project: without `version` or with the installed version → `already`; with a different `version` → plan entry that replaces the existing jar (version change, flow like an update in §6.4).
+- Externally linked dependency (Hangar `externalUrl`) → `external` with name and link. Dependency without a compatible downloadable version → `incompatible`; then the plan cannot run (`409 plugin_incompatible`). Requested version only external → `409 plugin_not_downloadable`.
+- Plan entry: `{source, project_id, slug, title, version_id, version_name, channel, filename, size, required_by}`.
 
 ### 6.4 Jobs
 
-- Im Speicher, höchstens einer pro Server (sonst `409 conflict`) und vier im panel (sonst `429 rate_limited`); das letzte Ergebnis bleibt bis zum nächsten Job oder Neustart des panels. Ein Neustart des panels bricht laufende Jobs ab; Temp-Dateien räumt der Dienst ohnehin auf.
-- **install:** Plan neu berechnen (der Vorschau wird nicht vertraut), Zielordner bei Bedarf per `mkdir` anlegen, dann je Plan-Eintrag (Abhängigkeiten zuerst): herunterladen → `PUT /v1/upload` mit Prüfsumme (Modrinth `sha512`, Hangar `sha256`) → DB-Eintrag mit der sha512 aus der Antwort. Existiert der Dateiname schon (mit oder ohne `.disabled`) und gehört zu einem anderen Projekt oder ist manuell → Schritt-Fehler `file_exists`, der Job bricht ab. Bereits installierte Schritte bleiben installiert. Ist der Dienst ausgelastet (`busy`), wiederholt ein Schritt Download und Upload bis zu dreimal (Wartezeit ab 2 s, verdoppelt).
-- **update:** pro gewähltem Jar (leer = alle mit Update): neue Version herunterladen, unter neuem Namen hochladen (gleicher Name → `overwrite=1`), deaktivierte Jars bleiben deaktiviert (Upload als `<name>.jar.disabled`), danach altes Jar löschen und DB-Eintrag ersetzen. Vor dem Download prüft der Schritt die sha512 des zu ersetzenden Jars (ist es seit dem Updatecheck geändert → `file_exists`, Updates-Cache verworfen); lässt sich das alte Jar nicht löschen, nimmt er das neue zurück (scheitert auch das, nennt die Meldung beide Namen). Neue Pflicht-Abhängigkeiten der neuen Version werden wie bei `install` mitinstalliert; jede Update-Gruppe wird für sich aufgelöst, ein Projekt, das derselbe Job schon installiert hat, wird nicht ein zweites Mal geladen. Doppelte Namen in `files` zählen einmal. Ein Fehler betrifft nur den Schritt; der Job läuft weiter und endet `failed`, wenn ein Schritt fehlschlug.
-- Zustände: Job `running|done|failed`, Schritt `pending|downloading|done|failed|skipped`; Schritt-Fehler als Code (`download_failed`, `hash_mismatch`, `file_exists`, `insufficient_storage`, `files_unavailable`, `source_unavailable`) plus Text ohne Host-Pfade.
+- In memory, at most one per server (otherwise `409 conflict`) and four in the panel (otherwise `429 rate_limited`); the last result stays until the next job or a panel restart. A panel restart aborts running jobs; the service cleans up temp files anyway.
+- **install:** recompute the plan (the preview is not trusted), create the target folder with `mkdir` if needed, then for each plan entry (dependencies first): download → `PUT /v1/upload` with checksum (Modrinth `sha512`, Hangar `sha256`) → DB entry with the sha512 from the response. If the filename already exists (with or without `.disabled`) and belongs to another project or is manual → step error `file_exists`, the job aborts. Steps already installed stay installed. If the service is busy (`busy`), a step retries download and upload up to three times (wait from 2 s, doubled).
+- **update:** per selected jar (empty = all with an update): download the new version, upload it under the new name (same name → `overwrite=1`), disabled jars stay disabled (upload as `<name>.jar.disabled`), then delete the old jar and replace the DB entry. Before the download the step checks the sha512 of the jar to be replaced (if it changed since the update check → `file_exists`, updates cache discarded); if the old jar cannot be deleted, it takes the new one back (if that fails too, the message names both files). New required dependencies of the new version are installed along as with `install`; each update group is resolved on its own, and a project that the same job already installed is not downloaded a second time. Duplicate names in `files` count once. An error affects only its step; the job continues and ends `failed` if a step failed.
+- States: job `running|done|failed`, step `pending|downloading|done|failed|skipped`; step errors as a code (`download_failed`, `hash_mismatch`, `file_exists`, `insufficient_storage`, `files_unavailable`, `source_unavailable`) plus text without host paths.
 
 ### 6.5 Updates
 
-`GET /servers/{id}/plugins/updates` (Cache 1 h pro Server, `?refresh=true` bzw. `?refresh=1` umgeht ihn; Jobs, Schalten und Löschen verwerfen ihn) liefert `{updates: [{file, from: {id, name, channel}, to: {id, name, channel}}], checked_at}`. Modrinth-Jars (DB oder Hash-Zuordnung) über `version_files/update` mit `version_types = [release]` bzw. `[release, beta]` bei einem Beta-Jar bzw. allen dreien bei Alpha; Hangar-Jars aus der DB über die Versionsliste, neueste herunterladbare Version im gleichen oder stabileren Kanal, nur wenn sie neuer veröffentlicht wurde als die installierte. Manuelle Jars bekommen keine Updates.
+`GET /servers/{id}/plugins/updates` (cache 1 h per server, `?refresh=true` or `?refresh=1` bypasses it; jobs, toggling and deleting discard it) returns `{updates: [{file, from: {id, name, channel}, to: {id, name, channel}}], checked_at}`. Modrinth jars (DB or hash matching) through `version_files/update` with `version_types = [release]`, `[release, beta]` for a beta jar, or all three for alpha; Hangar jars from the DB through the version list, newest downloadable version in the same or a more stable channel, only if it was published later than the installed one. Manual jars get no updates.
 
 ### 6.6 API
 
-Alle Routen über `*rbac.Router` mit `rbac.Server(rbac.PermServerPlugins, "id")`, in `api/openapi.yaml` beschrieben, mit MSW-Mock. Server ohne Instanz → `404 not_found`; Art ohne Plugins/Mods → `409 plugins_unsupported` (alle Routen außer `icon`).
+All routes through `*rbac.Router` with `rbac.Server(rbac.PermServerPlugins, "id")`, described in `api/openapi.yaml`, with an MSW mock. Server without an instance → `404 not_found`; type without plugins/mods → `409 plugins_unsupported` (all routes except `icon`).
 
-| Route | Inhalt |
+| Route | Content |
 |---|---|
 | `GET /servers/{id}/plugins` | `{kind: plugin\|mod, dir, game_version, sources, jars: [{file, enabled, size, mtime, source: modrinth\|hangar\|manual, project: {id, slug, title, page_url, icon_url}?, version: {id, name, channel}?, meta?, installed_by_panel}], truncated, restart_needed, source_errors}` |
-| `GET /servers/{id}/plugins/search?source=&q=&offset=` | `{hits: [{source, project_id, slug, title, description, author, downloads, icon_url, page_url, installed}], total, offset}`; `q` ≤ 100 Zeichen, `offset` ≤ 1000 |
-| `GET /servers/{id}/plugins/versions?source=&project=` | `{versions: [{id, name, channel, published_at, downloadable, external_url?}]}` (kompatibel, neueste zuerst, höchstens 25) |
+| `GET /servers/{id}/plugins/search?source=&q=&offset=` | `{hits: [{source, project_id, slug, title, description, author, downloads, icon_url, page_url, installed}], total, offset}`; `q` ≤ 100 characters, `offset` ≤ 1000 |
+| `GET /servers/{id}/plugins/versions?source=&project=` | `{versions: [{id, name, channel, published_at, downloadable, external_url?}]}` (compatible, newest first, at most 25) |
 | `GET /servers/{id}/plugins/resolve?source=&project=&version=` | `{install: [PlanEntry], already: [...], external: [{name, url}], incompatible: [{title, reason}]}` |
-| `POST /servers/{id}/plugins/install` | `{source, project, version?}` → `202` mit dem Job (`PluginJob`); nichts zu tun (alles schon installiert) → `409 conflict` |
+| `POST /servers/{id}/plugins/install` | `{source, project, version?}` → `202` with the job (`PluginJob`); nothing to do (everything already installed) → `409 conflict` |
 | `GET /servers/{id}/plugins/updates` | §6.5 |
-| `POST /servers/{id}/plugins/update` | `{files: [string]}` → `202` mit dem Job; Datei ohne Update bzw. gar kein Update → `400 validation_failed` |
-| `POST /servers/{id}/plugins/toggle` | `{file, enabled}` → `204`; `rename` im Dienst |
-| `POST /servers/{id}/plugins/delete` | `{file}` → `204`; löscht auch den DB-Eintrag |
+| `POST /servers/{id}/plugins/update` | `{files: [string]}` → `202` with the job; file without an update or no update at all → `400 validation_failed` |
+| `POST /servers/{id}/plugins/toggle` | `{file, enabled}` → `204`; `rename` in the service |
+| `POST /servers/{id}/plugins/delete` | `{file}` → `204`; also deletes the DB entry |
 | `GET /servers/{id}/plugins/jobs` | `{job: null \| {id, kind: install\|update, state, steps: [{title, file, state, error_code, error}], started_at, finished_at}}` |
-| `GET /servers/{id}/plugins/icon?url=` | Bild (§6.8) |
+| `GET /servers/{id}/plugins/icon?url=` | Image (§6.8) |
 
-- `source` ∈ `modrinth|hangar` (`hangar` nur bei Plugins, sonst `400 validation_failed`); `project`/`version` ≤ 128 Zeichen, `^[A-Za-z0-9._+-]+$`. `file` ist ein reiner Dateiname ohne `/`, endet auf `.jar` oder `.jar.disabled` und besteht `filesapi.CleanPath`; der Pfad im Dienst ist immer `<dir>/<file>`. `toggle` und `delete` wirken nur auf Namen, die `/v1/jars` listet (sonst `404`, auch bei abgeschnittener Liste); Werte für `project`/`version`, die nur aus `.` bestehen, sind ungültig.
-- `icon_url` und `project.icon_url` in Antworten zeigen bereits auf den Icon-Proxy (`/api/servers/{id}/plugins/icon?url=…`), `page_url` auf die Projektseite (`https://modrinth.com/<plugin|mod>/<slug>` bzw. `https://hangar.papermc.io/<owner>/<slug>`).
-- **CSRF** gilt für alle `POST`. **Rate-Limit** pro Konto über `search`, `versions`, `resolve`, `updates` mit `refresh`: Token-Bucket mit 1 Aufruf/s und Spitze 20, also etwa 60 pro Minute (sonst `429 rate_limited` mit `Retry-After`); ein Updatecheck, der nicht aus dem Cache kommt, zählt ebenfalls (auch bei `POST …/update`).
-- Unbekanntes Projekt oder unbekannte Version beim Upstream → `404 not_found` (als Abhängigkeit: `incompatible`). Externe Links (`external_url`, `external[].url`) gibt das panel nur bei `http`/`https` weiter.
-- **Fehler-Mapping** des Dienstes: `exists` → `409 file_exists`, `not_found` → `404 not_found`, `not_regular`/`invalid` → `400 validation_failed`, alles Übrige (auch `busy`, `insufficient_storage`, `too_large`, `hash_mismatch`, ein alter Dienst ohne `/v1/jars`) → `503 files_unavailable`; in Jobs erscheinen sie als Schritt-Fehler.
+- `source` ∈ `modrinth|hangar` (`hangar` only for plugins, otherwise `400 validation_failed`); `project`/`version` ≤ 128 characters, `^[A-Za-z0-9._+-]+$`. `file` is a plain filename without `/`, ends in `.jar` or `.jar.disabled` and passes `filesapi.CleanPath`; the path in the service is always `<dir>/<file>`. `toggle` and `delete` only act on names that `/v1/jars` lists (otherwise `404`, also for a truncated list); values for `project`/`version` that consist only of `.` are invalid.
+- `icon_url` and `project.icon_url` in responses already point to the icon proxy (`/api/servers/{id}/plugins/icon?url=…`), `page_url` to the project page (`https://modrinth.com/<plugin|mod>/<slug>` or `https://hangar.papermc.io/<owner>/<slug>`).
+- **CSRF** applies to all `POST`. **Rate limit** per account across `search`, `versions`, `resolve`, and `updates` with `refresh`: token bucket with 1 call/s and burst 20, so about 60 per minute (otherwise `429 rate_limited` with `Retry-After`); an update check that does not come from the cache counts as well (also for `POST …/update`).
+- Unknown project or unknown version at the upstream → `404 not_found` (as a dependency: `incompatible`). The panel only passes on external links (`external_url`, `external[].url`) with `http`/`https`.
+- **Error mapping** of the service: `exists` → `409 file_exists`, `not_found` → `404 not_found`, `not_regular`/`invalid` → `400 validation_failed`, everything else (including `busy`, `insufficient_storage`, `too_large`, `hash_mismatch`, an old service without `/v1/jars`) → `503 files_unavailable`; in jobs they appear as step errors.
 
-### 6.7 Fehlercodes
+### 6.7 Error codes
 
-Neu in `internal/httpx/errors.go` und im Enum des Vertrags:
+New in `internal/httpx/errors.go` and in the contract's enum:
 
-| Code | Status | Wann |
+| Code | Status | When |
 |---|---|---|
-| `plugins_unsupported` | 409 | Server-Art ohne Plugins/Mods |
-| `plugin_source_unavailable` | 502 | Modrinth oder Hangar nicht erreichbar oder antwortet unbrauchbar |
-| `plugin_not_downloadable` | 409 | gewählte Version nur extern verfügbar |
-| `plugin_incompatible` | 409 | Projekt oder Pflicht-Abhängigkeit ohne kompatible Version |
+| `plugins_unsupported` | 409 | Server type without plugins/mods |
+| `plugin_source_unavailable` | 502 | Modrinth or Hangar unreachable or answering with something unusable |
+| `plugin_not_downloadable` | 409 | Selected version only available externally |
+| `plugin_incompatible` | 409 | Project or required dependency without a compatible version |
 
-Vorhanden und genutzt: `conflict` (Job läuft), `catalog_unavailable` (`LATEST` nicht auflösbar), `rate_limited`, `validation_failed`, `not_found`.
+Existing and used: `conflict` (job running), `catalog_unavailable` (`LATEST` cannot be resolved), `rate_limited`, `validation_failed`, `not_found`.
 
-### 6.8 Icon-Proxy
+### 6.8 Icon proxy
 
-- `url` muss mit `https://cdn.modrinth.com/` oder `https://hangarcdn.papermc.io/` beginnen (≤ 512 Zeichen), sonst `400 validation_failed`; Weiterleitungen wie §4.
-- Bild ≤ 256 KiB, Typ per Magic Bytes: nur PNG, JPEG, WebP, GIF (kein SVG) → sonst `502 plugin_source_unavailable`. Antwort mit erkanntem `Content-Type`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'`, `Cache-Control: private, max-age=86400`.
-- Cache im Speicher (LRU, 32 MiB, 24 h). Nicht im Rate-Limit aus §6.6, aber höchstens 8 gleichzeitige Upstream-Abrufe im panel.
+- `url` must start with `https://cdn.modrinth.com/` or `https://hangarcdn.papermc.io/` (≤ 512 characters), otherwise `400 validation_failed`; redirects as in §4.
+- Image ≤ 256 KiB, type by magic bytes: only PNG, JPEG, WebP, GIF (no SVG) → otherwise `502 plugin_source_unavailable`. Response with the detected `Content-Type`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'`, `Cache-Control: private, max-age=86400`.
+- In-memory cache (LRU, 32 MiB, 24 h). Not part of the rate limit from §6.6, but at most 8 concurrent upstream fetches in the panel.
 
 ### 6.9 Audit
 
-Neue Aktionen in `internal/audit/types.go`: `plugin.install` `{source, project, version, file}`, `plugin.update` `{file: neuer Name, from, to: Versionsnamen}` (ebenso ein Versionswechsel über `install`, dann `plugin.install` mit `from`), `plugin.remove` `{file}`, `plugin.toggle` `{file, enabled}`. Ziel `server:<id>`, Ergebnis `success`/`failure`, ein Eintrag pro Jar (auch für Abhängigkeiten); Akteur ist der Nutzer, der den Job gestartet hat. Inventar, Suche, Versionen, Auflösen, Updatecheck und Icons werden nicht auditiert, ebenso Ablehnungen durch Rechte, Validierung und Rate-Limit (wie TP1–3b).
+New actions in `internal/audit/types.go`: `plugin.install` `{source, project, version, file}`, `plugin.update` `{file: new name, from, to: version names}` (likewise a version change through `install`, then `plugin.install` with `from`), `plugin.remove` `{file}`, `plugin.toggle` `{file, enabled}`. Target `server:<id>`, result `success`/`failure`, one entry per jar (also for dependencies); the actor is the user who started the job. Inventory, search, versions, resolve, update check and icons are not audited, nor are rejections by permissions, validation and rate limit (as in sub-projects 1–3b).
 
 ## 7. Frontend
 
-Bestehende shadcn-Komponenten; Texte `de`/`en`; mobil bedienbar.
+Existing shadcn components; texts `de`/`en`; usable on mobile.
 
-### 7.1 Tab „Plugins“ bzw. „Mods“
+### 7.1 Tab "Plugins" or "Mods"
 
-Sichtbar mit `server.plugins` bei paper, purpur, fabric und neoforge; Titel nach `kind`.
+Visible with `server.plugins` on paper, purpur, fabric and neoforge; title according to `kind`.
 
-- **Installiert:** Liste mit Icon, Name (Projekt-Titel, sonst `meta.name`, sonst Dateiname), Version, Quelle (Modrinth/Hangar/manuell), Schalter aktiv/inaktiv, Menü (Projektseite öffnen, Version wechseln → Installieren-Dialog mit vorgewählter Version, Entfernen mit Bestätigung), Update-Badge. Manuelle Jars ohne Zuordnung: Hinweis „Nicht zugeordnet – Updates nicht möglich“. Kopfzeile: „Nach Updates suchen“, „Alle aktualisieren (n)“. Auf dem Handy Karten statt Tabelle. `source_errors` → Hinweis „Modrinth gerade nicht erreichbar – Zuordnung unvollständig“.
-- **Entdecken:** Suchfeld (verzögert), Quellen-Umschalter Modrinth | Hangar (bei Mods nur Modrinth), Treffer mit Icon, Titel, Autor, Downloads, Kurzbeschreibung, Badge „installiert“, Knopf „Installieren“; ohne Suchbegriff die beliebtesten passenden Projekte; „Mehr laden“. Beschreibungen (Markdown/HTML) werden nicht gerendert, nur die Kurzbeschreibung und ein Link zur Projektseite.
-- **Installieren-Dialog:** Versionsauswahl (Standard: neueste `release`; Beta/Alpha markiert; nur extern verfügbare ausgegraut mit „Nur extern erhältlich“, Link und Hinweis auf den Dateien-Tab), darunter die Vorschau aus `resolve`: „Wird mitinstalliert“, „Bereits vorhanden“, „Manuell nötig“ (mit Links), „Inkompatibel“ (sperrt „Installieren“).
-- **Job:** Fortschritt pro Jar (wartet, lädt, fertig, übersprungen, Fehler mit übersetztem Grund `plugins.step.error.*`), Abfrage alle 2 s, solange `running`; Installieren-, Update-, Schalter- und Entfernen-Knöpfe gesperrt. Nach Ende wird das Inventar neu geladen.
-- **Banner** bei `restart_needed`: „Neustart nötig, damit die Änderungen wirken“, mit Neustart-Knopf bei `server.power`.
-- Upstream nicht erreichbar: Entdecken zeigt einen Fehlerzustand mit „Erneut versuchen“; Installiert bleibt bedienbar.
+- **Installed:** list with icon, name (project title, else `meta.name`, else filename), version, source (Modrinth/Hangar/manual), enabled/disabled switch, menu (open project page, change version → install dialog with the version preselected, remove with confirmation), update badge. Manual jars without a match: hint "Not matched – updates not possible". Header: "Check for updates", "Update all (n)". On a phone cards instead of a table. `source_errors` → hint "Modrinth currently unreachable – matching incomplete".
+- **Discover:** search field (debounced), source toggle Modrinth | Hangar (Modrinth only for mods), hits with icon, title, author, downloads, short description, badge "installed", button "Install"; without a search term the most popular matching projects; "Load more". Descriptions (Markdown/HTML) are not rendered, only the short description and a link to the project page.
+- **Install dialog:** version selection (default: newest `release`; beta/alpha marked; versions only available externally greyed out with "Only available externally", a link and a pointer to the Files tab), below it the preview from `resolve`: "Installed along", "Already present", "Needs manual install" (with links), "Incompatible" (blocks "Install").
+- **Job:** progress per jar (waiting, downloading, done, skipped, error with translated reason `plugins.step.error.*`), polled every 2 s while `running`; install, update, toggle and remove buttons disabled. When it ends the inventory is reloaded.
+- **Banner** on `restart_needed`: "Restart required for the changes to take effect", with a restart button for `server.power`.
+- Upstream unreachable: Discover shows an error state with "Try again"; Installed stays usable.
 
-### 7.2 Benutzerverwaltung
+### 7.2 User management
 
-Beim Anhaken von `server.plugins`: Hinweis „„Plugins/Mods“ erlaubt Code-Ausführung im Minecraft-Server. Vergib es nur an Personen, denen du voll vertraust.“
+When ticking `server.plugins`: hint "'Plugins/mods' allows running code in the Minecraft server. Grant it only to people you fully trust."
 
 ### 7.3 Mocks
 
-MSW-Mocks pro Operation: kleiner Katalog (Modrinth und Hangar, ein Hangar-Projekt nur extern, eins mit Pflicht-Abhängigkeit, eine Beta-Version, eine Client-only-Mod, die nicht erscheint), Inventar mit panel-installiertem, per Hash zugeordnetem und manuellem Jar, simulierter Job mit Fortschritt, ein verfügbares Update, Icons als kleine PNGs aus dem Mock. `make preview` zeigt alles ohne Backend.
+MSW mocks per operation: small catalog (Modrinth and Hangar, one Hangar project external only, one with a required dependency, one beta version, one client-only mod that does not appear), inventory with a panel-installed, a hash-matched and a manual jar, simulated job with progress, one available update, icons as small PNGs from the mock. `make preview` shows everything without a backend.
 
-## 8. Entwicklung, Betrieb und CI
+## 8. Development, operation and CI
 
-- **Mac:** nur `make check` (CLAUDE.md). `make dev` braucht nichts Neues; das panel spricht im Dev-Modus mit den echten Upstreams.
-- **Test-VM / Produktion:** keine neue Konfiguration. Das panel braucht ausgehendes HTTPS zu `api.modrinth.com`, `cdn.modrinth.com`, `hangar.papermc.io`, `hangarcdn.papermc.io` (wie für die Kataloge).
-- **Release:** unverändert.
+- **Mac:** only `make check` (CLAUDE.md). `make dev` needs nothing new; in dev mode the panel talks to the real upstreams.
+- **Test VM / production:** no new configuration. The panel needs outbound HTTPS to `api.modrinth.com`, `cdn.modrinth.com`, `hangar.papermc.io`, `hangarcdn.papermc.io` (as for the catalogs).
+- **Release:** unchanged.
 
 ## 9. Tests
 
-| Ebene | Inhalt |
+| Level | Content |
 |---|---|
-| `plugins/upstream` | `httptest` mit echten gekürzten Antworten aus `testdata/` (Suche beider Quellen, Versionen, `version_files`, `version_files/update`, Hangar mit internem und externem Download und Abhängigkeiten); Facets und Query-Parameter, Host-Allowlist inkl. Weiterleitungen auf fremde Hosts und `http`, Größenlimit, abweichender `Content-Length`, Timeout, Cache und geteilte Aufrufe, Dateinamen-Fallback |
-| Auflösen | Tiefe und Paketlimit, Zyklus, bereits installiert (auch deaktiviert), extern, inkompatibel, feste `version_id`, Kanalwahl, Client-only-Mod |
-| `files` | `/v1/jars`: `.jar`/`.jar.disabled`, Symlink-Jar und Ordner ausgelassen, Grenze 500, Prüfsummen und Cache (geänderte mtime → neu berechnet), Metadaten aus `paper-plugin.yml`, `plugin.yml`, `fabric.mod.json`, `neoforge.mods.toml` mit `${file.jarVersion}`, kaputtes und übergroßes Jar → `meta: null`; Upload mit falscher Prüfsumme hinterlässt keine Datei und lässt das Ziel unverändert, beide Parameter zugleich → `400 invalid` |
-| panel `plugins` | Fake-Upstream + Fake-Dienst + `storetest`: Rechte (`plugins`, nur `view`, Admin, fremder Server), CSRF, Art ohne Plugins, `LATEST`-Auflösung, Inventar-Zuordnung (DB, Hash, manuell, verwaister Eintrag), Install-Job mit Abhängigkeit, Abbruch bei `file_exists`, Update mit neuem Dateinamen und deaktiviertem Jar, ein Job pro Server, Job-Limit, `restart_needed`, Audit-Einträge, Rate-Limit, Icon-Proxy (SVG, fremder Host, zu groß) |
-| Vertrag | OpenAPI ↔ Routen, Fehlercodes ↔ Enum, Mock pro Operation |
-| Frontend | Vitest: Inventar-Darstellung (Namensfallback, Badges), Auflösungs-Vorschau, Job-Fortschritt; Playwright gegen Mock: suchen → installieren mit Abhängigkeit → deaktivieren → Update → entfernen |
-| CI-Abnahme | `scripts/ci-instances.sh` gegen die echten Upstreams und den Paper-Server: ein kleines Modrinth-Plugin und ein Hangar-Plugin mit Pflicht-Abhängigkeit installieren, Server neu starten, per RCON `plugins` prüfen, ein Jar deaktivieren und erneut prüfen. Upstream-Fehler werden einmal wiederholt und brechen dann mit klarer Meldung ab (kein stilles Überspringen). |
+| `plugins/upstream` | `httptest` with real trimmed responses from `testdata/` (search of both sources, versions, `version_files`, `version_files/update`, Hangar with internal and external download and dependencies); facets and query parameters, host allowlist including redirects to foreign hosts and `http`, size limit, differing `Content-Length`, timeout, cache and shared calls, filename fallback |
+| Resolving | Depth and package limit, cycle, already installed (also disabled), external, incompatible, fixed `version_id`, channel choice, client-only mod |
+| `files` | `/v1/jars`: `.jar`/`.jar.disabled`, symlinked jar and folder skipped, limit 500, checksums and cache (changed mtime → recomputed), metadata from `paper-plugin.yml`, `plugin.yml`, `fabric.mod.json`, `neoforge.mods.toml` with `${file.jarVersion}`, broken and oversized jar → `meta: null`; upload with a wrong checksum leaves no file and the target unchanged, both parameters at once → `400 invalid` |
+| panel `plugins` | Fake upstream + fake service + `storetest`: permissions (`plugins`, only `view`, admin, foreign server), CSRF, type without plugins, `LATEST` resolution, inventory matching (DB, hash, manual, orphaned entry), install job with dependency, abort on `file_exists`, update with a new filename and a disabled jar, one job per server, job limit, `restart_needed`, audit entries, rate limit, icon proxy (SVG, foreign host, too large) |
+| Contract | OpenAPI ↔ routes, error codes ↔ enum, mock per operation |
+| Frontend | Vitest: inventory display (name fallback, badges), resolve preview, job progress; Playwright against the mock: search → install with dependency → disable → update → remove |
+| CI acceptance | `scripts/ci-instances.sh` against the real upstreams and the Paper server: install a small Modrinth plugin and a Hangar plugin with a required dependency, restart the server, check via RCON `plugins`, disable a jar and check again. Upstream errors are retried once and then abort with a clear message (no silent skipping). |
 
-Konventionen aus TP1–3b gelten unverändert.
+Conventions from sub-projects 1–3b apply unchanged.
 
-## 10. Abnahmekriterien
+## 10. Acceptance criteria
 
-Automatisch in der CI: 1 sowie die Dienst-Seite von 2 und 5. Manuell durch den Nutzer auf der Test-VM: 2–7 (`docs/dev/acceptance-tp3c.md`).
+Automatically in CI: 1 plus the service side of 2 and 5. Manually by the user on the test VM: 2–7 (`docs/dev/acceptance.md` ("Plugins and mods")).
 
-1. Alle CI-Jobs grün.
-2. Auf einem Paper-Server LuckPerms (Modrinth) und ViaBackwards (Hangar, zieht ViaVersion mit) installieren; nach dem Neustart sind sie aktiv.
-3. Auf einem Fabric-Server eine Mod installieren, die Fabric API mitbringt; der Server startet damit.
-4. Ein per Dateien-Tab hochgeladenes Modrinth-Jar einer älteren Version wird zugeordnet und lässt sich aktualisieren.
-5. Ein Jar deaktivieren; nach dem Neustart ist es nicht geladen; wieder aktivieren lädt es erneut.
-6. Ein Nutzer mit nur `server.view` sieht keinen Plugins-Tab, die API antwortet `403`.
-7. Alle Installationen, Updates, Schalter und Löschungen stehen im Audit-Log; `panel audit verify` meldet OK.
+1. All CI jobs green.
+2. Install LuckPerms (Modrinth) and ViaBackwards (Hangar, pulls in ViaVersion) on a Paper server; after the restart they are active.
+3. Install a mod on a Fabric server that brings Fabric API along; the server starts with it.
+4. A Modrinth jar of an older version uploaded through the Files tab is matched and can be updated.
+5. Disable a jar; after the restart it is not loaded; enabling it again loads it again.
+6. A user with only `server.view` sees no Plugins tab, the API answers `403`.
+7. All installs, updates, toggles and removals are in the audit log; `panel audit verify` reports OK.
