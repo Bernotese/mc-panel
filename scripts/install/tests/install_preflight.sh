@@ -13,7 +13,7 @@ pre_fixture() {
   pre_fixture_os ubuntu 26.04
   stub pre_port_owner ':'
   stub pre_domain_matches 'return 0'
-  DOMAIN=panel.example.com EMAIL=a@example.com TLS_MODE=letsencrypt CMD=install
+  DOMAIN=panel.example.com EMAIL=a@example.com TLS_MODE=letsencrypt CMD=install NO_FIREWALL=1
 }
 
 test_install_pre_os_ok_accepts_ubuntu_2604() {
@@ -63,7 +63,7 @@ test_install_pre_port_owner_reads_ss() {
 test_install_pre_check_refuses_foreign_port_user() {
   pre_fixture_os ubuntu 26.04
   stub pre_domain_matches 'return 0'
-  DOMAIN=panel.example.com EMAIL=a@example.com TLS_MODE=letsencrypt CMD=install
+  DOMAIN=panel.example.com EMAIL=a@example.com TLS_MODE=letsencrypt CMD=install NO_FIREWALL=1
   # the real pre_port_owner against a stubbed ss: nginx on port 80 only
   stub ss "[[ \$* == *':80' ]] && printf '%s\\n' 'LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\"nginx\",pid=99,fd=6))'; :"
   assert_fails pre_check
@@ -120,4 +120,48 @@ test_install_pre_check_internal_tls_skips_dns() {
   stub pre_domain_matches 'echo "dns must not be checked" >&2; return 1'
   DOMAIN=panel.192-168-1-117.sslip.io EMAIL='' TLS_MODE=internal YES=0
   pre_check >/dev/null
+}
+
+test_install_pre_check_refuses_other_domain_in_panel_toml() {
+  pre_fixture
+  mkdir -p "$ROOT$ETC_PANEL"
+  printf 'listen = "unix:/run/mc-panel-web/panel.sock"\npublic_url = "https://old.example.com"\n' >"$ROOT$ETC_PANEL/panel.toml"
+  assert_fails pre_check
+  assert_contains "$(cat "$WORK/out")" "public_url https://old.example.com"
+  DOMAIN=old.example.com
+  pre_check >/dev/null
+}
+
+test_install_pre_check_internal_compares_localhost() {
+  pre_fixture
+  mkdir -p "$ROOT$ETC_PANEL"
+  printf 'public_url = "https://localhost"\n' >"$ROOT$ETC_PANEL/panel.toml"
+  DOMAIN=localhost TLS_MODE=internal EMAIL=''
+  pre_check >/dev/null
+  DOMAIN=panel.example.com
+  assert_fails pre_check
+}
+
+test_install_pre_check_plans_the_firewall_first() {
+  # a session on a port sshd is not configured for aborts before any change
+  pre_fixture
+  NO_FIREWALL=0 SSH_PORT=''
+  stub ss ':'
+  stub systemctl 'return 1'
+  stub sshd 'echo "port 22"'
+  SSH_CONNECTION="198.51.100.4 50122 203.0.113.7 2222"
+  assert_fails pre_check
+  assert_contains "$(cat "$WORK/out")" "port 2222"
+  : >"$WORK/calls.log"
+  NO_FIREWALL=1
+  pre_check >/dev/null
+}
+
+test_install_pre_check_reads_the_stdin_password_early() {
+  pre_fixture
+  ADMIN_USER="admin" ADMIN_PASSWORD_FILE=''
+  stub adm_script_is_file 'return 0'
+  pre_check <<<'early-secret-1234' >/dev/null
+  # pre_check ran in this shell: the password is kept for adm_ensure
+  assert_eq early-secret-1234 "$ADM_STDIN_PW"
 }

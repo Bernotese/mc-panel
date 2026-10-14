@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # preflight.sh - installer spec §4.1: refuse to touch a system the installer does not support.
 # Runs before any change, so it may die; root, architecture and the arguments are checked by
-# main.sh (require_root, detect_arch, validate_args).
+# main.sh (require_root, detect_arch, validate_args). Also runs fw_plan (SSH ports, sessions,
+# listeners) and checks an existing panel.toml against the domain.
 
 # Ports the panel needs; the value is the process allowed to hold the port already (Caddy for
 # HTTP(S), Docker's proxy for the published mc-router port).
@@ -53,8 +54,21 @@ pre_domain_matches() {
   [[ -n "$(LC_ALL=C comm -12 <(printf '%s\n' "$resolved") <(printf '%s\n' "$local_addrs"))" ]]
 }
 
+# pre_domain_consistent: an existing panel.toml must name the same host in public_url as
+# --domain (localhost with --tls internal and no --domain); otherwise Caddy would serve a site
+# the panel rejects (origin checks) - abort before anything changes.
+pre_domain_consistent() {
+  local have
+  have="$(cfg_domain_from_config)"
+  if [[ -n $have && $have != "$DOMAIN" ]]; then
+    die "$ETC_PANEL/panel.toml has public_url https://$have, but the domain is $DOMAIN; pass --domain $have or change public_url there first"
+  fi
+}
+
 pre_check() {
   log_step "preflight"
+  # The stdin password (--admin-user) is read before any other command could consume stdin.
+  adm_preread
   pre_os_ok || die "this installer supports Ubuntu 26.04 LTS only"
   [[ "$(cat -- "$ROOT/proc/1/comm" 2>/dev/null)" == systemd ]] || die "systemd must be PID 1"
   local port owner
@@ -64,9 +78,14 @@ pre_check() {
       die "port $port is in use by $owner; mc-panel needs 80 and 443 (Caddy) and 25565 (Minecraft)"
     fi
   done
+  pre_domain_consistent
   if [[ $TLS_MODE == letsencrypt ]] && ! pre_domain_matches; then
     warn "$DOMAIN does not resolve to an address of this host; Let's Encrypt fails until DNS points here"
     confirm "continue anyway?" || die "aborted: point the DNS record of $DOMAIN to this host first (or pass --yes)"
+  fi
+  # SSH ports and the running sessions before anything changes (fw_ensure checks again).
+  if [[ $NO_FIREWALL != 1 ]]; then
+    fw_plan
   fi
   log_ok "Ubuntu $(pre_os_field VERSION_ID), systemd, ports 80/443/25565"
 }
