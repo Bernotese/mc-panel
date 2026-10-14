@@ -141,7 +141,7 @@ Der Skip-Link „Zum Inhalt“ bleibt erhalten.
 ### 4.3 Server-Bereiche als Routen
 
 - Layout-Route `routes/_app/servers/$id.tsx` (Server-Kopf + `<Outlet/>`), Kind-Routen: Index = Übersicht, `console`, `players`, `files`, `plugins`, `backups`, `monitoring`, `settings`. `servers/new` bleibt.
-- Eine reine Funktion `serverSections(server, isAdmin)` in `features/servers/sections.ts` liefert die erlaubten Bereiche in fester Reihenfolge (heutige Logik aus `server-detail-page.tsx`: Übersicht und Monitoring immer; Konsole und Spieler mit `server.console`; Dateien mit `server.files`; Plugins/Mods mit `server.plugins` und passendem Typ; Backups mit `server.backups`; Einstellungen für Admins; ohne Instanz nur Übersicht bzw. Einstellungen für Admins). Baum, Mobilmenü und Routen-Guards nutzen dieselbe Funktion. Unit-Tests decken jede Kombination ab.
+- Eine reine Funktion `serverSections(server, isAdmin)` in `features/servers/sections.ts` liefert die erlaubten Bereiche in fester Reihenfolge (heutige Logik aus `server-detail-page.tsx`: Übersicht und Monitoring immer; Konsole und Spieler mit `server.console`; Dateien mit `server.files`; Plugins/Mods mit `server.plugins` und passendem Typ; Backups mit `server.backups`; Einstellungen für Admins; ohne Instanz nur Übersicht, dort für Admins das Löschformular). Baum, Mobilmenü und Routen-Guards nutzen dieselbe Funktion. Unit-Tests decken jede Kombination ab.
 - Wird ein nicht erlaubter Bereich direkt aufgerufen (oder das Recht entzogen, während er offen ist), leitet die Route zur Übersicht weiter (`replace`).
 - Wechselt man den Server, bleibt der Bereich erhalten, wenn er beim Ziel erlaubt ist, sonst Übersicht.
 - „Löschen“ ist kein eigener Bereich mehr, sondern eine Gefahrenzone am Ende der Einstellungen (unverändert mit Bestätigung und sudo).
@@ -223,7 +223,7 @@ Die genaue Dateizuordnung (insbesondere in `features/servers/`) legt der Plan fe
 
 - Jeder Teammate: `make check`, dann `make test-vm SUITE=web` (Vitest + tsc) für seine Änderung; T2 zusätzlich `SUITE=e2e`. Der VM-Lock ist geteilt, deshalb `SUITE=all` nur einmal pro PR durch den Lead.
 - Unit-Tests: `serverSections` (alle Rechte-Kombinationen), Routen-Guards und Weiterleitung, Blocker im Dateien-Bereich, `McText`, `PingBars`, `StatSlot` (fehlende Werte → „–“), Baum-Zustand in `localStorage`. Bestehende Tests werden an die neue Struktur angepasst, nicht gelöscht; Semantik (Rollen, Namen, Texte) bleibt, wo die Spec sie nicht ausdrücklich ändert.
-- **Screenshots:** Jeder Teammate erzeugt mit Playwright gegen den Mock auf der VM Screenshots seiner Seiten in Dark und Light (Desktop 1440 px und Mobil 390 px) und hängt sie an den PR. Ein kleines Skript dafür (`web/e2e/screenshots.spec.ts`, Projekt `screenshots`, läuft nicht in CI) gehört zu Welle 0.
+- **Screenshots:** Jeder Teammate erzeugt mit `make test-vm SUITE=shots` (Playwright-Projekt `screenshots`, eigene Datei `web/e2e/shots/<bereich>.shots.ts`, nicht in CI) Screenshots seiner Seiten gegen den Mock in Dark und Light (Desktop 1440 px und Mobil 390 px); sie landen lokal in `web/screenshots/` (gitignored), der Teammate prüft sie selbst und der Lead zeigt eine Auswahl dem Nutzer. Die Infrastruktur gehört zu Welle 0.
 - Kontrast: Der Lead prüft die Token-Paare aus §3.1 in Welle 0 rechnerisch (AA: 4,5 : 1 Text, 3 : 1 große Schrift/UI-Ränder).
 
 ### 6.4 PRs
