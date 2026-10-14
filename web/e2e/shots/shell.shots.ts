@@ -2,7 +2,7 @@ import { test } from '@playwright/test'
 import { openServer, serverSectionLink } from '../helpers'
 import { shoot, signInMock } from './shoot'
 
-test('shell: dashboard, server sections, collapsed tree', async ({ page }) => {
+test('shell: dashboard, server sections, collapsed tree, expanded rail', async ({ page }) => {
   await signInMock(page)
   await shoot(page, 'shell-dashboard')
   await openServer(page, 'survival')
@@ -13,6 +13,10 @@ test('shell: dashboard, server sections, collapsed tree', async ({ page }) => {
   await shoot(page, 'shell-server-settings')
   await page.getByRole('button', { name: 'Serverliste einklappen' }).click()
   await shoot(page, 'shell-tree-collapsed')
+  await page.getByRole('button', { name: 'Menü ausklappen' }).click()
+  await shoot(page, 'shell-rail-expanded')
+  await page.getByRole('button', { name: 'Serverliste ausklappen' }).click()
+  await shoot(page, 'shell-rail-expanded-tree')
 })
 
 test('shell: phone drawer and tablet flyout', async ({ page }) => {

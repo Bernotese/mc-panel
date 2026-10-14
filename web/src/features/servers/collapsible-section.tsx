@@ -7,18 +7,20 @@ export function CollapsibleSection({
   title,
   description,
   forceOpen = false,
+  className,
   children,
 }: {
   title: string
   description?: string
   forceOpen?: boolean
+  className?: string
   children: ReactNode
 }) {
   const contentId = useId()
   const [open, setOpen] = useState(false)
   const expanded = open || forceOpen
   return (
-    <section className="bg-card border">
+    <section className={cn('bg-card border', className)}>
       <h2>
         <button
           type="button"

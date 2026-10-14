@@ -34,6 +34,10 @@ import { javaLabel, memoryInputValue, serverAddress } from './format'
 import { PropertiesFields } from './properties-fields'
 import { INSTANCE_TYPES, isModpack, JAVA_VERSIONS, memoryMiBFromGiB, type FieldError, type MemoryLimits } from './validation'
 
+const LEFT = '@4xl/server-form:col-start-1 @4xl/server-form:row-span-3 @4xl/server-form:row-start-1'
+const RIGHT = '@4xl/server-form:col-start-2'
+const FULL = '@4xl/server-form:col-span-2'
+
 type Shown = (field: FormField) => FieldError | undefined
 type Update = (patch: Partial<ServerFormValue>, ...fields: FormField[]) => void
 
@@ -94,7 +98,9 @@ export function ServerForm({
 
   return (
     <form
-      className="flex max-w-3xl flex-col gap-6"
+      // Issue #86: in a wide container (callers wrap the form in @container/server-form) basics fill the left column and the
+      // other sections stack on the right; the last right row (1fr) absorbs the height difference. One column below.
+      className="grid gap-6 @4xl/server-form:grid-cols-2 @4xl/server-form:grid-rows-[auto_auto_1fr] @4xl/server-form:items-start"
       noValidate
       onSubmit={(e) => {
         e.preventDefault()
@@ -103,7 +109,7 @@ export function ServerForm({
         if (result) onSubmit(result)
       }}
     >
-      <Section title={t('servers.form.section.basics')}>
+      <Section title={t('servers.form.section.basics')} className={LEFT}>
         <div className="flex flex-col gap-4">
           {mode === 'create' ? (
             <>
@@ -126,7 +132,7 @@ export function ServerForm({
           />
         </div>
       </Section>
-      <Section title={t('servers.form.section.resources')}>
+      <Section title={t('servers.form.section.resources')} className={RIGHT}>
         <MemoryField
           id={`${id}-memory`}
           text={value.memoryGiB}
@@ -138,6 +144,7 @@ export function ServerForm({
         />
       </Section>
       <CollapsibleSection
+        className={RIGHT}
         title={t('servers.form.advanced')}
         description={t('servers.form.advanced_description')}
         forceOpen={submitted && (errors.java !== undefined || (value.type === 'neoforge' && errors.loader_version !== undefined))}
@@ -145,6 +152,7 @@ export function ServerForm({
         <AdvancedFields id={id} value={value} catalog={catalog.data} shown={shown} update={update} />
       </CollapsibleSection>
       <CollapsibleSection
+        className={RIGHT}
         title={t('servers.form.properties')}
         description={t('servers.form.properties_description')}
         forceOpen={submitted && PROPERTY_FIELDS.some((f) => errors[f] !== undefined)}
@@ -159,9 +167,9 @@ export function ServerForm({
         />
       </CollapsibleSection>
       {mode === 'create' ? (
-        <EulaField id={`${id}-eula`} checked={value.eulaAccepted} error={shown('eula')} onChange={(eulaAccepted) => update({ eulaAccepted }, 'eula')} />
+        <EulaField className={FULL} id={`${id}-eula`} checked={value.eulaAccepted} error={shown('eula')} onChange={(eulaAccepted) => update({ eulaAccepted }, 'eula')} />
       ) : null}
-      <div className="flex flex-col items-start gap-3">
+      <div className={cn('flex flex-col items-start gap-3', FULL)}>
         {notice ? <p className="text-muted-foreground text-sm">{notice}</p> : null}
         {submitted && hasErrors ? (
           <p role="alert" className="text-destructive text-sm">
@@ -236,7 +244,8 @@ function TypeField({
   return (
     <fieldset className="space-y-2" aria-describedby={error ? `${id}-error` : undefined}>
       <legend className="mb-2 text-sm font-medium">{t('servers.form.type')}</legend>
-      <div className="grid gap-2 sm:grid-cols-2">
+      {/* Two cards per row unless the form puts basics into a narrow left column. */}
+      <div className="grid gap-2 @md/server-form:grid-cols-2 @4xl/server-form:grid-cols-1 @6xl/server-form:grid-cols-2">
         {INSTANCE_TYPES.map((option) => {
           const optionId = `${id}-${option}`
           const disabled = option === 'curseforge' && !curseforgeKeySet
@@ -513,10 +522,22 @@ function AdvancedFields({
   )
 }
 
-function EulaField({ id, checked, error, onChange }: { id: string; checked: boolean; error: FieldError | undefined; onChange(checked: boolean): void }) {
+function EulaField({
+  id,
+  checked,
+  error,
+  className,
+  onChange,
+}: {
+  id: string
+  checked: boolean
+  error: FieldError | undefined
+  className?: string
+  onChange(checked: boolean): void
+}) {
   const { t } = useTranslation()
   return (
-    <div className="space-y-1">
+    <div className={cn('space-y-1', className)}>
       <div className="flex items-start gap-2">
         <input
           id={id}

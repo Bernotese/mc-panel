@@ -159,6 +159,8 @@ export const de = {
     new_server: 'Neuer Server',
     tree_collapse: 'Serverliste einklappen',
     tree_expand: 'Serverliste ausklappen',
+    rail_expand: 'Menü ausklappen',
+    rail_collapse: 'Menü einklappen',
     open_servers: 'Serverliste öffnen',
     breadcrumb: 'Brotkrume',
     home: 'Startseite',

@@ -7,6 +7,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTr
 import { useMediaQuery } from '@/lib/use-media-query'
 import { Breadcrumb } from './breadcrumb'
 import { IconRail } from './icon-rail'
+import { readRailExpanded, writeRailExpanded } from './rail-state'
 import { ServerTree } from './server-tree'
 import { readTreeOpen, writeTreeOpen } from './tree-state'
 
@@ -19,6 +20,7 @@ export function AppLayout() {
   const lg = useMediaQuery(LG_QUERY)
   const md = useMediaQuery(MD_QUERY)
   const [treeOpen, setTreeOpen] = useState(readTreeOpen)
+  const [railExpanded, setRailExpanded] = useState(readRailExpanded)
   const [menuOpen, setMenuOpen] = useState(false)
   const [flyoutOpen, setFlyoutOpen] = useState(false)
 
@@ -28,6 +30,12 @@ export function AppLayout() {
     setTreeOpen(next)
   }
 
+  function toggleRail() {
+    const next = !railExpanded
+    writeRailExpanded(next)
+    setRailExpanded(next)
+  }
+
   return (
     <div className="bg-background flex min-h-svh">
       <a href="#main" className="focus:bg-background sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-3 focus:py-2">
@@ -35,7 +43,13 @@ export function AppLayout() {
       </a>
       {md ? (
         <aside className="sticky top-0 flex h-svh shrink-0">
-          <IconRail treeOpen={lg ? treeOpen : flyoutOpen} onToggleTree={lg ? toggleTree : () => setFlyoutOpen(true)} />
+          {/* Labels only on desktop: tablets keep the narrow rail with the tree flyout beside it. */}
+          <IconRail
+            treeOpen={lg ? treeOpen : flyoutOpen}
+            onToggleTree={lg ? toggleTree : () => setFlyoutOpen(true)}
+            expanded={lg && railExpanded}
+            onToggleRail={lg ? toggleRail : undefined}
+          />
           {lg && treeOpen ? <ServerTree /> : null}
         </aside>
       ) : null}
@@ -78,7 +92,10 @@ export function AppLayout() {
           <Breadcrumb />
         </header>
         <main id="main" tabIndex={-1} className="w-full min-w-0 flex-1 p-4 outline-none md:p-6">
-          <Outlet />
+          {/* One content area for every page (issue #86): the same width cap everywhere, centred on wide screens. */}
+          <div className="mx-auto w-full max-w-7xl min-w-0">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>
