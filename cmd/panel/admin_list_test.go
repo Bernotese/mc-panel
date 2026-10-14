@@ -100,6 +100,34 @@ func TestAdminListCommandReadOnly(t *testing.T) {
 	}
 }
 
+// TestAdminListCommandWhilePanelRuns reads a database that is still open (the running panel):
+// admins committed to the WAL are seen, and no file is added.
+func TestAdminListCommandWhilePanelRuns(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.DefaultPanel()
+	cfg.DataDir = t.TempDir()
+	db, err := store.Open(cfg.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	storetest.CreateUser(t, db, "carol", "admin")
+	before := dirNames(t, cfg.DataDir)
+	var out bytes.Buffer
+	if err := adminListCommand(ctx, cfg, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != "carol\n" {
+		t.Fatalf("output = %q", got)
+	}
+	if after := dirNames(t, cfg.DataDir); !slices.Equal(before, after) {
+		t.Fatalf("data directory changed: %v -> %v", before, after)
+	}
+}
+
 func TestAdminListCommandRefusesSymlink(t *testing.T) {
 	cfg := config.DefaultPanel()
 	cfg.DataDir = t.TempDir()
