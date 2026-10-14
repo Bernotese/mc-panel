@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 mc-panel is a self-hosted Minecraft server panel: a Go backend with an embedded React SPA, released as static `linux/amd64` and `linux/arm64` binaries. Development happens locally on macOS (Apple Silicon); production is an Ubuntu 26.04 LTS VPS set up by the installer (`install.sh`, sub-project 6: panel, agent and the files service as systemd services behind Caddy). Project docs are written in German:
 
 - `docs/dev/README.md`: toolchain versions, CLI commands, CI jobs and how to reproduce them locally, lint conventions, release process, production setup.
-- `docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`: architecture, security requirements and the roadmap of sub-projects (1 foundation, 2 instances, 3a console, 3b files, 3c plugins, 4 backups and 5 monitoring are done; 6 installer is specified and planned).
+- `docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`: architecture, security requirements and the roadmap of sub-projects (1 foundation, 2 instances, 3a console, 3b files, 3c plugins, 4 backups, 5 monitoring and 6 installer are done).
 - `docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md`: Minecraft instances (sub-project 2); manual acceptance checklist in `docs/dev/acceptance-tp2.md`.
 - `docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md`: console, live log and player management (sub-project 3a); manual acceptance checklist in `docs/dev/acceptance-tp3a.md`.
 - `docs/superpowers/specs/2026-10-11-mc-panel-files-design.md`: file browser through the unprivileged files service (sub-project 3b); manual acceptance checklist in `docs/dev/acceptance-tp3b.md`.
