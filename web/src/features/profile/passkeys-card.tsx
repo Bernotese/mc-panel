@@ -8,6 +8,7 @@ import type { Passkey, PasskeyCreated } from '@/api/types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { dialogLock, guardClose } from '@/components/dialog-lock'
 import { DataList, type Column } from '@/components/data-list'
+import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { refreshMe } from '@/features/auth/me'
@@ -16,7 +17,6 @@ import { RecoveryCodesPanel } from '@/features/setup/recovery-codes-panel'
 import { isWebAuthnSupported } from '@/features/webauthn/webauthn'
 import { errorMessage, useErrorToast } from '@/lib/error-message'
 import { useFormat } from '@/lib/format'
-import { SectionCard } from './section-card'
 import { passkeysKey } from './query-keys'
 
 export function PasskeysCard() {
@@ -83,9 +83,9 @@ export function PasskeysCard() {
   ]
 
   return (
-    <SectionCard
+    <Section
       title={t('profile.passkeys.title')}
-      className="md:col-span-2"
+     
       actions={
         supported ? (
           <Button type="button" size="sm" onClick={() => setAdding(true)}>
@@ -128,6 +128,6 @@ export function PasskeysCard() {
         pending={remove.isPending}
         onConfirm={() => deleting && remove.mutate(deleting)}
       />
-    </SectionCard>
+    </Section>
   )
 }
