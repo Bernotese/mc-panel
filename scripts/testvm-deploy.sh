@@ -19,6 +19,10 @@ GO_ROOT=/usr/local/go
 NODE_ROOT=/usr/local/lib/nodejs
 NODE_MAJOR=24
 CADDY_CA=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+# Set only after a successful `install`: until then every deploy runs `install` again.
+INSTALLED_MARKER=/etc/mc-panel/.testvm-installed
+CADDYFILE=/etc/caddy/Caddyfile
+CADDYFILE_PREV=/etc/caddy/Caddyfile.testvm-prev
 
 log() { printf '\n==> %s\n' "$*"; }
 
@@ -68,8 +72,13 @@ main() {
   build "$version"
   stage="$(stage_installer "$version")"
   migrate_once
+  install_restic
   write_caddy_frame "$panel_host" "$ip"
-  run_installer "$stage" "$panel_host"
+  if ! run_installer "$stage" "$panel_host"; then
+    restore_caddy_frame
+    echo "testvm-deploy: install.sh failed (details: sudo tail -n 50 /var/log/mc-panel-install.log)" >&2
+    exit 1
+  fi
   finish "$stage" "$panel_host"
 
   cat <<EOF
@@ -83,10 +92,10 @@ mc-panel $(git -C "$SRC" describe --always --dirty) deployed.
 EOF
 }
 
-# install_packages: only what the build needs. Docker, Caddy, nftables, restic, sqlite3 and the
-# rest come from the installer (packages step).
+# install_packages: what the build and install-restic.sh need (bzip2 unpacks restic). Docker,
+# Caddy, nftables, sqlite3, tzdata and the rest come from the installer (packages step).
 install_packages() {
-  local pkgs=(ca-certificates curl git jq make xz-utils) missing=() p
+  local pkgs=(ca-certificates curl git jq make xz-utils bzip2) missing=() p
   for p in "${pkgs[@]}"; do
     dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'install ok installed' || missing+=("$p")
   done
@@ -173,6 +182,10 @@ stage_installer() {
   rm -rf "$dir"
   mkdir -p "$dir"
   cp "$SRC/bin/panel" "$SRC/bin/agent" "$SRC/bin/files" "$dir/"
+  if [ ! -f "$SRC/scripts/install/assemble.sh" ] || [ ! -d "$SRC/deploy" ]; then
+    echo "testvm-deploy: this ref has no installer (scripts/install/assemble.sh, deploy/); deploy a ref from sub-project 6 on" >&2
+    exit 1
+  fi
   cp -r "$SRC/deploy" "$dir/deploy"
   quiet bash "$SRC/scripts/install/assemble.sh" "$version" "$dir/install.sh"
   chmod 0755 "$dir/install.sh"
@@ -182,26 +195,43 @@ stage_installer() {
 # migrate_once: before sub-project 6 the VM was deployed by heredocs in this script (panel on
 # TCP 127.0.0.1:8080, no panel socket unit). The configs held nothing hand-made, so they are
 # moved aside (*.pre-installer) and the installer writes them anew; it would only add missing
-# keys and keep listen = "127.0.0.1:8080". The data (DB with the admin, secret key, worlds,
-# backups) stays; stopping the agent does not stop the Minecraft containers.
+# keys and keep listen = "127.0.0.1:8080". Only that old layout is moved, and never twice (an
+# existing *.pre-installer stays the copy of the original). The data (DB with the admin, secret
+# key, worlds, backups) stays; stopping the agent does not stop the Minecraft containers.
 migrate_once() {
-  [ -e /etc/systemd/system/mcpanel-panel.socket ] && return 0
+  sudo test -e "$INSTALLED_MARKER" && return 0
   sudo test -e /etc/mc-panel/panel.toml || return 0
+  sudo test -e /etc/mc-panel/panel.toml.pre-installer && return 0
+  sudo grep -qE '^[[:space:]]*listen[[:space:]]*=[[:space:]]*"127\.0\.0\.1:8080"' /etc/mc-panel/panel.toml || return 0
   log "migrate the pre-installer deployment"
   local f
   for f in /etc/mc-panel/panel.toml /etc/mc-panel/agent.toml /etc/mc-panel-files/files.toml; do
-    if sudo test -e "$f"; then
+    if sudo test -e "$f" && ! sudo test -e "$f.pre-installer"; then
       sudo mv "$f" "$f.pre-installer"
     fi
   done
   sudo systemctl stop mcpanel-panel.service mcpanel-files.service mcpanel-files.socket mcpanel-agent.service 2>/dev/null || true
 }
 
+# install_restic: the pinned restic of the files service (scripts/install-restic.sh, idempotent);
+# the installer takes it as restic_binary because /usr/local/bin comes first in PATH.
+install_restic() {
+  log "restic"
+  quiet sudo bash "$SRC/scripts/install-restic.sh"
+}
+
+caddy_validate() {
+  sudo runuser -u caddy -- env HOME=/var/lib/caddy caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1
+}
+
 # write_caddy_frame <panel_host> <ip>: the VM's Caddyfile around the installer's site: no trust
 # store changes (tls internal), the bare IP redirects to the panel name, and the installer's
 # import line already in its exact managed form (the installer then leaves the Caddyfile alone;
-# uninstall removes exactly that line). The installer validates and reloads Caddy when its site
-# changes; a frame that changed on its own is reloaded here.
+# uninstall removes exactly that line). It must be in place before the first install: the old
+# Caddyfile has the panel site inline, and the installer's import next to it would define the
+# site twice. The previous file stays in Caddyfile.testvm-prev for restore_caddy_frame. The
+# installer validates and reloads Caddy when its site changes; a frame that changed on its own
+# is validated and reloaded here (and put back if Caddy rejects it).
 write_caddy_frame() {
   local panel_host="$1" ip="$2" tmp
   tmp="$(mktemp)"
@@ -217,35 +247,55 @@ $ip {
 	redir https://$panel_host{uri}
 }
 EOF
-  if sudo cmp -s "$tmp" /etc/caddy/Caddyfile; then
+  if sudo cmp -s "$tmp" "$CADDYFILE"; then
     rm -f "$tmp"
     return 0
   fi
   log "Caddyfile frame"
   sudo install -d -m 0755 /etc/caddy
-  sudo install -m 0644 -o root -g root "$tmp" /etc/caddy/Caddyfile.new
-  sudo mv -f /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile
+  if sudo test -f "$CADDYFILE"; then
+    sudo cp -p "$CADDYFILE" "$CADDYFILE_PREV"
+  fi
+  sudo install -m 0644 -o root -g root "$tmp" "$CADDYFILE.new"
+  sudo mv -f "$CADDYFILE.new" "$CADDYFILE"
   rm -f "$tmp"
   # On the first run mc-panel.caddy does not exist yet: the installer writes it next and
   # reloads Caddy (the running Caddy keeps its old configuration until then).
   if [ -e /etc/caddy/mc-panel.caddy ] && systemctl is-active --quiet caddy.service; then
-    quiet sudo runuser -u caddy -- env HOME=/var/lib/caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+    if ! caddy_validate; then
+      restore_caddy_frame
+      echo "testvm-deploy: caddy rejects the new Caddyfile frame; the previous one is back" >&2
+      exit 1
+    fi
     sudo systemctl reload caddy.service
   fi
 }
 
-# run_installer <stage> <panel_host>: install on the first run, update afterwards (the same
-# build again needs --force). The VM keeps its own firewall (internal network): --no-firewall.
-# stdin is /dev/null and there is no terminal; the admin already exists in the database.
+# restore_caddy_frame: after a failed installer run (or a rejected frame), puts the previous
+# Caddyfile back if the current one does not validate (e.g. the import of a mc-panel.caddy that
+# was never written), so a later Caddy restart still comes up.
+restore_caddy_frame() {
+  if sudo test -f "$CADDYFILE_PREV" && ! caddy_validate; then
+    sudo cp -p "$CADDYFILE_PREV" "$CADDYFILE"
+    echo "testvm-deploy: restored the previous $CADDYFILE" >&2
+  fi
+}
+
+# run_installer <stage> <panel_host>: `install` until one has succeeded (marker
+# $INSTALLED_MARKER, root-only) and while the Caddy site is missing, `update` afterwards (the
+# same build again needs --force). The VM keeps its own firewall (internal network):
+# --no-firewall. stdin is /dev/null and there is no terminal; the admin already exists in the
+# database.
 run_installer() {
   local stage="$1" panel_host="$2"
-  if [ -e /etc/systemd/system/mcpanel-panel.socket ]; then
+  if sudo test -e "$INSTALLED_MARKER" && [ -e /etc/caddy/mc-panel.caddy ]; then
     log "install.sh update"
     sudo "$stage/install.sh" update --from-dir "$stage" --force --yes
-  else
-    log "install.sh install"
-    sudo "$stage/install.sh" install --from-dir "$stage" --tls internal --domain "$panel_host" --no-firewall --yes
+    return
   fi
+  log "install.sh install"
+  sudo "$stage/install.sh" install --from-dir "$stage" --tls internal --domain "$panel_host" --no-firewall --yes || return
+  sudo install -m 0600 -o root -g root /dev/null "$INSTALLED_MARKER"
 }
 
 # finish <stage> <panel_host>: health through Caddy, copy of the Caddy CA for the browser,
@@ -257,7 +307,13 @@ finish() {
     if curl -fsS -o /dev/null --cacert <(sudo cat "$CADDY_CA" 2>/dev/null) \
       --resolve "$panel_host:443:127.0.0.1" "https://$panel_host/api/health" 2>/dev/null; then
       sudo install -m 0644 -o "$(id -un)" "$CADDY_CA" "$HOME/caddy-root.crt"
-      sudo "$stage/install.sh" doctor || true
+      # Exit code 1 (warnings) is expected on the VM; 2 means a check failed.
+      local rc=0
+      sudo "$stage/install.sh" doctor || rc=$?
+      if [ "$rc" -ge 2 ]; then
+        echo "testvm-deploy: install.sh doctor reports failures (exit $rc)" >&2
+        exit 1
+      fi
       return 0
     fi
     sleep 1
