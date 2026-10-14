@@ -1,8 +1,9 @@
 # shellcheck shell=bash
 # Tests of lib.sh and main.sh (installer plan V2, V4). Run: bash scripts/install/test.sh
 # Tests override functions (called by the code under test) and set globals and KEY_* values
-# (read by it), which shellcheck cannot see from this file:
-# shellcheck disable=SC2034,SC2329
+# (read by it), which shellcheck cannot see from this file (SC2317 is the code of shellcheck
+# 0.9 on the CI runner, SC2329 that of newer versions):
+# shellcheck disable=SC2034,SC2317,SC2329
 
 test_version_ge() {
   version_ge 1.2.3 1.2.3
