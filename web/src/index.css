@@ -118,6 +118,7 @@
     --sidebar-border: #dcdcd8;
     --sidebar-ring: #358027;
     --rail: #ebebe8;
+    --pattern: #efefec;
 
     --bevel-hi: #ffffff;
     --bevel-lo: #c4c4bf;
@@ -197,6 +198,7 @@
     --sidebar-border: #0b0c0e;
     --sidebar-ring: #5cc14a;
     --rail: #0d0e11;
+    --pattern: #131417;
 
     --bevel-hi: #575b66;
     --bevel-lo: #24262c;
@@ -307,8 +309,8 @@
 @utility pixel-pattern {
     background-color: var(--background);
     background-image:
-        linear-gradient(45deg, var(--surface-2) 25%, transparent 25%, transparent 75%, var(--surface-2) 75%),
-        linear-gradient(45deg, var(--surface-2) 25%, transparent 25%, transparent 75%, var(--surface-2) 75%);
+        linear-gradient(45deg, var(--pattern) 25%, transparent 25%, transparent 75%, var(--pattern) 75%),
+        linear-gradient(45deg, var(--pattern) 25%, transparent 25%, transparent 75%, var(--pattern) 75%);
     background-size: 32px 32px;
     background-position: 0 0, 16px 16px;
 }
@@ -321,6 +323,6 @@
     @apply bg-background text-foreground;
     }
   html {
-    @apply font-sans;
+    @apply bg-background font-sans;
     }
 }

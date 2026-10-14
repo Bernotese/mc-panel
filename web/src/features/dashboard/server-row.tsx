@@ -9,10 +9,10 @@ import { PixelIcon } from '@/components/pixel-icon'
 import { alertKey, formatDecimal, reachability } from '@/features/monitoring/model'
 import { AddressLine } from '@/features/servers/address-line'
 import { describeInstance, formatCpu, formatGiB } from '@/features/servers/format'
+import { PowerButtons } from '@/features/servers/power-buttons'
 import { StatusBadge } from '@/features/servers/status-badge'
 import { useFormat } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { PowerIconButtons } from './power-icon-buttons'
 
 const TRANSITIONAL: ReadonlySet<ServerState> = new Set<ServerState>(['creating', 'starting', 'stopping', 'restarting', 'unknown'])
 
@@ -123,7 +123,7 @@ export function ServerRow({ server, metrics }: { server: Server; metrics?: Overv
       ) : null}
       {instance && canPower ? (
         <div className="shrink-0 self-end sm:self-center">
-          <PowerIconButtons server={server} />
+          <PowerButtons server={server} compact />
         </div>
       ) : null}
     </article>

@@ -11,7 +11,7 @@ import type {
   PluginUpdate,
   PluginVersion,
 } from '@/api/types'
-import { renderServerTab } from '@/features/servers/tab-test-utils'
+import { renderServerTab } from '@/test/render-section'
 import { server } from '@/mocks/node'
 import { pluginKindOf } from './model'
 import { PluginsTab } from './plugins-tab'

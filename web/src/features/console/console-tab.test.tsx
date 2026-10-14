@@ -8,7 +8,7 @@ import { server } from '@/mocks/node'
 import { ConsoleTab } from './console-tab'
 import { FakeEventSource } from './testing/fake-event-source'
 import { stubLogViewport } from './testing/layout'
-import { renderSection } from './testing/render-section'
+import { renderSection } from '@/test/render-section'
 
 let eventSeq = 1_000
 

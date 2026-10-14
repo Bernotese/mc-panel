@@ -1,5 +1,5 @@
 import { screen } from '@testing-library/react'
-import { renderServerTab } from '@/features/servers/tab-test-utils'
+import { renderServerTab } from '@/test/render-section'
 import { FilesTab } from './files-tab'
 
 export async function openFiles(serverId = 1, username = 'admin') {

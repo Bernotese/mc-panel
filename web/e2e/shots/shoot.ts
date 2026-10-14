@@ -2,16 +2,21 @@ import { expect, type Page } from '@playwright/test'
 
 const VIEWPORTS = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 } } as const
 
+/**
+ * Switches the theme the way a user with preference "system" sees it: the stored preference stays "system" and the
+ * emulated colour scheme flips, so the app (watchSystemTheme) and the toaster (theme="system") follow together.
+ */
 async function setTheme(page: Page, theme: 'dark' | 'light') {
-  await page.evaluate((t) => {
-    localStorage.setItem('mcpanel.theme', t)
-    document.documentElement.classList.toggle('dark', t === 'dark')
-    document.documentElement.style.colorScheme = t
-  }, theme)
+  await page.evaluate(() => localStorage.setItem('mcpanel.theme', 'system'))
+  await page.emulateMedia({ colorScheme: theme })
 }
+
+// Without transitions a shot never catches a colour change halfway (washed-out badges in light shots).
+const NO_TRANSITIONS = '*, *::before, *::after { transition: none !important; animation-duration: 0s !important; }'
 
 /** Screenshots of the current page in both themes and both viewports (web/screenshots/, not committed). */
 export async function shoot(page: Page, name: string) {
+  await page.addStyleTag({ content: NO_TRANSITIONS })
   for (const [vp, size] of Object.entries(VIEWPORTS)) {
     await page.setViewportSize(size)
     for (const theme of ['dark', 'light'] as const) {
