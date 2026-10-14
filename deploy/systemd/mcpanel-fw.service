@@ -5,6 +5,7 @@
 Description=mc-panel host firewall (nftables table inet mcpanel_fw)
 DefaultDependencies=no
 Wants=network-pre.target
+After=nftables.service
 Before=network-pre.target shutdown.target
 Conflicts=shutdown.target
 
@@ -12,6 +13,9 @@ Conflicts=shutdown.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/sbin/nft -f /etc/mc-panel/mcpanel_fw.nft
+# The file replaces the table atomically (table {} + delete table + table), so a reload never
+# leaves the host without rules.
+ExecReload=/usr/sbin/nft -f /etc/mc-panel/mcpanel_fw.nft
 ExecStop=/usr/sbin/nft delete table inet mcpanel_fw
 
 [Install]

@@ -13,5 +13,6 @@ table inet mcpanel_fw {
 		tcp dport { {{SSH_PORT}} } accept
 		tcp dport { 80, 443, 25565 } accept
 		udp dport 443 accept
+		{{EXTRA_RULES}}
 	}
 }
