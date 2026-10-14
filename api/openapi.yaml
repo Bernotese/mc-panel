@@ -449,6 +449,15 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: 'No catalog for modrinth/curseforge (the pack decides the version)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: 'catalog_unavailable: upstream not reachable or invalid; the form falls back to free text', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/memory:
+    get:
+      operationId: getServerMemoryLimits
+      tags: [servers]
+      description: 'Memory limits for the server form: the per-server maximum follows the host memory, (MemTotal − 1 GiB) / 1.25 in steps of 256 MiB within 1..32 GiB; create and update reject memory_mib above it (validation_failed).'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ServerMemoryLimits' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /servers/settings:
     get:
       operationId: getServerSettings
@@ -1616,7 +1625,7 @@ components:
         loader_version: { type: [string, 'null'] }
         modpack: { type: [string, 'null'] }
         java: { $ref: '#/components/schemas/JavaVersion' }
-        memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256 }
+        memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256, description: 'At most max_mib of GET /servers/memory on this host' }
         properties: { $ref: '#/components/schemas/ServerProperties', description: All fields set (defaults resolved) }
     ServerStatus:
       type: object
@@ -1673,7 +1682,7 @@ components:
         loader_version: { type: [string, 'null'] }
         modpack: { type: [string, 'null'] }
         java: { $ref: '#/components/schemas/JavaVersion', description: Derived from type/version if omitted }
-        memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256 }
+        memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256, description: 'At most max_mib of GET /servers/memory on this host' }
         properties: { $ref: '#/components/schemas/ServerProperties' }
         eula_accepted: { type: boolean, const: true }
     UpdateServerRequest:
@@ -1685,7 +1694,7 @@ components:
         loader_version: { type: [string, 'null'] }
         modpack: { type: [string, 'null'] }
         java: { $ref: '#/components/schemas/JavaVersion' }
-        memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256 }
+        memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256, description: 'At most max_mib of GET /servers/memory on this host' }
         properties: { $ref: '#/components/schemas/ServerProperties' }
     PowerRequest:
       type: object
@@ -1720,6 +1729,28 @@ components:
         name:
           type: string
           description: "Server name from the mcpanel.name label of the container, not the container name mcpanel-mc-<id>"
+    ServerMemoryLimits:
+      type: object
+      required: [min_mib, max_mib, step_mib, host_total_mib, allocated_mib, recommended_mib]
+      properties:
+        min_mib: { type: integer, description: 'Smallest memory_mib (1024)' }
+        max_mib: { type: integer, description: 'Largest memory_mib a single server may get on this host: (host_total_mib − 1024) / 1.25, rounded down to step_mib, within min_mib..32768; 32768 if the host memory is unknown' }
+        step_mib: { type: integer, description: 'memory_mib must be a multiple of it (256)' }
+        host_total_mib: { type: [integer, 'null'], description: 'Installed memory of the host (MemTotal); null if unknown (development on macOS)' }
+        allocated_mib: { type: integer, format: int64, description: 'Sum of memory_mib of all servers (the form warns when a new total exceeds host_total_mib; stopped servers use no memory, so it is no limit)' }
+        recommended_mib:
+          type: object
+          description: 'Suggested memory_mib of a new server per type: 4096 (vanilla, paper, purpur) or 6144 (mod loaders, modpacks), at most half of host_total_mib − 1024 − allocated_mib, at least min_mib, at most max_mib'
+          required: [vanilla, paper, purpur, fabric, neoforge, modrinth, curseforge]
+          additionalProperties: false
+          properties:
+            vanilla: { type: integer }
+            paper: { type: integer }
+            purpur: { type: integer }
+            fabric: { type: integer }
+            neoforge: { type: integer }
+            modrinth: { type: integer }
+            curseforge: { type: integer }
     ServerSettings:
       type: object
       required: [base_domain, curseforge_api_key_set, backup_timezone, docker, unknown_containers]

@@ -17,6 +17,16 @@ export const MIN_MEMORY_MIB = 1024
 export const MAX_MEMORY_MIB = 32768
 export const MEMORY_STEP_MIB = 256
 export const DEFAULT_MEMORY_MIB = 4096
+
+/** Memory bounds of one server; the host-dependent ones come from GET /servers/memory. */
+export interface MemoryLimits {
+  min: number
+  max: number
+  step: number
+}
+
+/** instancespec's absolute bounds: used until (or if never) the panel reports the host limits. */
+export const STATIC_MEMORY_LIMITS: MemoryLimits = { min: MIN_MEMORY_MIB, max: MAX_MEMORY_MIB, step: MEMORY_STEP_MIB }
 export const MAX_MOTD_LENGTH = 150
 export const MAX_SEED_LENGTH = 64
 export const MAX_BASE_DOMAIN_LENGTH = 200
@@ -73,9 +83,9 @@ export function memoryMiBFromGiB(text: string): number | null {
   return Number.isFinite(gib) ? gib * 1024 : null
 }
 
-export function validateMemoryMiB(mib: number | null): FieldError | null {
-  const valid = mib !== null && Number.isInteger(mib) && mib >= MIN_MEMORY_MIB && mib <= MAX_MEMORY_MIB && mib % MEMORY_STEP_MIB === 0
-  return valid ? null : fieldError('servers.validation.memory', { min: MIN_MEMORY_MIB / 1024, max: MAX_MEMORY_MIB / 1024 })
+export function validateMemoryMiB(mib: number | null, limits: MemoryLimits = STATIC_MEMORY_LIMITS): FieldError | null {
+  const valid = mib !== null && Number.isInteger(mib) && mib >= limits.min && mib <= limits.max && mib % limits.step === 0
+  return valid ? null : fieldError('servers.validation.memory', { min: limits.min / 1024, max: limits.max / 1024 })
 }
 
 /**

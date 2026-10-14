@@ -18,6 +18,7 @@ var wantRoutes = map[string]rbac.Rule{
 	"GET /api/servers":                rbac.Authenticated(),
 	"POST /api/servers":               rbac.Admin().WithSudo(),
 	"GET /api/servers/catalog/{type}": rbac.Admin(),
+	"GET /api/servers/memory":         rbac.Admin(),
 	"GET /api/servers/settings":       rbac.Admin(),
 	"PUT /api/servers/settings":       rbac.Admin().WithSudo(),
 	"GET /api/servers/{id}":           rbac.Server(rbac.PermServerView, "id"),

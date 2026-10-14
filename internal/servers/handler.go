@@ -38,6 +38,10 @@ type Deps struct {
 	// Backups deletes a server's backups on DELETE /servers/{id}?purge_backups=1; nil = nothing
 	// to delete.
 	Backups BackupPurger
+	// HostMemory returns the installed memory of the host in bytes (hostinfo.MemTotal); it
+	// decides the per-server memory limit (MaxMemoryMiB). nil or an error = unknown: only
+	// instancespec.MaxMemoryMiB applies.
+	HostMemory func() (uint64, error)
 }
 
 type Handler struct {
@@ -52,9 +56,11 @@ type Handler struct {
 	gate    DataGate
 	backups BackupPurger
 	log     *slog.Logger
-	power   *powerLimiter
-	kick    chan struct{} // Trigger -> reconcile loop (buffer 1, never blocks)
-	status  statusCache   // last actual state reported by the agent
+	// hostMemory: see Deps.HostMemory.
+	hostMemory func() (uint64, error)
+	power      *powerLimiter
+	kick       chan struct{} // Trigger -> reconcile loop (buffer 1, never blocks)
+	status     statusCache   // last actual state reported by the agent
 
 	reconcile reconcileState
 }
@@ -82,7 +88,7 @@ func NewHandler(d Deps) *Handler {
 	}
 	return &Handler{
 		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst, catalog: cat, log: log,
-		gate: gate, backups: purger, ioClock: clock.Real{},
+		gate: gate, backups: purger, ioClock: clock.Real{}, hostMemory: d.HostMemory,
 		power: newPowerLimiter(), kick: make(chan struct{}, 1),
 		reconcile: reconcileState{attempts: map[int64]attempt{}, warned: map[int64]bool{}, foreign: map[int64]bool{}},
 	}
@@ -102,6 +108,7 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Get("/servers", rbac.Authenticated(), h.handleListServers)
 	api.Post("/servers", rbac.Admin().WithSudo(), h.handleCreateServer)
 	api.Get("/servers/catalog/{type}", rbac.Admin(), h.handleGetCatalog)
+	api.Get("/servers/memory", rbac.Admin(), h.handleGetMemoryLimits)
 	api.Get("/servers/settings", rbac.Admin(), h.handleGetSettings)
 	api.Put("/servers/settings", rbac.Admin().WithSudo(), h.handleUpdateSettings)
 	api.Get("/servers/{id}", rbac.Server(rbac.PermServerView, "id"), h.handleGetServer)

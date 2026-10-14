@@ -3,21 +3,24 @@ import { Link } from '@tanstack/react-router'
 import { useId, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { isSudoCancelled } from '@/api/errors'
-import type { Catalog, InstanceType, JavaVersion } from '@/api/types'
+import type { Catalog, InstanceType, JavaVersion, ServerMemoryLimits } from '@/api/types'
 import { NativeSelect } from '@/components/native-select'
 import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { errorMessage } from '@/lib/error-message'
+import { useFormat } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { catalogQueryOptions } from './api'
+import { catalogQueryOptions, memoryLimitsQueryOptions } from './api'
 import { CollapsibleSection } from './collapsible-section'
 import { FieldRow } from './field-row'
 import {
   effectiveJava,
   effectiveVersion,
   EULA_URL,
+  memoryLimitsFrom,
+  memoryOvercommit,
   PROPERTY_FIELDS,
   resolveServerForm,
   sameFormValue,
@@ -27,19 +30,9 @@ import {
   type ServerFormResult,
   type ServerFormValue,
 } from './form-model'
-import { javaLabel, serverAddress } from './format'
+import { javaLabel, memoryInputValue, serverAddress } from './format'
 import { PropertiesFields } from './properties-fields'
-import {
-  DEFAULT_MEMORY_MIB,
-  INSTANCE_TYPES,
-  isModpack,
-  JAVA_VERSIONS,
-  MAX_MEMORY_MIB,
-  MEMORY_STEP_MIB,
-  memoryMiBFromGiB,
-  MIN_MEMORY_MIB,
-  type FieldError,
-} from './validation'
+import { INSTANCE_TYPES, isModpack, JAVA_VERSIONS, memoryMiBFromGiB, type FieldError, type MemoryLimits } from './validation'
 
 type Shown = (field: FormField) => FieldError | undefined
 type Update = (patch: Partial<ServerFormValue>, ...fields: FormField[]) => void
@@ -73,12 +66,17 @@ export function ServerForm({
 }: ServerFormProps) {
   const { t } = useTranslation()
   const id = useId()
-  const [value, setValue] = useState<ServerFormValue>(initial)
+  const [draft, setValue] = useState<ServerFormValue>(initial)
   const [touched, setTouched] = useState<ReadonlySet<FormField>>(() => new Set())
   const [submitted, setSubmitted] = useState(false)
-  const modpack = isModpack(value.type)
-  const catalog = useQuery({ ...catalogQueryOptions(value.type), enabled: !modpack })
-  const ctx: FormContext = { mode, catalog: catalog.data, curseforgeKeySet }
+  const modpack = isModpack(draft.type)
+  const catalog = useQuery({ ...catalogQueryOptions(draft.type), enabled: !modpack })
+  // Without the host limits (still loading or failed) the form falls back to 1..32 GiB; the panel checks again.
+  const memoryLimits = useQuery(memoryLimitsQueryOptions)
+  // A new server follows the recommendation for its type until the admin changes the memory.
+  const recommendedMiB = mode === 'create' ? memoryLimits.data?.recommended_mib[draft.type] : undefined
+  const value = recommendedMiB !== undefined && !touched.has('memory') ? { ...draft, memoryGiB: memoryInputValue(recommendedMiB) } : draft
+  const ctx: FormContext = { mode, catalog: catalog.data, curseforgeKeySet, memory: memoryLimitsFrom(memoryLimits.data) }
   const errors = validateServerForm(value, ctx)
   const hasErrors = Object.keys(errors).length > 0
   const dirty = mode === 'create' || !sameFormValue(value, initial)
@@ -129,7 +127,15 @@ export function ServerForm({
         </div>
       </Section>
       <Section title={t('servers.form.section.resources')}>
-        <MemoryField id={`${id}-memory`} text={value.memoryGiB} error={shown('memory')} onChange={(memoryGiB) => update({ memoryGiB }, 'memory')} />
+        <MemoryField
+          id={`${id}-memory`}
+          text={value.memoryGiB}
+          error={shown('memory')}
+          limits={memoryLimits.data}
+          ownMiB={mode === 'edit' ? (memoryMiBFromGiB(initial.memoryGiB) ?? 0) : 0}
+          recommendedMiB={recommendedMiB}
+          onChange={(memoryGiB) => update({ memoryGiB }, 'memory')}
+        />
       </Section>
       <CollapsibleSection
         title={t('servers.form.advanced')}
@@ -385,39 +391,72 @@ function VersionFields({ id, value, catalog, catalogPending, catalogFailed, show
   )
 }
 
-function MemoryField({ id, text, error, onChange }: { id: string; text: string; error: FieldError | undefined; onChange(text: string): void }) {
+interface MemoryFieldProps {
+  id: string
+  text: string
+  error: FieldError | undefined
+  /** Host limits from GET /servers/memory; undefined = static 1..32 GiB, no host hints. */
+  limits: ServerMemoryLimits | undefined
+  /** Memory this server already counts in limits.allocated_mib (edit), 0 for a new one. */
+  ownMiB: number
+  /** create only: the suggested size for the chosen type */
+  recommendedMiB: number | undefined
+  onChange(text: string): void
+}
+
+function MemoryField({ id, text, error, limits, ownMiB, recommendedMiB, onChange }: MemoryFieldProps) {
   const { t } = useTranslation()
+  const fmt = useFormat()
+  const bounds: MemoryLimits = memoryLimitsFrom(limits)
+  const gib = (mib: number) => new Intl.NumberFormat(fmt.locale, { maximumFractionDigits: 2 }).format(mib / 1024)
   const mib = memoryMiBFromGiB(text)
-  const slider = mib !== null && mib >= MIN_MEMORY_MIB && mib <= MAX_MEMORY_MIB ? mib / 1024 : DEFAULT_MEMORY_MIB / 1024
+  const fallback = Math.min(Math.max(recommendedMiB ?? ownMiB, bounds.min), bounds.max)
+  const slider = mib !== null && mib >= bounds.min && mib <= bounds.max ? mib / 1024 : fallback / 1024
+  const range = { min: gib(bounds.min), max: gib(bounds.max) }
+  const hint =
+    limits?.host_total_mib != null
+      ? t('servers.form.memory_hint_host', { ...range, host: gib(limits.host_total_mib) })
+      : t('servers.form.memory_hint', range)
+  const overcommit = memoryOvercommit(mib, limits, ownMiB)
+  // The range in the error follows the locale like the hint (11,5 instead of 11.5).
+  const shownError = error?.key === 'servers.validation.memory' ? { ...error, params: range } : error
   return (
-    <FieldRow id={id} label={t('servers.form.memory')} hint={t('servers.form.memory_hint')} error={error}>
-      {(c) => (
-        <div className="flex items-center gap-3">
-          <input
-            type="range"
-            min={MIN_MEMORY_MIB / 1024}
-            max={MAX_MEMORY_MIB / 1024}
-            step={MEMORY_STEP_MIB / 1024}
-            value={slider}
-            aria-label={t('servers.form.memory_slider')}
-            aria-valuetext={`${slider} GiB`}
-            className="accent-primary h-2 min-w-0 flex-1"
-            onChange={(e) => onChange(e.target.value)}
-          />
-          <Input
-            {...c}
-            type="number"
-            inputMode="decimal"
-            min={MIN_MEMORY_MIB / 1024}
-            max={MAX_MEMORY_MIB / 1024}
-            step={MEMORY_STEP_MIB / 1024}
-            className="w-24"
-            value={text}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        </div>
-      )}
-    </FieldRow>
+    <div className="space-y-2">
+      <FieldRow id={id} label={t('servers.form.memory')} hint={hint} error={shownError}>
+        {(c) => (
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min={bounds.min / 1024}
+              max={bounds.max / 1024}
+              step={bounds.step / 1024}
+              value={slider}
+              aria-label={t('servers.form.memory_slider')}
+              aria-valuetext={`${slider} GiB`}
+              className="accent-primary h-2 min-w-0 flex-1"
+              onChange={(e) => onChange(e.target.value)}
+            />
+            <Input
+              {...c}
+              type="number"
+              inputMode="decimal"
+              min={bounds.min / 1024}
+              max={bounds.max / 1024}
+              step={bounds.step / 1024}
+              className="w-24"
+              value={text}
+              onChange={(e) => onChange(e.target.value)}
+            />
+          </div>
+        )}
+      </FieldRow>
+      {recommendedMiB !== undefined ? <p className="text-muted-foreground text-sm">{t('servers.form.memory_recommended', { value: gib(recommendedMiB) })}</p> : null}
+      {overcommit ? (
+        <p role="status" className="text-status-starting text-sm">
+          {t('servers.form.memory_overcommit', { total: gib(overcommit.totalMiB), host: gib(overcommit.hostMiB) })}
+        </p>
+      ) : null}
+    </div>
   )
 }
 

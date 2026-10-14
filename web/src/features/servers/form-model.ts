@@ -1,4 +1,4 @@
-import type { Catalog, Difficulty, Gamemode, InstanceConfig, InstanceType, JavaVersion, LevelType, ServerProperties } from '@/api/types'
+import type { Catalog, Difficulty, Gamemode, InstanceConfig, InstanceType, JavaVersion, LevelType, ServerMemoryLimits, ServerProperties } from '@/api/types'
 import { memoryInputValue } from './format'
 import { javaFor } from './java'
 import {
@@ -8,6 +8,7 @@ import {
   MAX_MOTD_LENGTH,
   MAX_SEED_LENGTH,
   memoryMiBFromGiB,
+  STATIC_MEMORY_LIMITS,
   validateIntInRange,
   validateLoaderVersion,
   validateMemoryMiB,
@@ -16,6 +17,7 @@ import {
   validateText,
   validateVersion,
   type FieldError,
+  type MemoryLimits,
 } from './validation'
 
 export const EULA_URL = 'https://aka.ms/MinecraftEULA'
@@ -84,6 +86,23 @@ export interface FormContext {
   mode: 'create' | 'edit'
   catalog: Catalog | undefined
   curseforgeKeySet: boolean
+  /** Per-server memory bounds of this host; omitted = instancespec's static 1..32 GiB. */
+  memory?: MemoryLimits
+}
+
+/** The bounds the form enforces: the host limits once the panel reported them, the static ones before. */
+export function memoryLimitsFrom(limits: ServerMemoryLimits | undefined): MemoryLimits {
+  return limits ? { min: limits.min_mib, max: limits.max_mib, step: limits.step_mib } : STATIC_MEMORY_LIMITS
+}
+
+/**
+ * Sum of all servers' memory if this server gets mib, when it exceeds the host memory (only a warning: stopped servers
+ * use no memory). ownMiB is what this server already counts in allocated_mib (0 for a new one).
+ */
+export function memoryOvercommit(mib: number | null, limits: ServerMemoryLimits | undefined, ownMiB: number): { totalMiB: number; hostMiB: number } | null {
+  if (mib === null || !limits || limits.host_total_mib === null) return null
+  const totalMiB = limits.allocated_mib - ownMiB + mib
+  return totalMiB > limits.host_total_mib ? { totalMiB, hostMiB: limits.host_total_mib } : null
 }
 
 /** Defaults of spec §7; the MOTD default (server name) is applied by the panel when motd is omitted. */
@@ -186,7 +205,7 @@ export function validateServerForm(value: ServerFormValue, ctx: FormContext): Fo
   if (hasLoader(value.type)) check('loader_version', validateLoaderVersion(value.loaderVersion.trim()))
   check('modpack', validateModpack(value.type, value.modpack.trim()))
   if (value.type === 'curseforge' && effectiveJava(value, ctx.catalog) === 'java8') errors.java = { key: 'servers.validation.java_curseforge' }
-  check('memory', validateMemoryMiB(memoryMiBFromGiB(value.memoryGiB)))
+  check('memory', validateMemoryMiB(memoryMiBFromGiB(value.memoryGiB), ctx.memory))
   const p = value.properties
   check('properties.motd', validateText(p.motd, MAX_MOTD_LENGTH))
   check('properties.max_players', validateIntInRange(p.max_players, 1, 500))
