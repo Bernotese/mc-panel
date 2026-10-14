@@ -6,9 +6,9 @@ import { api } from '@/api/client'
 import { unwrap, unwrapVoid } from '@/api/errors'
 import type { Session } from '@/api/types'
 import { DataList } from '@/components/data-list'
+import { Section } from '@/components/section'
 import { errorMessage, useErrorToast } from '@/lib/error-message'
 import { useFormat } from '@/lib/format'
-import { SectionCard } from './section-card'
 import { buildSessionColumns, useDeviceLabel } from './session-columns'
 import { allSessionsKey } from './query-keys'
 
@@ -29,7 +29,7 @@ export function AdminSessionsCard() {
   })
 
   return (
-    <SectionCard title={t('profile.sessions.all_title')} className="md:col-span-2">
+    <Section title={t('profile.sessions.all_title')}>
       {sessions.isError ? (
         <p role="alert" className="text-destructive">
           {errorMessage(sessions.error, t)}
@@ -46,6 +46,6 @@ export function AdminSessionsCard() {
           empty={t('profile.sessions.empty')}
         />
       )}
-    </SectionCard>
+    </Section>
   )
 }

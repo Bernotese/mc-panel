@@ -6,6 +6,7 @@ import { api } from '@/api/client'
 import { unwrapVoid } from '@/api/errors'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { dialogLock, guardClose } from '@/components/dialog-lock'
+import { Section } from '@/components/section'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -13,7 +14,6 @@ import { refreshMe, useMe } from '@/features/auth/me'
 import { RecoveryCodesPanel } from '@/features/setup/recovery-codes-panel'
 import { TotpSetupCard } from '@/features/setup/totp-setup-card'
 import { useErrorToast } from '@/lib/error-message'
-import { SectionCard } from './section-card'
 
 export function TwoFactorCard() {
   const { t } = useTranslation()
@@ -44,7 +44,7 @@ export function TwoFactorCard() {
   }
 
   return (
-    <SectionCard
+    <Section
       title={t('profile.totp.title')}
       actions={<Badge variant={enabled ? 'secondary' : 'outline'}>{enabled ? t('profile.totp.enabled') : t('profile.totp.disabled')}</Badge>}
     >
@@ -87,6 +87,6 @@ export function TwoFactorCard() {
         pending={disable.isPending}
         onConfirm={() => disable.mutate()}
       />
-    </SectionCard>
+    </Section>
   )
 }

@@ -8,10 +8,10 @@ import { unwrap, unwrapVoid } from '@/api/errors'
 import type { Session } from '@/api/types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { DataList } from '@/components/data-list'
+import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
 import { errorMessage, useErrorToast } from '@/lib/error-message'
 import { useFormat } from '@/lib/format'
-import { SectionCard } from './section-card'
 import { buildSessionColumns, useDeviceLabel } from './session-columns'
 import { mySessionsKey } from './query-keys'
 
@@ -45,9 +45,9 @@ export function SessionsCard() {
   const hasOthers = (sessions.data ?? []).some((s) => !s.current)
 
   return (
-    <SectionCard
+    <Section
       title={t('profile.sessions.title')}
-      className="md:col-span-2"
+     
       actions={
         <Button type="button" variant="outline" size="sm" disabled={!hasOthers} onClick={() => setConfirmOthers(true)}>
           {t('profile.sessions.revoke_others')}
@@ -80,6 +80,6 @@ export function SessionsCard() {
         pending={revokeOthers.isPending}
         onConfirm={() => revokeOthers.mutate()}
       />
-    </SectionCard>
+    </Section>
   )
 }
