@@ -11,8 +11,8 @@ import (
 	"github.com/Bernotese/mc-panel/internal/config"
 )
 
-// The real fd-3 path of socket activation is exercised on the test VM and in
-// scripts/ci-instances.sh (Phase C), not here: a unit test cannot own fd 3 safely.
+// Socket activation (unixsock.Activated) is tested in internal/unixsock, including a real
+// fd-3 handover to a child process.
 
 func TestRunVersion(t *testing.T) {
 	var out bytes.Buffer
@@ -44,27 +44,6 @@ func TestRunRejectsBrokenConfig(t *testing.T) {
 	}
 	if err := run(context.Background(), []string{"-config", p}, &bytes.Buffer{}, &bytes.Buffer{}, func() int { return 1000 }); err == nil {
 		t.Fatal("unknown config key accepted")
-	}
-}
-
-func TestActivatedListener(t *testing.T) {
-	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
-	var unset []string
-	unsetenv := func(k string) error { unset = append(unset, k); return nil }
-
-	l, err := activatedListener(env(nil), unsetenv, 42)
-	if l != nil || err != nil {
-		t.Fatalf("no activation: %v %v", l, err)
-	}
-	if len(unset) != 3 {
-		t.Fatalf("activation variables not removed: %v", unset)
-	}
-	l, err = activatedListener(env(map[string]string{"LISTEN_PID": "7", "LISTEN_FDS": "1"}), unsetenv, 42)
-	if l != nil || err != nil {
-		t.Fatalf("activation for another pid must be ignored: %v %v", l, err)
-	}
-	if _, err := activatedListener(env(map[string]string{"LISTEN_PID": "42", "LISTEN_FDS": "2"}), unsetenv, 42); err == nil {
-		t.Fatal("two sockets accepted")
 	}
 }
 

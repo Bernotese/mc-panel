@@ -1,0 +1,6 @@
+# Created by mc-panel install.sh {{VERSION}}. Later runs only add missing keys; your edits stay.
+# socket is only used without systemd socket activation (mcpanel-files.socket hands it over).
+socket = "/run/mc-panel-files/files.sock"
+panel_uid = {{PANEL_UID}}
+instances_dir = "{{INSTANCES_DIR}}"
+restic_binary = "{{RESTIC_BINARY}}"

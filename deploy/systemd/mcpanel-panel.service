@@ -1,0 +1,22 @@
+# Managed by mc-panel install.sh {{VERSION}}; install.sh update rewrites this file.
+[Unit]
+Description=mc-panel web panel
+Requires=mcpanel-panel.socket
+Wants=mcpanel-agent.service mcpanel-files.socket
+After=network-online.target mcpanel-panel.socket mcpanel-agent.service mcpanel-files.socket
+
+[Service]
+User=mcpanel
+Group=mcpanel
+StateDirectory=mc-panel
+StateDirectoryMode=0700
+ExecStart=/usr/local/bin/panel serve -config /etc/mc-panel/panel.toml
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

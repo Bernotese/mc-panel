@@ -1,0 +1,6 @@
+# Managed by mc-panel install.sh {{VERSION}}; install.sh update rewrites this file.
+# Imported from /etc/caddy/Caddyfile (line "import mc-panel.caddy"); other sites stay there.
+{{DOMAIN}} {
+	{{TLS}}
+	reverse_proxy unix//run/mc-panel-web/panel.sock
+}

@@ -17,6 +17,9 @@ before:
     # Builds the React app into internal/webui/dist, which cmd/panel embeds via go:embed.
     # The release workflow runs this step itself (without GITHUB_TOKEN) and passes --skip=before.
     - make web-build
+    # The installer (installer spec §3) as its own release asset, with the release version.
+    # The release workflow assembles it itself (it passes --skip=before).
+    - make installer INSTALLER_VERSION={{ .Version }}
 
 builds:
   - id: panel
@@ -96,13 +99,17 @@ archives:
     formats:
       - tar.gz
     name_template: "mc-panel_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    # Binaries only: "none*" matches nothing and disables the default README/LICENSE globs.
+    # Binaries plus the templates the installer uses with --from-dir (installer spec §3); this
+    # also replaces the default README/LICENSE globs.
     files:
-      - none*
+      - deploy/**/*
 
 checksum:
   name_template: checksums.txt
   algorithm: sha256
+  # install.sh is assembled into build/ by the before hook (make installer).
+  extra_files:
+    - glob: ./build/install.sh
 
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
@@ -128,3 +135,5 @@ release:
   name_template: "mc-panel {{ .Version }}"
   prerelease: auto
   draft: false
+  extra_files:
+    - glob: ./build/install.sh
