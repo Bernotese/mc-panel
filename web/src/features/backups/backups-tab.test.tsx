@@ -36,6 +36,13 @@ describe('backups tab', () => {
     expect(within(list).getAllByText('Geplant')).toHaveLength(1)
   })
 
+  it('shows snapshots and schedule as labelled sections', async () => {
+    mockOverview(overview({ snapshots: [snapshot(1)] }))
+    await openBackups()
+    expect(await screen.findByRole('region', { name: 'Snapshots' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Zeitplan' })).toBeInTheDocument()
+  })
+
   it('shows an empty list with a hint', async () => {
     mockOverview(overview())
     await openBackups()

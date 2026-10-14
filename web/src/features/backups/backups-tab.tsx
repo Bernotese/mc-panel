@@ -5,8 +5,8 @@ import { toast } from 'sonner'
 import { isApiError } from '@/api/errors'
 import type { BackupSnapshot, Server } from '@/api/types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
-import { SectionCard } from '@/features/profile/section-card'
 import { errorMessage } from '@/lib/error-message'
 import { useFormat } from '@/lib/format'
 import {
@@ -139,16 +139,16 @@ export function BackupsTab({ server }: { server: Server }) {
   const data = overview.data
   if (!data.available) {
     return (
-      <p role="status" className="rounded-md border p-4 text-sm">
+      <p role="status" className="bevel-inset px-4 py-3 text-sm">
         {t('backups.unavailable')}
       </p>
     )
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-6">
       {visibleJob ? <JobStatus job={visibleJob} onDismiss={() => setDismissed(visibleJob.id)} /> : null}
-      <SectionCard
+      <Section
         title={t('backups.snapshots.title')}
         actions={
           <Button type="button" size="sm" disabled={busy} onClick={() => setCreating(true)}>
@@ -165,7 +165,7 @@ export function BackupsTab({ server }: { server: Server }) {
           onRestore={setRestoring}
           onDelete={setDeleting}
         />
-      </SectionCard>
+      </Section>
       <ScheduleCard serverId={server.id} schedule={data.schedule} />
       {creating ? <CreateBackupDialog pending={create.isPending} onClose={() => setCreating(false)} onSubmit={(note) => startOnce(() => create.mutate(note))} /> : null}
       {restoring ? (
