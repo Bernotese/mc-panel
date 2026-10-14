@@ -27,9 +27,9 @@ defaults:
 jobs:
   # Decides which jobs a pull request needs (git diff against the merge base, no third-party
   # action). The weekly run, manual runs and any change to this workflow run everything. Pushes
-  # to main run every job on the self-hosted test-VM runners (free), but not the two root jobs
-  # on GitHub-hosted runners (instances, nftables): the pull request already ran them on the
-  # same tree, and they cost most of the billed minutes.
+  # to main run every job on the self-hosted test-VM runners (free), but not the root jobs on
+  # GitHub-hosted runners (instances, nftables, installer): the pull request already ran them
+  # on the same tree, and they cost most of the billed minutes.
   #
   # Runner placement: jobs without root run on the self-hosted runners on the test VM (labels
   # self-hosted + mcpanel-vm; two runners, see docs/dev/README.md). Their timing-sensitive test
@@ -49,6 +49,7 @@ jobs:
       instances: ${{ steps.diff.outputs.instances }}
       release: ${{ steps.diff.outputs.release }}
       installer: ${{ steps.diff.outputs.installer }}
+      installer_root: ${{ steps.diff.outputs.installer_root }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,7 +96,11 @@ jobs:
           out nftables "^internal/(agent|defense|auth)/|^cmd/(agent|panel)/|^scripts/ci-acceptance\.sh$|${gomod}" root
           out instances "^(cmd|internal)/|^scripts/(ci-instances\.sh|mc-status\.py|install-restic\.sh)$|${gomod}" root
           out release "^cmd/|^internal/webui/|^deploy/|^scripts/install/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
-          out installer '^scripts/install/|^deploy/|^scripts/ci-installer\.sh$|^scripts/testvm-deploy\.sh$|^Makefile$|^\.goreleaser\.yaml$'
+          # One filter for both installer jobs: the lint on every run, the lifecycle (root) not on
+          # pushes to main.
+          installer="^scripts/install/|^deploy/|^scripts/(ci-installer|install-restic|testvm-deploy)\.sh$|^cmd/|^internal/(config|unixsock)/|^\.goreleaser\.yaml$|^Makefile$|${gomod}"
+          out installer "${installer}"
+          out installer_root "${installer}" root
 
   go:
     name: Go (race tests, lint, vulns)
@@ -525,10 +530,38 @@ jobs:
         run: make installer INSTALLER_VERSION=0.0.0-ci
 
       - name: shellcheck
-        run: shellcheck --version && shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh
+        run: shellcheck --version && shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh scripts/ci-installer.sh scripts/testvm-deploy.sh
 
       - name: Bash tests
         run: bash scripts/install/test.sh
+
+  installer:
+    name: Installer lifecycle (root)
+    needs: changes
+    if: needs.changes.outputs.installer_root == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Install (tls internal, firewall on), doctor, idempotence, sign-in through Caddy, update,
+      # update with a broken panel (automatic rollback), uninstall (data kept, foreign objects
+      # untouched), reinstall over the data, uninstall --purge with the typed domain. Ubuntu
+      # 24.04 only with MCPANEL_INSTALL_ALLOW_UNSUPPORTED=1 (set by the script); its restic is
+      # 0.16, so the script installs the pinned restic first. The script builds the three
+      # staging versions itself (Go caches of setup-go); the panel is built without the web
+      # build: the checks use /api only.
+      - name: Installer lifecycle
+        run: sudo env "PATH=$PATH" "GOCACHE=$(go env GOCACHE)" "GOMODCACHE=$(go env GOMODCACHE)" scripts/ci-installer.sh .
 
   # The one result to wait for (gh pr checks): green when every job either passed or was not
   # needed for this change.
@@ -545,6 +578,7 @@ jobs:
       - instances
       - build
       - installer-lint
+      - installer
     runs-on: [self-hosted, mcpanel-vm]
     timeout-minutes: 5
     steps:
