@@ -20,7 +20,7 @@ import (
 // admin yet: no output, no error (installer spec §4.10).
 func adminListCommand(ctx context.Context, cfg config.Panel, w io.Writer) error {
 	path := cfg.DBPath()
-	fi, err := os.Lstat(path)
+	fi, err := os.Lstat(path) //nolint:gosec // G703: data_dir from the operator's panel.toml, like openDB
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -32,6 +32,13 @@ func adminListCommand(ctx context.Context, cfg config.Panel, w io.Writer) error 
 	}
 	q := url.Values{}
 	q.Set("mode", "ro")
+	// A read-only connection still creates -wal/-shm next to a WAL database that has none
+	// (the panel is stopped and checkpointed on close). Then nothing writes the database and
+	// it is opened as immutable, which creates nothing; with a running panel the existing
+	// -wal/-shm are used, so admins it just created are seen.
+	if _, err := os.Lstat(path + "-wal"); errors.Is(err, fs.ErrNotExist) { //nolint:gosec // G703: see above
+		q.Set("immutable", "1")
+	}
 	q.Add("_pragma", "busy_timeout(5000)")
 	q.Add("_pragma", "query_only(1)")
 	db, err := sql.Open("sqlite", "file:"+path+"?"+q.Encode()) // driver registered by internal/store
