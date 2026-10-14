@@ -3,17 +3,16 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MetricsRange } from '@/api/types'
-import { ServerDetailPage } from '@/features/servers/server-detail-page'
+import { renderSection } from '@/features/console/testing/render-section'
 import { loginAs } from '@/mocks/db'
 import { server } from '@/mocks/node'
-import { renderWithProviders } from '@/test/render'
 import { LIVE_POLL_MS } from './api'
+import { MonitoringTab } from './monitoring-tab'
 import { liveMetrics, metricsSeries, mockLive, mockMetrics } from './test-utils'
 
 async function openMonitoring(serverId = 1, username = 'admin') {
   const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
-  const rendered = await renderWithProviders(<ServerDetailPage serverId={serverId} />, { me: loginAs(username, { sudo: true }) })
-  await user.click(await screen.findByRole('tab', { name: 'Monitoring' }))
+  const rendered = await renderSection(serverId, (s) => <MonitoringTab server={s} />, { me: loginAs(username, { sudo: true }) })
   return { user, ...rendered }
 }
 
@@ -62,11 +61,11 @@ describe('MonitoringTab', () => {
   it('polls the live values every 5 s only while the tab is open', async () => {
     const live = mockLive((n) => liveMetrics({ players: n }))
     mockMetrics()
-    const { user } = await openMonitoring()
+    const { unmount } = await openMonitoring()
     await screen.findByText('1/20')
     await act(() => vi.advanceTimersByTimeAsync(LIVE_POLL_MS + 100))
     expect(await screen.findByText('2/20')).toBeInTheDocument()
-    await user.click(screen.getByRole('tab', { name: 'Übersicht' }))
+    unmount()
     const calls = live.calls
     await act(() => vi.advanceTimersByTimeAsync(LIVE_POLL_MS * 3))
     expect(live.calls).toBe(calls)

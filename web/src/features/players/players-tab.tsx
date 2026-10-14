@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
+import { Link, type LinkProps } from '@tanstack/react-router'
 import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { PlayerListFile, Server } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { useMe } from '@/features/auth/me'
 import { SectionCard } from '@/features/profile/section-card'
 import { errorMessage } from '@/lib/error-message'
 import { ONLINE_POLL_MS, onlinePlayersQueryOptions, playerListsQueryOptions } from './api'
@@ -16,8 +18,16 @@ function Muted({ children }: { children: ReactNode }) {
   return <p className="text-muted-foreground text-sm">{children}</p>
 }
 
-export function PlayersTab({ server, onOpenSettings }: { server: Server; onOpenSettings?: () => void }) {
+// The settings route is added by T2 (feat/ui-shell); the cast keeps tsc green on feat/ui-live until both are integrated.
+// The lead removes the cast when merging (see "Requests to lead").
+function settingsLink(serverId: number): LinkProps {
+  return { to: '/servers/$id/settings', params: { id: String(serverId) } } as unknown as LinkProps
+}
+
+/** `onOpenSettings` is ignored and goes away once T2's routes land (spec §6.2). */
+export function PlayersTab({ server }: { server: Server; onOpenSettings?: () => void }) {
   const { t } = useTranslation()
+  const isAdmin = useMe()?.role === 'admin'
   const running = server.status.state === 'running'
   const online = useQuery({ ...onlinePlayersQueryOptions(server.id), refetchInterval: running ? ONLINE_POLL_MS : false })
   const lists = useQuery(playerListsQueryOptions(server.id))
@@ -144,12 +154,12 @@ export function PlayersTab({ server, onOpenSettings }: { server: Server; onOpenS
         <div className="space-y-3">
           {whitelistOn ? (
             <Muted>{t('players.whitelist.active')}</Muted>
-          ) : onOpenSettings ? (
+          ) : isAdmin ? (
             <div className="flex flex-wrap items-center gap-2">
               <Muted>{t('players.whitelist.inactive')}</Muted>
-              <Button type="button" variant="link" className="h-auto p-0" onClick={onOpenSettings}>
+              <Link {...settingsLink(server.id)} className="text-primary text-sm underline underline-offset-4">
                 {t('players.whitelist.open_settings')}
-              </Button>
+              </Link>
             </div>
           ) : (
             <Muted>{t('players.whitelist.inactive_user')}</Muted>
