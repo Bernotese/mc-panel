@@ -41,7 +41,8 @@ export function AppLayout() {
       ) : null}
       {md && !lg ? (
         <Sheet open={flyoutOpen} onOpenChange={setFlyoutOpen}>
-          <SheetContent side="left" className="w-60 gap-0 p-0 sm:max-w-60">
+          {/* Opens beside the rail, which stays visible. */}
+          <SheetContent side="left" className="w-60 gap-0 p-0 data-[side=left]:left-14 sm:max-w-60">
             <SheetHeader className="sr-only">
               <SheetTitle>{t('nav.servers')}</SheetTitle>
               <SheetDescription>{t('nav.open_servers')}</SheetDescription>

@@ -5,8 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useMe } from '@/features/auth/me'
 import { serversQueryOptions } from '@/features/servers/api'
 import { sectionForSwitch, sectionFromPath, sectionHref, sectionLabelKey, serverIdFromPath, serverSections } from '@/features/servers/sections'
-import { pollInterval, stateLabelKey } from '@/features/servers/status'
-import { stateDotClass } from '@/features/servers/status-badge'
+import { pollInterval, stateDotClass, stateLabelKey } from '@/features/servers/status'
 import { cn } from '@/lib/utils'
 
 const ROW =
