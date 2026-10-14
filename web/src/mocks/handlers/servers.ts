@@ -6,6 +6,7 @@ import type {
   Permission,
   PowerAction,
   Server,
+  ServerMemoryLimits,
   ServerSettings,
   UpdateServerRequest,
   UpdateServerSettingsRequest,
@@ -28,9 +29,34 @@ function validBaseDomain(d: string): boolean {
   return d.length <= 200 && labels.length >= 2 && labels.every((l) => DNS_LABEL.test(l))
 }
 
-function validMemory(m: unknown): m is number {
-  return typeof m === 'number' && Number.isInteger(m) && m >= 1024 && m <= 32768 && m % 256 === 0
+/** Installed memory of the mock host (26 GiB): the per-server limit is (26 − 1) / 1.25 = 20 GiB. */
+const MOCK_HOST_MIB = 26624
+const MEMORY_RESERVE_MIB = 1024
+
+/** Same formula as servers.MaxMemoryMiB: (host − 1 GiB) / 1.25 in 256 MiB steps, within 1..32 GiB. */
+function maxMemoryMiB(hostMiB: number): number {
+  const m = Math.floor(((hostMiB - MEMORY_RESERVE_MIB) * 4) / 5)
+  return Math.min(Math.max(m - (m % 256), 1024), 32768)
 }
+
+/** Same rule as servers.RecommendedMemoryMiB. */
+function recommendedMemoryMiB(type: InstanceType, hostMiB: number, allocatedMiB: number): number {
+  const base = type === 'fabric' || type === 'neoforge' || type === 'modrinth' || type === 'curseforge' ? 6144 : 4096
+  const half = Math.floor(Math.max(hostMiB - MEMORY_RESERVE_MIB - allocatedMiB, 0) / 2)
+  return Math.min(Math.max(Math.min(base, half - (half % 256)), 1024), maxMemoryMiB(hostMiB))
+}
+
+function memoryLimits(): ServerMemoryLimits {
+  const allocated = db.servers.reduce((sum, s) => sum + (s.instance?.memory_mib ?? 0), 0)
+  const recommended = Object.fromEntries(TYPES.map((t) => [t, recommendedMemoryMiB(t, MOCK_HOST_MIB, allocated)])) as ServerMemoryLimits['recommended_mib']
+  return { min_mib: 1024, max_mib: maxMemoryMiB(MOCK_HOST_MIB), step_mib: 256, host_total_mib: MOCK_HOST_MIB, allocated_mib: allocated, recommended_mib: recommended }
+}
+
+function validMemory(m: unknown): m is number {
+  return typeof m === 'number' && Number.isInteger(m) && m >= 1024 && m <= maxMemoryMiB(MOCK_HOST_MIB) && m % 256 === 0
+}
+
+const MEMORY_MESSAGE = `memory_mib: must be 1024..${maxMemoryMiB(MOCK_HOST_MIB)} in steps of 256 on this host`
 
 /** Like filesapi.ValidTimezone: an exact IANA name the browser lists (or UTC), never an offset. */
 function validTimezone(tz: unknown): tz is string {
@@ -99,7 +125,7 @@ export const serverOperations: MockOperation[] = [
       if (!SERVER_NAME.test(name)) return apiError(400, 'validation_failed', 'name must match ^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$')
       if (body.eula_accepted !== true) return apiError(400, 'validation_failed', 'eula_accepted must be true')
       if (!body.type || !TYPES.includes(body.type)) return apiError(400, 'validation_failed', 'type: unknown type')
-      if (!validMemory(body.memory_mib)) return apiError(400, 'validation_failed', 'memory_mib: must be 1024..32768 in steps of 256')
+      if (!validMemory(body.memory_mib)) return apiError(400, 'validation_failed', MEMORY_MESSAGE)
       if (db.servers.some((s) => s.name === name)) return apiError(409, 'conflict', 'server name already taken')
       const version = body.version ?? ''
       const server: MockServer = {
@@ -137,6 +163,16 @@ export const serverOperations: MockOperation[] = [
       const catalog = db.catalogs[type]
       if (!catalog) return apiError(502, 'catalog_unavailable', 'version catalog unavailable, enter the version manually')
       return HttpResponse.json<Catalog>(catalog)
+    }),
+  ),
+
+  // Before getServer: MSW matches in order and /servers/:id would also match /servers/memory.
+  op(
+    'getServerMemoryLimits',
+    http.get(`${API}/servers/memory`, ({ request }) => {
+      const g = guard(request, { admin: true })
+      if (g instanceof Response) return g
+      return HttpResponse.json<ServerMemoryLimits>(memoryLimits())
     }),
   ),
 
@@ -212,7 +248,7 @@ export const serverOperations: MockOperation[] = [
       const body = await readJson<UpdateServerRequest>(request)
       if (!body) return apiError(400, 'bad_request', 'invalid JSON body')
       if (body.memory_mib !== undefined && !validMemory(body.memory_mib)) {
-        return apiError(400, 'validation_failed', 'memory_mib: must be 1024..32768 in steps of 256')
+        return apiError(400, 'validation_failed', MEMORY_MESSAGE)
       }
       const before = JSON.stringify(server.instance)
       const next = { ...server.instance }

@@ -58,7 +58,7 @@ describe('CreateServerPage', () => {
     const memory = screen.getByRole('spinbutton', { name: 'Arbeitsspeicher (GiB)' })
     await user.clear(memory)
     await user.type(memory, '40')
-    expect(screen.getByText('Gib 1 bis 32 GiB in Schritten von 0,25 GiB an.')).toBeInTheDocument()
+    expect(screen.getByText('Gib 1 bis 20 GiB in Schritten von 0,25 GiB an.')).toBeInTheDocument()
     expect(screen.queryByText('Ohne Zustimmung zur EULA kann kein Server angelegt werden.')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Server anlegen' }))
@@ -67,6 +67,26 @@ describe('CreateServerPage', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(db.servers).toHaveLength(4)
     expect(onCreated).not.toHaveBeenCalled()
+  })
+
+  it('suggests memory per type within the host limits and warns about overcommitting', async () => {
+    const user = userEvent.setup()
+    await renderWithProviders(<CreateServerPage onCreated={vi.fn()} />, { me: loginAs('admin') })
+    // mock host: 26 GiB RAM, limit 20 GiB, 10 GiB given to the seeded servers
+    expect(await screen.findByText(/Der Host hat 26 GiB RAM/)).toBeInTheDocument()
+    expect(screen.getByText('Empfohlen: 4 GiB')).toBeInTheDocument()
+    const memory = screen.getByRole('spinbutton', { name: 'Arbeitsspeicher (GiB)' })
+    expect(memory).toHaveAttribute('max', '20')
+    await user.click(screen.getByRole('radio', { name: 'Fabric' }))
+    expect(screen.getByText('Empfohlen: 6 GiB')).toBeInTheDocument()
+    expect(memory).toHaveValue(6)
+
+    await user.clear(memory)
+    await user.type(memory, '20')
+    expect(screen.getByRole('status')).toHaveTextContent('Alle Server zusammen hätten 30 GiB, der Host hat 26 GiB RAM.')
+    // a changed value stays when the type changes
+    await user.click(screen.getByRole('radio', { name: 'Paper' }))
+    expect(memory).toHaveValue(20)
   })
 
   it('explains a missing base domain and shows the 409 from the panel', async () => {

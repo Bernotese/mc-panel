@@ -516,6 +516,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/servers/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Memory limits for the server form: the per-server maximum follows the host memory, (MemTotal − 1 GiB) / 1.25 in steps of 256 MiB within 1..32 GiB; create and update reject memory_mib above it (validation_failed). */
+        get: operations["getServerMemoryLimits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/servers/settings": {
         parameters: {
             query?: never;
@@ -1620,6 +1637,7 @@ export interface components {
             loader_version: string | null;
             modpack: string | null;
             java: components["schemas"]["JavaVersion"];
+            /** @description At most max_mib of GET /servers/memory on this host */
             memory_mib: number;
             /** @description All fields set (defaults resolved) */
             properties: components["schemas"]["ServerProperties"];
@@ -1684,6 +1702,7 @@ export interface components {
             modpack?: string | null;
             /** @description Derived from type/version if omitted */
             java?: components["schemas"]["JavaVersion"];
+            /** @description At most max_mib of GET /servers/memory on this host */
             memory_mib: number;
             properties?: components["schemas"]["ServerProperties"];
             /** @constant */
@@ -1695,6 +1714,7 @@ export interface components {
             loader_version?: string | null;
             modpack?: string | null;
             java?: components["schemas"]["JavaVersion"];
+            /** @description At most max_mib of GET /servers/memory on this host */
             memory_mib?: number;
             properties?: components["schemas"]["ServerProperties"];
         };
@@ -1727,6 +1747,31 @@ export interface components {
             id: number;
             /** @description Server name from the mcpanel.name label of the container, not the container name mcpanel-mc-<id> */
             name: string;
+        };
+        ServerMemoryLimits: {
+            /** @description Smallest memory_mib (1024) */
+            min_mib: number;
+            /** @description Largest memory_mib a single server may get on this host: (host_total_mib − 1024) / 1.25, rounded down to step_mib, within min_mib..32768; 32768 if the host memory is unknown */
+            max_mib: number;
+            /** @description memory_mib must be a multiple of it (256) */
+            step_mib: number;
+            /** @description Installed memory of the host (MemTotal); null if unknown (development on macOS) */
+            host_total_mib: number | null;
+            /**
+             * Format: int64
+             * @description Sum of memory_mib of all servers (the form warns when a new total exceeds host_total_mib; stopped servers use no memory, so it is no limit)
+             */
+            allocated_mib: number;
+            /** @description Suggested memory_mib of a new server per type: 4096 (vanilla, paper, purpur) or 6144 (mod loaders, modpacks), at most half of host_total_mib − 1024 − allocated_mib, at least min_mib, at most max_mib */
+            recommended_mib: {
+                vanilla: number;
+                paper: number;
+                purpur: number;
+                fabric: number;
+                neoforge: number;
+                modrinth: number;
+                curseforge: number;
+            };
         };
         ServerSettings: {
             base_domain: string | null;
@@ -3597,6 +3642,28 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    getServerMemoryLimits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerMemoryLimits"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getServerSettings: {

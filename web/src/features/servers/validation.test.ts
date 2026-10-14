@@ -86,6 +86,13 @@ describe('memory', () => {
     for (const mib of [null, 768, 33024, 4000, 4403.2]) expectError(validateMemoryMiB(mib), 'servers.validation.memory')
     expect(validateMemoryMiB(512)?.params).toEqual({ min: 1, max: 32 })
   })
+
+  it('applies the host limit when one is given', () => {
+    const host = { min: 1024, max: 11776, step: 256 }
+    expect(validateMemoryMiB(11776, host)).toBeNull()
+    expectError(validateMemoryMiB(12032, host), 'servers.validation.memory')
+    expect(validateMemoryMiB(12032, host)?.params).toEqual({ min: 1, max: 11.5 })
+  })
 })
 
 describe('properties', () => {

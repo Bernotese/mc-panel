@@ -84,6 +84,7 @@ func TestInstanceLifecycleEndToEnd(t *testing.T) {
 		{"GET", fmt.Sprintf("/servers/%d", srvB), nil},
 		{"POST", fmt.Sprintf("/servers/%d/power", srvB), map[string]string{"action": "stop"}},
 		{"GET", "/servers/settings", nil},
+		{"GET", "/servers/memory", nil},
 	} {
 		if c, out := friend.do(tc.method, tc.path, tc.body); c != 403 {
 			t.Errorf("%s %s as friend = %d %v, want 403", tc.method, tc.path, c, out)
