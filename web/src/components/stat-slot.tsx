@@ -23,11 +23,12 @@ export function StatSlot({
   const showBar = typeof bar === 'number' && !Number.isNaN(bar)
   const pct = showBar ? Math.round(clamp01(bar) * 100) : 0
   return (
-    <div data-tone={tone} className={cn('bevel-inset min-w-0 px-3 py-2', className)}>
-      <div className="text-muted-foreground truncate text-xs">{label}</div>
+    <div data-tone={tone} className={cn('bevel-inset min-w-0 px-3 py-2.5', className)}>
+      <div className="text-foreground/80 truncate text-xs font-medium">{label}</div>
+      {/* Issue #84: values in the UI font with tabular figures; the pixel font made "8 GiB" read as "S 6iB". */}
       <div
         className={cn(
-          'font-pixel text-foreground text-lg leading-tight font-semibold tabular-nums',
+          'text-foreground mt-0.5 text-xl leading-tight font-semibold tabular-nums',
           tone === 'warn' && 'text-status-starting',
           tone === 'danger' && 'text-status-error',
         )}

@@ -25,8 +25,8 @@ function iconState(state: ServerState): 'online' | 'offline' | 'unknown' {
 function Fact({ label, children, className }: { label?: string; children: ReactNode; className?: string }) {
   return (
     <span className={cn('inline-flex items-baseline gap-1', className)}>
-      {label ? <span className="text-muted-foreground font-sans text-xs">{label}</span> : null}
-      <span>{children}</span>
+      {label ? <span className="text-muted-foreground text-xs">{label}</span> : null}
+      <span className="font-medium">{children}</span>
     </span>
   )
 }
@@ -69,7 +69,7 @@ export function ServerRow({ server, metrics }: { server: Server; metrics?: Overv
             {metrics && instance ? (
               <span className="flex items-center gap-2 sm:ml-auto">
                 <Users aria-hidden="true" className="text-muted-foreground size-3.5" />
-                <span className="font-pixel tabular-nums">
+                <span className="font-medium tabular-nums">
                   {metrics.players === null
                     ? missing
                     : t('monitoring.players_value', { players: metrics.players, max: metrics.players_max ?? missing })}
@@ -85,7 +85,7 @@ export function ServerRow({ server, metrics }: { server: Server; metrics?: Overv
               </span>
             ) : null}
           </div>
-          <p data-testid="server-metrics" className="font-pixel text-muted-foreground flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm tabular-nums">
+          <p data-testid="server-metrics" className="text-muted-foreground flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm tabular-nums">
             {instance ? (
               <Fact className="text-foreground">{describeInstance(instance, t)}</Fact>
             ) : (

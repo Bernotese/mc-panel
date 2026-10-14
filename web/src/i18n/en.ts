@@ -161,6 +161,8 @@ export const en: Messages = {
     new_server: 'New server',
     tree_collapse: 'Collapse server list',
     tree_expand: 'Expand server list',
+    rail_expand: 'Expand menu',
+    rail_collapse: 'Collapse menu',
     open_servers: 'Open server list',
     breadcrumb: 'Breadcrumb',
     home: 'Home',

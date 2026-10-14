@@ -38,7 +38,7 @@ function ListCard({ title, items, empty }: { title: string; items: ListItem[]; e
           {items.map((item) => (
             <li key={item.key} className="flex justify-between gap-3 py-1.5">
               <span className="min-w-0 break-all">{item.label}</span>
-              <span className="text-muted-foreground font-pixel shrink-0 tabular-nums">{item.value}</span>
+              <span className="text-muted-foreground shrink-0 font-semibold tabular-nums">{item.value}</span>
             </li>
           ))}
         </ul>

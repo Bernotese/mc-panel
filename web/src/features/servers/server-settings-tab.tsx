@@ -33,7 +33,7 @@ export function ServerSettingsTab({ server, instance }: { server: Server; instan
   })
 
   return (
-    <div className="flex max-w-3xl flex-col gap-6">
+    <div className="@container/server-form flex flex-col gap-6">
       {instance ? (
         // A changed instance (after saving or by another admin) re-initialises the form via the key.
         <ServerForm
