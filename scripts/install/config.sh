@@ -121,6 +121,14 @@ cfg_ensure() {
   a="$(cfg_file config/panel.toml "$ETC_PANEL/panel.toml" 0640 root mcpanel CFG_REQUIRED_PANEL)" || return 1
   b="$(cfg_file config/agent.toml "$ETC_PANEL/agent.toml" 0600 root root CFG_REQUIRED_AGENT)" || return 1
   c="$(cfg_file config/files.toml "$ETC_FILES/files.toml" 0640 root mcpanel-mc CFG_REQUIRED_FILES)" || return 1
+  # The panel takes the socket of mcpanel-panel.socket only if listen names exactly that path.
+  local listen
+  listen="$(awk '/^[[:space:]]*\[/ { exit }
+    /^[[:space:]]*listen[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/, ""); sub(/[[:space:]]*(#.*)?$/, ""); print; exit }' \
+    "$ROOT$ETC_PANEL/panel.toml")"
+  if [[ $listen != '"unix:/run/mc-panel-web/panel.sock"' ]]; then
+    warn "panel.toml: listen = $listen, but mcpanel-panel.socket listens on /run/mc-panel-web/panel.sock; Caddy cannot reach the panel"
+  fi
   if [[ $a == changed || $b == changed || $c == changed ]]; then
     CFG_CHANGED=1
     log_changed "panel.toml: $a, agent.toml: $b, files.toml: $c"

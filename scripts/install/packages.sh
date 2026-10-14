@@ -25,9 +25,21 @@ pkg_docker_answers() {
   docker info >/dev/null 2>&1
 }
 
-# pkg_mc_containers prints the IDs of running mc-panel containers (a query; tests stub it).
-pkg_mc_containers() {
-  docker ps -q --filter label=mcpanel.instance 2>/dev/null || true
+# pkg_running_containers prints the IDs of all running containers - a Docker restart without
+# live-restore stops every one of them, not only mc-panel's (a query; tests stub it).
+pkg_running_containers() {
+  docker ps -q 2>/dev/null || true
+}
+
+# pkg_swarm_active: 0 if this Docker is a swarm node (live-restore is incompatible with swarm
+# mode; dockerd would refuse to start). A query; tests stub it.
+pkg_swarm_active() {
+  [[ "$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)" == active ]]
+}
+
+# pkg_daemon_json_valid FILE: 0 if dockerd accepts FILE (a query; tests stub it).
+pkg_daemon_json_valid() {
+  dockerd --validate --config-file "$1" >/dev/null 2>&1
 }
 
 # pkg_restic_path prints the path of restic from PATH ("" if there is none).
@@ -64,6 +76,39 @@ pkg_wait_docker() {
   done
 }
 
+# pkg_daemon_json_ensure writes the missing /etc/docker/daemon.json (log rotation, live-restore)
+# unless Docker runs in swarm mode, keeps it only if dockerd accepts it, and restarts Docker for
+# it only without running containers. If Docker does not come back with it, the file is removed
+# again and Docker restarted with its defaults.
+pkg_daemon_json_ensure() {
+  local f="$ROOT/etc/docker/daemon.json"
+  if pkg_swarm_active; then
+    warn "docker: swarm mode is active, live-restore is incompatible with it; /etc/docker/daemon.json not written"
+    return 0
+  fi
+  if [[ ! -d $ROOT/etc/docker ]]; then
+    ensure_dir /etc/docker 0755 root root >/dev/null
+  fi
+  pkg_daemon_json | write_file /etc/docker/daemon.json 0644 root root >/dev/null
+  if ! pkg_daemon_json_valid "$f"; then
+    rm -f -- "$f"
+    warn "docker: dockerd --validate rejected the new daemon.json; removed it, Docker keeps its defaults"
+    return 0
+  fi
+  if [[ -n "$(pkg_running_containers)" ]]; then
+    # A restart now would stop the running containers (live-restore is not active yet).
+    warn "docker: log rotation and live-restore take effect on the next Docker restart (containers are running)"
+    return 0
+  fi
+  if sys_systemctl restart docker.service </dev/null; then
+    log_changed "docker: log rotation and live-restore (/etc/docker/daemon.json)"
+    return 0
+  fi
+  rm -f -- "$f"
+  sys_systemctl restart docker.service </dev/null || true
+  warn "docker: did not start with the new daemon.json; removed it again and restarted Docker with its defaults"
+}
+
 # shellcheck disable=SC2034 # PKG_RESTIC_BIN is read by cfg_keys (config.sh)
 pkg_install() {
   log_step "packages"
@@ -74,8 +119,10 @@ pkg_install() {
   fi
   mapfile -t missing < <(pkg_missing "${want[@]}")
   if ((${#missing[@]} > 0)); then
-    sys_apt -o "DPkg::Lock::Timeout=$PKG_APT_LOCK_WAIT" update || die "apt-get update failed"
-    sys_apt -o "DPkg::Lock::Timeout=$PKG_APT_LOCK_WAIT" install --no-install-recommends "${missing[@]}" ||
+    # stdin from /dev/null and the conffile defaults: apt never asks (curl | bash, CI).
+    sys_apt -o "DPkg::Lock::Timeout=$PKG_APT_LOCK_WAIT" update </dev/null || die "apt-get update failed"
+    sys_apt -o "DPkg::Lock::Timeout=$PKG_APT_LOCK_WAIT" -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+      install --no-install-recommends "${missing[@]}" </dev/null ||
       die "apt-get install ${missing[*]} failed"
     log_changed "installed ${missing[*]}"
   else
@@ -90,19 +137,9 @@ pkg_install() {
     die "restic $v at $bin is too old (need >= $PKG_RESTIC_MIN; install a newer restic first)"
   PKG_RESTIC_BIN="$bin"
   if [[ ! -e $ROOT/etc/docker/daemon.json && ! -L $ROOT/etc/docker/daemon.json ]]; then
-    if [[ ! -d $ROOT/etc/docker ]]; then
-      ensure_dir /etc/docker 0755 root root >/dev/null
-    fi
-    pkg_daemon_json | write_file /etc/docker/daemon.json 0644 root root >/dev/null
-    if [[ -n "$(pkg_mc_containers)" ]]; then
-      # A restart now would stop the running Minecraft servers (live-restore is not active yet).
-      warn "docker: log rotation and live-restore take effect on the next Docker restart (mc-panel containers are running)"
-    else
-      sys_systemctl restart docker.service || die "docker did not restart with the new daemon.json"
-      log_changed "docker: log rotation and live-restore (/etc/docker/daemon.json)"
-    fi
+    pkg_daemon_json_ensure
   fi
-  sys_systemctl enable --now docker.service || die "docker.service does not start"
+  sys_systemctl enable --now docker.service </dev/null || die "docker.service does not start"
   pkg_wait_docker || die "the Docker daemon does not answer (systemctl status docker)"
   log_ok "restic $v ($bin), Docker"
 }

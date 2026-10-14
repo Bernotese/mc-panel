@@ -15,12 +15,15 @@ pkg_fake_dpkg() { # NAME... count as installed
   }
 }
 
-# pkg_env: Docker answers, restic 0.18.1 at /usr/bin/restic, no running mc-panel containers.
+# pkg_env: Docker answers (no swarm, accepts daemon.json), restic 0.18.1 at /usr/bin/restic, no
+# running containers.
 pkg_env() {
   stub pkg_docker_answers 'return 0'
   stub pkg_restic_path 'echo /usr/bin/restic'
   stub pkg_restic_version 'echo 0.18.1'
-  stub pkg_mc_containers ':'
+  stub pkg_running_containers ':'
+  stub pkg_swarm_active 'return 1'
+  stub pkg_daemon_json_valid 'return 0'
   PKG_DOCKER_WAIT=0
 }
 
@@ -41,7 +44,7 @@ test_install_pkg_install_installs_missing_once() {
   pkg_daemon_json_present
   assert_fails pkg_install # the final Docker check fails in the stubbed world
   assert_called 'apt-get -y -q -o DPkg::Lock::Timeout=300 update'
-  assert_called 'env DEBIAN_FRONTEND=noninteractive apt-get -y -q -o DPkg::Lock::Timeout=300 install --no-install-recommends caddy nftables restic tzdata sqlite3 unattended-upgrades bzip2 docker.io'
+  assert_called 'env DEBIAN_FRONTEND=noninteractive apt-get -y -q -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install --no-install-recommends caddy nftables restic tzdata sqlite3 unattended-upgrades bzip2 docker.io'
   assert_eq 1 "$(grep -c ' install ' "$WORK/calls.log")"
 }
 
@@ -119,7 +122,7 @@ test_install_pkg_daemon_json_only_when_missing() {
 test_install_pkg_daemon_json_no_restart_with_running_servers() {
   pkg_fake_dpkg "${PKG_LIST[@]}"
   pkg_env
-  stub pkg_mc_containers 'echo 3f2a1b'
+  stub pkg_running_containers 'echo 3f2a1b' # any container, not only mc-panel's
   local out
   out="$(pkg_install)"
   assert_file_contains "$ROOT/etc/docker/daemon.json" '"live-restore": true'
@@ -134,4 +137,44 @@ test_install_pkg_install_fails_without_docker() {
   pkg_daemon_json_present
   assert_fails pkg_install
   assert_contains "$(cat "$WORK/out")" "does not answer"
+}
+
+test_install_pkg_daemon_json_removed_when_dockerd_rejects_it() {
+  pkg_fake_dpkg "${PKG_LIST[@]}"
+  pkg_env
+  stub pkg_daemon_json_valid 'return 1'
+  local out
+  out="$(pkg_install)"
+  assert_contains "$out" "[warn] docker: dockerd --validate rejected"
+  assert_no_file "$ROOT/etc/docker/daemon.json"
+  assert_not_called 'systemctl restart docker'
+}
+
+test_install_pkg_daemon_json_not_written_in_swarm_mode() {
+  pkg_fake_dpkg "${PKG_LIST[@]}"
+  pkg_env
+  stub pkg_swarm_active 'return 0'
+  assert_contains "$(pkg_install)" "[warn] docker: swarm mode"
+  assert_no_file "$ROOT/etc/docker/daemon.json"
+  assert_not_called 'systemctl restart docker'
+}
+
+test_install_pkg_daemon_json_removed_when_docker_does_not_restart() {
+  pkg_fake_dpkg "${PKG_LIST[@]}"
+  pkg_env
+  echo 0 >"$WORK/restarts"
+  sys_systemctl() {
+    printf 'systemctl %s\n' "$*" >>"$WORK/calls.log"
+    if [[ $* == "restart docker.service" ]]; then
+      local n
+      n=$(($(cat "$WORK/restarts") + 1))
+      echo "$n" >"$WORK/restarts"
+      ((n > 1)) # the first restart (with the new daemon.json) fails
+    fi
+  }
+  local out
+  out="$(pkg_install)"
+  assert_contains "$out" "[warn] docker: did not start with the new daemon.json"
+  assert_no_file "$ROOT/etc/docker/daemon.json"
+  assert_eq 2 "$(cat "$WORK/restarts")"
 }
