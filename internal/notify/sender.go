@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -147,10 +148,35 @@ func checkStatus(kind Kind, resp *http.Response) error {
 		return nil
 	}
 	err := fmt.Errorf("notify: %s returned status %d", kind, resp.StatusCode)
-	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+	if resp.StatusCode == http.StatusTooManyRequests {
+		if d, ok := parseRetryAfter(resp.Header.Get("Retry-After")); ok {
+			return &retryAfterError{err: err, after: d}
+		}
+		return err
+	}
+	if resp.StatusCode >= 500 {
 		return err
 	}
 	return &PermanentError{Err: err}
+}
+
+// retryAfterError is a rate-limited delivery whose target named a wait time (Discord answers
+// 429 with Retry-After in seconds, possibly fractional).
+type retryAfterError struct {
+	err   error
+	after time.Duration
+}
+
+func (e *retryAfterError) Error() string { return e.err.Error() }
+func (e *retryAfterError) Unwrap() error { return e.err }
+
+// parseRetryAfter reads a Retry-After value in (fractional) seconds. HTTP dates are ignored.
+func parseRetryAfter(v string) (time.Duration, bool) {
+	secs, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil || secs <= 0 || secs > 3600 {
+		return 0, false
+	}
+	return time.Duration(secs * float64(time.Second)), true
 }
 
 var defaultTitles = map[EventType]string{
@@ -167,6 +193,10 @@ var defaultTitles = map[EventType]string{
 	EventServerCrashLoop:    "Crash loop",
 	EventHostDiskLow:        "Low disk space on the host",
 	EventHostDiskOK:         "Disk space OK again",
+	Event2FALockout:         "Second factor locked",
+	Event2FAFailed:          "Wrong second factor after a correct password",
+	EventRecoveryCodeUsed:   "Recovery code used",
+	EventPasswordChanged:    "Password changed",
 	EventTest:               "mc-panel test notification",
 }
 
