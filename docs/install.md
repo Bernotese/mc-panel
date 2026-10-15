@@ -168,6 +168,19 @@ sudo bash install.sh uninstall --purge   # deletes everything after you type the
 
 `--purge` also deletes all worlds, backups, backup keys, the database, the rollback copies, the configuration and the users `mcpanel` and `mcpanel-mc`. It needs the panel domain typed on the terminal; `--yes` does not replace that.
 
+## Disk space and limits
+
+A server must not fill the disk for everyone else. The files service keeps a reserve free on `/srv/mc-panel`: the larger of `reserve_bytes` (default 2 GiB) and `reserve_percent` (default 5 %, 0 to 50) under `[limits]` in `/etc/mc-panel-files/files.toml`. Below the reserve it refuses everything that grows data with "not enough space" (`507 insufficient_storage`): uploads, plugin installs, zip extraction, restores, new backups and editor saves that make a file larger. Reading, downloading, deleting, renaming, shrinking files and starting a server keep working, so you can always free space through the panel. A running backup checks the free space every 64 MiB and stops below half the reserve, without a snapshot. The reserve only covers what goes through the files service: a running Minecraft server writes its world itself, so give `/srv/mc-panel` its own file system (`doctor`: `storage_fs`).
+
+Backups are limited, too:
+
+- A backup that runs longer than `max_duration` under `[backups]` in `/etc/mc-panel/panel.toml` (default `"4h"`, allowed `"10m"` to `"7d"`) is cancelled; saving is switched on again and `backup.failed` is notified.
+- One manual backup per server every 10 minutes (failed ones do not count).
+- Files larger than 64 MiB that use less than an eighth of their size on disk (sparse files) are left out; the job counts them as skipped and the files service logs them.
+- Changing a server's backup schedule and pinning or unpinning a snapshot need sudo.
+
+Restart `mcpanel-files` (or `mcpanel-panel`) after changing these keys.
+
 ## Backups of keys and data
 
 The panel's backups are local restic repositories, one per server, in `/srv/mc-panel/backups/repos/<id>`, on the same disk as the worlds. They protect against mistakes, not against losing the host. They do not protect against an attacker on the host either: the Minecraft containers and the files service run as the same user `mcpanel-mc`, which owns the worlds, the repositories **and** their keys. A Minecraft server that escapes its container (a kernel or runc bug) or a compromised panel with `server.backups` can delete or encrypt every backup, and corruption is only noticed at a restore. Follow the 3-2-1 rule: three copies, on two kinds of storage, one of them off the host and out of reach of the host (pull it from a backup server, or push to append-only storage such as restic's rest-server with `--append-only` or S3 with object lock), and test a restore now and then.

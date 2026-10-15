@@ -25,6 +25,7 @@ What CI covers: unit and integration tests, Docker integration (`dockerintegrati
 - [ ] **Permissions:** a user with only `server.power` on `survival` sees only `survival`, can start and stop it, sees no settings area; `PATCH /api/servers/<id>` answers `403`.
 - [ ] **Memory limit:** the server form shows the host's RAM, allows at most (host RAM − 1 GiB) / 1.25 and recommends a size per type when creating; `PATCH /api/servers/<id>` with a larger `memory_mib` answers `400 validation_failed`; if all servers together exceed the host RAM, the form warns.
 - [ ] **Change and restart:** change MOTD and memory → "restart required"; after restarting, the client shows the new MOTD, `sudo docker inspect mcpanel-mc-<id>` shows the new limit, the world is kept.
+- [ ] **Seed:** a user with only `server.view` on `survival` does not see the seed (UI and `GET /api/servers/<id>`); a user with `server.files` and admins do.
 - [ ] **Host reboot:** with servers running, `sudo reboot` the VM. Servers whose desired state is "running" run again afterwards.
 - [ ] **Delete and audit:** delete a throwaway server. Container and route are gone, its data is under `/srv/mc-panel/deleted/`, the audit log has the entry, and `ssh claude@192.168.1.117 "sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml"` reports OK.
 
@@ -43,7 +44,7 @@ What CI covers: agent (Docker demultiplexer, log stream, exec, player files) and
 - [ ] **Kick, ban, pardon:** kick (reason shown in the client), ban (join refused; entry with reason, by, since), pardon (join works again).
 - [ ] **In-game changes stay:** `/op <other>` or `/whitelist add <name>` in the game appear in the players area and survive a restart.
 - [ ] **Stopped server:** lists stay visible, change buttons and the console input are disabled with a hint.
-- [ ] **Revoked access:** while `helper` has the console open, remove `server.console` (or end the session in the Security Center). The stream ends within 30 s.
+- [ ] **Revoked access:** while `helper` has the console open, remove `server.console` (or end the session in the Security Center). The stream ends within about 5 s.
 - [ ] **Audit:** `server.console_command` (command text and result, not the output) and `server.player_action` (action, name, reason) entries; `panel audit verify` reports OK.
 - [ ] **Mobile:** console usable, the input stays visible at the bottom, players area without horizontal scrolling.
 
@@ -110,6 +111,8 @@ What CI covers: files service (tar over `os.Root` with symlinks, special files, 
 - [ ] **Without restic:** with restic moved away and `mcpanel-files` restarted, the backups area shows only the "not available" hint; the file browser still works.
 - [ ] **Panel crash during a backup:** create a 3 GiB file in the data directory to slow the backup, start one, `sudo systemctl kill -s KILL mcpanel-panel` during "backing up data". After systemd restarts the panel, `save-on` in the console answers "Saving is already turned on"; no job is left; delete the big file afterwards.
 - [ ] **Concurrency:** a second backup or restore while one runs is refused (`409 backup_running`); extracting a zip during a backup is refused (`429 busy`).
+- [ ] **Sudo and rate limit:** saving the schedule and pinning or unpinning a snapshot ask for sudo; a second manual backup within 10 minutes shows the rate-limit message, after a failed one it is allowed at once.
+- [ ] **Reserve:** fill the disk below the reserve (`fallocate`, larger of 2 GiB and 5 %): an upload, a plugin install and a backup fail with "not enough space"; deleting a file, saving a shorter `server.properties` and starting the server still work.
 - [ ] **Disk full:** fill the disk to ~1 GiB free (`fallocate`) and restore a snapshot > 1 GiB: "not enough space on the host", data unchanged, the server starts again; after removing the fill file the restore works.
 - [ ] **Delete with and without backups:** deleting a throwaway server with "also delete backups" removes `backups/repos/<id>` and `backups/keys/<id>` (audit `server.delete` with `backups_purged: true`); without it, both stay and the dialog says so.
 - [ ] **Only `server.view`:** `friend` has no backups area; `/api/servers/<id>/backups` answers `403`.

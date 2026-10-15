@@ -143,6 +143,8 @@ As before fixed paths, `DisallowUnknownFields`, errors `{error, code}`.
 - A file that grows or shrinks while it is read is written with the size from the `Stat` (truncated or padded with zeros, `skipped` unchanged); with a stopped server or with `save-off` this does not happen to world data.
 - Limits: more than `max_backup_entries` entries or `max_backup_bytes` of content → job `failed` (`too_large`), restic is aborted, no snapshot is made (restic only creates it at the end of the stream).
 - Before the start: free space on `backups/` ≥ `reserve_bytes` (sub-project 3b), otherwise `507`. Because of deduplication the service cannot calculate further in advance; if the disk fills up anyway, restic fails and the job is `failed`.
+  (Now, SEC-04: the reserve is the larger of `reserve_bytes` and `reserve_percent` (sub-project 3b §4.1). A running backup checks the free space every 64 MiB of the stream and aborts below half the reserve; restic makes no snapshot then.)
+- (Now, SEC-04: files larger than 64 MiB that occupy less than 1/8 of their size on disk (sparse files with holes) are left out, counted in `skipped` and logged, so a planted sparse file cannot blow up the stream.)
 - Progress: `bytes`/`entries` (tar content read).
 
 ### 4.3 Restore job
@@ -212,6 +214,7 @@ ALTER TABLE instance_settings ADD COLUMN backup_timezone TEXT NOT NULL DEFAULT '
 - One job per server in memory: `{id, kind: backup|restore|delete, trigger: manual|scheduled, state: queued|running|done|failed, step, bytes, snapshot, error, queued_at, started_at, finished_at}`; the last result stays until the next job or a panel restart.
 - `step` ∈ `queued`, `saving` (save-off/flush), `backing_up`, `resuming` (save-on), `pruning`, `stopping`, `pre_restore`, `restoring`, `deleting`.
 - **Panel-wide at most one job runs at a time** (FIFO queue across all servers); manual and scheduled jobs share it. A second job for the same server → `409 backup_running`.
+  (Now, SEC-25: the queue takes the servers round-robin, one job per server, so one server cannot starve the others. A backup longer than `[backups] max_duration` in `panel.toml` (default `4h`, allowed `10m` to `7d`) is cancelled; `save-on` follows on every path and `backup.failed` is notified. A manual backup is accepted once per server every 10 minutes (`429`; failed ones do not count).)
 - The panel polls the service job every 2 s (`GET /v1/jobs`) and mirrors `bytes` into its own job.
 - At shutdown the panel cancels the running service job (`/v1/jobs/cancel`), sends `save-on` if needed, and waits at most 20 s.
 
@@ -248,8 +251,8 @@ All routes with `rbac.Server(server.backups, "id")`, writing ones with CSRF; res
 | `GET /servers/{id}/backups` | – | `{available, snapshots, job, schedule}`; `schedule` incl. `next_run_at`, `last_*`, `timezone` |
 | `POST /servers/{id}/backups` | `{note?}` | `202 {job}` (manual backup) |
 | `GET /servers/{id}/backups/job` | – | `{job}` (`null` if none has run yet) |
-| `PUT /servers/{id}/backups/schedule` | `{mode, interval_hours, time_of_day, weekday, keep_last, keep_daily, keep_weekly, keep_monthly}` | `{schedule}` |
-| `POST /servers/{id}/backups/{snapshot}/pin` | `{pinned}` | `{snapshot}` (new ID) |
+| `PUT /servers/{id}/backups/schedule` | `{mode, interval_hours, time_of_day, weekday, keep_last, keep_daily, keep_weekly, keep_monthly}` | `{schedule}`; now with sudo (SEC-05: a schedule with small `keep_*` values prunes old snapshots) |
+| `POST /servers/{id}/backups/{snapshot}/pin` | `{pinned}` | `{snapshot}` (new ID); now with sudo (SEC-05: unpinning hands a snapshot to the retention) |
 | `POST /servers/{id}/backups/{snapshot}/restore` | – | `202 {job}` |
 | `DELETE /servers/{id}/backups/{snapshot}` | – | `202 {job}` |
 | `GET /servers/{id}/backups/{snapshot}/download` | – | Zip stream, `Content-Disposition: attachment; filename="<name>-<YYYYMMDD-HHMMSS>.zip"` |

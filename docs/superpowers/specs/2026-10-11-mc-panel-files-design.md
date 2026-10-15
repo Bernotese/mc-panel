@@ -100,7 +100,7 @@ max_list_entries   = 10000
 
 - Relative, separator `/`; `""` or `.` = root; no leading `/`, no `\`, no component `..`, no empty components (`a//b`), no control characters (`< 0x20`, `0x7f`), valid UTF-8; total ≤ 4096 bytes, component ≤ 255 bytes.
 - **Hidden** (not visible in lists, every access → `404 not_found`): `.rcon-cli.env` and `.rcon-cli.yaml` at the top level as well as every component with the prefix `.mcpanel-`.
-- **Redacted:** when `server.properties` (top level) is read and downloaded, the value of every line `rcon.password=…` is replaced by `********`. Folder zip downloads redact as well. When saving in the editor, a redacted line has no effect because itzg rewrites the file from the environment at start (`OVERRIDE_SERVER_PROPERTIES=true`); on write the service replaces a line `rcon.password=********` with the current value from the file, so that a running server keeps its password.
+- **Redacted:** when `server.properties` (top level) is read and downloaded, the value of every line `rcon.password=…` is replaced by `********`. Folder zip downloads redact as well. When saving in the editor, a redacted line has no effect because itzg rewrites the file from the environment at start (`OVERRIDE_SERVER_PROPERTIES=true`); on write the service replaces a line `rcon.password=********` with the current value from the file, so that a running server keeps its password. (Now, SEC-37: keys written with escapes, e.g. `rcon\.password` or `rcon\u002Epassword`, which Java's `Properties` reads as `rcon.password`, are recognised as well.)
 
 ## 4. API of the service (Unix socket)
 
@@ -125,9 +125,12 @@ Error codes of the service: `not_found` (404), `exists` (409), `modified` (409),
 ### 4.1 Limits and disk space
 
 - Before an upload (`Content-Length`), a write and an extract (`total_bytes` from the central directory), the service checks via `statfs` on the instance directory that `reserve_bytes` are still free afterwards, otherwise `507 insufficient_storage`. During an upload it also counts and aborts on more bytes than announced.
+  (Now, security review SEC-04: the reserve is the larger of `reserve_bytes` (2 GiB) and `reserve_percent` (new key under `[limits]`, default 5, 0..50) of the file system. Only writes that **grow** data are refused below it: uploads, plugin installs (`UploadChecked`), extracts, restores, new backups and editor saves that make a file larger. Reading, deleting, renaming, shrinking a file and starting the server keep working on a full disk.)
 - Streams: deadline per read/write operation 60 s; no overall deadline.
-- At most 4 concurrent uploads in the service (otherwise `429 busy`).
+  (Now, SEC-24: a client must also move at least 64 KiB per minute spent waiting for it, after a grace of 2 minutes; an upload ends after at most 6 h, a download after 12 h. Slow clients can no longer hold the global slots.)
+- At most 4 concurrent uploads in the service (otherwise `429 busy`). (Now: uploads with a checksum, i.e. plugin installs, have their own 4 slots.)
 - Downloads: at most 4 concurrent folder zips and 16 file downloads (otherwise `429 busy`). A folder zip keeps its central directory in memory (the names are limited to 16 MiB, `maxZipNameBytes`, plus at most `max_extract_entries` entries); the service therefore counts entries and names in a first pass and takes the zip slot only afterwards, so that only zips that are actually streaming hold the 4 slots.
+- (Now, SEC-23: every walk over a folder tree (folder zip, backup, delete, temp cleanup) has a budget of 1,000,000 names and 256 MiB of names; a tree beyond it fails instead of exhausting the service's memory. The temp cleanup at start skips such a data directory with a warning.)
 - `delete` and the extract pre-check are explicitly exempt from the server's 30 s write deadline (deleting a large world, central directory with up to 100 000 entries); the client deadlines are long: delete 10 min, extract pre-check 5 min, waiting for download headers 2 min (small calls 10 s).
 - Shutdown: the service first aborts running jobs (`svc.Close`), then stops HTTP (`Shutdown`). If the caller has left the pre-check of an extract, no job starts.
 
@@ -150,7 +153,7 @@ All routes through `*rbac.Router` with `rbac.Server(rbac.PermServerFiles, "id")`
 | `GET /servers/{id}/files/content?path=` | `{content, mtime, size}` |
 | `PUT /servers/{id}/files/content` | `{path, content, expected_mtime}` → `{mtime, size}` |
 | `POST /servers/{id}/files/upload?path=&overwrite=` | raw body (`application/octet-stream`), `Content-Length` required → `201` |
-| `GET /servers/{id}/files/download?path=` | Stream; `Content-Disposition: attachment; filename*=UTF-8''<name>` (folder: `<name>.zip`) |
+| `GET /servers/{id}/files/download?path=` | Stream; `Content-Disposition: attachment; filename*=UTF-8''<name>` (folder: `<name>.zip`; now without Unicode format characters (category Cf, e.g. right-to-left overrides), SEC-38) |
 | `POST /servers/{id}/files/mkdir` | `{path}` |
 | `POST /servers/{id}/files/rename` | `{from, to}` |
 | `POST /servers/{id}/files/delete` | `{path}` |
