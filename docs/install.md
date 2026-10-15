@@ -69,6 +69,21 @@ Before it loads the rules the installer checks that the SSH ports are right and 
 
 The agent's jails (5 failed sign-ins, IP rules; table `inet mcpanel`) drop **all** traffic from a jailed address at the host, SSH included, and they act before `mcpanel_fw`. If you share an address with an attacker (NAT, CGNAT, a VPN exit) you can lock yourself out of SSH too: keep the provider's web console at hand, then `sudo runuser -u mcpanel -- panel admin unlock -config /etc/mc-panel/panel.toml` (see [Troubleshooting](#troubleshooting)). The jails do not cover Minecraft over IPv4: Docker forwards the published port 25565 (mc-router) through its own DNAT and forward rules, past the jail and past `mcpanel_fw`'s input chain (over IPv6 it goes through docker-proxy and is jailed). The same holds for any port a container publishes, so do not publish other container ports on this host.
 
+## Containers and their network
+
+The Minecraft containers run with a read-only root file system, without capabilities, as `mcpanel-mc`, with memory, process and file limits. Their `/tmp` is `/srv/mc-panel/tmp/<id>` on the host (root-only `tmp/`, not backed up, emptied at every container recreate; modpacks unpack their pack there, so it needs disk space next to the data).
+
+A plugin or mod is code, so the agent filters what containers can reach (egress filter, chain `forward` in the agent's table `inet mcpanel`): new connections from the containers' network to private, link-local and cloud-metadata addresses are dropped. The list is `container_egress_deny` in `/etc/mc-panel/agent.toml`; the default is `169.254.0.0/16`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`, `fc00::/7`, `fe80::/10`, and `container_egress_deny = []` turns the filter off. Restart `mcpanel-agent` after a change. What still works: the internet (server jars, modpacks, plugins' own downloads), replies to players in a private network, and connections to the host's own addresses (those are governed by the host firewall `inet mcpanel_fw`, not by this filter). DNS goes through Docker's embedded resolver; if `/etc/docker/daemon.json` sets `dns` to a resolver in a private range, remove that range from the list or use a public resolver.
+
+Further options in `agent.toml`:
+
+| Key | Default | Effect |
+|---|---|---|
+| `router_connection_rate_limit` | `50` | new connections per second through mc-router (port 25565), all clients together |
+| `cpu_per_instance` | `0` (no cap) | CPUs per Minecraft server, e.g. `2` or `1.5` (at most the host's CPU count) |
+
+After an update the egress filter and the router's new settings apply at once. An existing server gets the hardened container (read-only root, `/tmp`, file limit, CPU cap) only at its next recreate, e.g. after a change of its settings.
+
 ## Caddy
 
 **Package and updates.** Ubuntu's `caddy` (universe) gets no security updates. The installer therefore adds Caddy's official repository (`https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main`, list `/etc/apt/sources.list.d/caddy-stable.list`, `signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg`). It trusts the downloaded key only if it is exactly the pinned key `65760C51EDEA2017CEA2CA15155B6D79CA56EA34` ("Caddy Web Server"), and installs Caddy from there; `update` switches an existing install. `unattended-upgrades` installs new Caddy releases daily (origin `cloudsmith/caddy/stable`). It skips a release whose default Caddyfile changed while yours differs (a conffile prompt); `doctor` (`caddy_package`) then reports an old version, and `apt-get install caddy` updates it by hand. If the new Caddy does not accept your Caddyfile or does not stay up after the switch, the installer goes back to the previous version, holds it (`apt-mark hold caddy`, so `unattended-upgrades` leaves it alone) and says so; fix the Caddyfile and run `install.sh update --force`, which tries again and releases the hold.
@@ -205,6 +220,7 @@ How to restore a snapshot without the panel is described in [`docs/dev/README.md
 | `/var/lib/mc-panel/` | database, `secret.key`, optional GeoIP database |
 | `/srv/mc-panel/instances/<id>` | data directory of each Minecraft server |
 | `/srv/mc-panel/backups/` | restic repositories and keys |
+| `/srv/mc-panel/tmp/<id>` | the `/tmp` of each Minecraft container (disposable, not backed up) |
 | `/var/lib/mc-panel-rollback/` | update backups |
 | `/var/log/mc-panel-install.log` | installer log |
 | `/etc/caddy/mc-panel.caddy` | the panel's Caddy site (rewritten by `install` and `update`) |
