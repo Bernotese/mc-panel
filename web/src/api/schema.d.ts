@@ -1032,6 +1032,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/servers/{id}/plugins/mrpack/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan of a Modrinth modpack import (.mrpack) into the mods of a fabric or neoforge server
+         * @description The body is the modrinth.index.json of the pack (the browser unpacks it; downloads and fileSize may be left out and are never used). Only files mods/<name>.jar count, other paths are counted in ignored_files. Every mod is matched by its sha512 on Modrinth; the panel never downloads from a URL of the pack. A different Minecraft or loader version is reported in version_mismatch (200), a different loader answers 409 mrpack_incompatible. Rate limited like the other upstream lookups.
+         */
+        post: operations["previewMrpack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/plugins/mrpack/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a job that installs and updates the server-side mods of a modpack (audited per jar and once for the import)
+         * @description The plan is computed again (the preview is not trusted); its install and update entries without the excluded optional ones become the steps. A failed step does not stop the job; it then ends failed. Disabled jars stay disabled, jars that are not in the pack stay installed.
+         */
+        post: operations["importMrpack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/servers/{id}/backups": {
         parameters: {
             query?: never;
@@ -1478,7 +1518,7 @@ export interface components {
     schemas: {
         Error: {
             /** @enum {string} */
-            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "files_unavailable" | "file_exists" | "file_modified" | "not_text" | "not_regular" | "instance_running" | "insufficient_storage" | "plugins_unsupported" | "plugin_source_unavailable" | "plugin_not_downloadable" | "plugin_incompatible" | "backups_unavailable" | "backup_running" | "internal";
+            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "files_unavailable" | "file_exists" | "file_modified" | "not_text" | "not_regular" | "instance_running" | "insufficient_storage" | "plugins_unsupported" | "plugin_source_unavailable" | "plugin_not_downloadable" | "plugin_incompatible" | "mrpack_incompatible" | "mrpack_version_mismatch" | "backups_unavailable" | "backup_running" | "internal";
             message: string;
             request_id?: string;
         };
@@ -2101,7 +2141,7 @@ export interface components {
             file: string;
         };
         /** @enum {string} */
-        PluginJobKind: "install" | "update";
+        PluginJobKind: "install" | "update" | "mrpack";
         /** @enum {string} */
         PluginJobState: "running" | "done" | "failed";
         /** @enum {string} */
@@ -2135,6 +2175,100 @@ export interface components {
         };
         PluginJobResponse: {
             job: components["schemas"]["PluginJob"] | null;
+        };
+        /** @enum {string} */
+        MrpackEnvSide: "required" | "optional" | "unsupported";
+        /** @description A file entry of modrinth.index.json; unknown fields are ignored */
+        MrpackFile: {
+            /** @description Relative, no "..", no backslash, no leading slash, no control characters; only mods/<name>.jar is used */
+            path: string;
+            hashes: {
+                sha512: string;
+                sha1?: string;
+            };
+            env?: {
+                client?: components["schemas"]["MrpackEnvSide"];
+                server?: components["schemas"]["MrpackEnvSide"];
+            };
+            /** @description Ignored */
+            downloads?: string[];
+            /**
+             * Format: int64
+             * @description Ignored
+             */
+            fileSize?: number;
+        };
+        /** @description modrinth.index.json of a .mrpack (camelCase like the file); unknown fields are ignored because the format may grow */
+        MrpackIndex: {
+            /** @enum {integer} */
+            formatVersion: 1;
+            /** @enum {string} */
+            game: "minecraft";
+            versionId?: string;
+            name: string;
+            /** @description Ignored */
+            summary?: string;
+            /** @description sha512 and target names (case-insensitive) must be unique */
+            files: components["schemas"]["MrpackFile"][];
+            /** @description minecraft (required) and one loader; keys only minecraft, fabric-loader, neoforge, forge, quilt-loader; versions ^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$ */
+            dependencies: {
+                [key: string]: string;
+            };
+        };
+        MrpackImportRequest: {
+            index: components["schemas"]["MrpackIndex"];
+            /** @description sha512 of optional entries not to install */
+            exclude: string[];
+            /** @description Import although version_mismatch is true */
+            accept_mismatch: boolean;
+        };
+        /** @enum {string} */
+        MrpackAction: "install" | "update" | "unchanged" | "skip";
+        /** @enum {string} */
+        MrpackSkipReason: "client_only" | "not_on_modrinth" | "incompatible" | "file_exists";
+        MrpackPlanEntry: {
+            /** @description install: the target file name (the name from the pack, or <slug>-<version>.jar if that is no valid jar name); update: the target name, with .disabled if the replaced jar is disabled; unchanged: the installed jar; skip: the name as in the pack (not_on_modrinth: to upload it by hand) */
+            file: string;
+            /** @description Lowercase hex, the key for exclude */
+            sha512: string;
+            action: components["schemas"]["MrpackAction"];
+            /** @description Set for skip, else null */
+            reason: components["schemas"]["MrpackSkipReason"] | null;
+            /** @description env.server is optional: preselected, may be excluded */
+            optional: boolean;
+            /** @description null if Modrinth does not know the file */
+            project: components["schemas"]["PluginProjectRef"] | null;
+            /** @description Pack version of the mod; null if Modrinth does not know the file */
+            version: components["schemas"]["PluginVersionRef"] | null;
+            /** @description update: the installed jar that is replaced (its .disabled stays); else null */
+            replaces: string | null;
+        };
+        MrpackPlan: {
+            pack: {
+                name: string;
+                version_id: string;
+            };
+            game_version: {
+                pack: string;
+                /** @description Game version of the instance (LATEST resolved) */
+                server: string;
+            };
+            loader: {
+                /** @enum {string} */
+                name: "fabric" | "neoforge";
+                /** @description Loader version of the pack */
+                pack: string;
+                /** @description Fixed loader version of the instance; null = newest (never a mismatch) */
+                server: string | null;
+            };
+            /** @description The Minecraft version differs, or the loader version differs from a fixed one; the import then needs accept_mismatch */
+            version_mismatch: boolean;
+            /** @description One per mod of the pack, in pack order */
+            entries: components["schemas"]["MrpackPlanEntry"][];
+            /** @description Jars in mods/ (with .disabled) that no entry matches or replaces; they stay installed */
+            kept: string[];
+            /** @description Files of the pack outside mods/<name>.jar (configs, resource packs, ...) */
+            ignored_files: number;
         };
         /** @enum {string} */
         BackupKind: "scheduled" | "manual" | "pre-restore";
@@ -4950,6 +5084,120 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    previewMrpack: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MrpackIndex"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MrpackPlan"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description plugins_unsupported (not fabric or neoforge) or mrpack_incompatible (the pack is for another loader, or names none) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large (the body exceeds 1 MiB) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            502: components["responses"]["PluginSourceUnavailable"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    importMrpack: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MrpackImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Job started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginJob"];
+                };
+            };
+            /** @description validation_failed (invalid index, or exclude names a hash that is not an optional entry of the plan) or bad_request (malformed JSON) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description plugins_unsupported, mrpack_incompatible (another loader), mrpack_version_mismatch (the Minecraft or loader version differs and accept_mismatch is not set) or conflict (a plugin job of this server is running, or nothing to install or update) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large (the body exceeds 1 MiB) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            502: components["responses"]["PluginSourceUnavailable"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getBackups: {

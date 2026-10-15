@@ -682,6 +682,25 @@ export const pluginsOperations: MockOperation[] = [
       return HttpResponse.json({ job: jobNow(c.server.id) })
     }),
   ),
+  // Stubs for the mrpack import (contract V4); the realistic mocks come with the UI.
+  op(
+    'previewMrpack',
+    http.post(`${API}/servers/:id/plugins/mrpack/preview`, ({ request, params }) => {
+      const c = access(request, params)
+      if (c instanceof Response) return c
+      if (c.kind !== 'mod') return apiError(409, 'plugins_unsupported', 'only fabric and neoforge servers import modpacks')
+      return apiError(409, 'mrpack_incompatible', 'the mock does not import modpacks yet')
+    }),
+  ),
+  op(
+    'importMrpack',
+    http.post(`${API}/servers/:id/plugins/mrpack/import`, ({ request, params }) => {
+      const c = access(request, params)
+      if (c instanceof Response) return c
+      if (c.kind !== 'mod') return apiError(409, 'plugins_unsupported', 'only fabric and neoforge servers import modpacks')
+      return apiError(409, 'mrpack_incompatible', 'the mock does not import modpacks yet')
+    }),
+  ),
   op(
     'getPluginIcon',
     http.get(`${API}/servers/:id/plugins/icon`, ({ request, params }) => {

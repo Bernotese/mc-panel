@@ -30,6 +30,7 @@ type jobTask struct {
 	group int         // a failed task skips the remaining tasks of its group
 	from  *versionRef // update: the replaced version (audit plugin.update); nil = install
 	err   *taskError  // the task failed before the job started (update resolution)
+	via   string      // audit details "via" ("mrpack"); "" = not set
 }
 
 type taskError struct{ code, msg string }
@@ -326,15 +327,20 @@ func (e *stepMsg) Unwrap() error { return e.err }
 // the job (its context carries the request's principal).
 func (h *Handler) auditTask(ctx context.Context, serverID int64, t jobTask, target string, err error) {
 	e := t.entry
+	action := audit.ActionPluginInstall
+	var details map[string]any
 	if t.from != nil {
-		h.record(ctx, audit.ActionPluginUpdate, serverID, result(err), map[string]any{"file": target, "from": t.from.Name, "to": e.VersionName})
-		return
+		action, details = audit.ActionPluginUpdate, map[string]any{"file": target, "from": t.from.Name, "to": e.VersionName}
+	} else {
+		details = map[string]any{"source": string(e.Source), "project": e.ProjectID, "version": e.VersionID, "file": target}
+		if e.replaces != "" {
+			details["from"] = e.replacesVersion // a version change of an installed project
+		}
 	}
-	details := map[string]any{"source": string(e.Source), "project": e.ProjectID, "version": e.VersionID, "file": target}
-	if e.replaces != "" {
-		details["from"] = e.replacesVersion // a version change of an installed project
+	if t.via != "" {
+		details["via"] = t.via
 	}
-	h.record(ctx, audit.ActionPluginInstall, serverID, result(err), details)
+	h.record(ctx, action, serverID, result(err), details)
 }
 
 // checksumOf is the digest the service checks before it stores the jar (Modrinth sha512,

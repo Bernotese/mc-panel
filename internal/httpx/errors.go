@@ -40,6 +40,8 @@ const (
 	CodePluginSourceUnavailable = "plugin_source_unavailable"
 	CodePluginNotDownloadable   = "plugin_not_downloadable"
 	CodePluginIncompatible      = "plugin_incompatible"
+	CodeMrpackIncompatible      = "mrpack_incompatible"
+	CodeMrpackVersionMismatch   = "mrpack_version_mismatch"
 	CodeBackupsUnavailable      = "backups_unavailable"
 	CodeBackupRunning           = "backup_running"
 	CodeInternal                = "internal"
