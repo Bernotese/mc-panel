@@ -1,17 +1,16 @@
 package files
 
 import (
-	"regexp"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // redacted replaces the RCON password in server.properties (spec §3.4).
 const redacted = "********"
 
-// passwordLine matches the start of a java.util.Properties logical line defining
-// rcon.password: key, then "=" or ":" with optional blanks, or only blanks. Group 1 is
-// everything up to the value.
-var passwordLine = regexp.MustCompile(`^([ \t\f]*rcon\.password(?:[ \t\f]*[=:][ \t\f]*|[ \t\f]+))(.*)$`)
+// passwordKey is the key whose value is redacted.
+const passwordKey = "rcon.password"
 
 // isServerProps reports whether clean is the top-level server.properties. The comparison
 // ignores case: on a case-insensitive file system (macOS dev) every spelling opens it.
@@ -32,12 +31,111 @@ func lineAt(s string, pos int) (end, next int) {
 	return end, next
 }
 
-// matchPassword matches passwordLine on one natural line (cheap pre-filter first).
-func matchPassword(body string) []int {
-	if !strings.Contains(body, "rcon.password") {
-		return nil
+// passwordValue parses the start of a java.util.Properties logical line (raw text: its natural
+// lines with their continuations) like Properties.load does and reports where the value starts
+// when the key is rcon.password. Keys are unescaped first (SEC-37): \uXXXX, \t, \n, \r and \f
+// are characters, a backslash before any other character is dropped, and a backslash at the end
+// of a natural line continues the line after the leading blanks of the next one. The key must
+// be followed by blanks or a '=' or ':' (with optional blanks around it), as before.
+func passwordValue(raw string) (int, bool) {
+	i := skipBlanks(raw, 0)
+	var key [len(passwordKey)]byte
+	n := 0
+	put := func(r rune) bool {
+		if r >= utf8.RuneSelf || n == len(key) {
+			return false // rcon.password is ASCII: any other rune or a longer key is not it
+		}
+		key[n] = byte(r)
+		n++
+		return true
 	}
-	return passwordLine.FindStringSubmatchIndex(body)
+key:
+	for i < len(raw) {
+		c := raw[i]
+		switch c {
+		case '=', ':', ' ', '\t', '\f':
+			break key
+		case '\\':
+			if j, ok := continuation(raw, i); ok {
+				i = skipBlanks(raw, j)
+				continue
+			}
+			if i+1 >= len(raw) {
+				return 0, false // a trailing backslash: no separator follows
+			}
+			r, size := rune(raw[i+1]), 1
+			switch raw[i+1] {
+			case 't':
+				r = '\t'
+			case 'n':
+				r = '\n'
+			case 'r':
+				r = '\r'
+			case 'f':
+				r = '\f'
+			case 'u':
+				v, err := strconv.ParseUint(raw[i+2:min(i+6, len(raw))], 16, 16)
+				if err != nil || i+6 > len(raw) {
+					return 0, false // Properties.load refuses a malformed \u escape
+				}
+				r, size = rune(v), 5
+			default:
+				r, size = utf8.DecodeRuneInString(raw[i+1:])
+			}
+			if !put(r) {
+				return 0, false
+			}
+			i += 1 + size
+		default:
+			r, size := utf8.DecodeRuneInString(raw[i:])
+			if !put(r) {
+				return 0, false
+			}
+			i += size
+		}
+	}
+	if string(key[:n]) != passwordKey || i >= len(raw) {
+		return 0, false
+	}
+	i = skipSeparatorBlanks(raw, i)
+	if i < len(raw) && (raw[i] == '=' || raw[i] == ':') {
+		i = skipSeparatorBlanks(raw, i+1)
+	}
+	return i, true
+}
+
+// skipBlanks skips spaces, tabs and form feeds from i.
+func skipBlanks(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\f') {
+		i++
+	}
+	return i
+}
+
+// skipSeparatorBlanks skips blanks and line continuations (with the leading blanks of the next
+// natural line) from i.
+func skipSeparatorBlanks(s string, i int) int {
+	for {
+		i = skipBlanks(s, i)
+		j, ok := continuation(s, i)
+		if !ok {
+			return i
+		}
+		i = j
+	}
+}
+
+// continuation reports whether s[i] is a backslash that ends a natural line (an unescaped one:
+// the caller is at a fresh position of the logical line) and returns the start of the next one.
+func continuation(s string, i int) (int, bool) {
+	if i+1 >= len(s) || s[i] != '\\' || (s[i+1] != '\n' && s[i+1] != '\r') {
+		return 0, false
+	}
+	j := i + 2
+	if s[i+1] == '\r' && j < len(s) && s[j] == '\n' {
+		j++
+	}
+	return j, true
 }
 
 // commentOrBlank reports whether a natural line that starts a logical line is a comment or
@@ -72,8 +170,8 @@ func mapPasswordLines(s string, f func(prefix, value string) (string, bool), inn
 				lastEnd, lastNext = lineAt(s, lastStart)
 			}
 		}
-		if m := matchPassword(first); m != nil {
-			if out, keep := f(first[:m[3]], s[pos+m[4]:lastEnd]); keep {
+		if vs, ok := passwordValue(s[pos:lastEnd]); ok {
+			if out, keep := f(s[pos:pos+vs], s[pos+vs:lastEnd]); keep {
 				b.WriteString(out)
 				b.WriteString(s[lastEnd:lastNext])
 			}
@@ -85,8 +183,8 @@ func mapPasswordLines(s string, f func(prefix, value string) (string, bool), inn
 			ce, cn := lineAt(s, cs)
 			body := s[cs:ce]
 			if inner != nil {
-				if m := matchPassword(body); m != nil {
-					body = inner(body[:m[3]], body[m[4]:])
+				if vs, ok := passwordValue(body); ok {
+					body = inner(body[:vs], body[vs:])
 				}
 			}
 			b.WriteString(body)
