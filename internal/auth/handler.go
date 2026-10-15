@@ -97,9 +97,11 @@ func New(d Deps) (*Handler, error) {
 		return nil, fmt.Errorf("auth: webauthn: %w", err)
 	}
 	q := store.New(d.DB)
+	sessions := NewSessions(q, d.Clock, d.Config.Session)
+	sessions.adminNet = d.Guard.CheckAdminNetwork
 	return &Handler{
 		db: d.DB, q: q, cfg: d.Config, clock: d.Clock, box: d.Box, guard: d.Guard, geo: d.Geo,
-		audit: d.Audit, notifier: d.Notifier, sessions: NewSessions(q, d.Clock, d.Config.Session), wa: wa,
+		audit: d.Audit, notifier: d.Notifier, sessions: sessions, wa: wa,
 		recoveryKey: d.Box.DeriveKey(recoveryKeyPurpose), twoFA: newTwoFALocks(),
 	}, nil
 }

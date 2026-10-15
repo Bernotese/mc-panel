@@ -10,6 +10,40 @@ import (
 	"database/sql"
 )
 
+const defenseActiveAdminSessions = `-- name: DefenseActiveAdminSessions :many
+SELECT s.id, s.ip FROM sessions s JOIN users u ON u.id = s.user_id
+WHERE u.role = 'admin' AND s.revoked_at IS NULL AND s.expires_at > ?1
+ORDER BY s.id
+`
+
+type DefenseActiveAdminSessionsRow struct {
+	ID int64
+	Ip string
+}
+
+func (q *Queries) DefenseActiveAdminSessions(ctx context.Context, now int64) ([]DefenseActiveAdminSessionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, defenseActiveAdminSessions, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DefenseActiveAdminSessionsRow{}
+	for rows.Next() {
+		var i DefenseActiveAdminSessionsRow
+		if err := rows.Scan(&i.ID, &i.Ip); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const defenseActiveBannedJails = `-- name: DefenseActiveBannedJails :many
 SELECT id, ip_key, reason, level, manual, created_at, expires_at, lifted_at, lifted_by, fw_banned_at, fw_unbanned_at FROM jails
 WHERE fw_banned_at IS NOT NULL AND lifted_at IS NULL AND expires_at > ?1
@@ -872,6 +906,20 @@ func (q *Queries) DefenseNewDeviceLogins(ctx context.Context, since int64) ([]De
 		return nil, err
 	}
 	return items, nil
+}
+
+const defenseRevokeSession = `-- name: DefenseRevokeSession :exec
+UPDATE sessions SET revoked_at = ?1 WHERE id = ?2 AND revoked_at IS NULL
+`
+
+type DefenseRevokeSessionParams struct {
+	RevokedAt sql.NullInt64
+	ID        int64
+}
+
+func (q *Queries) DefenseRevokeSession(ctx context.Context, arg DefenseRevokeSessionParams) error {
+	_, err := q.db.ExecContext(ctx, defenseRevokeSession, arg.RevokedAt, arg.ID)
+	return err
 }
 
 const defenseTopFailingCountries = `-- name: DefenseTopFailingCountries :many

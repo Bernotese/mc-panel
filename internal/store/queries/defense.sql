@@ -155,3 +155,11 @@ RETURNING *;
 
 -- name: DefenseDeleteNotifier :execrows
 DELETE FROM notifiers WHERE id = sqlc.arg(id);
+
+-- name: DefenseActiveAdminSessions :many
+SELECT s.id, s.ip FROM sessions s JOIN users u ON u.id = s.user_id
+WHERE u.role = 'admin' AND s.revoked_at IS NULL AND s.expires_at > sqlc.arg(now)
+ORDER BY s.id;
+
+-- name: DefenseRevokeSession :exec
+UPDATE sessions SET revoked_at = sqlc.arg(revoked_at) WHERE id = sqlc.arg(id) AND revoked_at IS NULL;
