@@ -2,8 +2,8 @@
 package password
 
 import (
-	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -11,7 +11,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -87,19 +89,56 @@ func (l *limiter) acquire(ctx context.Context) (release func(), err error) {
 	return func() { l.active.Add(-1); <-l.slots }, nil
 }
 
-//go:embed common.txt
-var commonRaw []byte
+// commonGz is the list of common passwords that Validate rejects: every entry of at least
+// MinLength characters, lower-cased, deduplicated and sorted, one per line. Sources (SecLists,
+// https://github.com/danielmiessler/SecLists, MIT licence, see common.LICENSE):
+// Passwords/Common-Credentials/xato-net-10-million-passwords-1000000.txt and
+// 100k-most-used-passwords-NCSC.txt, plus the earlier top-100k list.
+//
+//go:embed common.txt.gz
+var commonGz []byte
 
-var common = sync.OnceValue(func() map[string]struct{} {
-	m := make(map[string]struct{}, 4096)
-	sc := bufio.NewScanner(bytes.NewReader(commonRaw))
-	for sc.Scan() {
-		if line := strings.TrimSpace(sc.Text()); line != "" {
-			m[line] = struct{}{}
+// common returns the sorted list. The decompressed text is kept as one string and the
+// entries are substrings of it, so the ~47k entries cost little more than the text itself.
+var common = sync.OnceValue(func() []string {
+	zr, err := gzip.NewReader(bytes.NewReader(commonGz))
+	if err != nil {
+		panic("password: common list: " + err.Error())
+	}
+	raw, err := io.ReadAll(zr)
+	if err != nil {
+		panic("password: common list: " + err.Error())
+	}
+	text := string(raw)
+	words := make([]string, 0, strings.Count(text, "\n"))
+	for line := range strings.SplitSeq(text, "\n") {
+		if line != "" {
+			words = append(words, line)
 		}
 	}
-	return m
+	slices.Sort(words) // already sorted; keeps the binary search correct regardless
+	return words
 })
+
+func isCommon(lower string) bool {
+	_, found := slices.BinarySearch(common(), lower)
+	return found
+}
+
+// minDistinct is the number of different characters a password needs at least: "aaaaaaaaaaaa"
+// or "abababababab" pass the length check but are guessed immediately.
+const minDistinct = 4
+
+func tooFewDistinct(pw string) bool {
+	seen := make(map[rune]struct{}, minDistinct)
+	for _, r := range pw {
+		seen[r] = struct{}{}
+		if len(seen) >= minDistinct {
+			return false
+		}
+	}
+	return true
+}
 
 func Validate(pw, username string) error {
 	n := utf8.RuneCountInString(pw)
@@ -110,7 +149,7 @@ func Validate(pw, username string) error {
 		return ErrTooLong
 	}
 	lower := strings.ToLower(pw)
-	if _, ok := common()[lower]; ok {
+	if isCommon(lower) || tooFewDistinct(lower) {
 		return ErrCommon
 	}
 	if u := strings.ToLower(username); len(u) >= 3 && strings.Contains(lower, u) {
