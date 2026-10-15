@@ -11,3 +11,40 @@ updates:
           - "*"
     commit-message:
       prefix: ci
+
+  # SEC-32: Go modules and the web dependencies, one grouped PR per ecosystem and week. CI is the gate;
+  # a major npm update stays in its own PR.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-modules:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    groups:
+      web-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: npm
+    directory: /tools/redocly
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
