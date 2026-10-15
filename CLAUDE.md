@@ -7,7 +7,7 @@ mc-panel is a self-hosted Minecraft server panel: a Go backend with an embedded 
 - `README.md`: what mc-panel is, features, security model, requirements, quickstart. No build steps (those belong in `docs/dev/README.md`).
 - `docs/install.md`: operator guide: requirements, DNS, firewall, all `install.sh` options, first admin, update, rollback, doctor, uninstall, backups of keys, troubleshooting. Update it when installer options or paths change.
 - `docs/dev/README.md`: toolchain versions, dev setup, CLI commands, test VM, CI jobs and how to reproduce them locally, lint conventions, release process, production details, backups runbook.
-- `docs/dev/acceptance.md`: the manual release acceptance checklist, one section per area (setup, instances, console and players, files, plugins and mods, backups, monitoring and alerts, installer, UI). A feature with manual checks adds them to its area there; there are no per-sub-project checklists.
+- `docs/dev/acceptance.md`: the manual release acceptance checklist, one section per area (setup, sign-in and Security Center, instances, console and players, files, plugins and mods, backups, monitoring and alerts, installer, UI). A feature with manual checks adds them to its area there; there are no per-sub-project checklists.
 - `docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md`: architecture, security requirements and the roadmap of sub-projects (1 foundation, 2 instances, 3a console, 3b files, 3c plugins, 4 backups, 5 monitoring, 6 installer and 7 UI redesign are done).
 - `docs/superpowers/specs/2026-10-10-mc-panel-instances-design.md`: Minecraft instances (sub-project 2).
 - `docs/superpowers/specs/2026-10-11-mc-panel-console-players-design.md`: console, live log and player management (sub-project 3a).
