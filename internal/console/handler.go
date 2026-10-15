@@ -33,8 +33,8 @@ type Deps struct {
 	// Agent is the agent's console API; nil means "no agent" (every call fails with
 	// agentapi.ErrUnavailable).
 	Agent agentapi.ConsoleClient
-	// Access re-checks open streams every 30 s; nil = deny all (open streams end at the next
-	// 30 s recheck). cmd/panel always sets it (NewAccess).
+	// Access re-checks open streams every 5 s; nil = deny all (open streams end at the next
+	// recheck). cmd/panel always sets it (NewAccess).
 	Access Access
 	Log    *slog.Logger // nil = slog.Default()
 }

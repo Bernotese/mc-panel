@@ -52,9 +52,24 @@ type Panel struct {
 	InstancesDir   string   `toml:"instances_dir"`
 	TrustedProxies []string `toml:"trusted_proxies"`
 	Session        Session  `toml:"session"`
+	Backups        Backups  `toml:"backups"`
 
 	trusted []netip.Prefix
 }
+
+// Backups configures the backup jobs (sub-project 4).
+type Backups struct {
+	// MaxDuration bounds one backup: a running server stays in save-off meanwhile, and only
+	// one backup job runs in the panel at a time (SEC-25).
+	MaxDuration Duration `toml:"max_duration"`
+}
+
+// Bounds of backups.max_duration: below the stall watchdog (10 min) a slow disk would fail
+// every backup.
+const (
+	minBackupDuration = 10 * time.Minute
+	maxBackupDuration = 7 * 24 * time.Hour
+)
 
 func defaultSession() Session {
 	return Session{
@@ -79,6 +94,7 @@ func DefaultPanel() Panel {
 		GeoIPPath:          "/var/lib/mc-panel/dbip-country-lite.mmdb",
 		TrustedProxies:     []string{"127.0.0.1/32", "::1/128"},
 		Session:            defaultSession(),
+		Backups:            Backups{MaxDuration: Duration{4 * time.Hour}},
 		MonitoringPingAddr: "127.0.0.1:25565",
 		InstancesDir:       DefaultInstancesDir,
 	}
@@ -162,6 +178,9 @@ func (p *Panel) Validate() error {
 		if d.Duration <= 0 {
 			errs = append(errs, fmt.Errorf("session.%s must be > 0", name))
 		}
+	}
+	if d := p.Backups.MaxDuration.Duration; d < minBackupDuration || d > maxBackupDuration {
+		errs = append(errs, fmt.Errorf("backups.max_duration must be between %s and %s", minBackupDuration, maxBackupDuration))
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("config: %w", errors.Join(errs...))

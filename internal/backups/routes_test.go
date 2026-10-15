@@ -20,8 +20,8 @@ var wantRoutes = map[string]rbac.Rule{
 	"GET /servers/{id}/backups":                     backupsRule,
 	"POST /servers/{id}/backups":                    backupsRule,
 	"GET /servers/{id}/backups/job":                 backupsRule,
-	"PUT /servers/{id}/backups/schedule":            backupsRule,
-	"POST /servers/{id}/backups/{snapshot}/pin":     backupsRule,
+	"PUT /servers/{id}/backups/schedule":            backupsRule.WithSudo(),
+	"POST /servers/{id}/backups/{snapshot}/pin":     backupsRule.WithSudo(),
 	"POST /servers/{id}/backups/{snapshot}/restore": backupsRule.WithSudo(),
 	"DELETE /servers/{id}/backups/{snapshot}":       backupsRule.WithSudo(),
 	"GET /servers/{id}/backups/{snapshot}/download": backupsRule,
@@ -60,8 +60,9 @@ func TestRouteContract(t *testing.T) {
 	}
 }
 
-// A user without server.backups is refused; restore and delete need sudo even for admins;
-// anonymous requests are 401.
+// A user without server.backups is refused; schedule, pin, restore and delete need sudo even
+// for admins (SEC-05: a lowered retention or an unpin destroys snapshots as well); anonymous
+// requests are 401.
 func TestRoutesCheckPermissionAndSudo(t *testing.T) {
 	e := newEnv(t)
 	bob := userP(storetest.CreateUser(t, e.db, "bob", "user"), "bob")
@@ -75,7 +76,10 @@ func TestRoutesCheckPermissionAndSudo(t *testing.T) {
 		}
 	}
 	noSudo := e.admin()
-	for _, key := range []string{"POST /servers/{id}/backups/{snapshot}/restore", "DELETE /servers/{id}/backups/{snapshot}"} {
+	for _, key := range []string{
+		"PUT /servers/{id}/backups/schedule", "POST /servers/{id}/backups/{snapshot}/pin",
+		"POST /servers/{id}/backups/{snapshot}/restore", "DELETE /servers/{id}/backups/{snapshot}",
+	} {
 		method, pattern, _ := strings.Cut(key, " ")
 		rec := e.do(method, expand(pattern), "{}", &noSudo)
 		if rec.Code != http.StatusForbidden || errCode(t, rec) != "sudo_required" {

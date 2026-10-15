@@ -1108,6 +1108,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'backup_running (a backup, restore or delete job of this server is queued or running) or conflict (the server has no instance yet)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: 'rate_limited: a manual backup only 10 minutes after the previous one of the server ended (one refused before the file service started it does not count; Retry-After header set)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '503': { description: 'backups_unavailable (restic is missing on the host) or files_unavailable (file service)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /servers/{id}/backups/job:
     get:
@@ -1125,7 +1126,7 @@ paths:
     put:
       operationId: updateBackupSchedule
       tags: [backups]
-      summary: Set schedule and retention of the server (audited)
+      summary: Set schedule and retention of the server (sudo; audited)
       description: 'Times are in the panel time zone (ServerSettings.backup_timezone). The retention applies only to scheduled snapshots; manual, pre-restore and pinned ones stay.'
       parameters:
         - $ref: '#/components/parameters/IdPath'
@@ -1160,7 +1161,7 @@ paths:
     post:
       operationId: pinBackup
       tags: [backups]
-      summary: Pin or unpin a scheduled snapshot (pinned ones survive the retention; the snapshot gets a new ID; audited)
+      summary: Pin or unpin a scheduled snapshot (pinned ones survive the retention; the snapshot gets a new ID; sudo; audited)
       parameters:
         - $ref: '#/components/parameters/IdPath'
         - $ref: '#/components/parameters/SnapshotPath'
@@ -1672,7 +1673,7 @@ components:
         modpack: { type: [string, 'null'] }
         java: { $ref: '#/components/schemas/JavaVersion' }
         memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256, description: 'At most max_mib of GET /servers/memory on this host' }
-        properties: { $ref: '#/components/schemas/ServerProperties', description: All fields set (defaults resolved) }
+        properties: { $ref: '#/components/schemas/ServerProperties', description: 'All fields set (defaults resolved); seed only for admins and users with server.files on the server' }
     ServerStatus:
       type: object
       description: |

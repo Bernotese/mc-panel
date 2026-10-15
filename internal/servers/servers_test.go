@@ -13,6 +13,7 @@ import (
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/servers"
 	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
@@ -538,5 +539,45 @@ func TestDeleteServerZeroRowsIs404(t *testing.T) {
 	}
 	if got := e.rec.Actions(); slices.Contains(got, audit.ActionServerDelete) {
 		t.Fatalf("unexpected audit entries: %v", got)
+	}
+}
+
+// SEC-28: the world seed is shown only to admins and to users with server.files (they can read
+// server.properties anyway); server.view alone does not reveal it, in the list and the detail.
+func TestSeedOnlyForAdminsAndFilesUsers(t *testing.T) {
+	e := newEnv(t)
+	id := createInstance(t, e.db, "alpha")
+	mustExec(t, e.db, `UPDATE instances SET properties = ? WHERE server_id = ?`, `{"seed":"8675309"}`, id)
+	viewer := userP(storetest.CreateUser(t, e.db, "viewer", "user"), "viewer")
+	grant(t, e.db, viewer.UserID, id, "server.view", "server.power", "server.console", "server.plugins", "server.backups")
+	filer := userP(storetest.CreateUser(t, e.db, "filer", "user"), "filer")
+	grant(t, e.db, filer.UserID, id, "server.view", "server.files")
+	admin := e.admin()
+	for _, tc := range []struct {
+		name string
+		p    principal.Principal
+		want any // nil = no seed key
+	}{
+		{"admin", admin, "8675309"},
+		{"server.files", filer, "8675309"},
+		{"server.view", viewer, nil},
+	} {
+		list := decode[[]serverResp](t, e.do(http.MethodGet, "/servers", nil, &tc.p))
+		one := decode[serverResp](t, e.do(http.MethodGet, fmt.Sprintf("/servers/%d", id), nil, &tc.p))
+		if len(list) != 1 {
+			t.Fatalf("%s: list = %+v", tc.name, list)
+		}
+		for where, s := range map[string]serverResp{"list": list[0], "get": one} {
+			if s.Instance == nil {
+				t.Fatalf("%s %s: no instance", tc.name, where)
+			}
+			seed, ok := s.Instance.Properties["seed"]
+			if (tc.want == nil && ok) || (tc.want != nil && seed != tc.want) {
+				t.Errorf("%s %s: seed = %v (present %v), want %v", tc.name, where, seed, ok, tc.want)
+			}
+			if s.Instance.Properties["level_type"] != "normal" {
+				t.Errorf("%s %s: other properties changed: %v", tc.name, where, s.Instance.Properties)
+			}
+		}
 	}
 }
