@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import { openServer, openServerSection, serverSectionLink, signIn } from './helpers'
 
@@ -106,4 +107,37 @@ test('a user without the plugins permission sees no plugins tab', async ({ page 
   await expect(page).toHaveURL(/\/servers\/1$/)
   await expect(serverSectionLink(page, 'survival', 'Übersicht')).toBeVisible()
   await expect(serverSectionLink(page, 'survival', 'Plugins')).toHaveCount(0)
+})
+
+test('admin imports a modpack (.mrpack) into the mods of a fabric server', async ({ page }) => {
+  await signIn(page, 'admin', true)
+  await openServer(page, 'modded')
+  await expect(page).toHaveURL(/\/servers\/4$/)
+  await openServerSection(page, 'modded', 'Mods')
+  const installed = page.getByRole('region', { name: 'Installierte Mods' })
+  await expect(installed.getByText('fabric-api-0.110.0.jar')).toBeVisible()
+
+  const chooser = page.waitForEvent('filechooser')
+  await installed.getByRole('button', { name: 'Modpack importieren (.mrpack)' }).click()
+  await (await chooser).setFiles(fileURLToPath(new URL('./fixtures/test.mrpack', import.meta.url)))
+
+  const dialog = page.getByRole('dialog', { name: 'Modpack importieren' })
+  await expect(dialog.getByText(/E2E Pack \(1\.0\.0\)/)).toBeVisible()
+  await expect(dialog.getByRole('region', { name: /^Neu/ }).getByText('Lithium', { exact: true })).toBeVisible()
+  await expect(dialog.getByRole('region', { name: /^Aktualisiert/ }).getByText('Fabric API', { exact: true })).toBeVisible()
+  const skipped = dialog.getByRole('region', { name: /^Übersprungen/ })
+  await expect(skipped.getByText('Sodium Extra', { exact: true })).toBeVisible()
+  await expect(skipped.getByText('custom-tweaks.jar', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('Dateien außerhalb von mods/ werden ignoriert: 1')).toBeVisible()
+
+  await dialog.getByRole('checkbox', { name: 'ServerCore importieren' }).uncheck()
+  await dialog.getByRole('button', { name: 'Importieren (2)' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByText('Modpack-Import läuft …')).toBeVisible()
+  await expect(page.getByText('Modpack-Import abgeschlossen')).toBeVisible({ timeout: 15_000 })
+
+  await expect(installed.getByText('lithium-fabric-0.15.0.jar')).toBeVisible()
+  await expect(installed.getByText('fabric-api-0.111.0-beta.jar')).toBeVisible()
+  await expect(installed.getByText('fabric-api-0.110.0.jar')).toHaveCount(0)
+  await expect(installed.getByText('ServerCore', { exact: true })).toHaveCount(0)
 })
