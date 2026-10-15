@@ -66,7 +66,7 @@ Browser ──▶ panel (mcpanel, unprivileged)              agent (root)
 
 ### 3.1 panel: package `internal/servers`
 
-- Takes over the server handlers from `internal/users/servers.go` (list, create, details, delete, power) together with the power limiter (`internal/users/powerlimit.go`, used only by the power route). Granting permissions (`/users/{id}/permissions`) stays in `internal/users`.
+- Takes over the server handlers from `internal/users/servers.go` (list, create, details, delete, power) together with the power limiter (`internal/users/powerlimit.go`, used only by the power route). Granting permissions (`/users/{id}/permissions`) stays in `internal/users`. (Now: both files are gone from `internal/users`; the server handlers live in `internal/servers` (`servers.go`, `power.go`) and the limiter in `internal/servers/powerlimit.go`.)
 - The DB is the source of truth for the **desired state** of each instance.
 - A reconcile loop (§5.3) brings the actual state at the agent there.
 - The panel fetches the version catalogs (§6) itself; the agent needs no internet access except for image pulls by Docker.
@@ -204,7 +204,7 @@ Rules (panel and agent):
 | `loader_version` | only fabric/neoforge, otherwise `null`; format like `version` |
 | `modpack` | only modrinth: `^[a-z0-9-]{1,64}$`; only curseforge: slug like Modrinth or `https://www.curseforge.com/minecraft/modpacks/<slug>`; otherwise `null` |
 | `java` | Enum from §4 |
-| `memory_mib` | 1024–32768, multiple of 256 |
+| `memory_mib` | 1024–32768, multiple of 256 (Now, issue #79: the panel also caps it at the host's memory, `(MemTotal − 1 GiB) / 1.25` rounded down to 256 MiB, in `servers.MaxMemoryMiB` (`internal/servers/memory.go`, MemTotal from `internal/hostinfo`); create and update reject more with `400 validation_failed`. `GET /servers/memory` (admin) returns the limits, the memory already given to all servers and a recommended size per type for the form. The agent and `instancespec` are unchanged.) |
 | `properties` | only keys and types from §7 |
 | `curseforge_api_key` | only with `type = curseforge`, required there; `^[A-Za-z0-9$./_-]{1,128}$` |
 | Combination | `type = curseforge` requires `java != java8` (the java8 image does not support CurseForge) |
@@ -246,7 +246,7 @@ From a valid spec the agent generates exactly this configuration; none of it can
 - An existing `mcpanel-mc-<id>` whose label `mcpanel.name` does not match the request (the FQDN may change, e.g. after a change of the base domain) belongs to a different server: the agent never adopts, starts or replaces it, but reports `last_error`. If two containers share an FQDN, mc-router routes to the container with the highest ID.
 - Environment, fixed: `EULA=TRUE`, `TYPE`, `VERSION`, `MEMORY=<memory_mib>M`, `ENABLE_AUTOPAUSE=false`, `ENABLE_RCON=true` (reachable only in the internal network; for sub-project 3), `OVERRIDE_SERVER_PROPERTIES=true`; depending on the type `FABRIC_LOADER_VERSION`, `NEOFORGE_VERSION`, `MODRINTH_MODPACK` (with `TYPE=MODRINTH`), `CF_SLUG`/`CF_PAGE_URL` and `CF_API_KEY` (with `TYPE=AUTO_CURSEFORGE`; `type` → `TYPE`: vanilla→`VANILLA`, paper→`PAPER`, purpur→`PURPUR`, fabric→`FABRIC`, neoforge→`NEOFORGE`, modrinth→`MODRINTH`, curseforge→`AUTO_CURSEFORGE`).
 - Environment from `properties` according to §7, plus fixed `EXISTING_OPS_FILE=SYNCHRONIZE` and `EXISTING_WHITELIST_FILE=SYNCHRONIZE`: after every (re)start, ops and whitelist match exactly the lists in the panel (entries granted in-game are overwritten; the UI points this out). If the lists are empty or the whitelist is off, the agent empties `ops.json` or `whitelist.json` before creating the container. All other itzg variables (`JVM_OPTS`, `GENERIC_PACK`, `MODS`, `PLUGINS`, …) cannot be set.
-  (Now: since sub-project 3a the panel sets neither `OPS`/`WHITELIST` nor `EXISTING_*_FILE`; ops and whitelist belong to the server's own `ops.json`/`whitelist.json` and are changed through RCON, see `internal/agent/instancespec/env.go`. Only `whitelist_enabled` (`ENABLE_WHITELIST`) is still a property.)
+  (Now: since sub-project 3a the panel sets neither `OPS`/`WHITELIST` nor `EXISTING_*_FILE`; ops and whitelist belong to the server's own `ops.json`/`whitelist.json` and are changed through RCON, see `internal/agent/instancespec/env.go`. Only `whitelist_enabled` (`ENABLE_WHITELIST`) is still a property. The agent no longer empties `ops.json` or `whitelist.json` before creating a container; it only reads them for the players area (`internal/agent/instances/players.go`).)
 
 Router container `mcpanel-router`: image `[images].router`, network `mcpanel-mc`, port `25565/tcp` published on the host, mount `/srv/mc-panel/router` → `/config` (ro, a directory instead of a single file so that a `rename` becomes visible), started with `-routes-config /config/routes.json` **without** `-routes-config-watch`, same `HostConfig` hardening, `RestartPolicy: unless-stopped`; the image already runs as UID 65532. Route file: `{"mappings": {"<fqdn>": "mcpanel-mc-<id>:25565"}}`. After every write the agent sends `SIGHUP` (`POST /containers/mcpanel-router/kill?signal=SIGHUP`): only reloading via SIGHUP removes deleted routes, mc-router's file watching only adds (verified against mc-router 1.47.2). The router gets no Docker socket.
 

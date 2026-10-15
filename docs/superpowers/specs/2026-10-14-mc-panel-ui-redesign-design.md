@@ -75,7 +75,7 @@ New tokens:
 
 - Packages: `@fontsource-variable/space-grotesk`, `@fontsource/silkscreen`, `@fontsource-variable/pixelify-sans`, `@fontsource-variable/jetbrains-mono`; `@fontsource-variable/geist` is dropped.
 - `--font-sans` = Space Grotesk, `--font-heading` = Silkscreen, `--font-pixel` = Pixelify Sans, `--font-mono` = JetBrains Mono.
-- Silkscreen only for the logo, page and section headings, badges and short labels in capitals; never for body text, never below 12 px. Pixelify Sans only for key figures, player counts and the MOTD line.
+- Silkscreen only for the logo, page and section headings, badges and short labels in capitals; never for body text, never below 12 px. Pixelify Sans only for key figures, player counts and the MOTD line. (Now, issue #84: stat values, player counts and the dashboard figures use Space Grotesk (`font-semibold`, `tabular-nums`) for readability; Pixelify Sans stays for player names and the MOTD.)
 - Umlauts and `ß` must exist in all four fonts (checked in wave 0; if a glyph is missing, that spot falls back to Space Grotesk).
 
 ### 3.3 Utilities (Tailwind `@utility` in `index.css`)
@@ -131,6 +131,8 @@ API unchanged, new styling:
 - **Server tree** (about 220 px): heading "SERVERS", below it all visible servers with a status dot (from the existing servers query, same polling logic as the home page). The active server is expanded and shows its areas (§4.2). Admins see "+ Create server" at the bottom. Collapsible; state in `localStorage` under `mcpanel.tree` (try/catch, default: open).
 - **Top bar** (thin): breadcrumb (e.g. `survival / Console`), on mobile also the menu button.
 - **Content:** full width, page margin per §3.4.
+
+(Now, issue #86: on desktop (≥ `lg`) the rail can be expanded to show labels next to the icons, state in `localStorage` `mcpanel.rail` (default: collapsed). All pages share one content area `mx-auto max-w-7xl`; the server form, the panel settings and the profile use two columns on wide screens.)
 
 ### 4.2 Responsive
 
@@ -212,7 +214,7 @@ The **overview** then only contains details (type, version, Java, memory, start 
 | T4 Server management | `feat/ui-manage` | Files (incl. `useBlocker`), plugins, backups, server form, settings + danger zone | `features/files/*`, `features/plugins/*`, `features/backups/*`, `features/servers/{server-form,server-settings-tab,delete-server-section,properties-fields,…}.*` (everything in `features/servers` except T2's files) |
 | T5 Admin + auth | `feat/ui-admin` | §5.3 | `features/{users,security,audit,settings,profile,auth,setup,sudo,webauthn}/*` |
 
-The plan sets the exact file assignment (in particular in `features/servers/`); every file has exactly one owner.
+The plan sets the exact file assignment (in particular in `features/servers/`); every file has exactly one owner. (Now: `server-detail-page` was removed in wave 1; the server areas are the layout route `routes/_app/servers/$id` with `features/servers/server-layout.tsx`.)
 
 ### 6.2 Contracts between the teammates
 

@@ -232,6 +232,8 @@ Visible with `server.plugins` on paper, purpur, fabric and neoforge; title accor
 - **Banner** on `restart_needed`: "Restart required for the changes to take effect", with a restart button for `server.power`.
 - Upstream unreachable: Discover shows an error state with "Try again"; Installed stays usable.
 
+(Now, issue #85: Discover shows a source badge on each hit and a "Results from <source>" link, the source toggle is a tab bar, "Hide installed" is on by default (stored in `localStorage` `mcpanel.plugins.hideInstalled`) and loads further pages by itself (at most 4 per step) plus infinite scroll with "Load more" as a fallback. Installed has a name filter and status and origin filters with a counter and "Reset filters". Issue #78 adds "Import modpack (.mrpack)" for mods; see `2026-10-14-mc-panel-mrpack-import-design.md`.)
+
 ### 7.2 User management
 
 When ticking `server.plugins`: hint "'Plugins/mods' allows running code in the Minecraft server. Grant it only to people you fully trust."

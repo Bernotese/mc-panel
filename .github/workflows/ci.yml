@@ -32,7 +32,7 @@ jobs:
   # on the same tree, and they cost most of the billed minutes.
   #
   # Runner placement: jobs without root run on the self-hosted runners on the test VM (labels
-  # self-hosted + mcpanel-vm; two runners, see docs/dev/README.md). Their timing-sensitive test
+  # self-hosted + mcpanel-vm; four runners, see docs/dev/README.md). Their timing-sensitive test
   # steps take the same lock as `make test-vm`, so CI and teammates never run them at once. The
   # root jobs change the host (nftables, Docker, port 25565) and stay on GitHub-hosted runners.
   changes:
