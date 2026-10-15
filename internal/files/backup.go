@@ -132,7 +132,7 @@ func (s *Service) runBackup(ctx context.Context, root *os.Root, req filesapi.Cre
 		func(rel string, cause error) {
 			s.jobs.skip(req.ID)
 			if cause != nil {
-				s.log.Warn("files: backup left out an entry it cannot read", "id", req.ID, "path", rel, "err", s.publicMessage(cause.Error()))
+				s.log.Warn("files: backup left out an entry", "id", req.ID, "path", rel, "err", s.publicMessage(cause.Error()))
 			}
 		})
 	if werr == nil && ctx.Err() != nil {

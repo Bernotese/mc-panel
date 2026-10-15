@@ -202,8 +202,11 @@ type waitMode struct {
 	// stall: the job reports byte progress (backup, pre-restore, restore); no change for
 	// stallTimeout cancels and fails it.
 	stall bool
-	// limit > 0 bounds the whole job instead (forget reports no bytes).
-	limit time.Duration
+	// limit > 0 bounds the whole job (forget reports no bytes; a backup holds save-off and the
+	// panel's single job slot); limitMsg is the job error then and onLimit (may be nil) runs.
+	limit    time.Duration
+	limitMsg string
+	onLimit  func(msg string)
 	// untilEnd: the restoring step, which holds the start gate. Poll errors never end the wait
 	// and a cancelled job is waited for until a successful poll shows its end, so the gate does
 	// not open while the service may still swap the data directory.
@@ -211,10 +214,26 @@ type waitMode struct {
 }
 
 var (
-	waitBackup  = waitMode{stall: true}
 	waitRestore = waitMode{stall: true, untilEnd: true}
-	waitForget  = waitMode{limit: forgetTimeout}
+	waitForget  = waitMode{limit: forgetTimeout, limitMsg: msgForgetTimeout}
 )
+
+// waitBackup watches the service job of a backup (also a pre-restore one): stall watchdog
+// and backups.max_duration (SEC-25).
+func (h *Handler) waitBackup() waitMode {
+	return waitMode{stall: true, limit: h.maxBackup, limitMsg: "the backup did not finish within " + fmtDuration(h.maxBackup)}
+}
+
+// fmtDuration writes d as hours and minutes ("4 hours", "90 minutes").
+func fmtDuration(d time.Duration) string {
+	if d%time.Hour == 0 {
+		if d == time.Hour {
+			return "1 hour"
+		}
+		return fmt.Sprintf("%d hours", d/time.Hour)
+	}
+	return fmt.Sprintf("%d minutes", d/time.Minute)
+}
 
 // waitService polls the service job jobID of the server until it ended; progress goes to j.
 // A cancelled ctx cancels the service job. Stall watchdog and overall limit (h.clock) follow
@@ -271,7 +290,10 @@ func (h *Handler) waitService(ctx context.Context, j *job, id int64, jobID strin
 		case m.stall && now.Sub(lastChange) >= stallTimeout:
 			over = msgStalled
 		case m.limit > 0 && now.Sub(started) >= m.limit:
-			over = msgForgetTimeout
+			over = m.limitMsg
+			if m.onLimit != nil {
+				m.onLimit(over)
+			}
 		}
 		if over != "" {
 			h.log.WarnContext(ctx, "backups: cancelling the service job", "server_id", id, "job", jobID, "reason", over)
@@ -341,7 +363,13 @@ func (h *Handler) runBackup(ctx context.Context, j *job, kind filesapi.SnapshotK
 	if err != nil {
 		return "", err
 	}
-	done, err := h.waitService(ctx, j, id, sj.ID, waitBackup)
+	m := h.waitBackup()
+	if j.spec.trigger == triggerManual {
+		// Scheduled runs notify every failure (retention.go); a manual one only this one, the
+		// user may have left the page meanwhile.
+		m.onLimit = func(msg string) { h.alert(ctx, id, j.spec.name, alertBackup, msg) }
+	}
+	done, err := h.waitService(ctx, j, id, sj.ID, m)
 	if err != nil {
 		return "", err
 	}
