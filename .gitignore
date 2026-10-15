@@ -8,6 +8,7 @@
 /internal/webui/dist/*
 !/internal/webui/dist/.gitkeep
 web/node_modules/
+tools/redocly/node_modules/
 web/.tanstack/
 web/test-results/
 web/playwright-report/

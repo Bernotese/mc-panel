@@ -91,7 +91,7 @@ jobs:
           out go "^(cmd|internal|api|deploy)/|${gomod}|^sqlc\.yaml$|^\.golangci\.yml$|^Makefile$|^scripts/install-restic\.sh$"
           out web '^web/|^api/'
           out preview '^web/Dockerfile\.preview$|^compose\.preview\.yaml$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$'
-          out openapi '^api/'
+          out openapi '^api/|^tools/redocly/'
           out e2e "^(cmd|internal|api|web)/|${gomod}"
           out nftables "^internal/(agent|defense|auth)/|^cmd/(agent|panel)/|^scripts/ci-acceptance\.sh$|${gomod}" root
           out instances "^(cmd|internal)/|^scripts/(ci-instances\.sh|mc-status\.py|install-restic\.sh)$|${gomod}" root
@@ -202,8 +202,10 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      # No lifecycle scripts on the self-hosted runners (SEC-08): only fsevents (macOS) and msw (copies the
+      # committed public/mockServiceWorker.js) have any.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Lint
         run: npm run lint
@@ -256,8 +258,13 @@ jobs:
         with:
           node-version: "24"
 
+      # Pinned by tools/redocly/package-lock.json, without install scripts (SEC-08).
+      - name: Install Redocly
+        working-directory: tools/redocly
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       - name: Redocly lint
-        run: npx --yes @redocly/cli@2.54.2 lint api/openapi.yaml --extends=minimal
+        run: tools/redocly/node_modules/.bin/redocly lint api/openapi.yaml --extends=minimal
 
   e2e:
     name: E2E (Playwright, real backend)
@@ -421,7 +428,7 @@ jobs:
 
       - name: Install web dependencies
         working-directory: web
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: make build
         run: make build
