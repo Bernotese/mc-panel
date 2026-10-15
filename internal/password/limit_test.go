@@ -21,8 +21,8 @@ func withLimiter(t *testing.T, slots int, wait time.Duration) *limiter {
 
 func TestDefaultSlots(t *testing.T) {
 	want := max(2, runtime.NumCPU()/2)
-	if got := cap(lim.slots); got != want {
-		t.Fatalf("default slots = %d, want %d", got, want)
+	if got := cap(lim.slots) + cap(lim.reserved); got != want || cap(lim.reserved) != 1 {
+		t.Fatalf("default slots = %d + %d reserved, want %d with 1 reserved", cap(lim.slots), cap(lim.reserved), want)
 	}
 	if lim.wait != 2*time.Second {
 		t.Fatalf("default wait budget = %v, want 2s", lim.wait)
@@ -107,4 +107,34 @@ func TestMalformedHashNeedsNoSlot(t *testing.T) {
 	if _, _, err := VerifyContext(context.Background(), "x", "!"); !errors.Is(err, ErrMalformedHash) {
 		t.Fatalf("VerifyContext err = %v, want ErrMalformedHash", err)
 	}
+}
+
+// SEC-09: the reserved slot serves only callers marked with WithReservedSlot.
+func TestReservedSlot(t *testing.T) {
+	l := withLimiter(t, 1, 30*time.Millisecond)
+	l.reserved = make(chan struct{}, 1)
+	l.slots <- struct{}{} // the general pool is saturated
+	defer func() { <-l.slots }()
+	if _, err := l.acquire(context.Background()); !errors.Is(err, ErrBusy) {
+		t.Fatalf("unmarked caller: err = %v, want ErrBusy", err)
+	}
+	release, err := l.acquire(WithReservedSlot(context.Background()))
+	if err != nil {
+		t.Fatalf("marked caller: %v", err)
+	}
+	if _, err := l.acquire(WithReservedSlot(context.Background())); !errors.Is(err, ErrBusy) {
+		t.Fatalf("second marked caller while the reserved slot is taken: err = %v, want ErrBusy", err)
+	}
+	release()
+	if len(l.reserved) != 0 {
+		t.Fatal("release must free the reserved slot")
+	}
+	// a marked caller prefers the general pool when it has room
+	<-l.slots
+	release, err = l.acquire(WithReservedSlot(context.Background()))
+	if err != nil || len(l.slots) != 1 || len(l.reserved) != 0 {
+		t.Fatalf("marked caller with a free general slot: err=%v general=%d reserved=%d", err, len(l.slots), len(l.reserved))
+	}
+	release()
+	l.slots <- struct{}{}
 }

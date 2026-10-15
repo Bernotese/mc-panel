@@ -36,6 +36,24 @@ func TestLoginArgonBusyReturns429(t *testing.T) {
 	}
 }
 
+// SEC-09: a known device of the user may use the reserved argon2 slot, so it signs in while a
+// flood from other addresses keeps the general pool busy.
+func TestLoginKnownDeviceUsesReservedSlot(t *testing.T) {
+	e := newTestEnv(t)
+	e.createUser("alice", "user")
+	password.Warmup()
+	c := e.newClient("203.0.113.10")
+	unblock := password.BlockForTesting(10 * time.Millisecond)
+	defer unblock()
+	if res := c.login("alice", testPassword); res.code != http.StatusTooManyRequests {
+		t.Fatalf("unknown device while busy = %d %s", res.code, res.body)
+	}
+	e.guard.Known = true
+	if res := c.login("alice", testPassword); res.code != http.StatusOK {
+		t.Fatalf("known device while busy = %d %s", res.code, res.body)
+	}
+}
+
 func TestChangePasswordArgonBusyReturns429(t *testing.T) {
 	e := newTestEnv(t)
 	e.createUser("alice", "user")

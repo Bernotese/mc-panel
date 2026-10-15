@@ -83,6 +83,10 @@ func (s *Service) RecordAttempt(ctx context.Context, a Attempt) error {
 		newDevice = n == 0
 	}
 	country := s.geo.Country(ip)
+	var net56, net48 string
+	if ip.Is6() {
+		net56, net48 = netPrefix(ip, 56).String(), netPrefix(ip, 48).String()
+	}
 	err := s.q.DefenseInsertAttempt(ctx, store.DefenseInsertAttemptParams{
 		Ts:        now.UnixMilli(),
 		Ip:        ip.String(),
@@ -94,9 +98,15 @@ func (s *Service) RecordAttempt(ctx context.Context, a Attempt) error {
 		Reason:    truncateRunes(a.Reason, maxReasonLen),
 		UserAgent: truncateRunes(a.UserAgent, maxUserAgentLen),
 		Country:   country,
+		Net56:     net56,
+		Net48:     net48,
 	})
 	if err != nil {
 		return fmt.Errorf("defense: record attempt: %w", err)
+	}
+	if !a.Success && a.Stage == StagePassword && !s.snap.Load().allowed(ip, now) {
+		// the per-username bucket counts failed password attempts only (see CheckLogin)
+		s.loginUser.consume(usernameKey(a.Username), now)
 	}
 	if a.Success {
 		if newDevice {
@@ -114,37 +124,80 @@ func (s *Service) RecordAttempt(ctx context.Context, a Attempt) error {
 	return s.maybeJail(ctx, ip, key, now)
 }
 
-// maybeJail jails key if it reached the failure threshold. Allowlisted and
-// loopback addresses are never jailed.
+// jailLevel is one prefix under which failures are counted and jailed.
+type jailLevel struct {
+	key       netip.Prefix
+	threshold int64
+	count     func(ctx context.Context, key string, since int64) (int64, error)
+}
+
+// jailLevels lists the prefixes of ip from the widest to the narrowest: an IPv6 address is
+// also counted per /56 and /48 (SEC-09), so rotating /64s of one prefix does not help.
+func (s *Service) jailLevels(ip netip.Addr, key netip.Prefix) []jailLevel {
+	byKey := func(ctx context.Context, k string, since int64) (int64, error) {
+		return s.q.DefenseCountFailuresSince(ctx, store.DefenseCountFailuresSinceParams{IpKey: k, Since: since})
+	}
+	levels := []jailLevel{{key: key, threshold: FailureThreshold, count: byKey}}
+	if !ip.Is6() {
+		return levels
+	}
+	by48 := func(ctx context.Context, k string, since int64) (int64, error) {
+		return s.q.DefenseCountFailuresInNet48Since(ctx, store.DefenseCountFailuresInNet48SinceParams{Net: k, Since: since})
+	}
+	by56 := func(ctx context.Context, k string, since int64) (int64, error) {
+		return s.q.DefenseCountFailuresInNet56Since(ctx, store.DefenseCountFailuresInNet56SinceParams{Net: k, Since: since})
+	}
+	return append([]jailLevel{
+		{key: netPrefix(ip, 48), threshold: Net48FailureThreshold, count: by48},
+		{key: netPrefix(ip, 56), threshold: Net56FailureThreshold, count: by56},
+	}, levels...)
+}
+
+// maybeJail jails ip's key, or for IPv6 its /56 or /48, when one of them reached its failure
+// threshold. The widest prefix wins: once it is jailed, narrower jails would add nothing.
+// Allowlisted and loopback addresses are never jailed.
 func (s *Service) maybeJail(ctx context.Context, ip netip.Addr, key netip.Prefix, now time.Time) error {
 	if ip.IsLoopback() || s.snap.Load().allowed(ip, now) {
 		return nil
 	}
 	s.jailMu.Lock()
 	defer s.jailMu.Unlock()
+	for _, l := range s.jailLevels(ip, key) {
+		done, err := s.jailIfOver(ctx, ip, l, now)
+		if err != nil || done {
+			return err
+		}
+	}
+	return nil
+}
+
+// jailIfOver jails l.key if it has at least l.threshold failures in the window (counted after
+// its last jail). done is true when l.key is jailed afterwards (also if it already was).
+func (s *Service) jailIfOver(ctx context.Context, ip netip.Addr, l jailLevel, now time.Time) (done bool, err error) {
+	key := l.key
 	if _, ok := s.snap.Load().jailedUntil(key, now); ok {
-		return nil
+		return true, nil
 	}
 	last, err := s.q.DefenseLastJailCreatedAt(ctx, key.String())
 	if err != nil {
-		return fmt.Errorf("defense: last jail: %w", err)
+		return false, fmt.Errorf("defense: last jail: %w", err)
 	}
 	since := now.Add(-FailureWindow).UnixMilli()
 	if last >= since {
 		since = last + 1
 	}
-	failures, err := s.q.DefenseCountFailuresSince(ctx, store.DefenseCountFailuresSinceParams{IpKey: key.String(), Since: since})
+	failures, err := l.count(ctx, key.String(), since)
 	if err != nil {
-		return fmt.Errorf("defense: count failures: %w", err)
+		return false, fmt.Errorf("defense: count failures: %w", err)
 	}
-	if failures < FailureThreshold {
-		return nil
+	if failures < l.threshold {
+		return false, nil
 	}
 	prior, err := s.q.DefenseCountJailsSince(ctx, store.DefenseCountJailsSinceParams{
 		IpKey: key.String(), Since: now.Add(-RepeatWindow).UnixMilli(),
 	})
 	if err != nil {
-		return fmt.Errorf("defense: count jails: %w", err)
+		return false, fmt.Errorf("defense: count jails: %w", err)
 	}
 	level := prior + 1
 	expires := now.Add(JailDuration(level))
@@ -157,7 +210,7 @@ func (s *Service) maybeJail(ctx context.Context, ip netip.Addr, key netip.Prefix
 		ExpiresAt: expires.UnixMilli(),
 	})
 	if err != nil {
-		return fmt.Errorf("defense: insert jail: %w", err)
+		return false, fmt.Errorf("defense: insert jail: %w", err)
 	}
 	s.addJail(key, expires)
 	s.kickSync()
@@ -179,5 +232,5 @@ func (s *Service) maybeJail(ctx context.Context, ip netip.Addr, key netip.Prefix
 		IP:      key.String(),
 		Time:    now,
 	})
-	return nil
+	return true, nil
 }

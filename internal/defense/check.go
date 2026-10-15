@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func normalizeUsername(u string) string { return strings.ToLower(strings.TrimSpace(u)) }
@@ -21,11 +22,19 @@ func (s *Service) jailed(ip netip.Addr, now time.Time) bool {
 	if snap.allowed(ip, now) {
 		return false
 	}
-	_, ok := snap.jailedUntil(httpx.IPKey(ip), now)
+	_, ok := snap.jailedFor(ip, now)
 	return ok
 }
 
-func (s *Service) CheckLogin(_ context.Context, ip netip.Addr, username string) error {
+func usernameKey(username string) string {
+	return truncateRunes(normalizeUsername(username), maxUsernameLen)
+}
+
+// CheckLogin runs before a password is verified. The per-username bucket only counts failed
+// attempts (RecordAttempt consumes it), and a known device of the user (see KnownDevice) passes
+// even when it is empty: rotating addresses can slow down guessing a password, but never lock
+// the owner out (spec §7.2, SEC-09).
+func (s *Service) CheckLogin(ctx context.Context, ip netip.Addr, username string) error {
 	if !ip.IsValid() {
 		return ErrIPBlocked // fail closed
 	}
@@ -47,10 +56,34 @@ func (s *Service) CheckLogin(_ context.Context, ip netip.Addr, username string) 
 		// them out by exhausting it; the per-IP bucket keeps brute force bounded
 		return nil
 	}
-	if d := s.loginUser.take(truncateRunes(normalizeUsername(username), maxUsernameLen), now); d > 0 {
+	if d := s.loginUser.wait(usernameKey(username), now); d > 0 {
+		if s.knownDevice(ctx, ip, username, now) {
+			return nil
+		}
 		return &RateLimitError{RetryAfter: d}
 	}
 	return nil
+}
+
+// KnownDevice reports whether ip's key completed a full login as username within
+// KnownDeviceWindow. Such logins skip the username bucket and may use the reserved argon2 slot.
+func (s *Service) KnownDevice(ctx context.Context, ip netip.Addr, username string) bool {
+	return s.knownDevice(ctx, ip, username, s.clock.Now())
+}
+
+func (s *Service) knownDevice(ctx context.Context, ip netip.Addr, username string, now time.Time) bool {
+	key := httpx.IPKey(normalizeIP(ip))
+	if !key.IsValid() || username == "" {
+		return false
+	}
+	n, err := s.q.DefenseKnownDevice(ctx, store.DefenseKnownDeviceParams{
+		Username: username, IpKey: key.String(), Since: now.Add(-KnownDeviceWindow).UnixMilli(),
+	})
+	if err != nil {
+		s.log.Error("defense: known device lookup", "err", err)
+		return false // fail closed: the bucket applies
+	}
+	return n > 0
 }
 
 func (s *Service) CheckSecondFactor(_ context.Context, ip netip.Addr, key string) error {

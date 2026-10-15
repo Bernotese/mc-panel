@@ -5,7 +5,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
 
@@ -35,7 +34,7 @@ func (s *snapshot) locksOut(ip netip.Addr, now time.Time, geo GeoResolver, loopb
 		return "admin_allowlist"
 	}
 	// removing an allow rule must not expose the caller to a jail it currently masks
-	if _, ok := s.jailedUntil(httpx.IPKey(ip), now); ok && !s.allowed(ip, now) {
+	if _, ok := s.jailedFor(ip, now); ok && !s.allowed(ip, now) {
 		return "jailed"
 	}
 	return ""

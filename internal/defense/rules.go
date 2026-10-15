@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
 
@@ -65,6 +66,36 @@ func (s *snapshot) jailedUntil(key netip.Prefix, now time.Time) (time.Time, bool
 		return time.Time{}, false
 	}
 	return until, true
+}
+
+// jailedFor returns the latest expiry of the active jails covering ip: its ip_key (/32 or /64)
+// and, for IPv6, the aggregated /56 and /48 jails (SEC-09).
+func (s *snapshot) jailedFor(ip netip.Addr, now time.Time) (time.Time, bool) {
+	ip = normalizeIP(ip)
+	var (
+		until  time.Time
+		jailed bool
+	)
+	for _, key := range jailKeys(ip) {
+		if u, ok := s.jailedUntil(key, now); ok && (!jailed || u.After(until)) {
+			until, jailed = u, true
+		}
+	}
+	return until, jailed
+}
+
+// jailKeys lists the prefixes a jail of ip can be recorded under, narrowest first.
+func jailKeys(ip netip.Addr) []netip.Prefix {
+	key := httpx.IPKey(ip)
+	if !key.IsValid() || !ip.Is6() {
+		return []netip.Prefix{key}
+	}
+	return []netip.Prefix{key, netPrefix(ip, 56), netPrefix(ip, 48)}
+}
+
+func netPrefix(ip netip.Addr, bits int) netip.Prefix {
+	p, _ := ip.Prefix(bits)
+	return p
 }
 
 func (s *snapshot) clone() *snapshot {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/banrules"
 )
 
 // fakeAgent is an in-memory agentapi.Client.
@@ -20,6 +21,7 @@ type fakeAgent struct {
 	banErr     error // returned by Ban only
 	health     agentapi.HealthResponse
 	bans       map[netip.Prefix]time.Duration
+	overlap    bool // refuse overlapping bans like the real firewall (banrules.ErrConflict)
 	banCalls   []netip.Prefix
 	banDurs    []time.Duration
 	unbanCalls []netip.Prefix
@@ -68,6 +70,13 @@ func (f *fakeAgent) Ban(_ context.Context, p netip.Prefix, d time.Duration) erro
 	}
 	if f.banErr != nil {
 		return f.banErr
+	}
+	if f.overlap {
+		for q := range f.bans {
+			if q != p && q.Overlaps(p) {
+				return fmt.Errorf("agent: %w: %s overlaps %s", banrules.ErrConflict, p, q)
+			}
+		}
 	}
 	f.banCalls = append(f.banCalls, p)
 	f.banDurs = append(f.banDurs, d)

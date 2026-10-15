@@ -24,9 +24,11 @@ func TestCheckPrefix(t *testing.T) {
 		"2001:db8:1:2::/64",
 		"2001:db8::1/128",
 		"2001:db8:1:2:3::/80",
+		"2001:db8:1::/48", // aggregated jails (SEC-09)
+		"2001:db8:1:200::/56",
 	}
 	bad := []string{
-		"0.0.0.0/0", "203.0.113.0/24", "127.0.0.1/32", "::1/128", "::/0", "2001:db8::/48",
+		"0.0.0.0/0", "203.0.113.0/24", "127.0.0.1/32", "::1/128", "::/0", "2001:db8::/47",
 		"::ffff:203.0.113.7/128", // IPv4-mapped: must be sent as plain IPv4
 		"::ffff:0:0/96",          // would cover the whole IPv4-mapped space
 		"::ffff:127.0.0.1/128",
@@ -69,6 +71,7 @@ func TestParsePrefix(t *testing.T) {
 		"::ffff:203.0.113.7/128", // mapped
 		"2001:db8:1:2::5/64",     // host bits
 		"203.0.113.0/24",         // too wide
+		"2001:db8::/40",          // too wide
 	}
 	for _, s := range bad {
 		if _, err := banrules.ParsePrefix(s); !errors.Is(err, banrules.ErrInvalid) {
