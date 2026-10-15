@@ -24,7 +24,7 @@ func countNotes(e *testEnv, t notify.EventType) int {
 // hour; wrong sudo codes do not (the session already passed the second factor).
 func TestNotifySecondFactorFailed(t *testing.T) {
 	e := newTestEnv(t)
-	c, _, secret := e.preauthClient("alice", "user", "2001:db8:1:2::10")
+	c, _, secret := e.preauthClient("alice", "user", "203.0.113.10")
 	bad := wrongCode(e.code(secret))
 	for range 3 {
 		c.do(http.MethodPost, "/api/auth/2fa/totp", map[string]string{"code": bad})
@@ -32,7 +32,7 @@ func TestNotifySecondFactorFailed(t *testing.T) {
 	if n := countNotes(e, notify.Event2FAFailed); n != 1 {
 		t.Fatalf("auth.2fa_failed = %d, want 1 (deduplicated)", n)
 	}
-	sameNet := e.newClient("2001:db8:1:2::99") // same /64
+	sameNet := e.newClient("203.0.113.10") // another session from the same address
 	sameNet.login("alice", testPassword)
 	sameNet.do(http.MethodPost, "/api/auth/2fa/totp", map[string]string{"code": bad})
 	if n := countNotes(e, notify.Event2FAFailed); n != 1 {
@@ -45,13 +45,13 @@ func TestNotifySecondFactorFailed(t *testing.T) {
 		t.Fatalf("other IP: auth.2fa_failed = %d, want 2", n)
 	}
 	e.clock.Advance(time.Hour)
-	again := e.newClient("2001:db8:1:2::10")
+	again := e.newClient("203.0.113.10")
 	again.login("alice", testPassword)
 	again.do(http.MethodPost, "/api/auth/2fa/totp", map[string]string{"code": bad})
 	if n := countNotes(e, notify.Event2FAFailed); n != 3 {
 		t.Fatalf("after an hour: auth.2fa_failed = %d, want 3", n)
 	}
-	if ev := e.notes.Events[len(e.notes.Events)-1]; ev.Username != "alice" || ev.IP != "2001:db8:1:2::10" {
+	if ev := e.notes.Events[len(e.notes.Events)-1]; ev.Username != "alice" || ev.IP != "203.0.113.10" {
 		t.Fatalf("event = %+v", ev)
 	}
 

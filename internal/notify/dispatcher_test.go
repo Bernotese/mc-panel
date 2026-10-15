@@ -86,14 +86,14 @@ func TestNotifyDedup(t *testing.T) {
 	e.d.Notify(ctx, Event{Type: EventNewDeviceLogin, IP: "203.0.113.7/32"})
 	e.clk.Advance(DedupWindow)
 	e.d.Notify(ctx, jailed("203.0.113.7/32"))
-	if n := len(e.d.ch); n != 4 {
+	if n := len(e.d.ch) + len(e.d.ops); n != 4 { // login.new_device uses the operational queue
 		t.Fatalf("queued %d, want 4", n)
 	}
 	e.d.Notify(ctx, Event{Type: EventUserCreated, Username: "a"})
 	e.d.Notify(ctx, Event{Type: EventUserCreated, Username: "b"})
 	e.d.Notify(ctx, Event{Type: EventTest, IP: "x"})
 	e.d.Notify(ctx, Event{Type: EventTest, IP: "x"})
-	if n := len(e.d.ch) + len(e.d.prio); n != 8 { // test events use the reserved queue
+	if n := len(e.d.ch) + len(e.d.ops) + len(e.d.prio); n != 8 { // test events use the reserved queue
 		t.Fatalf("events without IP and test events are never deduplicated, queued %d", n)
 	}
 }
