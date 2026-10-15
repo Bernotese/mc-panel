@@ -22,7 +22,7 @@ type Noop struct {
 	bans map[netip.Prefix]time.Time // prefix -> expiry
 }
 
-var _ agentapi.Firewall = (*Noop)(nil)
+var _ Backend = (*Noop)(nil)
 
 func NewNoop(clk clock.Clock, log *slog.Logger) *Noop {
 	return &Noop{clk: clk, log: log, bans: make(map[netip.Prefix]time.Time)}
@@ -82,4 +82,10 @@ func (n *Noop) purgeLocked(now time.Time) {
 			delete(n.bans, p)
 		}
 	}
+}
+
+// SetEgressSubnets only logs: without nftables container egress is not filtered.
+func (n *Noop) SetEgressSubnets(_ context.Context, subnets []netip.Prefix) error {
+	n.log.Info("noop firewall: container egress filter NOT enforced", "subnets", fmt.Sprint(subnets))
+	return nil
 }

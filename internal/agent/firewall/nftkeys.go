@@ -222,3 +222,43 @@ func splitExisting(p netip.Prefix, entries []entry) (bool, []netip.Prefix) {
 	}
 	return exists, others
 }
+
+// egressElements maps the egress deny prefixes to interval set elements: the start
+// key and, unless the range reaches the top of the address space, the exclusive end
+// key. Prefixes are canonical and do not overlap (validated in config).
+func egressElements(deny []netip.Prefix) (v4, v6 []rawElem) {
+	for _, p := range deny {
+		a := p.Addr()
+		if a.Is4() {
+			k := a.As4()
+			v4 = append(v4, rawElem{Key: k[:]})
+			if end := uint64(binary.BigEndian.Uint32(k[:])) + 1<<(32-p.Bits()); end <= 0xffffffff {
+				v4 = append(v4, rawElem{Key: binary.BigEndian.AppendUint32(nil, uint32(end)), IntervalEnd: true})
+			}
+			continue
+		}
+		k := a.As16()
+		v6 = append(v6, rawElem{Key: k[:]})
+		if p.Bits() > 0 {
+			if end, overflow := u128From(k).add(pow2(128 - p.Bits())); !overflow {
+				e := end.bytes()
+				v6 = append(v6, rawElem{Key: e[:], IntervalEnd: true})
+			}
+		}
+	}
+	return v4, v6
+}
+
+// egressSubnets keeps the container subnets a filter rule can be built for: valid,
+// canonical, not IPv4-mapped, not /0 (that would exempt every destination) and
+// each only once.
+func egressSubnets(subnets []netip.Prefix) []netip.Prefix {
+	var out []netip.Prefix
+	for _, p := range subnets {
+		if !p.IsValid() || p != p.Masked() || p.Addr().Is4In6() || p.Bits() == 0 || slices.Contains(out, p) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
