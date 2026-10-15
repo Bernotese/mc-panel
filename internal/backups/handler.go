@@ -37,7 +37,13 @@ type Deps struct {
 	Console   agentapi.ConsoleClient   // RCON; nil = running servers fail rcon_unavailable
 	Reconcile func()                   // asks servers for an immediate reconcile pass; nil = no-op
 	Log       *slog.Logger             // nil = slog.Default()
+	// MaxDuration bounds the service job of one backup (panel.toml backups.max_duration;
+	// 0 = defaultMaxDuration).
+	MaxDuration time.Duration
 }
+
+// defaultMaxDuration is backups.max_duration when Deps leaves it 0 (SEC-25).
+const defaultMaxDuration = 4 * time.Hour
 
 // Timings (spec §5, Global Constraints). The waits use wall time; clock.Clock only drives
 // logic (schedules, timestamps, the notification throttle). Tests shorten them.
@@ -77,6 +83,7 @@ type Handler struct {
 	alerts    *alerts
 	downloads *userSlots
 	manual    *cooldowns    // manual backups per server (manualEvery)
+	maxBackup time.Duration // limit of a backup's service job (logic time, h.clock)
 	lastTZ    string        // panel time zone of the previous tick ("" before the first; guarded by tickMu)
 	ticked    chan struct{} // closed after the first tick of Run (tests wait for it)
 
@@ -107,6 +114,10 @@ func NewHandler(d Deps) *Handler {
 		manual:    newCooldowns(),
 		tickEvery: tickEvery, pollEvery: pollEvery, rconTimeout: rconTimeout, stopTimeout: stopTimeout,
 		shutdownWait: shutdownWait, ioTimeout: ioTimeout, ioClock: clock.Real{},
+	}
+	h.maxBackup = d.MaxDuration
+	if h.maxBackup <= 0 {
+		h.maxBackup = defaultMaxDuration
 	}
 	h.ticked = make(chan struct{})
 	h.rconT, _ = con.(agentapi.RconTimeoutClient)

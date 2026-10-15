@@ -52,13 +52,29 @@ func (b *backupBudget) add(size int64) error {
 }
 
 // skipCause is the reason an entry is left out that deserves a log line (it cannot be read,
-// e.g. chmod 000 from inside the container); nil for ordinary skips (symlinks, hidden names,
-// entries that vanished).
+// e.g. chmod 000 from inside the container, or it is sparse); nil for ordinary skips
+// (symlinks, hidden names, entries that vanished).
 func skipCause(err error) error {
-	if errors.Is(err, fs.ErrPermission) {
+	if errors.Is(err, fs.ErrPermission) || errors.Is(err, errSparse) {
 		return err
 	}
 	return nil
+}
+
+// sparseMinSize: larger regular files that occupy less than 1/8 of their size on disk are
+// left out of a backup (SEC-25). Reading such a file yields mostly zeros: a container could
+// hold the panel's single backup job (and the server's save-off) for hours with a huge file
+// that costs it no disk space (sparseForBackup). A variable so tests can lower it.
+var sparseMinSize int64 = 64 << 20
+
+var errSparse = errors.New("sparse file (it occupies less than 1/8 of its size on disk)")
+
+// sparseForBackup reports whether the open file f (Stat st) is one a backup leaves out: larger than
+// sparseMinSize, less than 1/8 of it allocated, and with a hole (so a file that a compressing
+// file system stores small is still backed up).
+func sparseForBackup(f *os.File, st fs.FileInfo) bool {
+	alloc, ok := allocatedBytes(st)
+	return ok && st.Size() > sparseMinSize && alloc < st.Size()/8 && hasHole(f, st.Size())
 }
 
 // maxBackupDepth bounds the folder depth of a backup: the walk holds one open folder per level
@@ -74,7 +90,8 @@ const maxBackupDepth = 256
 // Symlinks, special files, hidden entries, names that filesapi.CleanPath refuses, entries that
 // cannot be read, folders deeper than maxBackupDepth and entries that vanish or are swapped
 // during the walk are left out (onSkip, with skipCause of the error). Only the data directory
-// itself must be readable. server.properties at the top level is redacted. hook (tests) runs
+// itself must be readable. Sparse files (sparseForBackup) are left out as well. server.properties at
+// the top level is redacted. hook (tests) runs
 // before each entry; onEntry reports each written entry with its content size.
 func writeBackupTar(ctx context.Context, root *os.Root, w io.Writer, lim config.FilesLimits, hook func(string), onEntry func(int64), onSkip func(p string, cause error)) error {
 	tw := tar.NewWriter(w)
@@ -257,6 +274,9 @@ func writeTarFile(tw *tar.Writer, d *os.Root, name, p string, info fs.FileInfo, 
 		return 0, err
 	}
 	defer f.Close()
+	if sparseForBackup(f, st) {
+		return 0, fmt.Errorf("%w: %w", errSkipEntry, errSparse)
+	}
 	size := st.Size()
 	if err := b.add(size); err != nil {
 		return 0, err

@@ -87,7 +87,7 @@ func (h *Handler) runRestore(ctx context.Context, j *job, snapshot string) (err 
 	if err != nil {
 		return err
 	}
-	if _, err := h.waitService(ctx, j, id, pre.ID, waitBackup); err != nil {
+	if _, err := h.waitService(ctx, j, id, pre.ID, h.waitBackup()); err != nil {
 		return err
 	}
 	if err := h.step(ctx, j, stepRestoring); err != nil {

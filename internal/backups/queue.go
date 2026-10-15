@@ -50,7 +50,9 @@ func (j *job) setBytes(n int64) {
 
 // queue keeps the backup jobs in memory (spec §5.3): the newest job per server (at most one
 // queued or running), a FIFO of waiting jobs and at most one running job in the panel. The
-// last result stays until the next job of the server or a panel restart.
+// last result stays until the next job of the server or a panel restart. With one job per
+// server the FIFO is round-robin between servers: a server's next job always goes behind the
+// jobs that wait already (SEC-25).
 type queue struct {
 	clock   clock.Clock
 	mu      sync.Mutex

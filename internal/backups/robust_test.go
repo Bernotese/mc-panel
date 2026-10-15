@@ -18,6 +18,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/backups"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/principal"
 )
 
@@ -551,5 +552,38 @@ func TestDownloadOutlivesWriteTimeout(t *testing.T) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil || resp.StatusCode != http.StatusOK || len(body) != len(e.files.zip) {
 		t.Fatalf("status %d, %d bytes, %v", resp.StatusCode, len(body), err)
+	}
+}
+
+// SEC-25: a backup that keeps writing but does not finish within backups.max_duration (4 h by
+// default) is cancelled; save-on follows and a manual one notifies backup.failed.
+func TestBackupMaxDuration(t *testing.T) {
+	e := newEnv(t)
+	id := e.instance("survival")
+	e.agent.set(id, agentapi.StateRunning)
+	release := e.files.holdPlan("manual")
+	defer release()
+	e.create(id, map[string]any{})
+	e.waitStep(id, "backing_up")
+	for range 29 { // 3 h 52 min with progress: no stall, below the limit
+		e.clk.Advance(8 * time.Minute)
+		time.Sleep(20 * time.Millisecond)
+	}
+	if j := e.job(id); j.State != "running" {
+		t.Fatalf("ended before the limit: %+v", j)
+	}
+	e.clk.Advance(8 * time.Minute)
+	j := e.waitJob(id)
+	if j.State != "failed" || code(j) != "internal" || j.Error != "the backup did not finish within 4 hours" {
+		t.Fatalf("job = %+v", j)
+	}
+	if n := e.files.count(fmt.Sprintf("cancel %d", id)); n != 1 {
+		t.Fatalf("calls = %v, want one cancel", e.files.callLog())
+	}
+	if got := e.console.sent(); got[len(got)-1] != fmt.Sprintf("%d save-on", id) {
+		t.Fatalf("rcon = %v", got)
+	}
+	if types := e.notes.Types(); !slices.Equal(types, []notify.EventType{notify.EventBackupFailed}) {
+		t.Fatalf("notifications = %v", types)
 	}
 }
