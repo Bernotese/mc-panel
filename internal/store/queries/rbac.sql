@@ -9,9 +9,16 @@ SELECT * FROM users WHERE id = ?;
 -- name: RbacGetUserByUsername :one
 SELECT * FROM users WHERE username = ?;
 
+-- name: RbacNextUserID :one
+-- Allocates the ID of a new user: never one that was used before (see migration 00008).
+UPDATE user_ids
+SET last_id = max(last_id, (SELECT COALESCE(MAX(id), 0) FROM users)) + 1
+WHERE id = 1
+RETURNING last_id;
+
 -- name: RbacCreateUser :one
-INSERT INTO users (username, password_hash, role, webauthn_handle, password_changed_at, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO users (id, username, password_hash, role, webauthn_handle, password_changed_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: RbacUpdateUserRole :exec

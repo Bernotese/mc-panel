@@ -240,6 +240,11 @@ type User struct {
 	UpdatedAt         int64
 }
 
+type UserID struct {
+	ID     int64
+	LastID int64
+}
+
 type WebauthnCredential struct {
 	ID             int64
 	UserID         int64
