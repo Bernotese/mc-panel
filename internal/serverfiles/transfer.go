@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
@@ -345,9 +346,20 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 	panic(http.ErrAbortHandler)
 }
 
-// attachment returns a Content-Disposition value with an ASCII fallback name and the exact
-// UTF-8 name (RFC 6266, RFC 5987).
+// attachment returns a Content-Disposition value with an ASCII fallback name and the UTF-8
+// name (RFC 6266, RFC 5987). Unicode format characters (category Cf: bidi controls, zero-width
+// characters) are dropped from both, so a name cannot pose as another in the browser's
+// download bar (SEC-38); a name of nothing else becomes "download".
 func attachment(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, name)
+	if name == "" {
+		name = "download"
+	}
 	var ascii strings.Builder
 	for _, c := range name {
 		if c < 0x20 || c > 0x7e || c == '"' || c == '\\' || c == ';' {
