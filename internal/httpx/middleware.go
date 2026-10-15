@@ -33,7 +33,7 @@ func CSP(styleNonce string) string {
 		styleSrc += " 'nonce-" + styleNonce + "'"
 	}
 	return "default-src 'self'; script-src 'self'; style-src " + styleSrc + "; " +
-		"img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; " +
+		"img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; " +
 		"base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 }
 
