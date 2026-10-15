@@ -102,7 +102,7 @@ func NewDispatcher(db *sql.DB, box *secretbox.Box, c clock.Clock, opts Dispatche
 		if opts.Dev {
 			opts.Client = NewHTTPClient()
 		} else {
-			opts.Client = NewRestrictedHTTPClient()
+			opts.Client = NewRestrictedHTTPClient(c)
 		}
 	}
 	if opts.Logger == nil {

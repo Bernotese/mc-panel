@@ -1491,6 +1491,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Sends a test notification. A failed delivery is reported without the target's status (400); at most 6 per minute per user (429). */
         post: operations["testNotifier"];
         delete?: never;
         options?: never;
@@ -6154,6 +6155,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     getAgentStatus: {

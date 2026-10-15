@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -250,6 +251,9 @@ func TestBlockedDestinations(t *testing.T) {
 		"64:ff9b::7f00:1": true, "64:ff9b::a00:1": true, "64:ff9b:1::1": true,
 		"100.63.255.255": false, "100.128.0.1": false, "198.17.255.255": false, "198.20.0.1": false,
 		"64:ff9b::808:808": true, "203.0.113.7": false, "2001:db8::1": false, "8.8.8.8": false,
+		// SEC-22: 6to4 (here 127.0.0.1), Teredo, site-local and IPv4-compatible addresses
+		"2002:7f00:1::1": true, "2002:cb00:7107::1": true, "2001:0:4136:e378::1": true, "fec0::1": true,
+		"::7f00:1": true, "::a00:1": true, "2001:4860:4860::8888": false, "2003::1": false,
 	} {
 		if got := blockedDestination(netip.MustParseAddr(ip)); got != blocked {
 			t.Errorf("blockedDestination(%s) = %v, want %v", ip, got, blocked)
@@ -391,5 +395,41 @@ func TestDeliverHonoursRetryAfter(t *testing.T) {
 	e.d.deliver(context.Background(), Event{Type: EventServerDown})
 	if calls.Load() != 3 || len(waits) != 2 || waits[0] != 2500*time.Millisecond || waits[1] != MaxRetryAfter {
 		t.Fatalf("calls = %d, waits = %v; want Retry-After 2.5s, then capped at %s", calls.Load(), waits, MaxRetryAfter)
+	}
+}
+
+func TestLocalAddrs(t *testing.T) {
+	clk := clock.NewFake(dT0)
+	calls := 0
+	var fail bool
+	list := func() ([]net.Addr, error) {
+		calls++
+		if fail {
+			return nil, errors.New("no interfaces")
+		}
+		return []net.Addr{
+			&net.IPNet{IP: net.ParseIP("203.0.113.5"), Mask: net.CIDRMask(24, 32)},
+			&net.IPNet{IP: net.ParseIP("2001:db8::5"), Mask: net.CIDRMask(64, 128)},
+		}, nil
+	}
+	l := newLocalAddrs(clk, list)
+	for ip, local := range map[string]bool{
+		"203.0.113.5": true, "::ffff:203.0.113.5": true, "2001:db8::5": true, "203.0.113.6": false, "2001:db8::6": false,
+	} {
+		if got := l.contains(netip.MustParseAddr(ip)); got != local {
+			t.Errorf("contains(%s) = %v, want %v", ip, got, local)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("interfaces listed %d times, want 1 (cached)", calls)
+	}
+	fail = true
+	clk.Advance(localAddrsTTL)
+	if !l.contains(netip.MustParseAddr("8.8.8.8")) {
+		t.Fatal("without an interface list every address must count as local (fail closed)")
+	}
+	fail = false
+	if l.contains(netip.MustParseAddr("8.8.8.8")) || calls != 3 {
+		t.Fatalf("after a failed listing the next call must list again (calls = %d)", calls)
 	}
 }
