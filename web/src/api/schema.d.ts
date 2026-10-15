@@ -5264,7 +5264,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description rate_limited: one manual backup per server every 10 minutes (a failed one does not count; Retry-After header set) */
+            /** @description rate_limited: a manual backup only 10 minutes after the previous one of the server ended (one refused before the file service started it does not count; Retry-After header set) */
             429: {
                 headers: {
                     [name: string]: unknown;

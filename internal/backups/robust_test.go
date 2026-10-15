@@ -586,4 +586,9 @@ func TestBackupMaxDuration(t *testing.T) {
 	if types := e.notes.Types(); !slices.Equal(types, []notify.EventType{notify.EventBackupFailed}) {
 		t.Fatalf("notifications = %v", types)
 	}
+	// The cooldown holds: the backup ran (and kept save-off on) for 4 hours.
+	a := e.admin()
+	if rec := e.do(http.MethodPost, bPath(id, ""), map[string]any{}, &a); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("restart after the time limit = %d %s", rec.Code, rec.Body)
+	}
 }

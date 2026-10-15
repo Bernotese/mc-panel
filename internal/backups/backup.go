@@ -363,6 +363,7 @@ func (h *Handler) runBackup(ctx context.Context, j *job, kind filesapi.SnapshotK
 	if err != nil {
 		return "", err
 	}
+	j.serviceStarted = true
 	m := h.waitBackup()
 	if j.spec.trigger == triggerManual {
 		// Scheduled runs notify every failure (retention.go); a manual one only this one, the
@@ -419,7 +420,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if wait := h.manual.waitLocked(srv.ID, now); wait > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int((wait+time.Second-1)/time.Second)))
 		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited,
-			fmt.Sprintf("one manual backup per server every %d minutes", int(manualEvery/time.Minute)))
+			fmt.Sprintf("the last manual backup of this server ended less than %d minutes ago", int(manualEvery/time.Minute)))
 		return
 	}
 	h.manual.last[srv.ID] = now
@@ -427,8 +428,15 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		serverID: srv.ID, name: srv.Name, kind: kindBackup, trigger: triggerManual,
 		run: func(ctx context.Context, j *job) (string, error) {
 			snap, err := h.runBackup(ctx, j, filesapi.SnapshotManual, note)
-			if err != nil {
-				h.manual.clear(srv.ID, now) // a failed backup does not count for the cooldown
+			if j.serviceStarted {
+				// The cooldown runs from the end of a backup that ran, also of one that failed
+				// (time limit, stall, restic): it could otherwise be restarted at once and keep
+				// the server in save-off.
+				h.manual.mark(srv.ID, h.clock.Now())
+			} else if err != nil {
+				// Refused before the stream started (busy, no space, RCON or save-off failed):
+				// it does not count.
+				h.manual.clear(srv.ID, now)
 			}
 			if err = h.deletedOr(ctx, srv.ID, err); errors.Is(err, errServerDeleted) {
 				return "", err

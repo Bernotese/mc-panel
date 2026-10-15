@@ -34,6 +34,9 @@ type job struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	done   chan struct{}
+	// serviceStarted: the file service accepted the backup stream (runBackup). Only the
+	// job's own run reads and writes it.
+	serviceStarted bool
 }
 
 func (j *job) setStep(step string) {

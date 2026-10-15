@@ -1108,7 +1108,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'backup_running (a backup, restore or delete job of this server is queued or running) or conflict (the server has no instance yet)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '429': { description: 'rate_limited: one manual backup per server every 10 minutes (a failed one does not count; Retry-After header set)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: 'rate_limited: a manual backup only 10 minutes after the previous one of the server ended (one refused before the file service started it does not count; Retry-After header set)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '503': { description: 'backups_unavailable (restic is missing on the host) or files_unavailable (file service)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /servers/{id}/backups/job:
     get:
