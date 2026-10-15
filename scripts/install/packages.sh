@@ -1,6 +1,8 @@
 # shellcheck shell=bash
 # packages.sh - installer spec §4.2: packages from the Ubuntu archive (only missing ones),
 # restic >= 0.17, a Docker daemon that answers, and Docker's daemon.json only when it is missing.
+# Caddy comes from the official Caddy repository (SEC-01: universe has no security updates for
+# it): its signing key is verified against the pinned fingerprint before apt trusts it.
 
 PKG_LIST=(caddy nftables restic tzdata sqlite3 unattended-upgrades curl ca-certificates bzip2)
 PKG_DOCKER=(docker.io)
@@ -8,6 +10,14 @@ PKG_RESTIC_MIN=0.17.0
 PKG_RESTIC_BIN=""    # set by pkg_install: path of a restic >= PKG_RESTIC_MIN (cfg_keys reads it)
 PKG_DOCKER_WAIT=30   # seconds to wait for the Docker daemon to answer
 PKG_APT_LOCK_WAIT=300 # seconds apt waits for the dpkg lock (unattended-upgrades on a fresh host)
+PKG_CADDY_KEY_URL=https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+# "Caddy Web Server <contact@caddyserver.com>", the same at keyserver.ubuntu.com.
+PKG_CADDY_KEY_FPR=65760C51EDEA2017CEA2CA15155B6D79CA56EA34
+PKG_CADDY_KEYRING=/usr/share/keyrings/caddy-stable-archive-keyring.gpg # the paths of Caddy's
+PKG_CADDY_SOURCES=/etc/apt/sources.list.d/caddy-stable.list            # own install guide
+PKG_CADDY_REPO=https://dl.cloudsmith.io/public/caddy/stable/deb/debian
+# shellcheck disable=SC2034 # read by doctor.sh
+PKG_CADDY_MIN=2.10.0 # doctor warns below this version
 
 # pkg_missing NAME... prints the given packages that are not installed, one per line.
 pkg_missing() {
@@ -50,6 +60,123 @@ pkg_restic_path() {
 # pkg_restic_version BIN prints the version of that restic ("" if it does not run).
 pkg_restic_version() {
   "$1" version 2>/dev/null | awk '$1 == "restic" { print $2; exit }'
+}
+
+# pkg_gpg_home: an empty gpg home in WORK, so root's own keyring stays untouched.
+pkg_gpg_home() {
+  if [[ ! -d $WORK/gnupg ]]; then
+    mkdir -m 0700 -- "$WORK/gnupg"
+  fi
+}
+
+# pkg_key_fprs FILE prints the fingerprints of the primary keys in the OpenPGP key FILE (armored
+# or binary), one per line. A query; tests stub it.
+pkg_key_fprs() {
+  pkg_gpg_home
+  gpg --batch --no-options --homedir "$WORK/gnupg" --with-colons --show-keys -- "$1" 2>/dev/null |
+    awk -F: '$1 == "pub" { want = 1; next } $1 == "fpr" && want { print $10; want = 0 }'
+}
+
+# pkg_dearmor IN OUT: the binary keyring apt's signed-by expects (a query; tests stub it).
+pkg_dearmor() {
+  pkg_gpg_home
+  gpg --batch --no-options --homedir "$WORK/gnupg" --yes --dearmor -o "$2" -- "$1" 2>/dev/null
+}
+
+# pkg_apt_policy NAME: apt-cache policy NAME (a query; tests stub it).
+pkg_apt_policy() {
+  apt-cache policy -- "$1" 2>/dev/null
+}
+
+# pkg_caddy_version prints the version of the installed caddy ("2.11.7"; "" without one).
+pkg_caddy_version() {
+  caddy version 2>/dev/null </dev/null | awk 'NR == 1 { sub(/^v/, "", $1); print $1 }'
+}
+
+# pkg_installed_sources: reads apt-cache policy on stdin and prints the sources of the installed
+# version (the lines below "***"), one per line.
+pkg_installed_sources() {
+  # a version line starts with " *** " (installed) or five blanks, a source line with eight
+  # (written out: mawk has no interval expressions)
+  awk '/^ [*][*][*] / { inst = 1; next }
+    /^     [^ ]/ { inst = 0 }
+    inst && /^        [^ ]/ { sub(/^ +[0-9]+ +/, ""); print }'
+}
+
+# pkg_caddy_from_repo: 0 if the installed caddy comes from the Caddy repository.
+pkg_caddy_from_repo() {
+  pkg_apt_policy caddy | pkg_installed_sources | grep -qF -- "$PKG_CADDY_REPO "
+}
+
+pkg_caddy_sources() {
+  printf '%s\n' \
+    "# Managed by mc-panel install.sh: Caddy from its official repository (security updates)." \
+    "deb [signed-by=$PKG_CADDY_KEYRING] $PKG_CADDY_REPO any-version main"
+}
+
+# pkg_caddy_repo_ok: 0 when the source list is ours and the keyring holds exactly the pinned key.
+pkg_caddy_repo_ok() {
+  [[ -f $ROOT$PKG_CADDY_SOURCES && ! -L $ROOT$PKG_CADDY_SOURCES && -f $ROOT$PKG_CADDY_KEYRING && ! -L $ROOT$PKG_CADDY_KEYRING ]] || return 1
+  [[ "$(cat -- "$ROOT$PKG_CADDY_SOURCES")" == "$(pkg_caddy_sources)" ]] || return 1
+  [[ "$(pkg_key_fprs "$ROOT$PKG_CADDY_KEYRING")" == "$PKG_CADDY_KEY_FPR" ]]
+}
+
+# pkg_caddy_repo: adds the Caddy repository unless it is in place: gpg from the archive if
+# missing, the key downloaded, converted and trusted only if it is exactly the pinned key, then
+# the source list (the file names of Caddy's guide, so a list of the operator is replaced, not
+# duplicated). Prints changed/unchanged; dies on a wrong key.
+pkg_caddy_repo() {
+  if pkg_caddy_repo_ok; then
+    echo unchanged
+    return 0
+  fi
+  if [[ -n "$(pkg_missing gpg)" ]]; then
+    sys_apt -o "DPkg::Lock::Timeout=$PKG_APT_LOCK_WAIT" update </dev/null >&2 || die "apt-get update failed"
+    sys_apt -o "DPkg::Lock::Timeout=$PKG_APT_LOCK_WAIT" install --no-install-recommends gpg </dev/null >&2 ||
+      die "apt-get install gpg failed"
+  fi
+  local fprs
+  fetch "$PKG_CADDY_KEY_URL" "$WORK/caddy.key"
+  pkg_dearmor "$WORK/caddy.key" "$WORK/caddy.gpg" || die "cannot read the Caddy signing key"
+  fprs="$(pkg_key_fprs "$WORK/caddy.gpg")"
+  [[ $fprs == "$PKG_CADDY_KEY_FPR" ]] ||
+    die "the Caddy signing key from $PKG_CADDY_KEY_URL is not the expected key $PKG_CADDY_KEY_FPR (got: ${fprs//$'\n'/ }); nothing was trusted"
+  if [[ ! -d $ROOT${PKG_CADDY_KEYRING%/*} ]]; then
+    ensure_dir "${PKG_CADDY_KEYRING%/*}" 0755 root root >/dev/null
+  fi
+  if [[ ! -d $ROOT${PKG_CADDY_SOURCES%/*} ]]; then
+    ensure_dir "${PKG_CADDY_SOURCES%/*}" 0755 root root >/dev/null
+  fi
+  write_file "$PKG_CADDY_KEYRING" 0644 root root <"$WORK/caddy.gpg" >/dev/null
+  pkg_caddy_sources | write_file "$PKG_CADDY_SOURCES" 0644 root root >/dev/null
+  echo changed
+}
+
+# pkg_caddy_upgrade: installs caddy from the Caddy repository when the installed one comes from
+# elsewhere (Ubuntu's universe). The Caddyfile is a conffile: --force-confold keeps it.
+pkg_caddy_upgrade() {
+  if pkg_caddy_from_repo; then
+    return 0
+  fi
+  sys_apt -o "DPkg::Lock::Timeout=$PKG_APT_LOCK_WAIT" update </dev/null || die "apt-get update failed"
+  sys_apt -o "DPkg::Lock::Timeout=$PKG_APT_LOCK_WAIT" -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+    install --no-install-recommends caddy </dev/null || die "apt-get install caddy (Caddy repository) failed"
+  log_changed "caddy $(pkg_caddy_version) from the Caddy repository"
+}
+
+# pkg_caddy_ensure (update): the Caddy repository and caddy from it; existing installs switch
+# here. Dies on failure (update runs it in a subshell and only warns).
+pkg_caddy_ensure() {
+  log_step "caddy package"
+  local r
+  r="$(pkg_caddy_repo)"
+  if [[ $r == changed ]]; then
+    log_changed "Caddy repository ($PKG_CADDY_REPO, key $PKG_CADDY_KEY_FPR)"
+  fi
+  pkg_caddy_upgrade
+  if [[ $r == unchanged ]] && pkg_caddy_from_repo; then
+    log_ok "caddy $(pkg_caddy_version) from the Caddy repository"
+  fi
 }
 
 pkg_daemon_json() {
@@ -112,7 +239,11 @@ pkg_daemon_json_ensure() {
 # shellcheck disable=SC2034 # PKG_RESTIC_BIN is read by cfg_keys (config.sh)
 pkg_install() {
   log_step "packages"
-  local missing=() want=("${PKG_LIST[@]}")
+  local missing=() want=("${PKG_LIST[@]}") repo
+  repo="$(pkg_caddy_repo)"
+  if [[ $repo == changed ]]; then
+    log_changed "Caddy repository ($PKG_CADDY_REPO, key $PKG_CADDY_KEY_FPR)"
+  fi
   # Docker from the archive only if no Docker is there yet (a stopped Docker CE stays).
   if ! pkg_docker_answers && [[ -n "$(pkg_missing docker-ce)" ]]; then
     want+=("${PKG_DOCKER[@]}")
@@ -128,6 +259,7 @@ pkg_install() {
   else
     log_ok "all packages present"
   fi
+  pkg_caddy_upgrade
   local bin v
   bin="$(pkg_restic_path)"
   [[ -n $bin ]] || die "restic is not installed"

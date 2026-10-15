@@ -73,6 +73,10 @@ ops_probes() {
   upd_fetch_latest_json() { fail "network access in a test: GitHub API"; }
   systemd_wait_active() { [[ -z ${OPS_UNHEALTHY:-} ]]; }
   sleep() { :; }
+  # the steps after a successful swap (upd_system) only record themselves here
+  pkg_caddy_ensure() { echo "step pkg_caddy_ensure" >>"$WORK/calls.log"; }
+  cad_ensure() { echo "step cad_ensure $DOMAIN $TLS_MODE" >>"$WORK/calls.log"; }
+  upg_ensure() { echo "step upg_ensure" >>"$WORK/calls.log"; }
 }
 
 # ops_only_dir: the single rollback dir.
@@ -657,4 +661,42 @@ test_ops_update_prune_removes_incomplete_backups() {
   upd_prune >/dev/null
   assert_no_file "$ROOT$ROLLBACK_DIR/1.0.0-20261010T000000Z"
   assert_file "$ROOT$ROLLBACK_DIR/1.0.0-20261011T000000Z"
+}
+
+test_ops_update_success_brings_caddy_and_upgrades_up_to_date() {
+  ops_fake_install 1.0.0
+  ops_probes
+  ops_fake_new_build 1.1.0
+  TARGET_VERSION=1.1.0
+  FROM_DIR="$WORK/build"
+  assert_exit 0 cmd_update
+  # after the swap, in this order, with the installed domain
+  assert_eq "pkg_caddy_ensure|cad_ensure panel.example.com letsencrypt|upg_ensure" \
+    "$(sed -n 's/^step //p' "$WORK/calls.log" | paste -sd'|' -)"
+}
+
+test_ops_update_failing_system_step_only_warns() {
+  ops_fake_install 1.0.0
+  ops_probes
+  ops_fake_new_build 1.1.0
+  TARGET_VERSION=1.1.0
+  FROM_DIR="$WORK/build"
+  pkg_caddy_ensure() { die "download failed: https://dl.cloudsmith.io/public/caddy/stable/gpg.key"; }
+  assert_exit 0 cmd_update
+  assert_contains "$(cat "$WORK/out")" "[warn] pkg_caddy_ensure failed (exit 1)"
+  assert_called 'step cad_ensure'
+  assert_called 'step upg_ensure'
+  assert_file_contains "$(ops_only_dir)/state" "phase=verified"
+}
+
+test_ops_update_rollback_skips_the_system_steps() {
+  ops_fake_install 1.0.0
+  ops_probes
+  ops_fake_new_build 1.1.0
+  TARGET_VERSION=1.1.0
+  FROM_DIR="$WORK/build"
+  upd_probe_health() { [[ $("$ROOT$BIN_DIR/panel" version) == 1.0.0 ]]; }
+  UPD_HEALTH_SECS=0
+  assert_exit 3 cmd_update
+  assert_not_called 'step '
 }

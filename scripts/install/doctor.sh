@@ -7,8 +7,9 @@
 # need root report "warn: skipped".
 #
 # Check ids (stable): services sockets files_process versions update_available update_state
-# config permissions caddy_config caddy_import certificate dns firewall docker restic tzdata
-# time_sync upgrades storage_fs storage_free backup_keys ssh_password ssh_root
+# config permissions caddy_config caddy_import caddy_package caddy_admin certificate dns firewall
+# docker docker_version docker_live_restore restic tzdata time_sync upgrades reboot_required
+# storage_fs storage_free backup_keys ssh_password ssh_root ssh_kbdinteractive
 
 DOC_IDS=()
 DOC_STATUS=()
@@ -18,6 +19,9 @@ DOC_UNITS=(mcpanel-agent.service mcpanel-files.socket mcpanel-files.service mcpa
   mcpanel-panel.service caddy.service)
 DOC_IMPORT_LINE='import mc-panel.caddy # managed by mc-panel'
 DOC_CERT_WARN_DAYS=14
+# Docker of Ubuntu 26.04's -security pocket (docker.io 29.1.3-0ubuntu4.1); older ones lack its fixes.
+DOC_DOCKER_MIN=29.1.3
+DOC_DOCKER_ROOT=/var/lib/docker # when docker info cannot tell
 
 # Required top-level keys: the same lists install adds (config.sh CFG_REQUIRED_*; a test compares
 # them).
@@ -89,10 +93,19 @@ doc_probe_nft_table() { nft list table inet mcpanel_fw 2>/dev/null; }
 # firewall step (fw_config_ports, B1: listenaddress ports win over Port).
 doc_probe_ssh_port() { fw_config_ports; }
 doc_probe_docker() { timeout 20 docker info >/dev/null 2>&1; }
+doc_probe_docker_version() { timeout 20 docker version --format '{{.Server.Version}}' 2>/dev/null; }
+doc_probe_docker_live_restore() { timeout 20 docker info --format '{{.LiveRestoreEnabled}}' 2>/dev/null; }
+doc_probe_docker_root() { timeout 20 docker info --format '{{.DockerRootDir}}' 2>/dev/null; }
+doc_probe_caddy_version() { pkg_caddy_version; }
+doc_probe_caddy_from_repo() { pkg_caddy_from_repo; }
+# doc_probe_mtime FILE: modification time of FILE in Unix seconds.
+doc_probe_mtime() { stat -c %Y -- "$1" 2>/dev/null; }
+doc_probe_now() { date +%s; }
 doc_probe_restic_version() { restic version 2>/dev/null | awk '{ print $2; exit }'; }
 doc_probe_pkg() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'; }
 doc_probe_ntp() { timedatectl show -p NTPSynchronized --value 2>/dev/null; }
-doc_probe_mountpoint() { findmnt -n -o TARGET --target "$INSTANCES_DIR" 2>/dev/null; }
+# doc_probe_mountpoint PATH: the mount point of the file system PATH is on.
+doc_probe_mountpoint() { findmnt -n -o TARGET --target "$1" 2>/dev/null; }
 # doc_probe_free_percent: free space on INSTANCES_DIR in percent (df reports the used share).
 doc_probe_free_percent() {
   local used
@@ -302,6 +315,15 @@ doc_chk_caddy() {
   else
     doc_result fail caddy_import "the panel site is not imported in $CADDY_DIR/Caddyfile" "install.sh install with your --domain/--email"
   fi
+  doc_chk_caddy_package
+  if [[ -e $ROOT$CADDY_DIR/Caddyfile && ! -r $ROOT$CADDY_DIR/Caddyfile ]] && ! doc_is_root; then
+    doc_result warn caddy_admin "caddy_admin: skipped ($CADDY_DIR/Caddyfile is not readable)" "sudo bash install.sh doctor"
+  elif [[ $(cad_admin_status "$ROOT$CADDY_DIR/Caddyfile") == socket ]]; then
+    doc_result ok caddy_admin "Caddy's admin API is off TCP (only caddy and root can use it)"
+  else
+    doc_result warn caddy_admin "Caddy's admin API listens on TCP (127.0.0.1:2019 by default): any local user, the panel included, can reconfigure Caddy" \
+      "add \"$CAD_ADMIN\" to the global options in $CADDY_DIR/Caddyfile, then systemctl restart caddy (install.sh creates /run/caddy via $CAD_DROPIN)"
+  fi
   doc_need_root certificate dns || return 0
   local domain days
   domain="$(doc_domain)" || domain=""
@@ -337,6 +359,33 @@ doc_chk_caddy() {
   fi
 }
 
+# doc_chk_caddy_package: Caddy from its own repository and not older than PKG_CADDY_MIN (SEC-01:
+# Ubuntu's universe package gets no security updates).
+doc_chk_caddy_package() {
+  local v hint="install.sh update --force (switches Caddy to its repository)"
+  v="$(doc_probe_caddy_version)" || v=""
+  if [[ -z $v ]]; then
+    doc_result warn caddy_package "cannot determine the Caddy version" "caddy version"
+  elif ! version_ge "$v" "$PKG_CADDY_MIN"; then
+    doc_result warn caddy_package "Caddy $v is older than ${PKG_CADDY_MIN%.0} (known vulnerabilities in its HTTP/2 and TLS stack)" "$hint"
+  elif ! doc_probe_caddy_from_repo; then
+    doc_result warn caddy_package "Caddy $v does not come from the Caddy repository (no automatic security updates)" "$hint"
+  else
+    doc_result ok caddy_package "Caddy $v from the Caddy repository"
+  fi
+}
+
+# doc_age SECONDS: a duration as "3 h" or "5 days".
+doc_age() {
+  if (($1 < 7200)); then
+    echo "$(($1 / 60)) min"
+  elif (($1 < 172800)); then
+    echo "$(($1 / 3600)) h"
+  else
+    echo "$(($1 / 86400)) days"
+  fi
+}
+
 doc_chk_firewall() {
   doc_need_root firewall || return 0
   local table ports p blocked=()
@@ -358,11 +407,29 @@ doc_chk_firewall() {
 }
 
 doc_chk_system() {
-  if doc_need_root docker; then
+  if doc_need_root docker docker_version docker_live_restore; then
     if doc_probe_docker; then
       doc_result ok docker "Docker is reachable"
     else
       doc_result fail docker "Docker is not reachable" "systemctl status docker"
+    fi
+    local dv lr
+    dv="$(doc_probe_docker_version)" || dv=""
+    if [[ -z $dv ]]; then
+      doc_result warn docker_version "cannot determine the Docker version" "docker version"
+    elif version_ge "$dv" "$DOC_DOCKER_MIN"; then
+      doc_result ok docker_version "Docker $dv"
+    else
+      doc_result warn docker_version "Docker $dv is older than $DOC_DOCKER_MIN (Ubuntu 26.04's security update)" "apt-get install --only-upgrade docker.io (or docker-ce)"
+    fi
+    lr="$(doc_probe_docker_live_restore)" || lr=""
+    if [[ $lr == true ]]; then
+      doc_result ok docker_live_restore "Docker live-restore is active (a Docker restart keeps the servers running)"
+    elif grep -qE '"live-restore"[[:space:]]*:[[:space:]]*true' -- "$ROOT/etc/docker/daemon.json" 2>/dev/null; then
+      doc_result warn docker_live_restore "live-restore is set in /etc/docker/daemon.json but not active: Docker was not restarted since, so its next restart (a package update) stops every server" \
+        "systemctl restart docker while no Minecraft servers are running"
+    else
+      doc_result ok docker_live_restore "Docker live-restore is not configured (/etc/docker/daemon.json)"
     fi
   fi
   local rv
@@ -387,15 +454,37 @@ doc_chk_system() {
   else
     doc_result warn upgrades "unattended-upgrades is not enabled" "install.sh install with your --domain/--email"
   fi
+  local rr="$ROOT/run/reboot-required" t now pkgs
+  if [[ -e $rr ]]; then
+    t="$(doc_probe_mtime "$rr")" || t=""
+    now="$(doc_probe_now)"
+    pkgs="$(sort -u -- "$rr.pkgs" 2>/dev/null | head -n 5 | paste -sd' ' -)" || pkgs=""
+    doc_result warn reboot_required "a reboot is pending${t:+ since $(doc_age $((now - t)))}${pkgs:+ ($pkgs)}: kernel and library fixes are not active yet" \
+      "plan a reboot (the Minecraft servers stop meanwhile); unattended-upgrades never reboots on its own"
+  else
+    doc_result ok reboot_required "no reboot pending"
+  fi
 }
 
+# doc_chk_storage: a full $INSTANCES_DIR must not take the panel's database or Docker (container
+# layers, logs) down with it (SEC-04): it needs a file system of its own.
 doc_chk_storage() {
-  local mp free
-  mp="$(doc_probe_mountpoint)" || mp=""
-  if [[ $mp == "$INSTANCES_DIR" ]]; then
-    doc_result ok storage_fs "$INSTANCES_DIR is its own file system"
+  local mp free docker_root shared=() d
+  mp="$(doc_probe_mountpoint "$INSTANCES_DIR")" || mp=""
+  docker_root=""
+  if doc_is_root; then
+    docker_root="$(doc_probe_docker_root)" || docker_root=""
+  fi
+  for d in "$DATA_DIR" "${docker_root:-$DOC_DOCKER_ROOT}"; do
+    if [[ -z $mp || "$(doc_probe_mountpoint "$d")" == "$mp" ]]; then
+      shared+=("$d")
+    fi
+  done
+  if ((${#shared[@]} == 0)); then
+    doc_result ok storage_fs "$INSTANCES_DIR is on its own file system ($mp)"
   else
-    doc_result warn storage_fs "$INSTANCES_DIR is not its own file system (shared with ${mp:-?})" "a full Minecraft server can then fill the disk of the panel; see the instances spec §3.3"
+    doc_result warn storage_fs "$INSTANCES_DIR shares a file system (${mp:-?}) with ${shared[*]}" \
+      "a server that fills $INSTANCES_DIR then also stops the panel's database or Docker; give $INSTANCES_DIR its own file system (docs/install.md)"
   fi
   free="$(doc_probe_free_percent)" || free=""
   if ! [[ $free =~ ^[0-9]+$ ]]; then
@@ -415,7 +504,7 @@ doc_chk_storage() {
 }
 
 doc_chk_ssh() {
-  doc_need_root ssh_password ssh_root || return 0
+  doc_need_root ssh_password ssh_root ssh_kbdinteractive || return 0
   local cfg
   cfg="$(doc_probe_sshd)" || cfg=""
   if grep -qiE '^passwordauthentication[[:space:]]+yes' <<<"$cfg"; then
@@ -427,6 +516,13 @@ doc_chk_ssh() {
     doc_result warn ssh_root "SSH allows root logins with a password (PermitRootLogin yes)" "set PermitRootLogin prohibit-password or no"
   else
     doc_result ok ssh_root "SSH root login with a password is off"
+  fi
+  # keyboard-interactive through PAM asks for the password, too (ChallengeResponse before OpenSSH 8.7)
+  if grep -qiE '^(kbdinteractive|challengeresponse)authentication[[:space:]]+yes' <<<"$cfg" &&
+    grep -qiE '^usepam[[:space:]]+yes' <<<"$cfg"; then
+    doc_result warn ssh_kbdinteractive "SSH allows password logins through PAM (KbdInteractiveAuthentication yes with UsePAM yes)" "set KbdInteractiveAuthentication no"
+  else
+    doc_result ok ssh_kbdinteractive "SSH keyboard-interactive (PAM password) logins are off"
   fi
 }
 
