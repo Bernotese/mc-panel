@@ -1,7 +1,7 @@
 import { browserSupportsWebAuthn, startAuthentication, startRegistration } from '@simplewebauthn/browser'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setCsrfToken } from '@/api/csrf'
-import { loginAs, WEBAUTHN_CHALLENGE } from '@/mocks/db'
+import { loginAs, MOCK_PASSWORD, WEBAUTHN_CHALLENGE } from '@/mocks/db'
 import { extractPublicKey, isWebAuthnSupported, loginWithPasskey, registerPasskey, sudoWithPasskey } from './webauthn'
 
 vi.mock('@simplewebauthn/browser', () => ({
@@ -46,7 +46,7 @@ describe('webauthn helpers', () => {
 
   it('registers a named passkey and returns first-time recovery codes', async () => {
     setCsrfToken(loginAs('newadmin', { stage: 'setup' }).csrf_token)
-    const created = await registerPasskey('YubiKey 5C')
+    const created = await registerPasskey('YubiKey 5C', MOCK_PASSWORD) // first factor: password required (SEC-15)
     expect(created.passkey.name).toBe('YubiKey 5C')
     expect(created.recovery_codes).toHaveLength(10)
     expect(vi.mocked(startRegistration).mock.calls[0][0].optionsJSON).toMatchObject({ rp: { id: 'localhost' } })

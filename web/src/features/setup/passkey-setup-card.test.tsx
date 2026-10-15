@@ -58,6 +58,7 @@ describe('PasskeySetupCard', () => {
     vi.mocked(startRegistration).mockRejectedValue(Object.assign(new Error('cancelled'), { name: 'NotAllowedError' }))
     const user = userEvent.setup()
     await renderWithProviders(<PasskeySetupCard onRegistered={() => undefined} />, { me: loginAs('newadmin', { stage: 'setup' }) })
+    await user.type(screen.getByLabelText('Aktuelles Passwort'), MOCK_PASSWORD)
     await user.click(screen.getByRole('button', { name: 'Passkey registrieren' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Vorgang abgebrochen oder Zeit abgelaufen.')
   })
