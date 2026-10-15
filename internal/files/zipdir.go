@@ -59,7 +59,8 @@ func zipSafeName(name string) bool {
 // symlinks, FIFOs, devices or sockets; entries that vanish or change type during the walk are
 // left out. visit gets the cleaned path and its Lstat info (a folder or a regular file).
 func walkZip(ctx context.Context, root *os.Root, dir string, visit func(p string, info fs.FileInfo) error) error {
-	return walkTree(root, dir, func(p string, d fs.DirEntry, err error) error {
+	// The zip limits (callers) are far below the walk budget of the default limits.
+	return walkTree(root, dir, newWalkBudget(config.FilesLimits{}), func(p string, d fs.DirEntry, err error) error {
 		if cerr := ctx.Err(); cerr != nil {
 			return cerr
 		}
