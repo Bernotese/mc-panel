@@ -44,12 +44,15 @@ func (s *Service) UploadChecked(ctx context.Context, id int64, p string, overwri
 	if clean == "" {
 		return filesapi.UploadResponse{}, fmt.Errorf("%w: a file name is required", filesapi.ErrInvalid)
 	}
-	select {
-	case s.uploads <- struct{}{}:
-		defer func() { <-s.uploads }()
-	default:
-		return filesapi.UploadResponse{}, fmt.Errorf("%w: too many uploads at the same time", filesapi.ErrBusy)
+	sem := s.uploads
+	if checked {
+		sem = s.checkedUploads // plugin installs (SEC-24)
 	}
+	release, err := slot(sem, "uploads")
+	if err != nil {
+		return filesapi.UploadResponse{}, err
+	}
+	defer release()
 	root, err := s.open(id)
 	if err != nil {
 		return filesapi.UploadResponse{}, err
@@ -145,8 +148,11 @@ func (b *bodyReader) Read(p []byte) (int, error) {
 // problem describes the body error for the caller (without the error text, which may name the
 // connection).
 func (b *bodyReader) problem() error {
-	if errors.Is(b.err, os.ErrDeadlineExceeded) {
+	switch {
+	case errors.Is(b.err, os.ErrDeadlineExceeded):
 		return fmt.Errorf("%w: the upload stalled (no data for %s)", filesapi.ErrInvalid, ioTimeout)
+	case errors.Is(b.err, errClientTooSlow), errors.Is(b.err, errStreamTooLong):
+		return fmt.Errorf("%w: the upload was too slow: %w", filesapi.ErrInvalid, b.err)
 	}
 	return fmt.Errorf("%w: the upload was interrupted", filesapi.ErrInvalid)
 }
