@@ -9,6 +9,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/defense"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/password"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
@@ -117,6 +118,8 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 	h.ResetSecondFactorLockout(user.ID) // spec §7.2: a password change lifts the 2FA lockout
 	h.auditLog(ctx, user.ID, user.Username, audit.ActionPasswordChange, user.Username, audit.ResultSuccess,
 		map[string]any{"revoked_sessions": revoked})
+	h.notifySecurity(ctx, notify.EventPasswordChanged, "Password changed",
+		user.Username+" changed their password"+h.fromWhere(ctx)+".", user.Username)
 	w.WriteHeader(http.StatusNoContent)
 }
 
