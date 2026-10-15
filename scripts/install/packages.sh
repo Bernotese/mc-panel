@@ -206,10 +206,11 @@ pkg_caddy_ensure() {
   if [[ $r == changed ]]; then
     log_changed "Caddy repository ($PKG_CADDY_REPO, key $PKG_CADDY_KEY_FPR)"
   fi
-  pkg_caddy_upgrade
   if [[ $r == unchanged ]] && pkg_caddy_from_repo; then
     log_ok "caddy $(pkg_caddy_version) from the Caddy repository"
+    return 0
   fi
+  pkg_caddy_upgrade
 }
 
 pkg_daemon_json() {
