@@ -55,21 +55,18 @@ func TestInstanceContainerGolden(t *testing.T) {
 		},
 		StopTimeout: 60,
 		HostConfig: docker.HostConfig{
-			Binds:          []string{"/srv/mc-panel/instances/7:/data"},
+			Binds:          []string{"/srv/mc-panel/instances/7:/data", "/srv/mc-panel/tmp/7:/tmp"},
 			NetworkMode:    "mcpanel-mc",
 			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
 			CapDrop:        []string{"ALL"},
 			SecurityOpt:    []string{"no-new-privileges:true"},
-			ReadonlyRootfs: true,
-			// The image only writes outside /data into /tmp (Java native libraries); exec
-			// because they are loaded from there, and /data is executable anyway.
-			Tmpfs:      map[string]string{"/tmp": "rw,exec,nosuid,nodev,size=512m"},
-			Memory:     5120 << 20, // 4096 MiB × 1.25
-			MemorySwap: 5120 << 20,
-			PidsLimit:  1024,
-			CPUShares:  256, // cgroup v2 weight ≈ 10: a busy server never starves panel, agent or router
-			Ulimits:    []docker.Ulimit{{Name: "nofile", Soft: 65536, Hard: 65536}},
-			LogConfig:  docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
+			ReadonlyRootfs: true,       // the image only writes /data and /tmp
+			Memory:         5120 << 20, // 4096 MiB × 1.25
+			MemorySwap:     5120 << 20,
+			PidsLimit:      1024,
+			CPUShares:      256, // cgroup v2 weight ≈ 10: a busy server never starves panel, agent or router
+			Ulimits:        []docker.Ulimit{{Name: "nofile", Soft: 65536, Hard: 65536}},
+			LogConfig:      docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
 		},
 		NetworkingConfig: docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{"mcpanel-mc": {}}},
 	}
@@ -156,13 +153,13 @@ func TestInstanceContainerInvariants(t *testing.T) {
 			t.Fatalf("%s (%s): %v", req.Name, req.Spec.Type, err)
 		}
 		hc := c.HostConfig
-		if len(hc.Binds) != 1 || hc.Binds[0] != instances.DataDir("/srv/mc-panel", req.ID)+":/data" {
+		if !slices.Equal(hc.Binds, []string{instances.DataDir("/srv/mc-panel", req.ID) + ":/data", instances.TmpDir("/srv/mc-panel", req.ID) + ":/tmp"}) {
 			t.Errorf("%s: binds = %v", req.Name, hc.Binds)
 		}
 		if hc.PortBindings != nil || c.ExposedPorts != nil || hc.CapAdd != nil || hc.Privileged {
 			t.Errorf("%s: ports/caps/privileges must stay unset: %+v", req.Name, hc)
 		}
-		if !hc.ReadonlyRootfs || len(hc.Tmpfs) != 1 || !strings.Contains(hc.Tmpfs["/tmp"], "size=512m") || hc.NanoCPUs != 0 ||
+		if !hc.ReadonlyRootfs || hc.NanoCPUs != 0 ||
 			!slices.Equal(hc.Ulimits, []docker.Ulimit{{Name: "nofile", Soft: 65536, Hard: 65536}}) {
 			t.Errorf("%s: rootfs/tmpfs/limits changed: %+v", req.Name, hc)
 		}
@@ -246,7 +243,8 @@ func TestTemplateHostLimits(t *testing.T) {
 
 func TestPaths(t *testing.T) {
 	if instances.ContainerName(12) != "mcpanel-mc-12" || instances.DataDir("/srv/mc-panel", 12) != "/srv/mc-panel/instances/12" ||
-		instances.RouterDir("/srv/mc-panel") != "/srv/mc-panel/router" || instances.DeletedDir("/srv/mc-panel") != "/srv/mc-panel/deleted" {
+		instances.RouterDir("/srv/mc-panel") != "/srv/mc-panel/router" || instances.DeletedDir("/srv/mc-panel") != "/srv/mc-panel/deleted" ||
+		instances.TmpDir("/srv/mc-panel", 12) != "/srv/mc-panel/tmp/12" {
 		t.Fatal("paths changed")
 	}
 }

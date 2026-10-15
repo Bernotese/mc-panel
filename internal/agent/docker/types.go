@@ -32,7 +32,6 @@ type HostConfig struct {
 	SecurityOpt    []string                 `json:"SecurityOpt,omitempty"`
 	Privileged     bool                     `json:"Privileged"`
 	ReadonlyRootfs bool                     `json:"ReadonlyRootfs"`
-	Tmpfs          map[string]string        `json:"Tmpfs,omitempty"` // mount point -> mount options
 	Memory         int64                    `json:"Memory,omitempty"`
 	MemorySwap     int64                    `json:"MemorySwap,omitempty"`
 	PidsLimit      int64                    `json:"PidsLimit,omitempty"`
