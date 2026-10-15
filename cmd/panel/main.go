@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -46,7 +47,7 @@ const usageText = `usage:
   panel admin create [-config path] [-dev] -username NAME   (password from stdin)
   panel admin unlock [-config path] [-dev]
   panel admin list   [-config path] [-dev]
-  panel audit verify [-config path] [-dev]
+  panel audit verify [-config path] [-dev] [-journal file|-]   (journalctl -u mcpanel-panel -o cat)
   panel version
 
   -config defaults to /etc/mc-panel/panel.toml unless -dev is given.`
@@ -218,12 +219,39 @@ func runCLI(cmd string, args []string, stdin *os.File, stdout, stderr io.Writer)
 		_, err := defense.Unlock(ctx, db, rec, clk, stdout)
 		return err
 	case "audit verify":
-		if len(rest) > 0 {
-			return fmt.Errorf("unexpected arguments: %v", rest)
+		journal, closeJournal, err := journalArg(rest, stdin)
+		if err != nil {
+			return err
 		}
-		return audit.RunAuditVerify(ctx, db, stdout)
+		defer closeJournal()
+		return audit.RunAuditVerify(ctx, db, stdout, journal)
 	}
 	return fmt.Errorf("unknown command %q", cmd)
+}
+
+// journalArg parses the arguments of `audit verify`: an optional -journal with a file name or
+// "-" for stdin. It returns nil without -journal.
+func journalArg(args []string, stdin io.Reader) (io.Reader, func(), error) {
+	fs := flag.NewFlagSet("audit verify", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	path := fs.String("journal", "", "")
+	if err := fs.Parse(args); err != nil {
+		return nil, nil, err
+	}
+	if fs.NArg() > 0 {
+		return nil, nil, fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	switch *path {
+	case "":
+		return nil, func() {}, nil
+	case "-":
+		return stdin, func() {}, nil
+	}
+	f, err := os.Open(*path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return f, func() { _ = f.Close() }, nil
 }
 
 func serve(args []string) error {

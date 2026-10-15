@@ -21,6 +21,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store"
 	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
@@ -30,6 +31,8 @@ type auditEnv struct {
 	db    *sql.DB
 	notes *notify.Recording
 	mux   http.Handler
+	h     *auditapi.Handler
+	rec   *audit.SQLRecorder
 }
 
 // newAuditEnv seeds five entries, one minute apart starting at t0:
@@ -44,7 +47,8 @@ func newAuditEnv(t *testing.T) *auditEnv {
 	notes := &notify.Recording{}
 	mux := chi.NewRouter()
 	rt := rbac.NewRouter(mux, rbac.NewDBChecker(db), clk)
-	auditapi.NewHandler(db, clk, notes).Routes(rt)
+	h := auditapi.NewHandler(db, clk, notes)
+	h.Routes(rt)
 
 	rec := audit.NewSQLRecorder(db, clk)
 	entries := []struct {
@@ -65,7 +69,7 @@ func newAuditEnv(t *testing.T) *auditEnv {
 			t.Fatal(err)
 		}
 	}
-	return &auditEnv{db: db, notes: notes, mux: mux}
+	return &auditEnv{db: db, notes: notes, mux: mux, h: h, rec: rec}
 }
 
 func (e *auditEnv) get(path string, p principal.Principal) *httptest.ResponseRecorder {
@@ -240,5 +244,41 @@ func TestAuditEndpointsRequireAdmin(t *testing.T) {
 		if rec := e.get(path, user); rec.Code != http.StatusForbidden {
 			t.Errorf("%s as user: code = %d, want 403", path, rec.Code)
 		}
+	}
+}
+
+// SEC-17: the scheduled verification notifies a broken chain, and a chain that was recomputed
+// after the panel wrote its last entry.
+func TestScheduledVerify(t *testing.T) {
+	ctx := context.Background()
+	e := newAuditEnv(t)
+	last := e.rec.LastWritten()
+	if last.ID != 5 {
+		t.Fatalf("last written = %+v", last)
+	}
+	if ok, err := e.h.VerifyOnce(ctx, last); !ok || err != nil || len(e.notes.Types()) != 0 {
+		t.Fatalf("intact: ok=%v err=%v notes=%v", ok, err, e.notes.Types())
+	}
+
+	// Rewrite entry 5 and recompute its hash: the chain verifies, the remembered anchor does not.
+	mustExec(t, e.db, "DROP TRIGGER audit_log_no_update")
+	rows, err := store.New(e.db).AuditListAfter(ctx, store.AuditListAfterParams{ID: 4, Limit: 1})
+	if err != nil || len(rows) != 1 {
+		t.Fatal(err)
+	}
+	row := rows[0]
+	row.Target = "tampered"
+	mustExec(t, e.db, "UPDATE audit_log SET target = ?, hash = ? WHERE id = 5", row.Target, audit.ComputeHash(row.PrevHash, row))
+	if ok, err := e.h.VerifyOnce(ctx, last); ok || err != nil {
+		t.Fatalf("recomputed: ok=%v err=%v", ok, err)
+	}
+	if got := e.notes.Types(); !slices.Equal(got, []notify.EventType{notify.EventAuditChainBroken}) {
+		t.Fatalf("notifications = %v", got)
+	}
+
+	// A broken chain notifies as well.
+	mustExec(t, e.db, "UPDATE audit_log SET target = 'tampered' WHERE id = 2")
+	if ok, _ := e.h.VerifyOnce(ctx, audit.Anchor{}); ok || len(e.notes.Types()) != 2 {
+		t.Fatalf("broken chain: ok=%v notes=%v", ok, e.notes.Types())
 	}
 }
