@@ -1,7 +1,8 @@
 // Command agent is the privileged mc-panel helper. It serves a small, strictly
 // validated JSON API on a Unix socket that only the panel user (and root) may
 // connect to, manages the nftables jail sets and is the only Docker client
-// (Minecraft containers and mc-router).
+// (Minecraft containers and mc-router), whose new connections into private
+// networks it filters (container_egress_deny).
 package main
 
 import (
@@ -134,6 +135,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			Images:       cfg.Images,
 			Clock:        clock.Real{},
 			Log:          log,
+			Egress:       fw,
+			NanoCPUs:     int64(math.Round(cfg.CPUPerInstance * 1e9)),
+
+			RouterConnectionRateLimit: cfg.RouterConnectionRateLimit,
 		})
 		// The layout of instances_dir (instances/ root:<mc gid> 0750 for the files service)
 		// is enforced before serving, also when Docker is down and no Ensure follows.

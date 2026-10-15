@@ -1,9 +1,11 @@
 // Package firewall contains the agent-side firewall backends: nftables
 // (Linux) and noop (in-memory, logs only; used on macOS and when configured).
+// Besides the IP jail they filter the egress of the Minecraft containers.
 package firewall
 
 import (
 	"cmp"
+	"context"
 	"net/netip"
 	"slices"
 	"time"
@@ -22,7 +24,24 @@ const (
 	ChainPriority = -10
 	// SetSize bounds each jail set so a flood of bans cannot exhaust kernel memory.
 	SetSize = 65536
+
+	// EgressChainName is the filter chain on the forward hook (also priority -10, so it
+	// runs before Docker's own forward rules) that drops new connections from the
+	// containers' subnets to the deny sets.
+	EgressChainName = "forward"
+	EgressSet4Name  = "mcpanel_egress_deny4"
+	EgressSet6Name  = "mcpanel_egress_deny6"
 )
+
+// Backend is a firewall backend: the IP jail plus the egress filter of the
+// Minecraft containers.
+type Backend interface {
+	agentapi.Firewall
+	// SetEgressSubnets makes the egress filter apply to exactly these container
+	// subnets (the mcpanel-mc network), replacing earlier ones. With an empty deny
+	// list (container_egress_deny = []) it does nothing.
+	SetEgressSubnets(ctx context.Context, subnets []netip.Prefix) error
+}
 
 // entry is a ban as seen by a backend: prefix plus remaining lifetime.
 type entry struct {

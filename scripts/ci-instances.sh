@@ -5,7 +5,9 @@
 # criteria 2 and 5 on the panel/files-service path; sub-project 5, spec §10 criteria 1-6 on the
 # panel path): starts the real agent as root and the files service as mcpanel-mc, creates a
 # Paper server through the agent socket, waits until it answers a status ping routed by hostname
-# through mc-router, checks the container hardening, the console endpoints and the files service
+# through mc-router, checks the container hardening (read-only rootfs, limits, the egress filter
+# against metadata and private addresses, replies to a client in a private network through the
+# router), the console endpoints and the files service
 # (credentials, peer UID, upload, redaction, editing, symlinks, directory zip), crashes it,
 # waits for Docker's restart, checks the console on the stopped server, planted player files and
 # archive extraction (incl. zip slip), and removes it. Then it starts the panel in production
@@ -27,8 +29,8 @@
 # audit log.
 #
 # Usage (as root): scripts/ci-instances.sh AGENT_BINARY FILES_BINARY PANEL_BINARY
-# Changes the host (users, Docker containers/network, ports 25565 and 8080, nftables table
-# inet mcpanel_citest) and needs internet (Mojang, PaperMC, Modrinth, Hangar): disposable CI
+# Changes the host (users, Docker containers/network, ports 25565 and 8080, nftables tables
+# inet mcpanel and inet mcpanel_citest, network namespace mcpcitest) and needs internet (Mojang, PaperMC, Modrinth, Hangar): disposable CI
 # runners only.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -72,6 +74,7 @@ mo="$work/mout"     # monitoring outputs
 mon_nft=""          # set while the ping-blocking nftables table exists
 mon_puts=0          # successful PUT /monitoring/settings (audit check)
 mon_before=""       # started_at (Unix ms) before a crash
+egress_ns=""        # set while the network namespace of the private-network client exists
 
 cleanup() {
   if [ -n "$panel_pid" ]; then
@@ -89,12 +92,17 @@ cleanup() {
   if [ -n "$mon_nft" ]; then
     nft delete table inet mcpanel_citest 2>/dev/null || true
   fi
+  if [ -n "$egress_ns" ]; then
+    ip netns del mcpcitest 2>/dev/null || true
+    ip link del mcpcit0 2>/dev/null || true
+  fi
   ids="$(docker ps -aq --filter label=mcpanel.instance; docker ps -aq --filter label=mcpanel.router)"
   if [ -n "$ids" ]; then
     # shellcheck disable=SC2086 # one container id per word
     docker rm -f $ids >/dev/null 2>&1 || true
   fi
   docker network rm mcpanel-mc >/dev/null 2>&1 || true
+  nft delete table inet mcpanel 2>/dev/null || true # the agent's jail and egress filter
   rm -rf "$work"
 }
 trap cleanup EXIT
@@ -573,10 +581,11 @@ done
 install -d -m 0755 "$work/bin"
 install -m 0755 "$1" "$work/bin/agent"
 install -d -m 0750 -o root -g mcpanel "$work/run"
+# nftables (not noop): the container egress filter (default container_egress_deny) is checked below.
 cat >"$work/agent.toml" <<EOF
 socket = "$sock"
 panel_uid = $(id -u mcpanel)
-firewall = "noop"
+firewall = "nftables"
 docker_socket = "/var/run/docker.sock"
 instances_dir = "$work/mc"
 mc_user = "mcpanel-mc"
@@ -679,12 +688,69 @@ checks = {
     "no_ports": not h.get("PortBindings"),
     "network": list(c["NetworkSettings"]["Networks"]) == ["mcpanel-mc"],
     "label": cfg["Labels"].get("mcpanel.instance") == "9001",
+    "readonly_rootfs": h["ReadonlyRootfs"] is True,
+    "tmpfs": h.get("Tmpfs") == {"/tmp": "rw,exec,nosuid,nodev,size=512m"},
+    "nofile": h.get("Ulimits") == [{"Name": "nofile", "Soft": 65536, "Hard": 65536}],
+    "no_rcon_broadcast": "BROADCAST_RCON_TO_OPS=false" in cfg["Env"],
 }
 bad = [k for k, ok in checks.items() if not ok]
 if bad:
     print("hardening failed:", bad, file=sys.stderr)
     sys.exit(1)
 print("OK: hardening", sorted(checks))' "$(id -u mcpanel-mc)" "$(id -g mcpanel-mc)" || fail "hardening"
+docker inspect mcpanel-router | python3 -I -c '
+import json, sys
+c = json.load(sys.stdin)[0]
+h, args = c["HostConfig"], c["Args"]
+checks = {
+    "readonly_rootfs": h["ReadonlyRootfs"] is True,
+    "pids": h["PidsLimit"] == 128,
+    "rate_limit": args[args.index("-connection-rate-limit") + 1] == "50" if "-connection-rate-limit" in args else False,
+}
+bad = [k for k, ok in checks.items() if not ok]
+if bad:
+    print("router hardening failed:", bad, args, file=sys.stderr)
+    sys.exit(1)
+print("OK: router hardening", sorted(checks))' || fail "router hardening"
+grep -qx 'broadcast-rcon-to-ops=false' "$work/mc/instances/9001/server.properties" ||
+  fail "server.properties: $(grep broadcast-rcon "$work/mc/instances/9001/server.properties" || echo 'broadcast-rcon-to-ops missing')"
+echo "OK: broadcast-rcon-to-ops=false in server.properties"
+
+echo "== container egress filter (SEC-02)"
+# The Paper download at the first start already went through the filter (public egress and DNS
+# work). New connections to the metadata address and private networks must be dropped by the
+# agent's forward rule for the network's subnet: its counter has to grow.
+subnet="$(docker network inspect -f '{{(index .IPAM.Config 0).Subnet}}' mcpanel-mc)"
+nft list chain inet mcpanel forward >"$work/egress.nft" 2>&1 || fail "egress chain: $(cat "$work/egress.nft")"
+grep -q "ip saddr $subnet .*@mcpanel_egress_deny4 counter packets [0-9]* bytes [0-9]* drop" "$work/egress.nft" ||
+  fail "no egress rule for $subnet: $(cat "$work/egress.nft")"
+egress_drops() { nft list chain inet mcpanel forward | sed -n 's/.*@mcpanel_egress_deny4 counter packets \([0-9]*\) .*/\1/p'; }
+drops_before="$(egress_drops)"
+for target in 169.254.169.254 10.255.255.1 192.168.255.1; do
+  if docker exec mcpanel-mc-9001 curl -sS -m 3 -o /dev/null "http://$target/" 2>"$work/egress.err"; then
+    fail "container reached http://$target/ despite the egress filter"
+  fi
+done
+drops_after="$(egress_drops)"
+[ "$drops_after" -gt "$drops_before" ] || fail "egress rule dropped nothing ($drops_before -> $drops_after): $(cat "$work/egress.err")"
+echo "OK: metadata and private addresses blocked from the container ($((drops_after - drops_before)) packets dropped)"
+# Only new connections from the containers are dropped: a player in a private network (here a
+# network namespace with 10.250.0.2) still gets the router's replies through the published port.
+egress_ns=1
+ip netns add mcpcitest
+ip link add mcpcit0 type veth peer name mcpcit1
+ip link set mcpcit1 netns mcpcitest
+ip addr add 10.250.0.1/30 dev mcpcit0
+ip link set mcpcit0 up
+ip netns exec mcpcitest ip addr add 10.250.0.2/30 dev mcpcit1
+ip netns exec mcpcitest ip link set mcpcit1 up
+lan_ping() { ip netns exec mcpcitest python3 -I scripts/mc-status.py 10.250.0.1 25565 citest.mc.localhost >"$work/lan-status.json" 2>&1; }
+wait_for 30 "status ping from a client in 10.250.0.0/30" lan_ping
+grep -q 'ci acceptance' "$work/lan-status.json" || fail "status ping from the private network: $(cat "$work/lan-status.json")"
+ip netns del mcpcitest
+ip link del mcpcit0 2>/dev/null || true
+egress_ns=""
+echo "OK: a client in a private network reaches the server through the router"
 [ "$(stat -c '%U:%G %a' "$work/mc/instances/9001")" = "mcpanel-mc:mcpanel-mc 750" ] || fail "data dir owner/mode: $(stat -c '%U:%G %a' "$work/mc/instances/9001")"
 echo "OK: data dir owned by mcpanel-mc (0750)"
 if setpriv --reuid=mcpanel --regid=mcpanel --init-groups test -r "$work/mc/instances/9001"; then
