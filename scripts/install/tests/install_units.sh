@@ -59,7 +59,7 @@ test_install_unit_templates_are_sandboxed() {
   local panel="$ROOT$UNIT_DIR/mcpanel-panel.service" agent="$ROOT$UNIT_DIR/mcpanel-agent.service" files="$ROOT$UNIT_DIR/mcpanel-files.service"
   grep -qxF 'CapabilityBoundingSet=' "$panel" || fail "the panel keeps capabilities"
   assert_file_contains "$panel" 'SystemCallFilter=~@privileged @resources'
-  assert_file_contains "$panel" 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6'
+  assert_file_contains "$panel" 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK'
   assert_file_contains "$panel" 'IPAddressDeny=169.254.0.0/16 fe80::/10'
   if grep -q '^ProcSubset=' "$panel"; then fail "the panel reads /proc/meminfo and /proc/stat"; fi
   assert_file_contains "$agent" 'CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_NET_ADMIN'
