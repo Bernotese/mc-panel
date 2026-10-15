@@ -7,11 +7,12 @@ import (
 
 // manualEvery is the cooldown between two manual backups of one server (SEC-04, SEC-25):
 // back-to-back manual backups would fill the repository and keep a running server in
-// save-off. A manual backup that fails does not count.
+// save-off. It runs from the end of the last manual backup that the file service started
+// (successful or not); one refused before that does not count.
 const manualEvery = 10 * time.Minute
 
-// cooldowns remembers when the last manual backup of each server was queued; handleCreate
-// checks, marks and queues under mu.
+// cooldowns remembers the last manual backup of each server: when it was queued, and once
+// it ran, when it ended. handleCreate checks, marks and queues under mu.
 type cooldowns struct {
 	mu   sync.Mutex
 	last map[int64]time.Time
@@ -29,11 +30,18 @@ func (c *cooldowns) waitLocked(id int64, now time.Time) time.Duration {
 	return max(manualEvery-now.Sub(last), 0)
 }
 
-// clear forgets the mark t of server id (its backup failed); a newer mark stays.
+// clear forgets the mark t of server id (its backup was refused); a newer mark stays.
 func (c *cooldowns) clear(id int64, t time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.last[id].Equal(t) {
 		delete(c.last, id)
 	}
+}
+
+// mark records the end t of a manual backup of server id that ran.
+func (c *cooldowns) mark(id int64, t time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.last[id] = t
 }

@@ -504,8 +504,9 @@ func TestRunningBackupOfDeletedServerFinishes(t *testing.T) {
 	}
 }
 
-// SEC-04/SEC-25: one manual backup per server every 10 minutes; a failed one does not count,
-// and other servers are not affected.
+// SEC-04/SEC-25: a manual backup at most 10 minutes after the last one ended; one refused
+// before the file service started does not count, one that failed in the service does, and
+// other servers are not affected.
 func TestManualBackupCooldown(t *testing.T) {
 	e := newEnv(t)
 	id := e.instance("survival")
@@ -525,20 +526,31 @@ func TestManualBackupCooldown(t *testing.T) {
 	e.create(id, map[string]any{})
 	e.waitJob(id)
 
-	// A failed manual backup does not start the cooldown.
+	// A manual backup refused before the file service started its stream does not count:
+	// the service is busy, or save-off fails on the running server.
 	e.clk.Advance(10 * time.Minute)
+	setFilesErr(e, "create", filesapi.ErrBusy)
+	e.create(id, map[string]any{})
+	if j := e.waitJob(id); j.State != "failed" || code(j) != "files_busy" {
+		t.Fatalf("refused by the service = %+v", j)
+	}
+	setFilesErr(e, "create", nil)
+	e.agent.set(id, agentapi.StateRunning)
+	e.console.failNext("save-off", agentapi.ErrRconUnavailable)
+	e.create(id, map[string]any{})
+	if j := e.waitJob(id); j.State != "failed" || code(j) != "rcon_unavailable" {
+		t.Fatalf("save-off failed = %+v", j)
+	}
+
+	// One that ran and failed in the service counts: no immediate restart (save-off again).
 	e.files.mu.Lock()
 	e.files.fail["manual"] = "restic: disk full"
 	e.files.mu.Unlock()
 	e.create(id, map[string]any{})
-	if j := e.waitJob(id); j.State != "failed" {
-		t.Fatalf("job = %+v", j)
+	if j := e.waitJob(id); j.State != "failed" || code(j) != "internal" {
+		t.Fatalf("service job failed = %+v", j)
 	}
-	e.files.mu.Lock()
-	delete(e.files.fail, "manual")
-	e.files.mu.Unlock()
-	e.create(id, map[string]any{})
-	if j := e.waitJob(id); j.State != "done" {
-		t.Fatalf("retry after a failure = %+v", j)
+	if rec := e.do(http.MethodPost, bPath(id, ""), map[string]any{}, &a); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("restart after a failed service job = %d %s", rec.Code, rec.Body)
 	}
 }

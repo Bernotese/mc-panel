@@ -239,7 +239,7 @@ export const backupOperations: MockOperation[] = [
       const wait = (c.b.manualAt ?? -Infinity) + MANUAL_EVERY_MS - Date.now()
       if (wait > 0) {
         return HttpResponse.json(
-          { error: 'rate_limited', message: 'one manual backup per server every 10 minutes' },
+          { error: 'rate_limited', message: 'the last manual backup of this server ended less than 10 minutes ago' },
           { status: 429, headers: { 'Retry-After': String(Math.ceil(wait / 1000)) } },
         )
       }
