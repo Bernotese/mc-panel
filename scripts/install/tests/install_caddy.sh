@@ -55,6 +55,12 @@ test_install_cad_ensure_writes_the_caddy_dropin_once() {
   : >"$WORK/calls.log"
   cad_ensure >/dev/null
   assert_not_called 'daemon-reload'
+  # another version rewrites the site (reload), but the drop-in stays: no Caddy restart
+  TARGET_VERSION=1.2.4
+  : >"$WORK/calls.log"
+  cad_ensure >/dev/null
+  assert_not_called 'daemon-reload'
+  assert_not_called 'systemctl restart caddy'
 }
 
 test_install_cad_ensure_site_has_the_access_log() {
