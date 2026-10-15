@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 const KeySize = 32
@@ -74,15 +75,10 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 		if _, err := rand.Read(key); err != nil {
 			return nil, err
 		}
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err != nil {
+		if err := writeKeyAtomic(path, key); err != nil {
 			return nil, fmt.Errorf("secretbox: create key: %w", err)
 		}
-		if _, err := f.Write(key); err != nil {
-			f.Close()
-			return nil, err
-		}
-		return key, f.Close()
+		return key, nil
 	}
 	if err != nil {
 		return nil, err
@@ -98,4 +94,39 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 		return nil, fmt.Errorf("secretbox: key file %s has %d bytes, want %d", path, len(key), KeySize)
 	}
 	return key, nil
+}
+
+// writeKeyAtomic writes key to path.tmp, syncs it and renames it to path, then syncs the
+// directory: a crash leaves either no key or the complete one, never a truncated key. A
+// leftover temp file from an earlier crash is overwritten.
+func writeKeyAtomic(path string, key []byte) error {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := f.Chmod(0o600); err != nil { // the leftover may have had another mode
+		f.Close()
+		return err
+	}
+	if _, err := f.Write(key); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	d, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
