@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url'
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 import { openServer, openServerSection, serverSectionLink, signIn } from './helpers'
 
 test('admin installs ViaBackwards, disables a jar, installs an update and removes a jar', async ({ page }) => {

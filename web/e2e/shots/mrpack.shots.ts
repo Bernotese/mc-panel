@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url'
-import { test } from '@playwright/test'
+import { test } from '../test'
 import { shoot, signInMock } from './shoot'
 
 test('mods: modpack import dialog', async ({ page }) => {

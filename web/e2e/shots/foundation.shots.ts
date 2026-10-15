@@ -1,4 +1,4 @@
-import { test } from '@playwright/test'
+import { test } from '../test'
 import { shoot, signInMock } from './shoot'
 
 test('foundation: login and dashboard', async ({ page }) => {

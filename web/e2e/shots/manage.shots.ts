@@ -1,4 +1,4 @@
-import { test, type Page } from '@playwright/test'
+import { test, type Page } from '../test'
 import { shoot, signInMock } from './shoot'
 
 /** Before T2: tabs on the detail page; after T2: links in the server tree. Both are tried. */

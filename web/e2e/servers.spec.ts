@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 import { confirmSudo, openServer, openServerSection, serverSectionLink, signIn } from './helpers'
 
 test('admin creates a paper server, changes the MOTD and restarts it', async ({ page }) => {
