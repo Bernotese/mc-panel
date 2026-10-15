@@ -309,6 +309,7 @@ An admin can override the value under "Advanced". The derivation lives in the pa
 
 - Missing keys = default; unknown keys → `400 validation_failed` (panel) or `400` (agent).
 - `seed` and `level_type` only take effect for a new world; the UI says so.
+- (Now, SEC-28: the API returns `seed` only to admins and users with `server.files`, who can read it from the world files anyway; a `server.view`-only user does not see it.)
 - (Now: sub-project 3a removed `whitelist` and `ops` from the allowlist; see the note in §5.4 and `internal/agent/instancespec/properties.go`.)
 
 ## 8. panel API
