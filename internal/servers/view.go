@@ -10,21 +10,21 @@ import (
 
 // propertiesJSON is ServerProperties with every field set (defaults resolved, spec §7).
 type propertiesJSON struct {
-	MOTD               string `json:"motd"`
-	Difficulty         string `json:"difficulty"`
-	Gamemode           string `json:"gamemode"`
-	MaxPlayers         int    `json:"max_players"`
-	PVP                bool   `json:"pvp"`
-	Hardcore           bool   `json:"hardcore"`
-	AllowFlight        bool   `json:"allow_flight"`
-	EnableCommandBlock bool   `json:"enable_command_block"`
-	OnlineMode         bool   `json:"online_mode"`
-	WhitelistEnabled   bool   `json:"whitelist_enabled"`
-	ViewDistance       int    `json:"view_distance"`
-	SimulationDistance int    `json:"simulation_distance"`
-	SpawnProtection    int    `json:"spawn_protection"`
-	Seed               string `json:"seed"`
-	LevelType          string `json:"level_type"`
+	MOTD               string  `json:"motd"`
+	Difficulty         string  `json:"difficulty"`
+	Gamemode           string  `json:"gamemode"`
+	MaxPlayers         int     `json:"max_players"`
+	PVP                bool    `json:"pvp"`
+	Hardcore           bool    `json:"hardcore"`
+	AllowFlight        bool    `json:"allow_flight"`
+	EnableCommandBlock bool    `json:"enable_command_block"`
+	OnlineMode         bool    `json:"online_mode"`
+	WhitelistEnabled   bool    `json:"whitelist_enabled"`
+	ViewDistance       int     `json:"view_distance"`
+	SimulationDistance int     `json:"simulation_distance"`
+	SpawnProtection    int     `json:"spawn_protection"`
+	Seed               *string `json:"seed,omitempty"` // nil = hidden from the caller (redactFor)
+	LevelType          string  `json:"level_type"`
 }
 
 func resolvedProperties(name string, p instancespec.Properties) propertiesJSON {
@@ -34,7 +34,7 @@ func resolvedProperties(name string, p instancespec.Properties) propertiesJSON {
 		PVP: *r.PVP, Hardcore: *r.Hardcore, AllowFlight: *r.AllowFlight, EnableCommandBlock: *r.EnableCommandBlock,
 		OnlineMode: *r.OnlineMode, WhitelistEnabled: *r.WhitelistEnabled,
 		ViewDistance: *r.ViewDistance, SimulationDistance: *r.SimulationDistance, SpawnProtection: *r.SpawnProtection,
-		Seed: *r.Seed, LevelType: *r.LevelType,
+		Seed: r.Seed, LevelType: *r.LevelType,
 	}
 }
 

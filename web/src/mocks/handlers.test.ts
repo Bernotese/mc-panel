@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { BackupJob, BackupOverview, BackupSnapshot } from '@/api/types'
 import type { LiveMetrics, MetricsSeries, MonitoringOverview, MonitoringSettings } from '@/api/types'
 import type { PluginInventory, PluginJob, PluginResolution, PluginSearchResult, PluginUpdates, PluginVersionList } from '@/api/types'
+import type { Server } from '@/api/types'
 import { callApi, field } from '@/test/call-api'
 import { db, defaultMonitoring, loginAs } from './db'
 import { operations } from './handlers'
@@ -249,6 +250,16 @@ describe('mock behaviour', () => {
     expect(list.map((s) => s.name)).toEqual(['survival', 'creative'])
     expect(list[0].permissions).toContain('server.power')
     expect((await callApi('GET', '/servers/3')).status).toBe(403)
+  })
+
+  it('shows the seed only to admins and users with server.files', async () => {
+    loginAs('alice')
+    const list = (await callApi('GET', '/servers')).body as Server[]
+    expect(list[0].permissions).not.toContain('server.files')
+    expect(list[0].instance?.properties).not.toHaveProperty('seed')
+    expect(((await callApi('GET', '/servers/1')).body as Server).instance?.properties).not.toHaveProperty('seed')
+    loginAs('admin')
+    expect(((await callApi('GET', '/servers/1')).body as Server).instance?.properties).toHaveProperty('seed')
   })
 
   it('creates users only with sudo and rejects duplicate names', async () => {

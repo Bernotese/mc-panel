@@ -1679,7 +1679,7 @@ export interface components {
             java: components["schemas"]["JavaVersion"];
             /** @description At most max_mib of GET /servers/memory on this host */
             memory_mib: number;
-            /** @description All fields set (defaults resolved) */
+            /** @description All fields set (defaults resolved); seed only for admins and users with server.files on the server */
             properties: components["schemas"]["ServerProperties"];
         };
         /**
