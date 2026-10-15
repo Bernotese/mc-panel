@@ -109,6 +109,8 @@ type LoginAttempt struct {
 	Reason    string
 	UserAgent string
 	Country   string
+	Net56     string
+	Net48     string
 }
 
 type Metrics1h struct {

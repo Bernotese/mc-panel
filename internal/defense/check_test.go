@@ -56,15 +56,29 @@ func TestCheckLoginIPv6Slash64SharesBucket(t *testing.T) {
 	}
 }
 
+// failPassword records a failed password attempt for username from ip.
+func (e *env) failPassword(t *testing.T, ip, username string) {
+	t.Helper()
+	if err := e.svc.RecordAttempt(context.Background(), Attempt{
+		IP: addr(ip), Username: username, Stage: StagePassword, Reason: "bad_password",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The per-username bucket counts failed password attempts only (SEC-09).
 func TestCheckLoginRateLimitPerUsername(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
+	for i := range 10 { // checks alone (e.g. successful logins) do not use it up
+		if err := e.svc.CheckLogin(ctx, addr(fmt.Sprintf("198.51.100.%d", i+1)), "admin"); err != nil {
+			t.Fatalf("check %d: %v", i, err)
+		}
+		e.clk.Advance(6 * time.Second) // stay within the per-IP bucket
+	}
 	names := []string{"admin", "Admin", " ADMIN ", "admin", "aDmIn"}
 	for i, n := range names {
-		ip := addr(fmt.Sprintf("198.51.100.%d", i+1))
-		if err := e.svc.CheckLogin(ctx, ip, n); err != nil {
-			t.Fatalf("attempt %d: %v", i, err)
-		}
+		e.failPassword(t, fmt.Sprintf("198.51.100.%d", i+20), n)
 	}
 	wantRateLimited(t, e.svc.CheckLogin(ctx, addr("198.51.100.99"), "admin"), 12*time.Second)
 }
@@ -174,10 +188,10 @@ func TestAllowlistedIPSkipsOnlyUsernameBucket(t *testing.T) {
 	e.addRule(t, "192.0.2.0/24", "allow", nil)
 	// others exhaust the username bucket of the admin
 	for i := 0; i < 5; i++ {
-		if err := e.svc.CheckLogin(ctx, addr(fmt.Sprintf("198.51.100.%d", i+1)), "admin"); err != nil {
-			t.Fatalf("attempt %d: %v", i, err)
-		}
+		e.failPassword(t, fmt.Sprintf("198.51.100.%d", i+1), "admin")
 	}
+	// failures from the allowlisted network do not count either
+	e.failPassword(t, "192.0.2.7", "admin")
 	wantRateLimited(t, e.svc.CheckLogin(ctx, addr("198.51.100.99"), "admin"), 12*time.Second)
 	// the allowlisted address is not blocked by the exhausted username bucket ...
 	for i := 0; i < 5; i++ {
@@ -194,9 +208,7 @@ func TestLoginUsernameBucketKeyIsCapped(t *testing.T) {
 	ctx := context.Background()
 	long := strings.Repeat("a", 64)
 	for i := 0; i < 5; i++ {
-		if err := e.svc.CheckLogin(ctx, addr(fmt.Sprintf("198.51.100.%d", i+1)), long+fmt.Sprint(i)); err != nil {
-			t.Fatalf("attempt %d: %v", i, err)
-		}
+		e.failPassword(t, fmt.Sprintf("198.51.100.%d", i+1), long+fmt.Sprint(i))
 	}
 	// names that only differ after 64 runes share a bucket
 	wantRateLimited(t, e.svc.CheckLogin(ctx, addr("198.51.100.99"), long+"zzz"), 12*time.Second)

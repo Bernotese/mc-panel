@@ -50,7 +50,10 @@ var (
 // allocates 64 MiB and burns CPU; without a bound a login flood could exhaust memory and
 // get the OOM killer to pick a Minecraft JVM on the same host.
 type limiter struct {
-	slots        chan struct{}
+	slots chan struct{}
+	// reserved, if not nil, is an extra slot only for callers marked with WithReservedSlot
+	// (logins from known devices): a flood of other logins cannot take it (SEC-09).
+	reserved     chan struct{}
 	wait         time.Duration
 	active, peak atomic.Int64 // observability for tests
 }
@@ -59,20 +62,59 @@ func newLimiter(slots int, wait time.Duration) *limiter {
 	return &limiter{slots: make(chan struct{}, slots), wait: wait}
 }
 
+// newDefaultLimiter splits max(2, NumCPU/2) slots into a general pool and one reserved slot.
+func newDefaultLimiter() *limiter {
+	l := newLimiter(max(2, runtime.NumCPU()/2)-1, DefaultWaitBudget)
+	l.reserved = make(chan struct{}, 1)
+	return l
+}
+
 // DefaultWaitBudget is how long a caller waits for a free argon2 slot before ErrBusy.
 const DefaultWaitBudget = 2 * time.Second
 
-var lim = newLimiter(max(2, runtime.NumCPU()/2), DefaultWaitBudget)
+var lim = newDefaultLimiter()
+
+type reservedSlotKey struct{}
+
+// WithReservedSlot marks ctx so that Hash/Verify may also use the reserved argon2 slot. The
+// login handler sets it for known devices (an IP key with a recent full login of the user), so
+// they can still sign in while unknown addresses saturate the general pool.
+func WithReservedSlot(ctx context.Context) context.Context {
+	return context.WithValue(ctx, reservedSlotKey{}, true)
+}
+
+func hasReservedSlot(ctx context.Context) bool {
+	v, _ := ctx.Value(reservedSlotKey{}).(bool)
+	return v
+}
 
 // acquire takes a slot, waiting at most the wait budget. The returned release must be called.
 func (l *limiter) acquire(ctx context.Context) (release func(), err error) {
-	select {
+	var reserved chan struct{} // nil (never ready in select) unless the caller may use it
+	if hasReservedSlot(ctx) {
+		reserved = l.reserved
+	}
+	var got chan struct{}
+	select { // the general pool first, so the reserved slot stays free while it has room
 	case l.slots <- struct{}{}:
+		got = l.slots
 	default:
+	}
+	if got == nil {
+		select {
+		case reserved <- struct{}{}:
+			got = reserved
+		default:
+		}
+	}
+	if got == nil {
 		t := time.NewTimer(l.wait)
 		defer t.Stop()
 		select {
 		case l.slots <- struct{}{}:
+			got = l.slots
+		case reserved <- struct{}{}:
+			got = reserved
 		case <-t.C:
 			return nil, ErrBusy
 		case <-ctx.Done():
@@ -86,7 +128,7 @@ func (l *limiter) acquire(ctx context.Context) (release func(), err error) {
 			break
 		}
 	}
-	return func() { l.active.Add(-1); <-l.slots }, nil
+	return func() { l.active.Add(-1); <-got }, nil
 }
 
 // commonGz is the list of common passwords that Validate rejects: every entry of at least
@@ -297,12 +339,14 @@ func DummyVerifyContext(ctx context.Context, pw string) error {
 	return err
 }
 
-// BlockForTesting replaces the process-wide limiter with one whose only slot is taken and whose
-// wait budget is wait, so every Hash/Verify returns ErrBusy after wait. unblock restores the
+// BlockForTesting replaces the process-wide limiter with one whose only general slot is taken
+// and whose wait budget is wait, so every Hash/Verify returns ErrBusy after wait, except for
+// callers marked with WithReservedSlot: the reserved slot stays free. unblock restores the
 // previous limiter. Test-only: other packages' handler tests use it to exercise the 429 path.
 func BlockForTesting(wait time.Duration) (unblock func()) {
 	old := lim
 	l := newLimiter(1, wait)
+	l.reserved = make(chan struct{}, 1)
 	l.slots <- struct{}{}
 	lim = l
 	return func() { lim = old }

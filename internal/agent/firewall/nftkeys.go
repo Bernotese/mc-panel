@@ -9,6 +9,8 @@ import (
 	"slices"
 	"sort"
 	"time"
+
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 )
 
 // This file holds the pure logic of the nftables backend. It must not import
@@ -83,7 +85,7 @@ type elementSpec struct {
 }
 
 // elementFor maps a canonical ban prefix to its set element(s): IPv4 /32 ->
-// one key in mcpanel_jail4; IPv6 /64../128 -> interval [start, end) in
+// one key in mcpanel_jail4; IPv6 /48../128 -> interval [start, end) in
 // mcpanel_jail6.
 func elementFor(p netip.Prefix) (elementSpec, error) {
 	if !p.IsValid() || p != p.Masked() || p.Addr().Is4In6() {
@@ -97,8 +99,8 @@ func elementFor(p netip.Prefix) (elementSpec, error) {
 		k := a.As4()
 		return elementSpec{Set: Set4Name, Key: k[:]}, nil
 	}
-	if p.Bits() < 64 {
-		return elementSpec{}, fmt.Errorf("firewall: IPv6 bans must be /64 or narrower, got %s", p)
+	if p.Bits() < agentapi.MinBanBits6 {
+		return elementSpec{}, fmt.Errorf("firewall: IPv6 bans must be /%d or narrower, got %s", agentapi.MinBanBits6, p)
 	}
 	start := a.As16()
 	spec := elementSpec{Set: Set6Name, Key: start[:]}

@@ -55,20 +55,10 @@ func (k *keyedLimiter) takeExempt(key string, now time.Time) time.Duration {
 func (k *keyedLimiter) takeOpt(key string, now time.Time, exempt bool) time.Duration {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	e, ok := k.entries[key]
-	if !ok && len(k.entries) >= k.max {
-		if exempt {
-			return 0
-		}
-		// fail closed for this dimension: all further new keys share one bucket
-		key = overflowKey
-		e, ok = k.entries[key]
+	e := k.entry(key, now, exempt)
+	if e == nil {
+		return 0
 	}
-	if !ok {
-		e = &limiterEntry{lim: rate.NewLimiter(rate.Every(k.limit.Every), k.limit.Burst)}
-		k.entries[key] = e
-	}
-	e.last = now
 	r := e.lim.ReserveN(now, 1)
 	if !r.OK() {
 		return k.limit.Every
@@ -78,6 +68,57 @@ func (k *keyedLimiter) takeOpt(key string, now time.Time, exempt bool) time.Dura
 		return d
 	}
 	return 0
+}
+
+// entry returns the bucket of key and marks it used; must be called with k.mu held. Once the
+// map is full, new keys share the overflow bucket (fail closed for this dimension), except for
+// exempt callers, which get nil (not limited).
+func (k *keyedLimiter) entry(key string, now time.Time, exempt bool) *limiterEntry {
+	e, ok := k.entries[key]
+	if !ok && len(k.entries) >= k.max {
+		if exempt {
+			return nil
+		}
+		key = overflowKey
+		e, ok = k.entries[key]
+	}
+	if !ok {
+		e = &limiterEntry{lim: rate.NewLimiter(rate.Every(k.limit.Every), k.limit.Burst)}
+		k.entries[key] = e
+	}
+	e.last = now
+	return e
+}
+
+// wait returns how long until key has a token (0 = now) without consuming one. Used where only
+// failures cost a token (consume).
+func (k *keyedLimiter) wait(key string, now time.Time) time.Duration {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	e, ok := k.entries[key]
+	if !ok {
+		if len(k.entries) < k.max {
+			return 0 // a new key starts with a full bucket
+		}
+		if e, ok = k.entries[overflowKey]; !ok {
+			return 0
+		}
+	}
+	r := e.lim.ReserveN(now, 1)
+	if !r.OK() {
+		return k.limit.Every
+	}
+	d := r.DelayFrom(now)
+	r.CancelAt(now)
+	return d
+}
+
+// consume takes one token for key if one is available (an empty bucket stays empty: the
+// failure that would have cost it was refused by wait already, or raced with another one).
+func (k *keyedLimiter) consume(key string, now time.Time) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.entry(key, now, false).lim.AllowN(now, 1)
 }
 
 // cleanup removes buckets that were not used for at least idle.

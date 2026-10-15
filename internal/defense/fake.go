@@ -15,13 +15,15 @@ type FakeGuard struct {
 	LoginErr        error
 	SecondFactorErr error
 	AdminNetErr     error
+	Known           bool // returned by KnownDevice
 }
 
 func (f *FakeGuard) CheckLogin(context.Context, netip.Addr, string) error { return f.LoginErr }
 func (f *FakeGuard) CheckSecondFactor(context.Context, netip.Addr, string) error {
 	return f.SecondFactorErr
 }
-func (f *FakeGuard) CheckAdminNetwork(context.Context, netip.Addr) error { return f.AdminNetErr }
+func (f *FakeGuard) CheckAdminNetwork(context.Context, netip.Addr) error  { return f.AdminNetErr }
+func (f *FakeGuard) KnownDevice(context.Context, netip.Addr, string) bool { return f.Known }
 
 func (f *FakeGuard) RecordAttempt(_ context.Context, a Attempt) error {
 	f.mu.Lock()
