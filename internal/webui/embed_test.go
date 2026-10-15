@@ -117,3 +117,21 @@ func TestViteConfigMatchesCSP(t *testing.T) {
 		}
 	}
 }
+
+// SEC-42: dotfiles in dist (the tracked .gitkeep) are never served, not even as SPA fallback.
+func TestDotfilesAre404(t *testing.T) {
+	h := webui.NewHandler(fstest.MapFS{
+		"index.html":        {Data: []byte("<html>app</html>")},
+		".gitkeep":          {},
+		"assets/.hidden":    {Data: []byte("x")},
+		".well-known/x.txt": {Data: []byte("x")},
+	})
+	for _, p := range []string{"/.gitkeep", "/assets/.hidden", "/.well-known/x.txt", "/.env", "/servers/.x"} {
+		if code, body, _ := get(h, p); code != http.StatusNotFound || strings.Contains(body, "app") {
+			t.Errorf("%s → %d %q, want 404", p, code, body)
+		}
+	}
+	if code, _, _ := get(h, "/servers/1/files"); code != http.StatusOK {
+		t.Errorf("SPA route → %d", code)
+	}
+}
