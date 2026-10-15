@@ -161,7 +161,7 @@ func (s *Server) backupsDownload(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_ = rc.Flush()
 	}
-	err = s.svc.DownloadBackup(r.Context(), id, q.Get("snapshot"), start, &deadlineWriter{w: w, rc: rc, now: s.io.Now})
+	err = s.svc.DownloadBackup(r.Context(), id, q.Get("snapshot"), start, newDeadlineWriter(w, rc, s.io.Now))
 	if err == nil {
 		return
 	}
