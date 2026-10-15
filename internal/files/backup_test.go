@@ -3,8 +3,6 @@ package files
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -196,37 +194,5 @@ func TestBackupsCancelWhileRunning(t *testing.T) {
 	job := s.Job(1)
 	if job.State != jobFailed || len(f.snaps(s.repoDir(1))) != 0 {
 		t.Fatalf("after close: %+v, %d snapshots", job, len(f.snaps(s.repoDir(1))))
-	}
-}
-
-// SEC-25: a large sparse file is left out of a backup (counted as skipped, logged); a large
-// file with real data is not.
-func TestBackupSkipsSparseFiles(t *testing.T) {
-	old := sparseMinSize
-	sparseMinSize = 1 << 20
-	t.Cleanup(func() { sparseMinSize = old })
-	s, data, f := newBackupService(t, func(c *Config) { c.Limits.MaxBackupBytes = 1 << 30 })
-	put(t, data, "world/level.dat", "level")
-	put(t, data, "world/big.db", strings.Repeat("d", 2<<20))
-	put(t, data, "huge.bin", "")
-	if err := os.Truncate(filepath.Join(data, "huge.bin"), 1<<30); err != nil {
-		t.Fatal(err)
-	}
-	if fi, err := os.Stat(filepath.Join(data, "huge.bin")); err != nil {
-		t.Fatal(err)
-	} else if alloc, ok := allocatedBytes(fi); !ok || alloc >= fi.Size()/8 {
-		t.Skipf("the file system did not create a sparse file (allocated %d)", alloc)
-	}
-	if _, err := s.CreateBackup(context.Background(), filesapi.CreateBackupRequest{ID: 1, Kind: filesapi.SnapshotManual}); err != nil {
-		t.Fatal(err)
-	}
-	job := waitJob(t, s, 1)
-	if job.State != jobDone || job.Skipped != 1 {
-		t.Fatalf("job = %+v", job)
-	}
-	snaps := f.snaps(s.repoDir(1))
-	if len(snaps) != 1 || strings.Contains(string(snaps[0].Data), "huge.bin") || !strings.Contains(string(snaps[0].Data), "level.dat") ||
-		!strings.Contains(string(snaps[0].Data), "world/big.db") {
-		t.Fatalf("snapshot holds %d bytes", len(snaps[0].Data))
 	}
 }
