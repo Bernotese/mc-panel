@@ -254,7 +254,7 @@ export const backupOperations: MockOperation[] = [
   op(
     'updateBackupSchedule',
     http.put(`${API}/servers/:id/backups/schedule`, async ({ request, params }) => {
-      const c = access(request, params)
+      const c = access(request, params, { sudo: true })
       if (c instanceof Response) return c
       const body = await readJson<Record<string, unknown>>(request)
       if (!body || typeof body !== 'object') return apiError(400, 'bad_request', 'invalid JSON body')
@@ -282,7 +282,7 @@ export const backupOperations: MockOperation[] = [
   op(
     'pinBackup',
     http.post(`${API}/servers/:id/backups/:snapshot/pin`, async ({ request, params }) => {
-      const c = access(request, params)
+      const c = access(request, params, { sudo: true })
       if (c instanceof Response) return c
       const snap = findSnapshot(c, params)
       if (snap instanceof Response) return snap

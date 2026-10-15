@@ -120,8 +120,10 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Get("/servers/{id}/backups", rule, h.slow(h.handleOverview))
 	api.Post("/servers/{id}/backups", rule, h.handleCreate)
 	api.Get("/servers/{id}/backups/job", rule, h.handleJob)
-	api.Put("/servers/{id}/backups/schedule", rule, h.handleUpdateSchedule)
-	api.Post("/servers/{id}/backups/{snapshot}/pin", rule, h.slow(h.handlePin))
+	// SEC-05: a lowered retention or an unpin lets the next scheduled run prune snapshots, so
+	// both need sudo like restore and delete.
+	api.Put("/servers/{id}/backups/schedule", sudo, h.handleUpdateSchedule)
+	api.Post("/servers/{id}/backups/{snapshot}/pin", sudo, h.slow(h.handlePin))
 	api.Post("/servers/{id}/backups/{snapshot}/restore", sudo, h.slow(h.handleRestore))
 	api.Delete("/servers/{id}/backups/{snapshot}", sudo, h.slow(h.handleDelete))
 	api.Get("/servers/{id}/backups/{snapshot}/download", rule, h.slow(h.handleDownload))

@@ -484,10 +484,15 @@ describe('mock behaviour', () => {
     expect(field((await create({ extra: 1 })).body, 'error')).toBe('bad_request')
   })
 
-  it('pins scheduled snapshots only and restores or deletes with sudo', async () => {
+  it('pins scheduled snapshots only and pins, restores or deletes with sudo', async () => {
     let me = loginAs('admin')
     const list = async () => ((await callApi('GET', '/servers/1/backups')).body as BackupOverview).snapshots
     const [scheduled, manual] = await list()
+    const pinNoSudo = await callApi('POST', `/servers/1/backups/${scheduled.id}/pin`, { body: { pinned: true }, csrf: me.csrf_token })
+    expect(field(pinNoSudo.body, 'error')).toBe('sudo_required')
+    const restore = (id: string) => callApi('POST', `/servers/1/backups/${id}/restore`, { csrf: me.csrf_token })
+    expect(field((await restore(manual.id)).body, 'error')).toBe('sudo_required')
+    me = loginAs('admin', { sudo: true })
     const pin = await callApi('POST', `/servers/1/backups/${scheduled.id}/pin`, { body: { pinned: true }, csrf: me.csrf_token })
     const pinned = field(pin.body, 'snapshot') as BackupSnapshot
     expect(pinned.pinned).toBe(true)
@@ -500,9 +505,6 @@ describe('mock behaviour', () => {
     expect((await callApi('POST', `/servers/1/backups/${'0'.repeat(64)}/pin`, { body: { pinned: true }, csrf: me.csrf_token })).status).toBe(404)
     expect((await callApi('POST', '/servers/1/backups/nope/pin', { body: { pinned: true }, csrf: me.csrf_token })).status).toBe(400)
 
-    const restore = (id: string) => callApi('POST', `/servers/1/backups/${id}/restore`, { csrf: me.csrf_token })
-    expect(field((await restore(manual.id)).body, 'error')).toBe('sudo_required')
-    me = loginAs('admin', { sudo: true })
     const started = await restore(manual.id)
     expect(started.status).toBe(202)
     expect(field(started.body, 'job')).toMatchObject({ kind: 'restore', snapshot: manual.id })
@@ -519,9 +521,11 @@ describe('mock behaviour', () => {
   })
 
   it('validates schedules, reports unavailable backups and downloads a zip', async () => {
-    const me = loginAs('admin')
+    let me = loginAs('admin')
     const put = (id: number, body: unknown) => callApi('PUT', `/servers/${id}/backups/schedule`, { body, csrf: me.csrf_token })
     const weekly = { mode: 'weekly', interval_hours: 24, time_of_day: 600, weekday: 6, keep_last: 0, keep_daily: 0, keep_weekly: 8, keep_monthly: 0 }
+    expect(field((await put(2, weekly)).body, 'error')).toBe('sudo_required')
+    me = loginAs('admin', { sudo: true })
     const ok = await put(2, weekly)
     expect(ok.status).toBe(200)
     const schedule = field(ok.body, 'schedule') as BackupOverview['schedule']

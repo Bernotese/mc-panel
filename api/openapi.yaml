@@ -1125,7 +1125,7 @@ paths:
     put:
       operationId: updateBackupSchedule
       tags: [backups]
-      summary: Set schedule and retention of the server (audited)
+      summary: Set schedule and retention of the server (sudo; audited)
       description: 'Times are in the panel time zone (ServerSettings.backup_timezone). The retention applies only to scheduled snapshots; manual, pre-restore and pinned ones stay.'
       parameters:
         - $ref: '#/components/parameters/IdPath'
@@ -1160,7 +1160,7 @@ paths:
     post:
       operationId: pinBackup
       tags: [backups]
-      summary: Pin or unpin a scheduled snapshot (pinned ones survive the retention; the snapshot gets a new ID; audited)
+      summary: Pin or unpin a scheduled snapshot (pinned ones survive the retention; the snapshot gets a new ID; sudo; audited)
       parameters:
         - $ref: '#/components/parameters/IdPath'
         - $ref: '#/components/parameters/SnapshotPath'
