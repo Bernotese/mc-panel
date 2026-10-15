@@ -68,7 +68,7 @@ INSTALLER_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | 
 installer:
 	scripts/install/assemble.sh "$(INSTALLER_VERSION)" build/install.sh
 
-# Builds REF on the internal test VM from GitHub and (re)deploys it there (docs/dev/README.md, "Test-VM").
+# Builds REF on the internal test VM from GitHub and (re)deploys it there (docs/dev/README.md, "Test VM").
 TESTVM ?= claude@192.168.1.117
 REF ?= main
 
@@ -76,7 +76,7 @@ deploy-testvm:
 	ssh $(TESTVM) 'bash -s -- $(REF)' < scripts/testvm-deploy.sh
 
 # Copies the working tree to the test VM and runs the test suites there (docs/dev/README.md,
-# "Tests auf der Test-VM"): SUITE=all|go|lint|web|e2e.
+# "Tests on the test VM"): SUITE=all|go|lint|web|e2e|shots.
 SUITE ?= all
 
 test-vm:
