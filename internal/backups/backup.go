@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
@@ -377,10 +378,30 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
+	// The cooldown check, its mark and the queueing are one step, so a second request at the
+	// same time still gets 409 backup_running. The mark comes first: the job may fail (and clear
+	// it) right after it was queued.
+	h.manual.mu.Lock()
+	defer h.manual.mu.Unlock()
+	now := h.clock.Now()
+	if h.queue.busy(srv.ID) {
+		h.writeError(w, r, errBackupRunning)
+		return
+	}
+	if wait := h.manual.waitLocked(srv.ID, now); wait > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int((wait+time.Second-1)/time.Second)))
+		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited,
+			fmt.Sprintf("one manual backup per server every %d minutes", int(manualEvery/time.Minute)))
+		return
+	}
+	h.manual.last[srv.ID] = now
 	v, err := h.queue.add(ctx, jobSpec{
 		serverID: srv.ID, name: srv.Name, kind: kindBackup, trigger: triggerManual,
 		run: func(ctx context.Context, j *job) (string, error) {
 			snap, err := h.runBackup(ctx, j, filesapi.SnapshotManual, note)
+			if err != nil {
+				h.manual.clear(srv.ID, now) // a failed backup does not count for the cooldown
+			}
 			if err = h.deletedOr(ctx, srv.ID, err); errors.Is(err, errServerDeleted) {
 				return "", err
 			}
@@ -396,6 +417,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if err != nil {
+		delete(h.manual.last, srv.ID)
 		h.writeError(w, r, err)
 		return
 	}

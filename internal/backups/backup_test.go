@@ -503,3 +503,42 @@ func TestRunningBackupOfDeletedServerFinishes(t *testing.T) {
 		t.Fatalf("calls = %v", e.files.callLog())
 	}
 }
+
+// SEC-04/SEC-25: one manual backup per server every 10 minutes; a failed one does not count,
+// and other servers are not affected.
+func TestManualBackupCooldown(t *testing.T) {
+	e := newEnv(t)
+	id := e.instance("survival")
+	other := e.instance("creative")
+	e.create(id, map[string]any{})
+	if j := e.waitJob(id); j.State != "done" {
+		t.Fatalf("job = %+v", j)
+	}
+	a := e.admin()
+	rec := e.do(http.MethodPost, bPath(id, ""), map[string]any{}, &a)
+	if rec.Code != http.StatusTooManyRequests || errCode(t, rec) != "rate_limited" || rec.Header().Get("Retry-After") != "600" {
+		t.Fatalf("second manual backup = %d %s (Retry-After %q)", rec.Code, rec.Body, rec.Header().Get("Retry-After"))
+	}
+	e.create(other, map[string]any{}) // another server
+	e.waitJob(other)
+	e.clk.Advance(10 * time.Minute)
+	e.create(id, map[string]any{})
+	e.waitJob(id)
+
+	// A failed manual backup does not start the cooldown.
+	e.clk.Advance(10 * time.Minute)
+	e.files.mu.Lock()
+	e.files.fail["manual"] = "restic: disk full"
+	e.files.mu.Unlock()
+	e.create(id, map[string]any{})
+	if j := e.waitJob(id); j.State != "failed" {
+		t.Fatalf("job = %+v", j)
+	}
+	e.files.mu.Lock()
+	delete(e.files.fail, "manual")
+	e.files.mu.Unlock()
+	e.create(id, map[string]any{})
+	if j := e.waitJob(id); j.State != "done" {
+		t.Fatalf("retry after a failure = %+v", j)
+	}
+}
