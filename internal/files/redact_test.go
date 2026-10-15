@@ -106,3 +106,33 @@ func TestRedactIsLinearOnHugeFiles(t *testing.T) {
 		t.Fatal("continued value not restored exactly")
 	}
 }
+
+// SEC-37: java.util.Properties unescapes keys, so every spelling that loads as rcon.password is
+// redacted (and restored on save); keys that only look similar stay.
+func TestRedactEscapedKeys(t *testing.T) {
+	for _, c := range []struct{ name, in, want string }{
+		{"escaped dot", `rcon\.password=s3cret` + "\n", `rcon\.password=********` + "\n"},
+		{"escaped letters", `r\c\on.\pa\s\sword = s3cret` + "\n", `r\c\on.\pa\s\sword = ********` + "\n"},
+		// \n and \r are a line feed and a carriage return in a key, not the letters.
+		{"escaped n is a line feed", `rco\n.password=keep` + "\n", `rco\n.password=keep` + "\n"},
+		{"unicode dot", `rcon\u002epassword=s3cret` + "\n", `rcon\u002epassword=********` + "\n"},
+		{"unicode upper hex", `rcon\u002Epassword:s3cret` + "\n", `rcon\u002Epassword:********` + "\n"},
+		{"all unicode", `\u0072\u0063\u006f\u006e\u002e\u0070\u0061\u0073\u0073\u0077\u006f\u0072\u0064 s3cret`, `\u0072\u0063\u006f\u006e\u002e\u0070\u0061\u0073\u0073\u0077\u006f\u0072\u0064 ********`},
+		{"key continued", "rcon.pass\\\n   word=s3cret\nmotd=x\n", "rcon.pass\\\n   word=********\nmotd=x\n"},
+		{"separator continued", "rcon.password \\\n  = s3cret\n", "rcon.password \\\n  = ********\n"},
+		{"escaped tab is part of the key", "rcon.password\\t=keep\n", "rcon.password\\t=keep\n"},
+		{"escaped separator is part of the key", `rcon.password\=x=keep` + "\n", `rcon.password\=x=keep` + "\n"},
+		{"malformed unicode", `rcon\u00zzpassword=keep` + "\n", `rcon\u00zzpassword=keep` + "\n"},
+		{"other key", `rcon\.passwordless=keep` + "\n", `rcon\.passwordless=keep` + "\n"},
+		{"comment", `#rcon\.password=keep` + "\n", `#rcon\.password=keep` + "\n"},
+		{"inside another value", "motd=a \\\n" + `rcon\u002epassword=s3cret` + "\n", "motd=a \\\n" + `rcon\u002epassword=********` + "\n"},
+	} {
+		if got := redactProperties(c.in); got != c.want {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+		}
+	}
+	current := `rcon\u002epassword=s3cret` + "\n"
+	if got := restorePassword(`rcon\.password=********`+"\n", current); got != `rcon\.password=s3cret`+"\n" {
+		t.Fatalf("restore with escaped keys: %q", got)
+	}
+}

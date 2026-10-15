@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"strings"
@@ -78,14 +79,15 @@ func (s *Service) CreateBackup(ctx context.Context, req filesapi.CreateBackupReq
 		}
 	}()
 	// Deduplication makes the growth of the repository unknown up front: only the reserve is
-	// checked (spec 4 §4.2); a disk that fills up anyway fails the job in restic.
-	avail, err := s.disk.Available(s.backupsDir())
+	// checked (spec 4 §4.2); while the stream runs, backupSpace aborts it when the free space
+	// drops below half the reserve (SEC-04).
+	avail, keep, err := s.backupSpace()
 	if err != nil {
-		return filesapi.Job{}, fmt.Errorf("check free space: %w", err)
+		return filesapi.Job{}, err
 	}
-	if avail < uint64(max(s.cfg.Limits.ReserveBytes, 0)) {
+	if avail < keep {
 		return filesapi.Job{}, fmt.Errorf("%w: %d bytes free for backups, the reserve is %d bytes",
-			filesapi.ErrInsufficientStorage, avail, s.cfg.Limits.ReserveBytes)
+			filesapi.ErrInsufficientStorage, avail, keep)
 	}
 	ownSlot = false
 	job, err := s.jobs.start(req.ID, jobSpec{kind: filesapi.JobBackup}, s.clock.Now, func(jctx context.Context) error {
@@ -125,7 +127,7 @@ func (s *Service) runBackup(ctx context.Context, root *os.Root, req filesapi.Cre
 		return s.startErr(err)
 	}
 	stdin := p.Stdin()
-	werr := writeBackupTar(ctx, root, stdin, s.cfg.Limits, s.backupHook,
+	werr := writeBackupTar(ctx, root, &spaceCheckWriter{w: stdin, s: s}, s.cfg.Limits, s.backupHook,
 		func(n int64) { s.jobs.progress(req.ID, n) },
 		func(rel string, cause error) {
 			s.jobs.skip(req.ID)
@@ -163,6 +165,49 @@ func (s *Service) runBackup(ctx context.Context, root *os.Root, req filesapi.Cre
 	}
 	s.jobs.setSnapshot(req.ID, sid)
 	return nil
+}
+
+// backupSpace returns the free space of the backups file system and its reserve.
+func (s *Service) backupSpace() (avail, reserve uint64, err error) {
+	dir := s.backupsDir()
+	avail, err = s.disk.Available(dir)
+	if err != nil {
+		return 0, 0, fmt.Errorf("check free space: %w", err)
+	}
+	reserve, err = s.reserveBytes(dir)
+	if err != nil {
+		return 0, 0, err
+	}
+	return avail, reserve, nil
+}
+
+// backupSpaceEvery is how many stream bytes pass between two free-space checks of a running
+// backup (a variable so tests can lower it).
+var backupSpaceEvery int64 = 64 << 20
+
+// spaceCheckWriter checks the free space of the backups file system every backupSpaceEvery
+// bytes of the backup stream: below half the reserve the backup ends with
+// ErrInsufficientStorage (restic is killed, no snapshot), so one server's backup cannot fill
+// the disk the panel, the DB and Docker live on.
+type spaceCheckWriter struct {
+	w     io.Writer
+	s     *Service
+	since int64
+}
+
+func (c *spaceCheckWriter) Write(p []byte) (int, error) {
+	if c.since += int64(len(p)); c.since >= backupSpaceEvery {
+		c.since = 0
+		avail, keep, err := c.s.backupSpace()
+		if err != nil {
+			return 0, err
+		}
+		if avail < keep/2 {
+			return 0, fmt.Errorf("%w: only %d bytes left for backups, half the reserve is %d bytes",
+				filesapi.ErrInsufficientStorage, avail, keep/2)
+		}
+	}
+	return c.w.Write(p)
 }
 
 // ctxErr prefers the job's stop reason when its context ended (restic was interrupted).

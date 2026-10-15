@@ -3,6 +3,8 @@ package files
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -118,6 +120,12 @@ func TestUploadBusy(t *testing.T) {
 	}
 	if _, err := upload(s, "fifth", false, "x"); !errors.Is(err, filesapi.ErrBusy) {
 		t.Fatalf("fifth upload: %v, want ErrBusy", err)
+	}
+	// SEC-24: checked uploads (plugin installs) have their own slots.
+	sum := sha256.Sum256([]byte("x"))
+	if _, err := s.UploadChecked(ctx, 1, "plugin.jar", false, 1, filesapi.Checksum{Algo: filesapi.AlgoSHA256, Hex: hex.EncodeToString(sum[:])},
+		strings.NewReader("x")); err != nil {
+		t.Fatalf("plugin upload while the user slots are taken: %v", err)
 	}
 	close(release)
 	wg.Wait()
