@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { visibleName } from '@/lib/file-name'
 import { useFormat } from '@/lib/format'
 import { formatBytes } from './format'
 import { baseName } from './path'
@@ -11,7 +12,7 @@ export function JobStatus({ job }: { job: FileJob }) {
     <div className="space-y-2 rounded-md border p-3 text-sm">
       {/* Only the title is a live region: the counts change with every poll and would be read out every 2 s. */}
       <p role="status" className="font-medium">
-        {t('files.extract.running', { name: baseName(job.path) })}
+        {t('files.extract.running', { name: visibleName(baseName(job.path)) })}
       </p>
       <progress
         className="h-1.5 w-full"

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { isApiError } from '@/api/errors'
 import { errorMessage } from '@/lib/error-message'
+import { visibleName } from '@/lib/file-name'
 import { extractArchive, fileJobKey } from './api'
 import { isExtracting, useFileJob } from './use-file-job'
 import { baseName, joinPath, parentPath, stripZip, targetProblem } from './path'
@@ -61,7 +62,7 @@ export function ExtractDialog({ server, path, onClose }: { server: Server; path:
       <DialogContent className="sm:max-w-md">
         <form onSubmit={(event) => void submit(event)} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>{t('files.extract.title', { name })}</DialogTitle>
+            <DialogTitle>{t('files.extract.title', { name: visibleName(name) })}</DialogTitle>
             <DialogDescription>{t('files.extract.dest_hint')}</DialogDescription>
           </DialogHeader>
           {!stopped ? (
