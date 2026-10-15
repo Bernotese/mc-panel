@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/Bernotese/mc-panel/internal/config"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 )
 
@@ -102,7 +103,7 @@ func (s *Service) runRestore(ctx context.Context, root *os.Root, id int64, sid s
 				s.log.Error("files: cannot remove the restore journal entry", "id", id, "err", err)
 			}
 		}
-		err := unlockTree(root, tmp)
+		err := unlockTree(root, tmp, s.cfg.Limits)
 		if err == nil {
 			err = root.RemoveAll(tmp)
 		}
@@ -128,7 +129,7 @@ func (s *Service) runRestore(ctx context.Context, root *os.Root, id int64, sid s
 	if err := s.writeJournal(id, restoreJournal{Tmp: tmp, Phase: phaseOldMoving}); err != nil {
 		return err
 	}
-	err = swapTop(root, tmp, s.swapHook, func(phase string) error {
+	err = swapTop(root, tmp, s.cfg.Limits, s.swapHook, func(phase string) error {
 		return s.writeJournal(id, restoreJournal{Tmp: tmp, Phase: phase})
 	})
 	if se := (*restoreStuckError)(nil); errors.As(err, &se) {
@@ -209,13 +210,13 @@ func (e *restoreStuckError) Causes() string {
 // visibleNames lists the names of folder dir that are not hidden (spec 4 §4.3: hidden entries
 // such as .rcon-cli.env and the service's temp folders stay where they are).
 // The names are read in batches against the walk budget (SEC-23).
-func visibleNames(root *os.Root, dir string) ([]string, error) {
+func visibleNames(root *os.Root, dir string, lim config.FilesLimits) ([]string, error) {
 	f, _, err := openDir(root, dir)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	var b walkBudget
+	b := newWalkBudget(lim)
 	var out []string
 	for {
 		batch, rerr := f.Readdirnames(walkBatch)
@@ -252,7 +253,7 @@ func visibleNames(root *os.Root, dir string) ([]string, error) {
 //
 // The caller keeps tmp on errRestoreStuck. hook (tests) runs before every rename with its step
 // number, and before every undo with -1-<step undone>.
-func swapTop(root *os.Root, tmp string, hook func(step int) error, phase func(string) error) error {
+func swapTop(root *os.Root, tmp string, lim config.FilesLimits, hook func(step int) error, phase func(string) error) error {
 	old, nw := tmp+"/old", tmp+"/new"
 	if err := root.Mkdir(old, dirMode); err != nil { //nolint:gosec // G301: temp folder
 		return fsErr(err)
@@ -262,11 +263,11 @@ func swapTop(root *os.Root, tmp string, hook func(step int) error, phase func(st
 			return err
 		}
 	}
-	cur, err := visibleNames(root, "")
+	cur, err := visibleNames(root, "", lim)
 	if err != nil {
 		return err
 	}
-	next, err := visibleNames(root, nw)
+	next, err := visibleNames(root, nw, lim)
 	if err != nil {
 		return err
 	}

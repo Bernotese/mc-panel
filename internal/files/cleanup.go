@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Bernotese/mc-panel/internal/config"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 )
 
@@ -69,7 +70,7 @@ func (s *Service) cleanupRoot(ctx context.Context, root *os.Root, id int64, keep
 			// The container may have made the leftover or its folder read-only (unlockTree).
 			err := unlockDir(root, rootName(parentOf(v)))
 			if err == nil {
-				err = unlockTree(root, v)
+				err = unlockTree(root, v, s.cfg.Limits)
 			}
 			if err == nil {
 				err = root.RemoveAll(v)
@@ -83,7 +84,7 @@ func (s *Service) cleanupRoot(ctx context.Context, root *os.Root, id int64, keep
 		victims = victims[:0]
 	}
 	own := tempPrefix + s.tempToken + "-"
-	err := walkTree(root, "", func(p string, d fs.DirEntry, err error) error {
+	err := walkTree(root, "", newWalkBudget(s.cfg.Limits), func(p string, d fs.DirEntry, err error) error {
 		if cerr := ctx.Err(); cerr != nil {
 			return cerr
 		}
@@ -146,7 +147,9 @@ func cleanRoot(p string) string {
 
 // unlockTree is unlockDir for folder p and every folder below it, so the whole tree can be
 // removed. It never follows a symlink (one *os.Root per level, openSubdir); a missing p is fine.
-func unlockTree(root *os.Root, p string) error {
+// Only folders count against the walk budget of lim: files cost no memory here, and a temp
+// folder full of files must stay removable (RemoveAll reads in batches itself).
+func unlockTree(root *os.Root, p string, lim config.FilesLimits) error {
 	fi, err := lstat(root, p)
 	if errors.Is(err, filesapi.ErrNotFound) {
 		return nil
@@ -165,11 +168,11 @@ func unlockTree(root *os.Root, p string) error {
 		return err
 	}
 	defer func() { _ = sub.Close() }()
-	return unlockBelow(sub, 1, &walkBudget{})
+	return unlockBelow(sub, 1, newWalkBudget(lim))
 }
 
-// unlockBelow unlocks the folders below d. Names are read in batches against the walk budget
-// b; only the names of folders are kept until the listing is closed.
+// unlockBelow unlocks the folders below d. Names are read in batches; the folders among them
+// count against the walk budget b and only their names are kept until the listing is closed.
 func unlockBelow(d *os.Root, depth int, b *walkBudget) error {
 	if depth > maxUnlockDepth {
 		return nil // RemoveAll fails below; the error is logged by the caller
@@ -182,13 +185,13 @@ func unlockBelow(d *os.Root, depth int, b *walkBudget) error {
 	for {
 		batch, rerr := f.Readdirnames(walkBatch)
 		for _, n := range batch {
-			if err := b.count(n); err != nil {
-				_ = f.Close()
-				return err
-			}
 			fi, err := d.Lstat(n)
 			if err != nil || !fi.IsDir() {
 				continue
+			}
+			if err := b.count(n); err != nil {
+				_ = f.Close()
+				return err
 			}
 			if fi.Mode().Perm()&0o700 != 0o700 {
 				if err := d.Chmod(n, fi.Mode().Perm()|0o700); err != nil {
