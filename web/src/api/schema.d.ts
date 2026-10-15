@@ -5264,6 +5264,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description rate_limited: one manual backup per server every 10 minutes (a failed one does not count; Retry-After header set) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description backups_unavailable (restic is missing on the host) or files_unavailable (file service) */
             503: {
                 headers: {

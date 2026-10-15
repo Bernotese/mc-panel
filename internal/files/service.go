@@ -374,19 +374,38 @@ func fsErr(err error) error {
 	return err
 }
 
-// reserve checks that need more bytes still leave the configured reserve free, counting the
-// bytes that running operations announced but have not written yet (all data directories
+// reserveBytes is the free space that every growing operation must leave on the file system
+// of dir: reserve_bytes or reserve_percent of its size, whichever is larger (SEC-04).
+func (s *Service) reserveBytes(dir string) (uint64, error) {
+	r := uint64(max(s.cfg.Limits.ReserveBytes, 0))
+	if p := s.cfg.Limits.ReservePercent; p > 0 {
+		total, err := s.disk.Total(dir)
+		if err != nil {
+			return 0, fmt.Errorf("check the disk size: %w", err)
+		}
+		r = max(r, total/100*uint64(p))
+	}
+	return r, nil
+}
+
+// reserve checks that need more bytes still leave the reserve (reserveBytes) free, counting
+// the bytes that running operations announced but have not written yet (all data directories
 // share one file system). The caller reports written bytes with landed and must release the
 // reservation when it ends.
 func (s *Service) reserve(id, need int64) (*reservation, error) {
 	need = max(need, 0)
-	avail, err := s.disk.Available(s.instanceDir(id))
+	dir := s.instanceDir(id)
+	avail, err := s.disk.Available(dir)
 	if err != nil {
 		return nil, fmt.Errorf("check free space: %w", err)
 	}
+	keep, err := s.reserveBytes(dir)
+	if err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	want := uint64(need) + uint64(max(s.cfg.Limits.ReserveBytes, 0)) + uint64(s.pending)
+	want := uint64(need) + keep + uint64(s.pending)
 	if avail < want {
 		return nil, fmt.Errorf("%w: %d bytes free, %d bytes needed including the reserve and running operations",
 			filesapi.ErrInsufficientStorage, avail, want)

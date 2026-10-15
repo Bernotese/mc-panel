@@ -11,3 +11,11 @@ func availableBytes(dir string) (uint64, error) {
 	}
 	return st.Bavail * uint64(st.Bsize), nil
 }
+
+func totalBytes(dir string) (uint64, error) {
+	var st unix.Statfs_t
+	if err := unix.Statfs(dir, &st); err != nil {
+		return 0, err
+	}
+	return st.Blocks * uint64(st.Bsize), nil
+}

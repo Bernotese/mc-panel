@@ -489,6 +489,9 @@ describe('mock behaviour', () => {
     const after = (await callApi('GET', '/servers/1/backups')).body as BackupOverview
     expect(after.snapshots[0]).toMatchObject({ kind: 'manual', note: 'vor dem Umbau', id: job.snapshot })
     expect(db.audit.at(-1)).toMatchObject({ action: 'backup.create', target: 'server:1', details: { note: 'vor dem Umbau', snapshot: job.snapshot } })
+    const again = await create({})
+    expect(again.status).toBe(429)
+    expect(field(again.body, 'error')).toBe('rate_limited')
 
     expect(field((await create({ note: 'a\nb' })).body, 'error')).toBe('validation_failed')
     expect(field((await create({ note: 'x'.repeat(65) })).body, 'error')).toBe('validation_failed')

@@ -23,12 +23,18 @@ type FilesLimits struct {
 	MaxExtractBytes   int64 `toml:"max_extract_bytes"`
 	MaxExtractEntries int64 `toml:"max_extract_entries"`
 	ReserveBytes      int64 `toml:"reserve_bytes"`
-	MaxTextBytes      int64 `toml:"max_text_bytes"`
-	MaxListEntries    int   `toml:"max_list_entries"`
-	MaxBackupBytes    int64 `toml:"max_backup_bytes"`   // content of one snapshot (tar)
-	MaxBackupEntries  int64 `toml:"max_backup_entries"` // entries of one snapshot
-	MaxBackupJobs     int   `toml:"max_backup_jobs"`    // concurrent restic jobs (backup, restore, forget)
+	// ReservePercent of the file system's size is kept free as well; the larger of both
+	// counts (SEC-04).
+	ReservePercent   int   `toml:"reserve_percent"`
+	MaxTextBytes     int64 `toml:"max_text_bytes"`
+	MaxListEntries   int   `toml:"max_list_entries"`
+	MaxBackupBytes   int64 `toml:"max_backup_bytes"`   // content of one snapshot (tar)
+	MaxBackupEntries int64 `toml:"max_backup_entries"` // entries of one snapshot
+	MaxBackupJobs    int   `toml:"max_backup_jobs"`    // concurrent restic jobs (backup, restore, forget)
 }
+
+// maxReservePercent bounds reserve_percent: a larger reserve would refuse most writes.
+const maxReservePercent = 50
 
 // maxBackupJobsLimit bounds max_backup_jobs: every restic job holds its own memory and disk I/O.
 const maxBackupJobsLimit = 8
@@ -52,6 +58,7 @@ func defaultFilesLimits() FilesLimits {
 		MaxExtractBytes:   20 << 30,
 		MaxExtractEntries: 100000,
 		ReserveBytes:      2 << 30,
+		ReservePercent:    5,
 		MaxTextBytes:      5 << 20,
 		MaxListEntries:    10000,
 		MaxBackupBytes:    64 << 30,
@@ -149,6 +156,9 @@ func (f Files) Validate() error {
 	}
 	if l.ReserveBytes < 0 {
 		errs = append(errs, errors.New("limits.reserve_bytes must be >= 0"))
+	}
+	if l.ReservePercent < 0 || l.ReservePercent > maxReservePercent {
+		errs = append(errs, fmt.Errorf("limits.reserve_percent must be between 0 and %d", maxReservePercent))
 	}
 	if l.MaxTextBytes > maxTextBytesLimit {
 		errs = append(errs, fmt.Errorf("limits.max_text_bytes must be <= %d", maxTextBytesLimit))
