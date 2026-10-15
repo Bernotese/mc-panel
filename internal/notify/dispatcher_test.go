@@ -6,8 +6,10 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -292,5 +294,102 @@ func TestDedupRecordedOnlyWhenQueued(t *testing.T) {
 	e.d.Notify(ctx, Event{Type: EventJailed, IP: "203.0.113.7/32"}) // must not be suppressed by the dropped one
 	if n := len(e.d.ch); n != 1 {
 		t.Fatalf("event dropped on a full queue must not count for deduplication, queued %d", n)
+	}
+}
+
+// SEC-21: a flood of jails cannot crowd out operational events. Jails are limited to JailBurst
+// per window plus one summary, and server.* has its own queue and worker.
+func TestJailFloodDoesNotDropOperationalEvents(t *testing.T) {
+	e := newDispEnv(t, DispatcherOptions{QueueSize: 3})
+	h := newHookServer(t, http.StatusOK)
+	e.addNotifier(t, KindNtfy, "n", Config{URL: h.srv.URL, Topic: "alerts"}, true)
+	ctx := context.Background()
+	for i := range 500 {
+		e.d.Notify(ctx, Event{Type: EventJailed, Title: "IP jailed", IP: netip.AddrFrom4([4]byte{203, 0, byte(i / 256), byte(i)}).String() + "/32"})
+	}
+	e.d.Notify(ctx, Event{Type: EventServerDown, Title: "server down"})
+	if n := len(e.d.ops); n != 1 {
+		t.Fatalf("operational queue holds %d events, want 1", n)
+	}
+	rctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go e.d.Run(rctx)
+	deadline := time.Now().Add(2 * time.Second)
+	for !slicesContainsTitle(h.requests(), "server down") {
+		if time.Now().After(deadline) {
+			t.Fatal("server.down was not delivered")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func slicesContainsTitle(reqs []capturedReq, title string) bool {
+	for _, r := range reqs {
+		if r.title == title {
+			return true
+		}
+	}
+	return false
+}
+
+func TestJailAggregation(t *testing.T) {
+	e := newDispEnv(t, DispatcherOptions{QueueSize: 1000})
+	ctx := context.Background()
+	jail := func(i int) {
+		e.d.Notify(ctx, Event{Type: EventJailed, IP: netip.AddrFrom4([4]byte{198, 51, byte(i / 256), byte(i)}).String() + "/32"})
+	}
+	for i := range 500 {
+		jail(i)
+	}
+	if n := len(e.d.ch); n != JailBurst {
+		t.Fatalf("queued %d jail events, want %d", n, JailBurst)
+	}
+	e.d.flushJailSummary() // window not over yet
+	if n := len(e.d.ch); n != JailBurst {
+		t.Fatalf("summary before the window ended: queued %d", n)
+	}
+	e.clk.Advance(JailWindow)
+	e.d.flushJailSummary()
+	if n := len(e.d.ch); n != JailBurst+1 {
+		t.Fatalf("queued %d, want the burst plus one summary", n)
+	}
+	for range JailBurst {
+		<-e.d.ch
+	}
+	if s := <-e.d.ch; !strings.Contains(s.Message, "495 more addresses") {
+		t.Fatalf("summary = %+v", s)
+	}
+	e.d.flushJailSummary()
+	if n := len(e.d.ch); n != 0 {
+		t.Fatalf("a second summary without new jails: queued %d", n)
+	}
+	jail(1000) // a new window starts after the summary
+	if n := len(e.d.ch); n != 1 {
+		t.Fatalf("jail after the summary: queued %d, want 1", n)
+	}
+}
+
+func TestDeliverHonoursRetryAfter(t *testing.T) {
+	e := newDispEnv(t, DispatcherOptions{})
+	var waits []time.Duration
+	e.d.sleep = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		switch calls.Add(1) {
+		case 1:
+			w.Header().Set("Retry-After", "2.5")
+			w.WriteHeader(http.StatusTooManyRequests)
+		case 2:
+			w.Header().Set("Retry-After", "600")
+			w.WriteHeader(http.StatusTooManyRequests)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	e.addNotifier(t, KindDiscord, "d", Config{URL: srv.URL + "/api/webhooks/1/tok"}, true)
+	e.d.deliver(context.Background(), Event{Type: EventServerDown})
+	if calls.Load() != 3 || len(waits) != 2 || waits[0] != 2500*time.Millisecond || waits[1] != MaxRetryAfter {
+		t.Fatalf("calls = %d, waits = %v; want Retry-After 2.5s, then capped at %s", calls.Load(), waits, MaxRetryAfter)
 	}
 }
