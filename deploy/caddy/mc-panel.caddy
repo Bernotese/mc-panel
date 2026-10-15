@@ -2,5 +2,12 @@
 # Imported from /etc/caddy/Caddyfile (line "import mc-panel.caddy"); other sites stay there.
 {{DOMAIN}} {
 	{{TLS}}
+	# Access log (client IPs, URLs, user agents; Caddy redacts cookies and Authorization).
+	log {
+		output file /var/log/caddy/mc-panel.log {
+			roll_size 50MiB
+			roll_keep 14
+		}
+	}
 	reverse_proxy unix//run/mc-panel-web/panel.sock
 }
