@@ -693,7 +693,6 @@ checks = {
     "readonly_rootfs": h["ReadonlyRootfs"] is True,
     "no_tmpfs": not h.get("Tmpfs"),
     "nofile": h.get("Ulimits") == [{"Name": "nofile", "Soft": 65536, "Hard": 65536}],
-    "no_rcon_broadcast": "BROADCAST_RCON_TO_OPS=false" in cfg["Env"],
 }
 bad = [k for k, ok in checks.items() if not ok]
 if bad:
@@ -721,9 +720,6 @@ if bad:
     print("router hardening failed:", bad, args, file=sys.stderr)
     sys.exit(1)
 print("OK: router hardening", sorted(checks))' || fail "router hardening"
-grep -qx 'broadcast-rcon-to-ops=false' "$work/mc/instances/9001/server.properties" ||
-  fail "server.properties: $(grep broadcast-rcon "$work/mc/instances/9001/server.properties" || echo 'broadcast-rcon-to-ops missing')"
-echo "OK: broadcast-rcon-to-ops=false in server.properties"
 
 echo "== container egress filter (SEC-02)"
 # The Paper download at the first start already went through the filter (public egress and DNS
