@@ -25,7 +25,14 @@ mc-panel consists of three binaries separated by privilege:
 | `agent` | root | a narrow JSON API on a Unix socket, for the panel only: nftables jails and Docker (Minecraft containers, router) |
 | `files` | user `mcpanel-mc` (like the Minecraft containers; no capabilities, no network) | file browser and backups inside a server's data directory, for the panel only |
 
-The goal: a compromised panel does not get root on the host, and file operations on data a Minecraft server controls never run as root. The agent validates every request strictly and accepts connections only from the panel's user. In production Caddy terminates TLS in front of the panel, which listens on a Unix socket. Details are in the [foundation spec](docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md).
+The goal: a compromised panel does not get root on the host, and file operations on data a Minecraft server controls never run as root. The agent validates every request strictly and accepts connections only from the panel's user. All three run under systemd sandboxing (the agent keeps only the capabilities it needs and opens no IP sockets). In production Caddy, from its official repository with automatic updates, terminates TLS in front of the panel, which listens on a Unix socket. Details are in the [foundation spec](docs/superpowers/specs/2026-10-08-mc-panel-foundation-design.md) and in [docs/install.md](docs/install.md).
+
+What mc-panel trusts, and what it does not protect against:
+
+- **Plugins, mods and modpacks are code.** A user with `server.files` or `server.plugins` on a server can run any code in its container. Jars come only from Modrinth and Hangar and are checked against the checksum their API reports. That protects against a manipulated download, not against a compromised project or author account.
+- **Downloads at run time.** The Minecraft image is pinned by digest, but inside the container it downloads server jars, loaders and modpacks from their upstreams at start (Mojang, PaperMC, Fabric, NeoForge, Modrinth, CurseForge). The panel cannot verify those.
+- **Checksums while a server runs.** An upload is checked against its checksum before it is moved into place. The temporary file sits in the server's own directory, so a running server could change it in between: "verified" is no integrity guarantee against the server itself.
+- **Backups live on the same host** under the user the containers run as; see [docs/install.md](docs/install.md#backups-of-keys-and-data) for the residual risk and off-host copies.
 
 ## Requirements
 

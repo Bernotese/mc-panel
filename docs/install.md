@@ -10,7 +10,7 @@ This guide covers a production installation on a VPS with the installer `install
 - A DNS name for the panel, e.g. `panel.example.com`, and a wildcard name for the Minecraft servers, e.g. `*.mc.example.com` (see below).
 - Enough memory and disk for the Minecraft servers you plan to run. Worlds and backups live under `/srv/mc-panel`.
 
-The installer sets up everything else: Docker (`docker.io`, unless a Docker daemon already answers), Caddy, nftables, restic (≥ 0.17), `tzdata`, `sqlite3`, `unattended-upgrades`, the system users `mcpanel` and `mcpanel-mc`, the three services and the host firewall.
+The installer sets up everything else: Docker (`docker.io`, unless a Docker daemon already answers), Caddy (from the official Caddy repository, see [Caddy](#caddy)), nftables, restic (≥ 0.17), `tzdata`, `sqlite3`, `unattended-upgrades`, the system users `mcpanel` and `mcpanel-mc`, the three services and the host firewall.
 
 ## DNS and base domain
 
@@ -34,7 +34,7 @@ curl -fsSL https://github.com/Bernotese/mc-panel/releases/latest/download/instal
 
 `install.sh` is attached to every release (`…/releases/download/<tag>/install.sh`, its SHA-256 is in `checksums.txt`). It downloads the release archive for the host architecture and verifies it against `checksums.txt` of the same release.
 
-The steps, in order: preflight, packages, layout (users, directories), binaries, configuration, systemd units, Caddy site, firewall, security updates, first admin, and a final `doctor` run. Each step prints `[ok]`, `[changed]`, `[skip]` or `[warn]`. A second run with the same options changes nothing. At the end the installer prints the panel URL, the admin and the next steps. The log is in `/var/log/mc-panel-install.log` (0600).
+The steps, in order: preflight, packages (with the Caddy repository), layout (users, directories), binaries, configuration, systemd units, Caddy site, firewall, security updates, first admin, and a final `doctor` run. Each step prints `[ok]`, `[changed]`, `[skip]` or `[warn]`. A second run with the same options changes nothing. At the end the installer prints the panel URL, the admin and the next steps. The log is in `/var/log/mc-panel-install.log` (0600).
 
 For `doctor`, `update` and `uninstall`, download the script once:
 
@@ -66,6 +66,30 @@ sudo bash install.sh doctor
 The host firewall is its own nftables table `inet mcpanel_fw` (rules in `/etc/mc-panel/mcpanel_fw.nft`, loaded by `mcpanel-fw.service`), separate from the table `inet mcpanel` the agent uses for jails. It accepts loopback, established connections, ICMP/ICMPv6, DHCPv6 replies, the SSH port(s), TCP 80, 443 and 25565 and UDP 443 (HTTP/3), plus every `--allow-port`; everything else inbound is dropped.
 
 Before it loads the rules the installer checks that the SSH ports are right and that every running SSH session uses one of them. Other listening ports that the rules would block are listed and must be confirmed (or opened with `--allow-port`); without a terminal and without `--yes` the installer aborts. Keep a second SSH session open while you install, and have the provider's web console at hand. With `--no-firewall` you manage the firewall yourself; then open the same ports.
+
+The agent's jails (5 failed sign-ins, IP rules; table `inet mcpanel`) drop **all** traffic from a jailed address at the host, SSH included, and they act before `mcpanel_fw`. If you share an address with an attacker (NAT, CGNAT, a VPN exit) you can lock yourself out of SSH too: keep the provider's web console at hand, then `sudo runuser -u mcpanel -- panel admin unlock -config /etc/mc-panel/panel.toml` (see [Troubleshooting](#troubleshooting)). The jails do not cover Minecraft over IPv4: Docker forwards the published port 25565 (mc-router) through its own DNAT and forward rules, past the jail and past `mcpanel_fw`'s input chain (over IPv6 it goes through docker-proxy and is jailed). The same holds for any port a container publishes, so do not publish other container ports on this host.
+
+## Caddy
+
+**Package and updates.** Ubuntu's `caddy` (universe) gets no security updates. The installer therefore adds Caddy's official repository (`https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main`, list `/etc/apt/sources.list.d/caddy-stable.list`, `signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg`). It trusts the downloaded key only if it is exactly the pinned key `65760C51EDEA2017CEA2CA15155B6D79CA56EA34` ("Caddy Web Server"), and installs Caddy from there; `update` switches an existing install. `unattended-upgrades` installs new Caddy releases daily (origin `cloudsmith/caddy/stable`). It skips a release whose default Caddyfile changed while yours differs (a conffile prompt); `doctor` (`caddy_package`) then reports an old version, and `apt-get install caddy` updates it by hand.
+
+**Admin API.** In a Caddyfile the installer owns (it replaces only a missing or unchanged package default), Caddy's admin API is a Unix socket, `admin unix//run/caddy/admin.sock`, that only `caddy` and root can open. On `127.0.0.1:2019` every local user, the panel included, could reconfigure Caddy and read its TLS keys. The drop-in `/etc/systemd/system/caddy.service.d/mc-panel.conf` creates `/run/caddy` and `/var/log/caddy`. Your own Caddyfile stays as it is; `doctor` (`caddy_admin`) warns until you add the line to its global options and restart Caddy (`systemctl restart caddy`; a reload cannot move the admin address). `systemctl reload caddy` works with the socket as before.
+
+**Access log.** The panel site logs every request to `/var/log/caddy/mc-panel.log` (JSON, rotated at 50 MiB, 14 old files; directory and files readable only by `caddy` and root). It contains client IP addresses, URLs, user agents and request headers; Caddy redacts cookies and `Authorization`, and the site drops the CSRF token. IP addresses are personal data: tell your users, and shorten `roll_keep` in `/etc/caddy/mc-panel.caddy` if you need less (`install` and `update` rewrite this file, so keep a local change in your notes).
+
+**Behind a CDN or another proxy.** The panel takes the client address from `X-Forwarded-For` as Caddy passes it. Behind a CDN (or another proxy in front of Caddy) every request then seems to come from the CDN: jails, rate limits and bans hit the CDN's addresses, i.e. all users at once. Add the CDN's address ranges to Caddy (global option `servers { trusted_proxies static <ranges> }`, so Caddy keeps the client entry) **and** to `trusted_proxies` in `/etc/mc-panel/panel.toml` (so the panel skips them), then restart Caddy and `mcpanel-panel`. The host jail cannot block clients behind a CDN; only the in-app jail applies.
+
+**Optional: hide the panel.** The login page and the app bundle are public (as for any web app), so anyone can see that an mc-panel runs at the address. To hide it, add Caddy's `basic_auth` or an IP allowlist (a `remote_ip` matcher that answers 403 to everyone else) to the site in `/etc/caddy/mc-panel.caddy`, before `reverse_proxy`, and run `systemctl reload caddy`. `install` and `update` rewrite this file, so re-apply the change after each run (keep a copy). Check sign-in with passkeys and the live console afterwards.
+
+## Service sandboxing
+
+The three services run under systemd sandboxing (`systemd-analyze security` scores about 1.2 for the panel, 2.0 for the agent, 0.6 for the files service):
+
+- **panel** (`mcpanel`): no capabilities, writes only `/var/lib/mc-panel`, only Unix, IPv4 and IPv6 sockets, no link-local addresses (cloud metadata), a system-call filter, `MemoryMax=1G`, `TasksMax=512`.
+- **agent** (root): only `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_DAC_READ_SEARCH`, `CAP_FOWNER` and `CAP_NET_ADMIN`; writes only `/srv/mc-panel` and `/run/mc-panel`; only Unix and netlink sockets (Docker socket, nftables), no IP traffic. The Docker socket still makes it root-equivalent.
+- **files** (`mcpanel-mc`) and its child restic: no capabilities, no network namespace of the host, no `/proc` beyond its own processes, writes only `/srv/mc-panel/instances` and `/srv/mc-panel/backups`.
+
+The units in `/etc/systemd/system/mcpanel-*.service` come from the installer and `update` rewrites them; a change of your own belongs in a drop-in (`systemctl edit mcpanel-agent`), and loosening one weakens the separation of privileges. `instances_dir` must stay `/srv/mc-panel` (the units only allow writes there); mount another disk at that path instead.
 
 ## First admin
 
@@ -101,7 +125,9 @@ sudo bash install.sh update           # update to the latest release
 | `--force` | reinstall the installed version; also rolls back an interrupted update with the database copy without asking |
 | `--yes` | answer yes to confirmations |
 
-`update` hands over to the `install.sh` of the target version. It backs up the binaries, the units, the three configuration files and the database (consistent SQLite copy) to `/var/lib/mc-panel-rollback/<old version>-<time>/` (root only; the three newest are kept), swaps binaries and units, adds missing configuration keys, restarts the services and checks their health. Minecraft containers keep running; players stay connected. `update` does not change the Caddy site or the firewall; run `install` again for that.
+`update` hands over to the `install.sh` of the target version. It backs up the binaries, the units, the three configuration files and the database (consistent SQLite copy) to `/var/lib/mc-panel-rollback/<old version>-<time>/` (root only; the three newest are kept), swaps binaries and units, adds missing configuration keys, restarts the services and checks their health. Minecraft containers keep running; players stay connected.
+
+Once the new version runs healthy, `update` also brings Caddy up to date: it adds the Caddy repository and installs Caddy from it (an older install still has Ubuntu's package), rewrites `/etc/caddy/mc-panel.caddy` and the drop-in `caddy.service.d/mc-panel.conf`, moves the admin API of an installer-owned Caddyfile to a socket, and writes the `unattended-upgrades` settings (see [Caddy](#caddy)). These steps are outside the rollback copy: if one fails, `update` prints a `[warn]`, the update itself stays done, and `update --force` retries it. `update` does not change the firewall; run `install` again for that.
 
 ### Rollback
 
@@ -116,9 +142,20 @@ sudo bash install.sh doctor          # human-readable: ✓ ok, ! warning, ✗ fa
 sudo bash install.sh doctor --json   # {"status": "ok|warn|fail", "checks": [{"id", "status", "message", "hint"}]}
 ```
 
-Exit code 0 means all ok, 1 warnings, 2 failures. Without root the checks that need root report "skipped". The checks: `services`, `sockets`, `files_process`, `versions`, `update_available`, `update_state`, `config`, `permissions`, `caddy_config`, `caddy_import`, `certificate`, `dns`, `firewall`, `docker`, `restic`, `tzdata`, `time_sync`, `upgrades`, `storage_fs`, `storage_free`, `backup_keys`, `ssh_password`, `ssh_root`.
+Exit code 0 means all ok, 1 warnings, 2 failures. Without root the checks that need root report "skipped". The checks: `services`, `sockets`, `files_process`, `versions`, `update_available`, `update_state`, `config`, `permissions`, `caddy_config`, `caddy_import`, `caddy_package`, `caddy_admin`, `certificate`, `dns`, `firewall`, `docker`, `docker_version`, `docker_live_restore`, `restic`, `tzdata`, `time_sync`, `upgrades`, `reboot_required`, `storage_fs`, `storage_free`, `backup_keys`, `ssh_password`, `ssh_root`, `ssh_kbdinteractive`.
 
-Common warnings: `/srv/mc-panel` is not its own file system (a full world can then fill the disk of the panel; the installer does not create a separate file system), a newer release is available, SSH allows password or root logins (the installer never changes SSH).
+Common warnings:
+
+| Check | Meaning and fix |
+|---|---|
+| `storage_fs` | `/srv/mc-panel` shares a file system with `/var/lib/mc-panel` (database) or Docker's data root (`/var/lib/docker`). A server that fills the disk then also stops the panel or Docker. The installer does not create a file system; mount one at `/srv/mc-panel` before you install (or move the data there while everything is stopped). |
+| `caddy_package` | Caddy is older than 2.10 or does not come from the Caddy repository (Ubuntu's package gets no security updates). `install.sh update --force` switches it. |
+| `caddy_admin` | Caddy's admin API listens on TCP (default `127.0.0.1:2019`), so any local user, the panel included, can reconfigure Caddy and read its TLS keys. The installer moves it only in a Caddyfile it owns; for your own Caddyfile add `admin unix//run/caddy/admin.sock` to the global options and run `systemctl restart caddy`. |
+| `docker_version` | Docker is older than Ubuntu 26.04's security update (29.1.3). Update `docker.io` (or `docker-ce`). |
+| `docker_live_restore` | `live-restore` is set in `/etc/docker/daemon.json`, but Docker has not been restarted since, so the next Docker restart (e.g. a package update) stops every server. Restart Docker once while no Minecraft server runs. |
+| `reboot_required` | A kernel or library update waits for a reboot (with its age and the packages). `unattended-upgrades` never reboots on its own, because the Minecraft servers would stop; plan a reboot. |
+| `update_available` | A newer release is available. |
+| `ssh_password`, `ssh_root`, `ssh_kbdinteractive` | SSH allows password logins, root logins with a password, or password logins through PAM (`KbdInteractiveAuthentication yes` with `UsePAM yes`). The installer never changes SSH. |
 
 ## Uninstall
 
@@ -127,13 +164,15 @@ sudo bash install.sh uninstall           # asks once; --yes answers
 sudo bash install.sh uninstall --purge   # deletes everything after you type the panel domain
 ```
 
-`uninstall` stops and removes the units, the binaries, the Caddy site (`/etc/caddy/mc-panel.caddy` and the marked import line), the nftables tables `inet mcpanel_fw` and `inet mcpanel`, the Minecraft containers, mc-router and its network, and the sockets. It keeps worlds and backups (`/srv/mc-panel`), the database (`/var/lib/mc-panel`), the rollback copies, the configuration (`/etc/mc-panel*`) and the users, so a later `install` picks everything up again. Other Caddy sites and all packages stay.
+`uninstall` stops and removes the units, the binaries, the Caddy site (`/etc/caddy/mc-panel.caddy` and the marked import line), the nftables tables `inet mcpanel_fw` and `inet mcpanel`, the Minecraft containers, mc-router and its network, and the sockets. It keeps worlds and backups (`/srv/mc-panel`), the database (`/var/lib/mc-panel`), the rollback copies, the configuration (`/etc/mc-panel*`) and the users, so a later `install` picks everything up again. Other Caddy sites, all packages, the Caddy repository and the drop-in `caddy.service.d/mc-panel.conf` stay (a Caddyfile of the installer still uses the admin socket in `/run/caddy`).
 
 `--purge` also deletes all worlds, backups, backup keys, the database, the rollback copies, the configuration and the users `mcpanel` and `mcpanel-mc`. It needs the panel domain typed on the terminal; `--yes` does not replace that.
 
 ## Backups of keys and data
 
-The panel's backups are local restic repositories, one per server, in `/srv/mc-panel/backups/repos/<id>`, on the same disk as the worlds. They protect against mistakes, not against losing the host. Add these to your own host backups:
+The panel's backups are local restic repositories, one per server, in `/srv/mc-panel/backups/repos/<id>`, on the same disk as the worlds. They protect against mistakes, not against losing the host. They do not protect against an attacker on the host either: the Minecraft containers and the files service run as the same user `mcpanel-mc`, which owns the worlds, the repositories **and** their keys. A Minecraft server that escapes its container (a kernel or runc bug) or a compromised panel with `server.backups` can delete or encrypt every backup, and corruption is only noticed at a restore. Follow the 3-2-1 rule: three copies, on two kinds of storage, one of them off the host and out of reach of the host (pull it from a backup server, or push to append-only storage such as restic's rest-server with `--append-only` or S3 with object lock), and test a restore now and then.
+
+Add these to your own host backups:
 
 | Path | Why |
 |---|---|
@@ -156,6 +195,10 @@ How to restore a snapshot without the panel is described in [`docs/dev/README.md
 | `/srv/mc-panel/backups/` | restic repositories and keys |
 | `/var/lib/mc-panel-rollback/` | update backups |
 | `/var/log/mc-panel-install.log` | installer log |
+| `/etc/caddy/mc-panel.caddy` | the panel's Caddy site (rewritten by `install` and `update`) |
+| `/etc/systemd/system/caddy.service.d/mc-panel.conf` | drop-in for Caddy: creates `/run/caddy` (admin socket) and `/var/log/caddy` |
+| `/var/log/caddy/mc-panel.log` | HTTP access log of the panel (see [Caddy](#caddy)) |
+| `/etc/apt/sources.list.d/caddy-stable.list`, `/usr/share/keyrings/caddy-stable-archive-keyring.gpg` | the Caddy repository and its signing key |
 
 Services: `mcpanel-panel.service` (+ `.socket`), `mcpanel-agent.service`, `mcpanel-files.service` (+ `.socket`), `mcpanel-fw.service`, and Caddy. Logs: `journalctl -u mcpanel-panel -u mcpanel-agent -u mcpanel-files -f`.
 
