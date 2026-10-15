@@ -1,189 +1,189 @@
-# mc-panel – Teilprojekt 3a: Konsole, Logs, Spieler (Design-Spec)
+# mc-panel – Sub-project 3a: Console, logs, players (design spec)
 
-- **Datum:** 2026-10-11
-- **Status:** umgesetzt (PRs #18–#24, 2026-10-11)
-- **Autor:** Jannes (mit Claude)
-- **Baut auf:** `2026-10-08-mc-panel-foundation-design.md` (TP1), `2026-10-10-mc-panel-instances-design.md` (TP2)
+- **Date:** 2026-10-11
+- **Status:** implemented (PRs #18–#24, 2026-10-11)
+- **Author:** Jannes (with Claude)
+- **Builds on:** `2026-10-08-mc-panel-foundation-design.md` (sub-project 1), `2026-10-10-mc-panel-instances-design.md` (sub-project 2)
 
-## 1. Ziel und Kontext
+## 1. Goal and context
 
-Teilprojekt 3 („Live-Betrieb“, TP1 §1.1) ist zweigeteilt: **3a** (dieses Dokument) bringt Konsole, Live-Log und Spieler-Verwaltung; **3b** bringt Dateibrowser und Plugins/Mods (Modrinth, Hangar). Beide sind einzeln nutzbar und haben je eigene Spec, eigenen Plan und eigene PRs.
+Sub-project 3 ("live operation", sub-project 1 §1.1) is split in two: **3a** (this document) brings the console, the live log and player management; **3b** brings the file browser and plugins/mods (Modrinth, Hangar). Each is usable on its own and has its own spec, plan and PRs. (Now: 3b was split further into 3b, file browser, and 3c, plugins and mods; both are done.)
 
-### 1.1 Erfolg
+### 1.1 Success
 
-Ein Nutzer mit `server.console` öffnet die Konsole eines Servers und sieht die letzten 500 Log-Zeilen und danach das Log live, auch über Neustarts des Containers hinweg. Er schickt Befehle und sieht deren Antwort. Im Tab „Spieler“ sieht er Online-Spieler, Ops, Whitelist und Bans und kann kicken, bannen, entbannen, Op vergeben und die Whitelist pflegen – ohne Neustart des Servers.
+A user with `server.console` opens a server's console and sees the last 500 log lines, then the log live, also across container restarts. They send commands and see the response. In the "Players" tab they see online players, ops, whitelist and bans, and can kick, ban, unban, grant op and maintain the whitelist – without restarting the server.
 
-### 1.2 Unveränderte Leitlinie
+### 1.2 Unchanged guideline
 
-Ein kompromittiertes panel darf keinen Root auf dem Host bekommen (TP1 §3). Das panel bekommt weiterhin weder den Docker-Socket noch Zugriff auf `/srv/mc-panel/instances`; Logs, Befehle und Spielerlisten laufen über den agent, der jede Anfrage selbst prüft.
+A compromised panel must not get root on the host (sub-project 1 §3). The panel still gets neither the Docker socket nor access to `/srv/mc-panel/instances`; logs, commands and player lists go through the agent, which checks every request itself.
 
-### 1.3 Nicht-Ziele (3a)
+### 1.3 Non-goals (3a)
 
-- Dateibrowser, Plugins/Mods, Herunterladen älterer Logdateien (`logs/*.log.gz`) – Teilprojekt 3b.
-- Tab-Vervollständigung von Befehlen, interaktives Terminal (stdin/TTY).
-- Eigene UI für IP-Bans (über die Konsole weiterhin möglich: `ban-ip`, `pardon-ip`).
-- Spielerzahl auf dem Dashboard (jede Abfrage erzeugt RCON-Zeilen im Server-Log, §3.3); sie steht nur auf der Detailseite.
-- Backups (TP4), Monitoring/Alerts (TP5).
+- File browser, plugins/mods, downloading older log files (`logs/*.log.gz`) – sub-project 3b. (Now: the file browser is sub-project 3b, plugins and mods are sub-project 3c; old log files under `logs/` can be downloaded like any other file in the file browser.)
+- Tab completion of commands, interactive terminal (stdin/TTY).
+- A dedicated UI for IP bans (still possible through the console: `ban-ip`, `pardon-ip`).
+- Player count on the dashboard (every query produces RCON lines in the server log, §3.3); it is shown only on the detail page. (Now: since sub-project 5 the dashboard shows the player count from monitoring, which uses the Server List Ping through mc-router, not RCON.)
+- Backups (sub-project 4), monitoring/alerts (sub-project 5). (Now: both done.)
 
-## 2. Entscheidungen
+## 2. Decisions
 
-| Bereich | Entscheidung | Begründung |
+| Area | Decision | Rationale |
 |---|---|---|
-| Rechte | `server.view`: Online-Spieler. `server.console`: Live-Log, Befehle, Spielerlisten, Spieler-Aktionen | Logs enthalten Spieler-IPs; wer Befehle senden darf, kann sich ohnehin `op` geben. Keine neue Berechtigung |
-| Befehle | RCON über `docker exec rcon-cli <befehl>` im Container | itzg bringt `rcon-cli` mit und erzeugt das RCON-Passwort selbst (`/data/.rcon-cli.env`); argv ohne Shell; keine Änderung an der Container-Vorlage nötig |
-| Log | Docker-Container-Log (`follow`) über den agent | Enthält alles, was der Server ausgibt; Rotation regelt Docker (TP2 §5.4: 3 × 10 MiB) |
-| Browser ↔ panel | Server-Sent Events für das Log, normale `POST`-Requests für Befehle | CSRF, Rechte, Rate-Limit und Audit laufen über die bestehende Middleware; keine WebSocket-Bibliothek; `EventSource` verbindet sich selbst neu; Caddy reicht SSE ohne Konfiguration durch |
-| Spielerlisten | Der Server ist maßgeblich (`ops.json`, `whitelist.json`, `banned-players.json`); Änderungen per RCON | Wirken sofort, im Spiel vergebene Rechte bleiben erhalten, und ein Absturz-Neustart setzt nichts zurück |
-| Log-Darstellung | Eigene virtualisierte Log-Komponente statt xterm.js | Leicht, mobil bedienbar, Suche/Filter; ein Terminal-Emulator bringt ohne stdin keinen Mehrwert |
+| Permissions | `server.view`: online players. `server.console`: live log, commands, player lists, player actions | Logs contain player IPs; whoever may send commands can give themselves `op` anyway. No new permission |
+| Commands | RCON via `docker exec rcon-cli <command>` in the container | itzg ships `rcon-cli` and generates the RCON password itself (`/data/.rcon-cli.env`); argv without a shell; no change to the container template needed |
+| Log | Docker container log (`follow`) through the agent | Contains everything the server prints; Docker handles rotation (sub-project 2 §5.4: 3 × 10 MiB) |
+| Browser ↔ panel | Server-Sent Events for the log, normal `POST` requests for commands | CSRF, permissions, rate limit and audit go through the existing middleware; no WebSocket library; `EventSource` reconnects by itself; Caddy passes SSE through without configuration |
+| Player lists | The server is authoritative (`ops.json`, `whitelist.json`, `banned-players.json`); changes via RCON | Take effect immediately, permissions granted in-game are kept, and a crash restart resets nothing |
+| Log rendering | Own virtualised log component instead of xterm.js | Lightweight, usable on mobile, search/filter; a terminal emulator adds nothing without stdin |
 
-### 2.1 Verworfene Alternativen
+### 2.1 Rejected alternatives
 
-- **WebSocket + stdin-Attach + xterm.js:** verlangt `OpenStdin` in der Container-Vorlage (Neuanlage aller Container), eine WebSocket-Bibliothek und Origin-/Rechte-/Audit-Prüfung pro Nachricht neben der Middleware; Spieler-Aktionen bräuchten trotzdem RCON.
-- **Befehle über stdin, Log per SSE:** Befehle hätten keine direkte Antwort, Spieler-Funktionen bräuchten trotzdem RCON – zwei Befehlswege.
-- **agent spricht RCON direkt mit der Container-IP:** der agent müsste das Passwort als root aus `/data` lesen und das RCON-Protokoll selbst implementieren; `rcon-cli` im Container erledigt beides.
-- **panel bleibt maßgeblich für Ops/Whitelist (wie TP2):** Startet Docker den Container nach einem Absturz neu, schreibt itzg die alten Listen aus der Container-Umgebung zurück; Bans wären trotzdem nur im Spiel gespeichert.
+- **WebSocket + stdin attach + xterm.js:** requires `OpenStdin` in the container template (recreating all containers), a WebSocket library and origin/permission/audit checks per message alongside the middleware; player actions would still need RCON.
+- **Commands via stdin, log via SSE:** commands would have no direct response, player functions would still need RCON – two command paths.
+- **agent speaks RCON directly to the container IP:** the agent would have to read the password from `/data` as root and implement the RCON protocol itself; `rcon-cli` in the container does both.
+- **panel stays authoritative for ops/whitelist (as in sub-project 2):** if Docker restarts the container after a crash, itzg writes the old lists back from the container environment; bans would still be stored only in the game.
 
-## 3. Änderungen an Teilprojekt 2
+## 3. Changes to sub-project 2
 
-### 3.1 Ops und Whitelist verlassen die Eigenschaften
+### 3.1 Ops and whitelist leave the properties
 
-- Die Schlüssel `ops` und `whitelist` entfallen aus der Allowlist (TP2 §7) in `internal/agent/instancespec` (panel und agent); wer sie noch sendet, bekommt `400 validation_failed`. `whitelist_enabled` bleibt (`ENABLE_WHITELIST`, Änderung → „Neustart nötig“).
-- `instancespec.Env` setzt `OPS`, `WHITELIST`, `EXISTING_OPS_FILE` und `EXISTING_WHITELIST_FILE` nicht mehr. Ohne `OPS`/`WHITELIST` lässt itzg `ops.json` und `whitelist.json` unverändert (`scripts/start-setupRbac` im itzg-Image, geprüft 2026-10-11).
-- Der agent leert `ops.json`/`whitelist.json` nicht mehr (`clearStaleLists` in `internal/agent/instances/datadir.go` entfällt).
-- Neue Migration `internal/store/migrations/00004_players_in_game.sql`: `properties = json_remove(properties, '$.ops', '$.whitelist')` und `revision = revision + 1`, `updated_at` = Migrationszeitpunkt – nur für Zeilen, die einen der beiden Schlüssel enthalten. Laufende Server zeigen danach „Neustart nötig“; gestoppte legt der Abgleich ohne die Variablen neu an.
-- Die Dateien im Datenverzeichnis bleiben unverändert und entsprechen nach TP2 genau den bisherigen Listen. Einzige Ausnahme: Namen einer **ausgeschalteten** Whitelist standen nur in der DB (TP2 hat `whitelist.json` dann geleert) und gehen verloren; sie waren nicht wirksam.
-- Im UI entfallen die Felder Ops und Whitelist in Formular und Einstellungen (§7).
+- The keys `ops` and `whitelist` are removed from the allowlist (sub-project 2 §7) in `internal/agent/instancespec` (panel and agent); whoever still sends them gets `400 validation_failed`. `whitelist_enabled` stays (`ENABLE_WHITELIST`, change → "restart required").
+- `instancespec.Env` no longer sets `OPS`, `WHITELIST`, `EXISTING_OPS_FILE` and `EXISTING_WHITELIST_FILE`. Without `OPS`/`WHITELIST`, itzg leaves `ops.json` and `whitelist.json` unchanged (`scripts/start-setupRbac` in the itzg image, checked 2026-10-11).
+- The agent no longer empties `ops.json`/`whitelist.json` (`clearStaleLists` in `internal/agent/instances/datadir.go` is removed).
+- New migration `internal/store/migrations/00004_players_in_game.sql`: `properties = json_remove(properties, '$.ops', '$.whitelist')` and `revision = revision + 1`, `updated_at` = time of the migration – only for rows that contain one of the two keys. Running servers then show "restart required"; the reconcile loop recreates stopped ones without the variables.
+- The files in the data directory stay unchanged and, after sub-project 2, match the previous lists exactly. Only exception: names of a **disabled** whitelist were stored only in the DB (sub-project 2 emptied `whitelist.json` in that case) and are lost; they had no effect.
+- In the UI the ops and whitelist fields are removed from the form and the settings (§7).
 
-### 3.2 Keine Änderung an der Container-Vorlage sonst
+### 3.2 No other change to the container template
 
-`ENABLE_RCON=true` bleibt (TP2 §5.4). RCON ist nur im internen Netz `mcpanel-mc` erreichbar und durch das zufällige, bei jedem Start neu erzeugte itzg-Passwort geschützt.
+`ENABLE_RCON=true` stays (sub-project 2 §5.4). RCON is reachable only in the internal network `mcpanel-mc` and protected by the random itzg password that is regenerated on every start.
 
-### 3.3 RCON-Rauschen im Log
+### 3.3 RCON noise in the log
 
-Jeder RCON-Aufruf erzeugt im Server-Log zwei Zeilen (`Thread RCON Client /… started` und `… shutting down`; beobachtet mit Paper auf der Test-VM, Vanilla verhält sich gleich). Die Konsole blendet sie standardmäßig aus (§7.2); die Online-Spieler-Abfrage wird zwischengespeichert (§6.3).
+Every RCON call produces two lines in the server log (`Thread RCON Client /… started` and `… shutting down`; observed with Paper on the test VM, Vanilla behaves the same). The console hides them by default (§7.2); the online players query is cached (§6.3).
 
-## 4. Architektur
+## 4. Architecture
 
 ```
 Browser ──SSE /console/stream──▶ panel internal/console ──NDJSON-Stream──▶ agent ──▶ Docker: GET /containers/{id}/logs?follow
-        ──POST /console─────────▶   · Rechte, CSRF, Limits    ──JSON──────▶       ──▶ Docker: exec rcon-cli <befehl>
-        ──GET/POST /players─────▶   · Audit, Parser            ──JSON──────▶       ──▶ /srv/mc-panel/instances/<id>/*.json (os.Root)
+        ──POST /console─────────▶   · permissions, CSRF, limits ──JSON────▶       ──▶ Docker: exec rcon-cli <command>
+        ──GET/POST /players─────▶   · audit, parser            ──JSON──────▶       ──▶ /srv/mc-panel/instances/<id>/*.json (os.Root)
 ```
 
-- **panel:** neues Paket `internal/console` mit `Handler` und `Routes(api *rbac.Router)`, verdrahtet in `cmd/panel/app.go`. Es nutzt den agent-Client (`internal/agent`) und für Server-Existenz/Zustand `internal/servers` bzw. die DB. `internal/servers` wächst dadurch nicht.
-- **agent:** neue Methoden am Instanz-Manager (`internal/agent/instances`) für Logs, RCON und Spielerlisten; Docker-Aufrufe in `internal/agent/docker`; Anfragen und Validierung in `internal/agent/agentapi`.
+- **panel:** new package `internal/console` with `Handler` and `Routes(api *rbac.Router)`, wired in `cmd/panel/app.go`. It uses the agent client (`internal/agent`) and, for server existence/state, `internal/servers` or the DB. `internal/servers` does not grow because of it.
+- **agent:** new methods on the instance manager (`internal/agent/instances`) for logs, RCON and player lists; Docker calls in `internal/agent/docker`; requests and validation in `internal/agent/agentapi`.
 
 ## 5. agent
 
 ### 5.1 API
 
-Muster wie TP2 §5.1: feste Pfade, `POST` mit JSON-Body, IDs im Body, `DisallowUnknownFields`, Peer-UID-Prüfung, Body-Limit 16 KiB.
+Pattern as in sub-project 2 §5.1: fixed paths, `POST` with a JSON body, IDs in the body, `DisallowUnknownFields`, peer UID check, body limit 16 KiB.
 
-| Methode, Pfad | Body | Antwort |
+| Method, path | Body | Response |
 |---|---|---|
-| `POST /v1/instances/logs` | `{id, tail, since}` | `200`, Stream `application/x-ndjson` |
-| `POST /v1/instances/rcon` | `{id, command}`, ab TP4 optional `timeout_ms` (§5.3) | `200 {output}` |
+| `POST /v1/instances/logs` | `{id, tail, since}` | `200`, stream `application/x-ndjson` |
+| `POST /v1/instances/rcon` | `{id, command}`, since sub-project 4 optionally `timeout_ms` (§5.3) | `200 {output}` |
 | `POST /v1/instances/players` | `{id}` | `200 {ops, whitelist, bans, errors}` |
 
-Fehler wie bisher als `agentapi.ErrorResponse` (`{error, code}`); neue Werte für `code` als Konstanten in `agentapi`: `400` (Validierung, ohne Code), `404` mit `not_found` (Container `mcpanel-mc-<id>` bzw. Datenverzeichnis fehlt), `409` mit `not_running` (Container läuft nicht; nur `rcon`), `429` mit `busy` (Limit, vorhandener Code), `503` mit `docker_unavailable` (vorhanden), `503` mit `rcon_unavailable` (nur `rcon`).
+Errors as before as `agentapi.ErrorResponse` (`{error, code}`); new values for `code` as constants in `agentapi`: `400` (validation, without code), `404` with `not_found` (container `mcpanel-mc-<id>` or data directory missing), `409` with `not_running` (container not running; `rcon` only), `429` with `busy` (limit, existing code), `503` with `docker_unavailable` (existing), `503` with `rcon_unavailable` (`rcon` only).
 
 ### 5.2 Logs
 
-- `id` > 0; `tail` 0–1000; `since` ≥ 0 = Docker-Zeitstempel in Nanosekunden seit Unix-Epoche (0 = ohne). Ist `since` > 0, wird `tail` ignoriert.
-- Docker-Aufruf: `GET /containers/mcpanel-mc-<id>/logs?follow=1&stdout=1&stderr=1&timestamps=1&tail=<tail>[&since=<s>.<ns>]`. Der Container hat kein TTY, die Antwort ist der Docker-Multiplex-Stream (8-Byte-Header je Frame); ein gemeinsamer Demultiplexer (§5.5) trennt ihn.
-- Jede Zeile wird als eine NDJSON-Zeile geschrieben: `{"ts": <ns>, "stream": "out"|"err", "line": "<text>"}`. `ts` stammt aus dem Docker-Zeitstempel; `line` ohne Zeitstempel und ohne abschließendes `\n`/`\r`, auf 8 KiB gekürzt (an einer UTF-8-Grenze), ungültiges UTF-8 ersetzt durch U+FFFD.
-- Der Stream endet, wenn Docker ihn beendet (Container gestoppt, entfernt) oder der Aufrufer trennt (Kontext). Docker beendet `follow` auch, wenn der Container neu angelegt wird; der Aufrufer (panel) verbindet sich neu (§6.2).
-- Fristen: Die globalen `ReadTimeout`/`WriteTimeout` des agent-Servers (5 s/10 s) gelten für diesen Pfad nicht; der Handler setzt per `http.ResponseController` vor jedem Schreiben eine Frist von 30 s und flusht nach jedem Schreiben.
-- Höchstens 16 gleichzeitige Log-Streams im agent, sonst `429`.
+- `id` > 0; `tail` 0–1000; `since` ≥ 0 = Docker timestamp in nanoseconds since the Unix epoch (0 = none). If `since` > 0, `tail` is ignored.
+- Docker call: `GET /containers/mcpanel-mc-<id>/logs?follow=1&stdout=1&stderr=1&timestamps=1&tail=<tail>[&since=<s>.<ns>]`. The container has no TTY, the response is the Docker multiplex stream (8-byte header per frame); a shared demultiplexer (§5.5) splits it.
+- Each line is written as one NDJSON line: `{"ts": <ns>, "stream": "out"|"err", "line": "<text>"}`. `ts` comes from the Docker timestamp; `line` without the timestamp and without a trailing `\n`/`\r`, truncated to 8 KiB (at a UTF-8 boundary), invalid UTF-8 replaced by U+FFFD.
+- The stream ends when Docker ends it (container stopped, removed) or the caller disconnects (context). Docker also ends `follow` when the container is recreated; the caller (panel) reconnects (§6.2).
+- Deadlines: the global `ReadTimeout`/`WriteTimeout` of the agent server (5 s/10 s) do not apply to this path; the handler sets a 30 s deadline via `http.ResponseController` before every write and flushes after every write.
+- At most 16 concurrent log streams in the agent, otherwise `429`.
 
 ### 5.3 RCON
 
-- `id` > 0; `command`: 1–1000 Bytes, gültiges UTF-8, kein Zeichen < `0x20` und kein `0x7f` (also auch kein Zeilenumbruch oder Tab), nicht nur Leerzeichen, und kein führendes `-` (nach optionalen Leerzeichen und höchstens einem `/`), damit der Befehl nie als Option von `rcon-cli` gelesen wird.
-- Ablauf: Container inspizieren (fehlt er → `404 not_found`, läuft er nicht → `409 not_running`), `POST /containers/{id}/exec` mit `{"Cmd": ["rcon-cli", "--", command], "User": "<uid>:<gid>", "WorkingDir": "/data", "Env": ["HOME=/data"], "AttachStdout": true, "AttachStderr": true, "AttachStdin": false, "Tty": false}`, dann `POST /exec/{id}/start` mit `{"Detach": false, "Tty": false}` (Antwort-Body ist der Multiplex-Stream, kein Hijack), danach `GET /exec/{id}/json` für den Exit-Code.
-- `uid:gid` ist `mcpanel-mc` (wie der Container selbst). `rcon-cli` steht fest im Code; nur die Integrationstests tauschen es über die Manager-Konfiguration (`RconCommand`, Default `rcon-cli`) gegen ein busybox-Programm.
-- Timeout 10 s für den gesamten Ablauf (Nachtrag TP4: einstellbar über `timeout_ms`, siehe unten); Ausgabe (stdout und stderr zusammen) höchstens 64 KiB, danach abgeschnitten mit Hinweis `[… gekürzt]`.
-- Exit-Code ≠ 0 (z. B. RCON während des Starts noch nicht bereit) → `503` mit Code `rcon_unavailable` und den ersten 500 Zeichen der Ausgabe in `error`. Exit-Code 0 → `200 {output}` mit der Ausgabe als Text (Minecraft-`§`-Formatcodes bleiben erhalten).
-- RCON-Aufrufe laufen nicht über die serielle Warteschlange der Instanz (TP2 §5.1), weil sie den Container-Zustand nicht ändern. Höchstens 4 gleichzeitige Aufrufe pro Instanz, sonst `429`. Beim Herunterfahren bricht der agent laufende Konsolen-Aufrufe und Spielerlisten-Lesungen ab (das panel sieht eine abgebrochene Verbindung und meldet `503 agent_unavailable`).
-- **Nachtrag TP4 (Backups):** Der Body nimmt optional `timeout_ms` an (Ganzzahl; fehlt oder `0` = 10 s wie bisher, sonst 1–120000, strikt geprüft: andere Werte → `400`). Er begrenzt den ganzen Ablauf im agent; der Client des panels wartet die Frist plus 5 s. Die Konsole des panels sendet keinen Wert (10 s); Backups senden 60 s für `save-off`, `save-all flush` und `save-on` (`save-all flush` kann bei großen Welten länger als 10 s dauern). Spec: `2026-10-12-mc-panel-backups-design.md`.
+- `id` > 0; `command`: 1–1000 bytes, valid UTF-8, no character < `0x20` and no `0x7f` (so no line break or tab either), not only spaces, and no leading `-` (after optional spaces and at most one `/`), so that the command is never read as an option of `rcon-cli`.
+- Flow: inspect the container (missing → `404 not_found`, not running → `409 not_running`), `POST /containers/{id}/exec` with `{"Cmd": ["rcon-cli", "--", command], "User": "<uid>:<gid>", "WorkingDir": "/data", "Env": ["HOME=/data"], "AttachStdout": true, "AttachStderr": true, "AttachStdin": false, "Tty": false}`, then `POST /exec/{id}/start` with `{"Detach": false, "Tty": false}` (the response body is the multiplex stream, no hijack), then `GET /exec/{id}/json` for the exit code.
+- `uid:gid` is `mcpanel-mc` (like the container itself). `rcon-cli` is fixed in the code; only the integration tests swap it for a busybox program through the manager configuration (`RconCommand`, default `rcon-cli`).
+- Timeout 10 s for the whole flow (addendum sub-project 4: configurable via `timeout_ms`, see below); output (stdout and stderr together) at most 64 KiB, then truncated with the note `[… gekürzt]`.
+- Exit code ≠ 0 (e.g. RCON not ready yet during startup) → `503` with code `rcon_unavailable` and the first 500 characters of the output in `error`. Exit code 0 → `200 {output}` with the output as text (Minecraft `§` format codes are kept).
+- RCON calls do not go through the instance's serial queue (sub-project 2 §5.1) because they do not change the container state. At most 4 concurrent calls per instance, otherwise `429`. On shutdown the agent aborts running console calls and player list reads (the panel sees an aborted connection and reports `503 agent_unavailable`).
+- **Addendum sub-project 4 (backups):** the body optionally takes `timeout_ms` (integer; missing or `0` = 10 s as before, otherwise 1–120000, strictly checked: other values → `400`). It bounds the whole flow in the agent; the panel's client waits for the deadline plus 5 s. The panel's console sends no value (10 s); backups send 60 s for `save-off`, `save-all flush` and `save-on` (`save-all flush` can take longer than 10 s for large worlds). Spec: `2026-10-12-mc-panel-backups-design.md`.
 
-### 5.4 Spielerlisten
+### 5.4 Player lists
 
-- Liest `ops.json`, `whitelist.json` und `banned-players.json` aus `/srv/mc-panel/instances/<id>`; funktioniert auch bei gestopptem oder fehlendem Container (fehlt das Verzeichnis → `404`).
-- Das Verzeichnis gehört dem Container-Benutzer; der root-agent liest also Dateien, die ein kompromittierter Server kontrolliert. Deshalb:
-  - Öffnen über `os.Root` auf dem Datenverzeichnis (keine Auflösung von Symlinks aus dem Verzeichnis heraus, kein `..`), mit `O_RDONLY|O_NOFOLLOW|O_NONBLOCK` (kein Hängen an einer FIFO, kein Folgen eines Symlinks als letztem Element).
-  - Nach dem Öffnen `fstat`: nur reguläre Dateien, höchstens 1 MiB; gelesen werden höchstens 1 MiB + 1 Byte.
-  - Inhalte werden geparst und nur die Felder unten weitergegeben; Strings auf 256 Zeichen gekürzt, Listen auf 1000 Einträge (das Dekodieren endet nach 1000 Einträgen).
-  - Höchstens 2 Lesungen gleichzeitig im agent, sonst `429 busy`.
-- Antwort:
+- Reads `ops.json`, `whitelist.json` and `banned-players.json` from `/srv/mc-panel/instances/<id>`; works also with a stopped or missing container (directory missing → `404`).
+- The directory belongs to the container user; the root agent therefore reads files that a compromised server controls. Hence:
+  - Opened through `os.Root` on the data directory (no resolution of symlinks out of the directory, no `..`), with `O_RDONLY|O_NOFOLLOW|O_NONBLOCK` (no hanging on a FIFO, no following of a symlink as the last element).
+  - After opening, `fstat`: regular files only, at most 1 MiB; at most 1 MiB + 1 byte is read.
+  - Contents are parsed and only the fields below are passed on; strings truncated to 256 characters, lists to 1000 entries (decoding stops after 1000 entries).
+  - At most 2 concurrent reads in the agent, otherwise `429 busy`.
+- Response:
   - `ops`: `[{uuid, name, level}]`
   - `whitelist`: `[{uuid, name}]`
-  - `bans`: `[{uuid, name, reason, source, created, expires}]` (`created`/`expires` als Text wie in der Datei, z. B. `2026-10-11 09:32:51 +0000` bzw. `forever`)
-  - `errors`: Namen der Dateien, die vorhanden, aber unlesbar sind (Symlink, keine reguläre Datei, zu groß, kein gültiges JSON); die zugehörige Liste ist dann leer. Eine fehlende Datei ist kein Fehler, sondern eine leere Liste.
+  - `bans`: `[{uuid, name, reason, source, created, expires}]` (`created`/`expires` as text as in the file, e.g. `2026-10-11 09:32:51 +0000` or `forever`)
+  - `errors`: names of the files that exist but are unreadable (symlink, not a regular file, too large, not valid JSON); the corresponding list is then empty. A missing file is not an error but an empty list.
 
-### 5.5 Docker-Client
+### 5.5 Docker client
 
-Neu in `internal/agent/docker`, sonst keine weiteren Aufrufe (kein Attach, kein Exec mit TTY oder stdin):
+New in `internal/agent/docker`, no further calls otherwise (no attach, no exec with TTY or stdin):
 
-| Methode | Docker-API |
+| Method | Docker API |
 |---|---|
-| `ContainerLogs(ctx, id, opts) (io.ReadCloser, error)` | `GET /containers/{id}/logs` (Stream, ohne Client-Timeout; nur Kontext) |
+| `ContainerLogs(ctx, id, opts) (io.ReadCloser, error)` | `GET /containers/{id}/logs` (stream, without client timeout; context only) |
 | `ExecCreate(ctx, id, cfg) (string, error)` | `POST /containers/{id}/exec` |
 | `ExecStart(ctx, execID) (io.ReadCloser, error)` | `POST /exec/{id}/start` |
 | `ExecInspect(ctx, execID) (ExecInfo, error)` | `GET /exec/{id}/json` |
-| `Demux(r io.Reader) (Frame, error)` bzw. Leser pro Frame | Multiplex-Format: 1 Byte Stream (1 = stdout, 2 = stderr), 3 Byte Null, 4 Byte Länge (Big Endian), dann Nutzdaten; Frame-Länge höchstens 1 MiB, sonst Fehler |
+| `Demux(r io.Reader) (Frame, error)` or a reader per frame | Multiplex format: 1 byte stream (1 = stdout, 2 = stderr), 3 bytes zero, 4 bytes length (big endian), then payload; frame length at most 1 MiB, otherwise error |
 
 ## 6. panel
 
 ### 6.1 API
 
-Alle Routen über `*rbac.Router`, beschrieben in `api/openapi.yaml`, mit MSW-Mock.
+All routes through `*rbac.Router`, described in `api/openapi.yaml`, with an MSW mock.
 
-| Route | Regel | Inhalt |
+| Route | Rule | Content |
 |---|---|---|
 | `GET /servers/{id}/console/stream` | `Server(server.console, "id")` | SSE (§6.2) |
 | `POST /servers/{id}/console` | `Server(server.console, "id")` | `{command}` → `200 {output}` (§6.4) |
 | `GET /servers/{id}/players` | `Server(server.view, "id")` | `{available, online: [{name, uuid}], max}` (§6.3) |
-| `GET /servers/{id}/players/lists` | `Server(server.console, "id")` | `{ops, whitelist, bans, errors}` wie §5.4 |
+| `GET /servers/{id}/players/lists` | `Server(server.console, "id")` | `{ops, whitelist, bans, errors}` as in §5.4 |
 | `POST /servers/{id}/players/actions` | `Server(server.console, "id")` | `{action, name, reason?}` → `200 {output}` (§6.5) |
 
-- Nicht eingerichtete Server (ohne `instances`-Zeile) → `404 not_found` auf allen fünf Routen.
-- agent nicht erreichbar → `503 agent_unavailable`; Docker nicht verfügbar → `503 docker_unavailable` (Ausnahme: `GET /players` antwortet dann `available: false`).
+- Servers that are not set up (without an `instances` row) → `404 not_found` on all five routes.
+- agent unreachable → `503 agent_unavailable`; Docker unavailable → `503 docker_unavailable` (exception: `GET /players` then answers `available: false`).
 
-### 6.2 Log-Stream (SSE)
+### 6.2 Log stream (SSE)
 
-- Antwort `text/event-stream`, `Cache-Control: no-store`, `X-Accel-Buffering: no`. Die Fristen des panel-Servers (`WriteTimeout` 60 s) gelten nicht; vor jedem Schreiben setzt der Handler per `ResponseController` 30 s und flusht danach.
+- Response `text/event-stream`, `Cache-Control: no-store`, `X-Accel-Buffering: no`. The panel server's deadlines (`WriteTimeout` 60 s) do not apply; before every write the handler sets 30 s via `ResponseController` and flushes afterwards.
 - Events:
-  - `event: line`, `id: <ts>` (Docker-Zeitstempel in ns), `data: {"ts": <unix-ms>, "stream": "out"|"err", "line": "…"}`.
-  - `event: state`, `data: {"running": true|false}` – beim ersten erfolgreichen Öffnen des agent-Streams `true`, bei dessen Ende `false`.
-  - Alle 15 s ein Kommentar (`: ping`) als Heartbeat.
-- Start: Mit Header `Last-Event-ID` (gültige Zahl) öffnet das panel den agent-Stream mit `since` = diesem Wert + 1 ns, sonst mit `tail` = 500. Der Query-Parameter `tail` (0–1000) überschreibt den Default.
-- Endet der agent-Stream oder schlägt das Öffnen fehl (`404`, `docker_unavailable`, agent weg), sendet das panel einmalig `state {running: false}` und versucht es erneut mit `since` = letzter gesehener Zeitstempel. So läuft das Log über Neustarts und Neuanlagen des Containers weiter, ohne doppelte Zeilen. Nach einem Versuch mit Zeile oder Zustandswechsel wartet das panel 3 s; bleibt ein Versuch ohne beides (gestoppter Server, agent weg oder ausgelastet), verdoppelt sich die Wartezeit bis höchstens 10 s (3 → 6 → 10 s); jede Zeile bzw. jeder Zustandswechsel setzt sie zurück. Ein `429 busy` des agent wird auf Info-Ebene geloggt.
-- Prüfung während des Streams (über `clock.Clock`, alle 30 s): Session gültig (nicht abgelaufen, nicht widerrufen, Stufe voll angemeldet), Benutzer existiert, Recht `server.console` (bzw. Admin) besteht noch, Server existiert noch. Fällt eine Prüfung durch, schließt das panel den Stream. Der Stream verlängert die Session nicht (`Touch` nur beim Öffnen wie bei jedem Request).
-- Höchstens 4 gleichzeitige Streams pro Benutzer im panel, sonst `429 rate_limited`. Beim Herunterfahren schließt das panel alle Streams; das Herunterfahren wartet höchstens 20 s (länger als der RCON-Aufruf mit 15 s).
+  - `event: line`, `id: <ts>` (Docker timestamp in ns), `data: {"ts": <unix-ms>, "stream": "out"|"err", "line": "…"}`.
+  - `event: state`, `data: {"running": true|false}` – `true` when the agent stream is first opened successfully, `false` when it ends.
+  - Every 15 s a comment (`: ping`) as a heartbeat.
+- Start: with a `Last-Event-ID` header (valid number) the panel opens the agent stream with `since` = that value + 1 ns, otherwise with `tail` = 500. The query parameter `tail` (0–1000) overrides the default.
+- If the agent stream ends or opening it fails (`404`, `docker_unavailable`, agent gone), the panel sends `state {running: false}` once and retries with `since` = the last timestamp seen. This way the log continues across restarts and recreations of the container, without duplicate lines. After an attempt with a line or a state change the panel waits 3 s; if an attempt has neither (stopped server, agent gone or busy), the wait doubles up to at most 10 s (3 → 6 → 10 s); every line or state change resets it. A `429 busy` from the agent is logged at info level.
+- Checks during the stream (via `clock.Clock`, every 30 s): session valid (not expired, not revoked, fully signed in), user exists, permission `server.console` (or admin) still holds, server still exists. If a check fails, the panel closes the stream. The stream does not extend the session (`Touch` only on opening, as with every request).
+- At most 4 concurrent streams per user in the panel, otherwise `429 rate_limited`. On shutdown the panel closes all streams; shutdown waits at most 20 s (longer than the RCON call with 15 s).
 
-### 6.3 Online-Spieler
+### 6.3 Online players
 
-- Das panel ruft über den agent `rcon` mit `list uuids` auf und parst die Antwort. Formate (Beispiele aus echten Servern in `internal/console/testdata/`):
+- The panel calls `rcon` with `list uuids` through the agent and parses the response. Formats (examples from real servers in `internal/console/testdata/`):
   - `There are 2 of a max of 20 players online: Alex (uuid), Steve (uuid)`
   - `There are 0 of a max of 20 players online: `
-  - ohne UUIDs (ältere Versionen ignorieren `uuids`): `… online: Alex, Steve`
-  - `§`-Formatcodes werden vor dem Parsen entfernt.
-- Antwort: `available: true`, `online` (Name; `uuid` oder `null`), `max`. Läuft der Server nicht, antwortet RCON nicht oder ist das Format unbekannt → `available: false`, `online: []`, `max: null` (kein HTTP-Fehler).
-- Zwischenspeicher pro Server 10 s (Erfolg und `available: false`), damit mehrere Betrachter kein zusätzliches RCON-Rauschen erzeugen.
+  - without UUIDs (older versions ignore `uuids`): `… online: Alex, Steve`
+  - `§` format codes are removed before parsing.
+- Response: `available: true`, `online` (name; `uuid` or `null`), `max`. If the server is not running, RCON does not answer or the format is unknown → `available: false`, `online: []`, `max: null` (no HTTP error).
+- Cache per server 10 s (success and `available: false`), so that several viewers produce no additional RCON noise.
 
-### 6.4 Befehle
+### 6.4 Commands
 
-- Das panel entfernt ein führendes `/` und prüft wie der agent (§5.3); Verstoß → `400 validation_failed`.
-- Rate-Limit: 30 Befehle pro Minute pro Benutzer (Token-Bucket, Burst 10, Muster wie `internal/servers/powerlimit.go`), gemeinsam für Befehle und Spieler-Aktionen; Überschreitung → `429 rate_limited` mit `Retry-After`.
-- Fehler: `409 instance_not_running` (agent `not_running`), `503 rcon_unavailable`.
-- Der RCON-Aufruf wird nicht abgebrochen, wenn der Browser die Verbindung verlässt; der Audit-Eintrag (`server.console_command`, §6.7) folgt der Antwort des agent, nicht dem Verbleib des Clients. Das gilt ebenso für Spieler-Aktionen (§6.5).
-- Kein Sudo (würde bei jedem Befehl stören).
+- The panel removes a leading `/` and checks like the agent (§5.3); violation → `400 validation_failed`.
+- Rate limit: 30 commands per minute per user (token bucket, burst 10, pattern as in `internal/servers/powerlimit.go`), shared by commands and player actions; exceeding it → `429 rate_limited` with `Retry-After`.
+- Errors: `409 instance_not_running` (agent `not_running`), `503 rcon_unavailable`.
+- The RCON call is not aborted when the browser leaves the connection; the audit entry (`server.console_command`, §6.7) follows the agent's response, not whether the client is still there. The same applies to player actions (§6.5).
+- No sudo (it would get in the way on every command).
 
-### 6.5 Spieler-Aktionen
+### 6.5 Player actions
 
-`action` ist ein Enum; das panel baut den RCON-Befehl, Nutzertext wird nie als Befehl übernommen:
+`action` is an enum; the panel builds the RCON command, user text is never taken over as a command:
 
-| `action` | RCON-Befehl |
+| `action` | RCON command |
 |---|---|
 | `kick` | `kick <name>[ <reason>]` |
 | `ban` | `ban <name>[ <reason>]` |
@@ -193,89 +193,89 @@ Alle Routen über `*rbac.Router`, beschrieben in `api/openapi.yaml`, mit MSW-Moc
 | `whitelist_add` | `whitelist add <name>` |
 | `whitelist_remove` | `whitelist remove <name>` |
 
-- `name`: `^[A-Za-z0-9_]{3,16}$`. `reason`: nur bei `kick`/`ban` erlaubt, sonst `400`; höchstens 200 Zeichen, druckbar, ohne Steuerzeichen.
-- Es gelten Rate-Limit und Fehler wie §6.4. Die Antwort enthält die RCON-Ausgabe (z. B. `Made Steve a server operator`).
-- `whitelist add` und `op` lösen den Namen beim Server über Mojang auf (Online-Modus); unbekannte Namen beantwortet der Server mit einem Text, der unverändert zurückkommt.
+- `name`: `^[A-Za-z0-9_]{3,16}$`. `reason`: only allowed for `kick`/`ban`, otherwise `400`; at most 200 characters, printable, without control characters.
+- Rate limit and errors as in §6.4 apply. The response contains the RCON output (e.g. `Made Steve a server operator`).
+- `whitelist add` and `op` resolve the name on the server via Mojang (online mode); the server answers unknown names with a text that is returned unchanged.
 
-### 6.6 Fehlercodes
+### 6.6 Error codes
 
-Neu in `internal/httpx/errors.go` und im Enum des Vertrags:
+New in `internal/httpx/errors.go` and in the contract's enum:
 
-| Code | Status | Wann |
+| Code | Status | When |
 |---|---|---|
-| `instance_not_running` | 409 | Befehl oder Spieler-Aktion bei nicht laufendem Server |
-| `rcon_unavailable` | 503 | RCON antwortet nicht (Server startet noch, RCON aus) |
+| `instance_not_running` | 409 | Command or player action while the server is not running |
+| `rcon_unavailable` | 503 | RCON does not answer (server still starting, RCON off) |
 
 ### 6.7 Audit
 
-- `server.console_command`: Ziel Server, Details `{command}` (wie gesendet, ohne führendes `/`), Ergebnis `ok` oder `failed` (bei `instance_not_running`, `rcon_unavailable`, agent-Fehlern).
-- `server.player_action`: Ziel Server, Details `{action, name, reason?}`, Ergebnis wie oben.
-- Neu als Konstanten in `internal/audit/types.go`: `ActionServerConsoleCommand`, `ActionServerPlayerAction`. Ablehnungen durch Rechte, Validierung oder Rate-Limit werden nicht auditiert (wie TP1/TP2).
-- Öffnen des Log-Streams wird nicht auditiert.
+- `server.console_command`: target server, details `{command}` (as sent, without the leading `/`), result `ok` or `failed` (on `instance_not_running`, `rcon_unavailable`, agent errors).
+- `server.player_action`: target server, details `{action, name, reason?}`, result as above.
+- New as constants in `internal/audit/types.go`: `ActionServerConsoleCommand`, `ActionServerPlayerAction`. Rejections by permissions, validation or rate limit are not audited (as in sub-projects 1 and 2).
+- Opening the log stream is not audited.
 
 ## 7. Frontend
 
-Bestehende shadcn-Komponenten; Texte `de`/`en`; mobil bedienbar.
+Existing shadcn components; texts `de`/`en`; usable on mobile.
 
-### 7.1 Detailseite `/servers/$id`
+### 7.1 Detail page `/servers/$id`
 
-Tabs (nur mit passendem Recht sichtbar): Übersicht · **Konsole** · **Spieler** · Einstellungen · Löschen.
+Tabs (visible only with the matching permission): Overview · **Console** · **Players** · Settings · Delete. (Now: since sub-project 7 the server areas are routes under `routes/_app/servers/$id` (`console`, `players` and others) in the server tree instead of tabs; deleting a server is the danger zone at the end of its settings.)
 
-- **Übersicht** (`server.view`): neue Karte „Online-Spieler“ mit `Anzahl / Max` und Namen; Abfrage alle 15 s, nur solange die Seite sichtbar ist; bei `available: false` „nicht verfügbar“.
-- **Einstellungen** (Admin): Felder Ops und Whitelist entfallen; `whitelist_enabled` bleibt mit Verweis auf den Spieler-Tab. Dasselbe gilt für `/servers/new`.
+- **Overview** (`server.view`): new card "Online players" with `count / max` and names; queried every 15 s, only while the page is visible; with `available: false` "not available".
+- **Settings** (admin): the ops and whitelist fields are removed; `whitelist_enabled` stays, with a reference to the players tab. The same applies to `/servers/new`.
 
-### 7.2 Konsole (`server.console`)
+### 7.2 Console (`server.console`)
 
-- **Log-Ansicht:** virtualisierte Liste (`@tanstack/react-virtual`, einzige neue Abhängigkeit), Ringpuffer von 5000 Zeilen.
-- **Darstellung:** eigener Parser für ANSI-SGR-Farben (16 Farben, fett) und Minecraft-`§`-Codes zu Spans; kein `dangerouslySetInnerHTML`. Zeilen mit `WARN` bzw. `ERROR` sind farblich hervorgehoben; stderr-Zeilen ebenso.
-- **Werkzeuge:** Textfilter; Schalter „RCON-Meldungen ausblenden“ (Standard an, filtert die Zeilen aus §3.3); Auto-Scroll, der beim Hochscrollen pausiert, mit Knopf „Neue Zeilen ↓“; Verbindungsanzeige (verbunden, Server gestoppt, verbinde neu, „Zu viele offene Konsolen – schließe eine andere.“ bei `429` des Streams); „Kopieren“ der sichtbaren Zeilen.
-- **Befehlszeile:** am unteren Rand (auch mobil), Verlauf mit ↑/↓ (nur im Speicher, 100 Einträge). Ein gesendeter Befehl erscheint als eigener, abgesetzter Block `› befehl` mit der RCON-Antwort darunter, eingereiht in die Log-Ansicht. Bei gestopptem Server sowie bei `forbidden`/`not_found` des Streams gesperrt, mit Hinweis. Unter der Zeile: „`stop` beendet den Server, Docker startet ihn sofort neu – zum Stoppen den Power-Button verwenden.“
-- **Verbindung:** `EventSource` (Same-Origin, Cookie). Bei Abbruch verbindet der Browser selbst neu (mit `Last-Event-ID`); bei `401`/`403` schließt die Ansicht die Verbindung und zeigt den passenden Hinweis.
+- **Log view:** virtualised list (`@tanstack/react-virtual`, the only new dependency), ring buffer of 5000 lines.
+- **Rendering:** own parser for ANSI SGR colours (16 colours, bold) and Minecraft `§` codes into spans; no `dangerouslySetInnerHTML`. Lines with `WARN` or `ERROR` are highlighted in colour; so are stderr lines.
+- **Tools:** text filter; switch "Hide RCON messages" (on by default, filters the lines from §3.3); auto-scroll that pauses when scrolling up, with a "New lines ↓" button; connection indicator (connected, server stopped, reconnecting, "Too many open consoles – close another one." on a `429` of the stream); "Copy" of the visible lines.
+- **Command line:** at the bottom (also on mobile), history with ↑/↓ (in memory only, 100 entries). A sent command appears as its own, separated block `› command` with the RCON response below, placed in the log view. Disabled with a note when the server is stopped and on `forbidden`/`not_found` of the stream. Below the line: "`stop` ends the server, Docker restarts it immediately – use the power button to stop it."
+- **Connection:** `EventSource` (same origin, cookie). On a drop the browser reconnects by itself (with `Last-Event-ID`); on `401`/`403` the view closes the connection and shows the matching note.
 
-### 7.3 Spieler (`server.console`)
+### 7.3 Players (`server.console`)
 
-- **Online:** Name, Aktionen Kick, Ban (Dialog mit optionalem Grund), Op geben/Op entziehen.
-- **Whitelist:** Name hinzufügen, entfernen; Hinweis, ob die Whitelist aktiv ist, mit Link zur Einstellung (Admin).
-- **Ops:** hinzufügen, entfernen; Level anzeigen.
-- **Bans:** Name, Grund, von, seit, bis; Entbannen.
-- Ops und Whitelist zeigen eine Warnung „Neustart nötig“, solange der Server noch mit der alten Umgebung (TP2) läuft; die Karte „Online“ zeigt bei gestopptem Server keine Liste. Die Op-Aktionen heißen „Op geben“ bzw. „Op entziehen“ (en „Make op“/„Remove op“); ihr zugänglicher Name enthält den sichtbaren Text plus den Spielernamen („Op geben: Steve“). Die Tab-Leiste scrollt auf dem Handy horizontal.
-- Listen sind auch bei gestopptem Server lesbar; Ändern nur bei laufendem Server (Knöpfe sonst gesperrt, Hinweis). Unlesbare Dateien (`errors`) zeigen einen Hinweis an der betroffenen Liste.
-- Nach jeder Aktion: Toast mit der RCON-Antwort, danach Neuladen von Listen und Online-Spielern.
+- **Online:** name, actions kick, ban (dialog with optional reason), make op/remove op.
+- **Whitelist:** add name, remove; note whether the whitelist is active, with a link to the setting (admin).
+- **Ops:** add, remove; show level.
+- **Bans:** name, reason, by, since, until; unban.
+- Ops and whitelist show a "restart required" warning as long as the server still runs with the old environment (sub-project 2); the "Online" card shows no list while the server is stopped. The op actions are called "Op geben" and "Op entziehen" (en "Make op"/"Remove op"); their accessible name contains the visible text plus the player name ("Op geben: Steve"). The tab bar scrolls horizontally on phones.
+- Lists are readable also while the server is stopped; changes only while the server is running (buttons disabled otherwise, with a note). Unreadable files (`errors`) show a note on the affected list.
+- After every action: toast with the RCON response, then the lists and online players are reloaded.
 
 ### 7.4 Mocks
 
-MSW-Mocks für alle neuen Operationen. Der Stream-Mock liefert über einen `ReadableStream` einige Startzeilen (inkl. ANSI-, `§`- und RCON-Zeilen) und danach alle 2 s eine Zeile; Befehle antworten mit Beispieltext. `make preview` zeigt so Konsole und Spieler-Tab ohne Backend.
+MSW mocks for all new operations. The stream mock delivers some initial lines (including ANSI, `§` and RCON lines) through a `ReadableStream` and then one line every 2 s; commands answer with sample text. `make preview` thus shows the console and the players tab without a backend.
 
-## 8. Entwicklung, CI und Abnahme
+## 8. Development, CI and acceptance
 
-- **Mac:** nur `make check` (CLAUDE.md). `make dev` läuft ohne Docker: Konsole und Spieler zeigen „Docker nicht verfügbar“; die UI-Vorschau (Mock-API) zeigt alles.
-- **CI:** wie bisher; zusätzlich neue Fälle in `dockerintegration` (§9) und in `scripts/ci-instances.sh`.
-- **Manuelle Abnahme:** auf der Test-VM nach `docs/dev/acceptance-tp3a.md` (neu).
+- **Mac:** only `make check` (CLAUDE.md). `make dev` runs without Docker: console and players show "Docker not available"; the UI preview (mock API) shows everything.
+- **CI:** as before; additionally new cases in `dockerintegration` (§9) and in `scripts/ci-instances.sh`.
+- **Manual acceptance:** on the test VM following `docs/dev/acceptance.md` ("Console and players").
 
 ## 9. Tests
 
-| Ebene | Inhalt |
+| Level | Content |
 |---|---|
-| agent `docker` | Fake-Docker-Server (`httptest` auf Unix-Socket): Demultiplexer (Header über Lesegrenzen geteilt, Zeilen über Frame-Grenzen, Frame > 1 MiB, unbekannter Stream-Typ), `ContainerLogs` mit follow/since/tail und Ende beim Stopp, Exec-Lebenszyklus mit Exit-Code, Timeouts |
-| agent `agentapi`/Server | Tabellentests für `rcon` (Steuerzeichen, Zeilenumbruch, Tab, ungültiges UTF-8, 0 und 1001 Bytes, nur Leerzeichen, unbekannte Felder) und `logs` (`tail`/`since`-Grenzen); Stream-Limit `429`; RCON-Limit pro Instanz; Frist pro Schreibvorgang; `not_running`; `rcon_unavailable`; Zeilenkürzung und UTF-8-Ersetzung |
-| agent Spielerlisten | Symlink aus dem Verzeichnis heraus, Symlink als letztes Element (z. B. auf `/etc/shadow`), FIFO, Verzeichnis statt Datei, > 1 MiB, kaputtes JSON, fehlende Datei (kein Fehler), Kürzung von Strings und Listen |
-| agent Integration | `dockerintegration` (Linux, busybox): Log-Stream eines echten Containers inkl. Ende beim Stopp und `since`; Exec über `RconCommand` = busybox-Programm mit Ausgabe und Exit-Code ≠ 0 |
-| `instances` (CI) | `scripts/ci-instances.sh`: Paper-Server liefert über den agent `list`; der Log-Stream enthält `Done (`; nach `whitelist add` und `op` zeigt `players` die Einträge; der Container hat kein `OPS`/`WHITELIST`/`EXISTING_*_FILE` mehr |
-| panel `console` | Fake-agent + `storetest`: Rechte (view vs. console, Admin, fremder Server → `403`), SSE-Format, `Last-Event-ID` → `since`, Neuverbindung nach Stream-Ende mit `state`-Events, Schließen bei widerrufener Session/entzogenem Recht/gelöschtem Server (Fake-Clock), Stream-Limit, Rate-Limit, Audit-Einträge, Tabelle Aktion → RCON-Befehl, Validierung von `name`/`reason`, Parser `list uuids` mit Beispielen aus `testdata/`, Zwischenspeicher 10 s |
-| Migration | `ops`/`whitelist` entfernt, `revision` nur bei betroffenen Zeilen erhöht, andere Eigenschaften unverändert |
-| `instancespec` | `ops`/`whitelist` werden abgelehnt; `Env` enthält kein `OPS`/`WHITELIST`/`EXISTING_*_FILE` (Golden-Test angepasst) |
-| Vertrag | bestehende Tests: OpenAPI ↔ Routen, Fehlercodes ↔ Enum, Mock pro Operation |
-| Frontend | Vitest: ANSI-/`§`-Parser, Ringpuffer, Befehlsverlauf, RCON-Filter, Online-Karte; Playwright gegen Mock: Konsole öffnen → Zeilen erscheinen → Befehl senden → Antwort-Block; Spieler-Tab → Kick → Toast |
+| agent `docker` | Fake Docker server (`httptest` on a Unix socket): demultiplexer (header split across read boundaries, lines across frame boundaries, frame > 1 MiB, unknown stream type), `ContainerLogs` with follow/since/tail and end on stop, exec lifecycle with exit code, timeouts |
+| agent `agentapi`/server | Table tests for `rcon` (control characters, line break, tab, invalid UTF-8, 0 and 1001 bytes, only spaces, unknown fields) and `logs` (`tail`/`since` bounds); stream limit `429`; RCON limit per instance; deadline per write; `not_running`; `rcon_unavailable`; line truncation and UTF-8 replacement |
+| agent player lists | Symlink out of the directory, symlink as the last element (e.g. to `/etc/shadow`), FIFO, directory instead of file, > 1 MiB, broken JSON, missing file (no error), truncation of strings and lists |
+| agent integration | `dockerintegration` (Linux, busybox): log stream of a real container including end on stop and `since`; exec via `RconCommand` = busybox program with output and exit code ≠ 0 |
+| `instances` (CI) | `scripts/ci-instances.sh`: a Paper server delivers `list` through the agent; the log stream contains `Done (`; after `whitelist add` and `op`, `players` shows the entries; the container no longer has `OPS`/`WHITELIST`/`EXISTING_*_FILE` |
+| panel `console` | Fake agent + `storetest`: permissions (view vs. console, admin, foreign server → `403`), SSE format, `Last-Event-ID` → `since`, reconnect after stream end with `state` events, closing on revoked session/withdrawn permission/deleted server (fake clock), stream limit, rate limit, audit entries, table action → RCON command, validation of `name`/`reason`, parser `list uuids` with examples from `testdata/`, 10 s cache |
+| Migration | `ops`/`whitelist` removed, `revision` bumped only for affected rows, other properties unchanged |
+| `instancespec` | `ops`/`whitelist` are rejected; `Env` contains no `OPS`/`WHITELIST`/`EXISTING_*_FILE` (golden test adjusted) |
+| Contract | existing tests: OpenAPI ↔ routes, error codes ↔ enum, mock per operation |
+| Frontend | Vitest: ANSI/`§` parser, ring buffer, command history, RCON filter, online card; Playwright against the mock: open console → lines appear → send command → response block; players tab → kick → toast |
 
-Konventionen aus TP1/TP2 gelten unverändert (nur Standardbibliothek in Go-Tests, `clock.Clock`, Kontexte überall).
+Conventions from sub-projects 1 and 2 apply unchanged (only the standard library in Go tests, `clock.Clock`, contexts everywhere).
 
-## 10. Abnahmekriterien
+## 10. Acceptance criteria
 
-Automatisch in der CI: 1 sowie die agent-Seite von 2 und 4 (`scripts/ci-instances.sh`). Manuell durch den Nutzer auf der Test-VM: 2–6 (`docs/dev/acceptance-tp3a.md`).
+Automated in CI: 1 as well as the agent side of 2 and 4 (`scripts/ci-instances.sh`). Manually by the user on the test VM: 2–6 (`docs/dev/acceptance.md`, "Console and players").
 
-1. Alle CI-Jobs grün.
-2. Die Konsole zeigt das Live-Log; `say hallo` erscheint im Spiel, `list` liefert eine Antwort. Ein Neustart des Servers unterbricht die Ansicht nicht dauerhaft, und es erscheinen keine doppelten Zeilen.
-3. Ein Nutzer mit nur `server.view` sieht die Online-Spieler, aber weder Konsole noch Spielerlisten (UI ohne Tabs, API `403`).
-4. Whitelist, Op, Kick, Ban und Entbannen wirken ohne Neustart. Im Spiel vergebene Ops erscheinen im Spieler-Tab und bleiben nach einem Neustart des Servers erhalten.
-5. Entzieht ein Admin einem Nutzer bei offener Konsole das Recht oder wird dessen Session beendet, endet der Stream innerhalb von 30 s.
-6. Alle Befehle und Spieler-Aktionen stehen im Audit-Log; `panel audit verify` meldet OK.
+1. All CI jobs green.
+2. The console shows the live log; `say hallo` appears in the game, `list` returns a response. A server restart does not interrupt the view permanently, and no duplicate lines appear.
+3. A user with only `server.view` sees the online players, but neither the console nor the player lists (UI without the tabs, API `403`).
+4. Whitelist, op, kick, ban and unban take effect without a restart. Ops granted in-game appear in the players tab and are kept after a server restart.
+5. If an admin withdraws a user's permission while the console is open, or the user's session is ended, the stream ends within 30 s.
+6. All commands and player actions are in the audit log; `panel audit verify` reports OK.
