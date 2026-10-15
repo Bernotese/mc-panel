@@ -1672,7 +1672,7 @@ components:
         modpack: { type: [string, 'null'] }
         java: { $ref: '#/components/schemas/JavaVersion' }
         memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256, description: 'At most max_mib of GET /servers/memory on this host' }
-        properties: { $ref: '#/components/schemas/ServerProperties', description: All fields set (defaults resolved) }
+        properties: { $ref: '#/components/schemas/ServerProperties', description: 'All fields set (defaults resolved); seed only for admins and users with server.files on the server' }
     ServerStatus:
       type: object
       description: |
