@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/defense"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
@@ -110,5 +112,7 @@ func (h *Handler) noteSecondFactor(ctx context.Context, username string, userID 
 			"user_id", userID, "username", username, "lockout", secondFactorLockout.String())
 		h.auditLog(ctx, userID, username, audit.ActionLogin, username, audit.ResultDenied,
 			map[string]any{"reason": "2fa_lockout"})
+		h.notifySecurity(ctx, notify.Event2FALockout, "Second factor locked",
+			fmt.Sprintf("%s: second factor locked for %s after %d failed attempts.", username, secondFactorLockout, secondFactorMaxFailures), username)
 	}
 }
