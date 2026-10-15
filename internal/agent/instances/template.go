@@ -5,6 +5,7 @@
 package instances
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -39,6 +40,15 @@ const (
 	CPUShares = 256
 	// RouterMemoryBytes caps mc-router (it needs a few MiB).
 	RouterMemoryBytes = 256 << 20
+	// RouterPidsLimit caps mc-router's threads (about 13 under a flood of 200 connections).
+	RouterPidsLimit = 128
+	// NofileLimit is the open-files limit of instance containers (soft = hard).
+	NofileLimit = 65536
+	// TmpfsOptions bound the instance's /tmp, the only path the itzg image writes outside
+	// /data (Java native libraries, verified for Paper and Fabric). tmpfs is charged to
+	// the container's memory cgroup. exec: the libraries are loaded from there, and /data
+	// is executable anyway.
+	TmpfsOptions = "rw,exec,nosuid,nodev,size=512m"
 
 	routerPort        = "25565/tcp"
 	routerConfigDir   = "/config"
@@ -53,6 +63,11 @@ type Host struct {
 	InstancesDir string
 	UID, GID     int
 	Images       config.Images
+	// NanoCPUs caps every instance container (cpu_per_instance); 0 = no cap.
+	NanoCPUs int64
+	// RouterConnectionRateLimit is mc-router's -connection-rate-limit; 0 means
+	// config.DefaultRouterConnectionRateLimit.
+	RouterConnectionRateLimit int
 }
 
 func ContainerName(id int64) string { return ContainerPrefix + strconv.FormatInt(id, 10) }
@@ -123,11 +138,14 @@ func InstanceContainer(h Host, req agentapi.EnsureRequest) (docker.ContainerConf
 			CapDrop:        []string{"ALL"},
 			SecurityOpt:    []string{"no-new-privileges:true"},
 			Privileged:     false,
-			ReadonlyRootfs: false, // itzg writes outside /data (e.g. /tmp)
+			ReadonlyRootfs: true,
+			Tmpfs:          map[string]string{"/tmp": TmpfsOptions},
 			Memory:         memory,
 			MemorySwap:     memory,
 			PidsLimit:      PidsLimit,
 			CPUShares:      CPUShares,
+			NanoCPUs:       h.NanoCPUs,
+			Ulimits:        []docker.Ulimit{{Name: "nofile", Soft: NofileLimit, Hard: NofileLimit}},
 			LogConfig:      logConfig(),
 		},
 		NetworkingConfig: network(),
@@ -143,22 +161,26 @@ func RouterContainer(h Host) (docker.ContainerConfig, error) {
 		return docker.ContainerConfig{}, err
 	}
 	return docker.ContainerConfig{
-		Image:        img,
-		Cmd:          []string{"-routes-config", routerConfigDir + "/" + routesFileName},
+		Image: img,
+		Cmd: []string{
+			"-routes-config", routerConfigDir + "/" + routesFileName,
+			"-connection-rate-limit", strconv.Itoa(cmp.Or(h.RouterConnectionRateLimit, config.DefaultRouterConnectionRateLimit)),
+		},
 		Labels:       map[string]string{LabelRouter: "1"},
 		ExposedPorts: map[string]struct{}{routerPort: {}},
 		HostConfig: docker.HostConfig{
 			// Directory, not file: an atomic rename of routes.json stays visible.
-			Binds:         []string{RouterDir(h.InstancesDir) + ":" + routerConfigDir + ":ro"},
-			NetworkMode:   NetworkName,
-			PortBindings:  map[string][]docker.PortBinding{routerPort: {{HostPort: strconv.Itoa(MinecraftPort)}}},
-			RestartPolicy: docker.RestartPolicy{Name: "unless-stopped"},
-			CapDrop:       []string{"ALL"},
-			SecurityOpt:   []string{"no-new-privileges:true"},
-			Memory:        RouterMemoryBytes,
-			MemorySwap:    RouterMemoryBytes,
-			PidsLimit:     PidsLimit,
-			LogConfig:     logConfig(),
+			Binds:          []string{RouterDir(h.InstancesDir) + ":" + routerConfigDir + ":ro"},
+			NetworkMode:    NetworkName,
+			PortBindings:   map[string][]docker.PortBinding{routerPort: {{HostPort: strconv.Itoa(MinecraftPort)}}},
+			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
+			CapDrop:        []string{"ALL"},
+			SecurityOpt:    []string{"no-new-privileges:true"},
+			ReadonlyRootfs: true,
+			Memory:         RouterMemoryBytes,
+			MemorySwap:     RouterMemoryBytes,
+			PidsLimit:      RouterPidsLimit,
+			LogConfig:      logConfig(),
 		},
 		NetworkingConfig: network(),
 	}, nil
