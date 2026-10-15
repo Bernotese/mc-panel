@@ -38,6 +38,39 @@ test_install_unit_ensure_renders_the_real_templates() {
   assert_file_contains "$ROOT$UNIT_DIR/mcpanel-panel.socket" 'SocketGroup=caddy'
 }
 
+test_install_unit_templates_are_sandboxed() {
+  # SEC-12: the directives each service was checked against (see the unit comments)
+  stub systemd_wait_active 'return 0'
+  stub unit_settled 'return 0'
+  stub unit_panel_health 'return 0'
+  CMD=install
+  KEY_VERSION=1.2.3 KEY_INSTANCES_DIR=/srv/mc-panel
+  unit_ensure >/dev/null
+  local u d
+  for u in mcpanel-panel mcpanel-agent mcpanel-files; do
+    for d in NoNewPrivileges=yes ProtectSystem=strict ProtectHome=yes PrivateTmp=yes PrivateDevices=yes \
+      ProtectProc=invisible ProtectKernelTunables=yes ProtectKernelModules=yes ProtectKernelLogs=yes \
+      ProtectControlGroups=yes ProtectClock=yes ProtectHostname=yes RestrictNamespaces=yes RestrictRealtime=yes \
+      RestrictSUIDSGID=yes LockPersonality=yes MemoryDenyWriteExecute=yes SystemCallArchitectures=native \
+      SystemCallFilter=@system-service SystemCallErrorNumber=EPERM; do
+      assert_file_contains "$ROOT$UNIT_DIR/$u.service" "$d"
+    done
+  done
+  local panel="$ROOT$UNIT_DIR/mcpanel-panel.service" agent="$ROOT$UNIT_DIR/mcpanel-agent.service" files="$ROOT$UNIT_DIR/mcpanel-files.service"
+  grep -qxF 'CapabilityBoundingSet=' "$panel" || fail "the panel keeps capabilities"
+  assert_file_contains "$panel" 'SystemCallFilter=~@privileged @resources'
+  assert_file_contains "$panel" 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6'
+  assert_file_contains "$panel" 'IPAddressDeny=169.254.0.0/16 fe80::/10'
+  if grep -q '^ProcSubset=' "$panel"; then fail "the panel reads /proc/meminfo and /proc/stat"; fi
+  assert_file_contains "$agent" 'CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_NET_ADMIN'
+  assert_file_contains "$agent" 'ReadWritePaths=/srv/mc-panel'
+  assert_file_contains "$agent" 'RestrictAddressFamilies=AF_UNIX AF_NETLINK'
+  assert_file_contains "$agent" 'IPAddressDeny=any'
+  assert_file_contains "$files" 'ProcSubset=pid'
+  assert_file_contains "$files" 'PrivateNetwork=yes'
+  assert_file_contains "$files" 'IPAddressDeny=any'
+}
+
 test_install_unit_ensure_never_enables_the_firewall_unit() {
   # Only fw_ensure enables/starts mcpanel-fw.service (never with --no-firewall).
   unit_fixture
