@@ -3,6 +3,9 @@ import { api } from '@/api/client'
 import { isApiError, unwrap, unwrapVoid } from '@/api/errors'
 import type {
   InstallPluginRequest,
+  MrpackImportRequest,
+  MrpackIndex,
+  MrpackPlan,
   PluginInventory,
   PluginJob,
   PluginJobResponse,
@@ -38,6 +41,9 @@ export const versionsKey = (id: number, source: PluginSource, project: string) =
 export const resolvesKey = (id: number) => ['plugin-upstream', id, 'resolve'] as const
 export const resolveKey = (id: number, source: PluginSource, project: string, version: string) =>
   ['plugin-upstream', id, 'resolve', source, project, version] as const
+
+/** Below resolvesKey: a finished job or a removal makes the mrpack preview stale like the install previews. */
+export const mrpackPreviewKey = (id: number, token: number) => [...resolvesKey(id), 'mrpack', token] as const
 
 export function inventoryQueryOptions(id: number) {
   return queryOptions<PluginInventory>({
@@ -98,6 +104,22 @@ export function resolveQueryOptions(id: number, source: PluginSource, project: s
     queryFn: () => unwrap(api.GET('/servers/{id}/plugins/resolve', { params: { path: { id }, query: { source, project, version } } })),
     retry: false,
   })
+}
+
+/** The plan of a modpack import (mrpack spec §3); token tells two chosen files apart. */
+export function mrpackPreviewQueryOptions(id: number, token: number, index: MrpackIndex | undefined) {
+  return queryOptions<MrpackPlan>({
+    queryKey: mrpackPreviewKey(id, token),
+    queryFn: () => unwrap(api.POST('/servers/{id}/plugins/mrpack/preview', { params: { path: { id } }, body: index as MrpackIndex })),
+    enabled: index !== undefined,
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: false,
+  })
+}
+
+export function importMrpack(id: number, body: MrpackImportRequest): Promise<PluginJob> {
+  return unwrap(api.POST('/servers/{id}/plugins/mrpack/import', { params: { path: { id } }, body }))
 }
 
 export function installPlugin(id: number, body: InstallPluginRequest): Promise<PluginJob> {

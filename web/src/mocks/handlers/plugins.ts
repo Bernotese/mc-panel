@@ -2,6 +2,10 @@ import { http, HttpResponse } from 'msw'
 import type {
   InstallPluginRequest,
   InstalledJar,
+  MrpackEnvSide,
+  MrpackImportRequest,
+  MrpackPlan,
+  MrpackPlanEntry,
   PluginChannel,
   PluginFileRequest,
   PluginInventory,
@@ -13,6 +17,7 @@ import type {
   PluginResolution,
   PluginSearchHit,
   PluginSource,
+  PluginStepErrorCode,
   PluginUpdate,
   PluginVersion,
   TogglePluginRequest,
@@ -400,7 +405,14 @@ function jobNow(serverId: number): PluginJob | null {
     job.steps.forEach((step, i) => {
       if (step.state !== 'pending' && step.state !== 'downloading') return
       if (elapsed >= (i + 1) * stepMs) {
-        applyChange(serverId, mj.actorId, mj.changes[i])
+        const change = mj.changes[i]
+        if (change?.fail) {
+          step.state = 'failed'
+          step.error_code = change.fail
+          step.error = 'mock: the download failed'
+          return
+        }
+        applyChange(serverId, mj.actorId, change)
         step.state = 'done'
       } else if (elapsed >= i * stepMs) {
         step.state = 'downloading'
@@ -472,6 +484,168 @@ function projectQuery(c: Ctx, url: URL): { source: PluginSource; project: string
   const project = url.searchParams.get('project') ?? ''
   if (!NAME_RE.test(project)) return validation('project: 1 to 128 characters of A-Z a-z 0-9 . _ + -')
   return { source, project }
+}
+
+/**
+ * Mock Modrinth answers of POST /v2/version_files for the mrpack import: a few fixed sha512 values (the e2e fixture and
+ * the tests use them). `loaders` defaults to fabric; `fail` lets the import step fail like a broken download.
+ */
+const mockSha = (byte: number) => byte.toString(16).padStart(2, '0').repeat(64)
+export const MRPACK_MOCK_HASHES = {
+  lithium: mockSha(0xa1), // lithium 0.15.0
+  fabricApiBeta: mockSha(0xa2), // fabric-api 0.111.0-beta (installed on modded: 0.110.0)
+  fabricApi: mockSha(0xa3), // fabric-api 0.110.0 (installed on modded)
+  servercore: mockSha(0xa4), // servercore 1.5.8
+  sodiumExtra: mockSha(0xa5), // client-only project
+  servercoreNeoforge: mockSha(0xa6), // a servercore build for neoforge only
+  lithiumBroken: mockSha(0xa7), // lithium 0.15.1-beta, whose download fails
+} as const
+const MRPACK_FILES: Record<string, { project: string; version: string; loaders?: string[]; fail?: PluginStepErrorCode }> = {
+  [MRPACK_MOCK_HASHES.lithium]: { project: 'gvQqBUqZ', version: 'li0150' },
+  [MRPACK_MOCK_HASHES.fabricApiBeta]: { project: 'P7dR8mSH', version: 'fapi0111b' },
+  [MRPACK_MOCK_HASHES.fabricApi]: { project: 'P7dR8mSH', version: 'fapi0110' },
+  [MRPACK_MOCK_HASHES.servercore]: { project: '4WWQxlQP', version: 'sc158' },
+  [MRPACK_MOCK_HASHES.sodiumExtra]: { project: 'PtjYWJkn', version: 'se0612' },
+  [MRPACK_MOCK_HASHES.servercoreNeoforge]: { project: '4WWQxlQP', version: 'sc159b', loaders: ['neoforge'] },
+  [MRPACK_MOCK_HASHES.lithiumBroken]: { project: 'gvQqBUqZ', version: 'li0151b', fail: 'download_failed' },
+}
+const MRPACK_DEP_KEYS = ['minecraft', 'fabric-loader', 'neoforge', 'forge', 'quilt-loader']
+const MRPACK_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/
+const SHA512_RE = /^[0-9a-f]{128}$/i
+const MOD_PATH_RE = /^mods\/([^/]+\.jar)$/
+
+interface MockMrpackFile {
+  path: string
+  sha512: string
+  server: MrpackEnvSide | null
+}
+
+interface MockMrpackIndex {
+  name: string
+  versionId: string
+  files: MockMrpackFile[]
+  deps: Record<string, string>
+}
+
+/** The checks of spec §4.1, in short: enough for the UI's error paths. */
+function parseMrpackIndex(raw: unknown): MockMrpackIndex | ErrorResponse {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return validation('index: a JSON object is required')
+  const i = raw as Record<string, unknown>
+  if (i.formatVersion !== 1 || i.game !== 'minecraft') return validation('index: formatVersion 1 and game minecraft are required')
+  if (typeof i.name !== 'string' || i.name.length < 1 || i.name.length > 128) return validation('index.name: 1 to 128 characters')
+  const versionId = i.versionId ?? ''
+  if (typeof versionId !== 'string' || versionId.length > 128) return validation('index.versionId: at most 128 characters')
+  if (!Array.isArray(i.files) || i.files.length > 2000) return validation('index.files: at most 2000 entries')
+  if (!i.dependencies || typeof i.dependencies !== 'object') return validation('index.dependencies is required')
+  const deps: Record<string, string> = {}
+  for (const [k, v] of Object.entries(i.dependencies as Record<string, unknown>)) {
+    if (!MRPACK_DEP_KEYS.includes(k) || typeof v !== 'string' || !MRPACK_VERSION_RE.test(v)) return validation(`index.dependencies.${k}: unknown key or invalid version`)
+    deps[k] = v
+  }
+  if (!deps.minecraft) return validation('index.dependencies.minecraft is required')
+  const files: MockMrpackFile[] = []
+  const hashes = new Set<string>()
+  const names = new Set<string>()
+  for (const f of i.files as unknown[]) {
+    const file = f as { path?: unknown; hashes?: { sha512?: unknown }; env?: { server?: unknown } }
+    const path = file?.path
+    const sha = file?.hashes?.sha512
+    if (typeof path !== 'string' || path === '' || path.length > 255 || path.startsWith('/') || path.includes('\\') || path.split('/').includes('..')) {
+      return validation('index.files: invalid path')
+    }
+    if (typeof sha !== 'string' || !SHA512_RE.test(sha)) return validation(`index.files: ${path} has no valid sha512`)
+    const lower = sha.toLowerCase()
+    if (hashes.has(lower) || names.has(path.toLowerCase())) return validation(`index.files: ${path} is listed twice`)
+    hashes.add(lower)
+    names.add(path.toLowerCase())
+    const env = file.env?.server
+    files.push({ path, sha512: lower, server: env === 'required' || env === 'optional' || env === 'unsupported' ? env : null })
+  }
+  return { name: i.name, versionId, files, deps }
+}
+
+interface MrpackItem {
+  entry: MrpackPlanEntry
+  project: MockProject
+  version: MockVersion
+  fail?: PluginStepErrorCode
+}
+
+/** Spec §3, step by step, against the mock catalog and inventory. */
+function mrpackPlan(c: Ctx, index: MockMrpackIndex): { plan: MrpackPlan; items: MrpackItem[] } | ErrorResponse {
+  const type = c.server.instance?.type
+  const loaderKey = type === 'neoforge' ? 'neoforge' : 'fabric-loader'
+  const otherLoaders = MRPACK_DEP_KEYS.filter((k) => k !== 'minecraft' && k !== loaderKey)
+  if (!index.deps[loaderKey] || otherLoaders.some((k) => index.deps[k])) return apiError(409, 'mrpack_incompatible', 'the modpack is for another mod loader')
+  const server = gameVersion(c.server)
+  if (server === null) return catalogUnavailable()
+  const loaderServer = c.server.instance?.loader_version ?? null
+  const loaderPack = index.deps[loaderKey]
+  const entries: MrpackPlanEntry[] = []
+  const items: MrpackItem[] = []
+  const matched = new Set<string>()
+  let ignored = 0
+  for (const f of index.files) {
+    const m = MOD_PATH_RE.exec(f.path)
+    if (!m) {
+      ignored++
+      continue
+    }
+    const file = m[1]
+    const base: MrpackPlanEntry = { file, sha512: f.sha512, action: 'skip', reason: null, optional: f.server === 'optional', project: null, version: null, replaces: null }
+    const known = MRPACK_FILES[f.sha512]
+    const project = known ? CATALOG.find((p) => p.source === 'modrinth' && p.id === known.project) : undefined
+    const version = project?.versions.find((x) => x.id === known?.version)
+    if (f.server === 'unsupported' || project?.clientOnly) {
+      entries.push({ ...base, reason: 'client_only', project: project ? projectRef(c.server.id, project) : null })
+      continue
+    }
+    if (!known || !project || !version) {
+      entries.push({ ...base, reason: 'not_on_modrinth' })
+      continue
+    }
+    const ref = projectRef(c.server.id, project)
+    const verRef = { id: version.id, name: version.name, channel: version.channel }
+    if (!(known.loaders ?? ['fabric']).includes(type ?? '')) {
+      entries.push({ ...base, reason: 'incompatible', project: ref, version: verRef })
+      continue
+    }
+    const have = installedJar(c.inv, 'modrinth', project.id)
+    if (have && have.version?.id === version.id) {
+      matched.add(have.file)
+      entries.push({ ...base, file: have.file, action: 'unchanged', project: ref, version: verRef })
+      continue
+    }
+    if (have) {
+      matched.add(have.file)
+      const target = have.enabled ? file : `${file}.disabled`
+      const entry: MrpackPlanEntry = { ...base, file: target, action: 'update', project: ref, version: verRef, replaces: have.file }
+      entries.push(entry)
+      items.push({ entry, project, version, fail: known.fail })
+      continue
+    }
+    if (c.inv.jars.some((j) => baseName(j.file) === baseName(file))) {
+      entries.push({ ...base, reason: 'file_exists', project: ref, version: verRef })
+      continue
+    }
+    const entry: MrpackPlanEntry = { ...base, action: 'install', project: ref, version: verRef }
+    entries.push(entry)
+    items.push({ entry, project, version, fail: known.fail })
+  }
+  const minecraftDiffers = index.deps.minecraft !== server
+  const loaderDiffers = loaderServer !== null && loaderServer !== loaderPack
+  return {
+    plan: {
+      pack: { name: index.name, version_id: index.versionId },
+      game_version: { pack: index.deps.minecraft, server },
+      loader: { name: type === 'neoforge' ? 'neoforge' : 'fabric', pack: loaderPack, server: loaderServer },
+      version_mismatch: minecraftDiffers || loaderDiffers,
+      entries,
+      kept: c.inv.jars.filter((j) => !matched.has(j.file)).map((j) => j.file).sort(),
+      ignored_files: ignored,
+    },
+    items,
+  }
 }
 
 export const pluginsOperations: MockOperation[] = [
@@ -682,23 +856,59 @@ export const pluginsOperations: MockOperation[] = [
       return HttpResponse.json({ job: jobNow(c.server.id) })
     }),
   ),
-  // Stubs for the mrpack import (contract V4); the realistic mocks come with the UI.
   op(
     'previewMrpack',
-    http.post(`${API}/servers/:id/plugins/mrpack/preview`, ({ request, params }) => {
+    http.post(`${API}/servers/:id/plugins/mrpack/preview`, async ({ request, params }) => {
       const c = access(request, params)
       if (c instanceof Response) return c
       if (c.kind !== 'mod') return apiError(409, 'plugins_unsupported', 'only fabric and neoforge servers import modpacks')
-      return apiError(409, 'mrpack_incompatible', 'the mock does not import modpacks yet')
+      const index = parseMrpackIndex(await readJson<unknown>(request))
+      if (index instanceof Response) return index
+      const plan = mrpackPlan(c, index)
+      if (plan instanceof Response) return plan
+      return HttpResponse.json(plan.plan)
     }),
   ),
   op(
     'importMrpack',
-    http.post(`${API}/servers/:id/plugins/mrpack/import`, ({ request, params }) => {
+    http.post(`${API}/servers/:id/plugins/mrpack/import`, async ({ request, params }) => {
       const c = access(request, params)
       if (c instanceof Response) return c
       if (c.kind !== 'mod') return apiError(409, 'plugins_unsupported', 'only fabric and neoforge servers import modpacks')
-      return apiError(409, 'mrpack_incompatible', 'the mock does not import modpacks yet')
+      const body = await readJson<MrpackImportRequest>(request)
+      if (!body || typeof body !== 'object' || !onlyKeys(body, ['index', 'exclude', 'accept_mismatch'])) return validation('invalid body')
+      if (!Array.isArray(body.exclude) || typeof body.accept_mismatch !== 'boolean') return validation('exclude and accept_mismatch are required')
+      const index = parseMrpackIndex(body.index)
+      if (index instanceof Response) return index
+      const result = mrpackPlan(c, index)
+      if (result instanceof Response) return result
+      const { plan, items } = result
+      const optional = new Set(plan.entries.filter((e) => e.optional && (e.action === 'install' || e.action === 'update')).map((e) => e.sha512))
+      const exclude = new Set<string>()
+      for (const h of body.exclude) {
+        const sha = typeof h === 'string' ? h.toLowerCase() : ''
+        if (!optional.has(sha)) return validation('exclude names a hash that is not an optional entry of the plan')
+        exclude.add(sha)
+      }
+      if (plan.version_mismatch && !body.accept_mismatch) return apiError(409, 'mrpack_version_mismatch', 'the modpack is for another Minecraft or loader version')
+      const blocked = jobBlocked(c)
+      if (blocked) return blocked
+      const chosen = items.filter((i) => !exclude.has(i.entry.sha512))
+      if (chosen.length === 0) return apiError(409, 'conflict', 'the modpack has nothing to install or update')
+      const changes: MockPluginChange[] = chosen.map((i) => {
+        const old = i.entry.replaces ? c.inv.jars.find((j) => j.file === i.entry.replaces) : undefined
+        const add = newJar(c.server.id, i.project, i.version, old ? old.enabled : true)
+        return {
+          remove: old?.file ?? null,
+          add,
+          action: i.entry.action === 'update' ? 'plugin.update' : 'plugin.install',
+          details: { source: 'modrinth', project: i.project.id, version: i.version.id, file: add.file, via: 'mrpack' },
+          fail: i.fail,
+        }
+      })
+      const steps = changes.map((ch, i) => step(chosen[i].project.title, ch.add.file))
+      recordAudit(c.g.user, 'plugin.mrpack_import', `server:${c.server.id}`, 'success', { pack: plan.pack.name, version: plan.pack.version_id })
+      return HttpResponse.json(startJob(c, 'mrpack', steps, changes), { status: 202 })
     }),
   ),
   op(

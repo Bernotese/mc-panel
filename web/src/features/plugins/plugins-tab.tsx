@@ -30,6 +30,7 @@ import { Discover } from './discover'
 import { InstallDialog } from './install-dialog'
 import { InstalledList } from './installed-list'
 import { JobProgress } from './job-progress'
+import { MrpackImport } from './mrpack-import'
 import { jobStartErrorMessage, usePluginErrorToast } from './messages'
 import { jarName, sourcesFor, updatesByFile, type InstallTarget } from './model'
 import { usePluginJob } from './use-plugin-job'
@@ -166,6 +167,9 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
 
   const updateActions = (
     <>
+      {kind === 'mod' && inventory.isSuccess ? (
+        <MrpackImport server={server} busy={busy} onStarted={(started) => startJob(queryClient, server.id, started)} />
+      ) : null}
       <Button type="button" variant="outline" size="sm" disabled={check.isPending || !inventory.isSuccess} onClick={() => check.mutate()}>
         <RefreshCw aria-hidden="true" />
         {check.isPending ? t('plugins.updates.checking') : t('plugins.updates.check')}

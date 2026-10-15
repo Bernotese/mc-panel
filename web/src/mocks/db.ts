@@ -27,6 +27,7 @@ import type {
   PlayerOp,
   PluginJob,
   PluginKind,
+  PluginStepErrorCode,
   Role,
   SecondFactor,
   SecuritySettings,
@@ -187,6 +188,8 @@ export interface MockPluginChange {
   add: InstalledJar
   action: 'plugin.install' | 'plugin.update'
   details: Record<string, unknown>
+  /** The step fails with this code instead of changing the inventory (mrpack mock: a download that fails). */
+  fail?: PluginStepErrorCode
 }
 
 export interface MockPluginJob {
