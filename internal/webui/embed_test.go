@@ -4,10 +4,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
 
+	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/webui"
 )
 
@@ -63,6 +66,54 @@ func TestMissingAssetIs404(t *testing.T) {
 		}
 		if strings.Contains(hdr.Get("Cache-Control"), "immutable") {
 			t.Errorf("%s: a 404 must not be cached as immutable", p)
+		}
+	}
+}
+
+// SEC-31: index.html carries a fresh style nonce per response, in the body and in the CSP, and
+// is never cached (a revalidated body would keep an old nonce).
+func TestIndexStyleNonce(t *testing.T) {
+	h := webui.NewHandler(fstest.MapFS{
+		"index.html": {Data: []byte(`<meta property="csp-nonce" nonce="` + webui.NoncePlaceholder + `"><link rel="stylesheet" nonce="` + webui.NoncePlaceholder + `">`)},
+	})
+	nonceRE := regexp.MustCompile(`'nonce-([A-Za-z0-9+/]{22}==)'`)
+	seen := map[string]bool{}
+	for _, p := range []string{"/", "/index.html", "/servers/1/files"} {
+		code, body, hdr := get(h, p)
+		m := nonceRE.FindStringSubmatch(hdr.Get("Content-Security-Policy"))
+		if code != http.StatusOK || m == nil {
+			t.Fatalf("%s → %d csp=%q", p, code, hdr.Get("Content-Security-Policy"))
+		}
+		if strings.Contains(body, webui.NoncePlaceholder) || strings.Count(body, `nonce="`+m[1]+`"`) != 2 {
+			t.Errorf("%s: body %q does not carry nonce %s", p, body, m[1])
+		}
+		if seen[m[1]] {
+			t.Errorf("%s: nonce %s reused", p, m[1])
+		}
+		seen[m[1]] = true
+		if strings.Contains(hdr.Get("Content-Security-Policy"), "unsafe-inline") {
+			t.Errorf("%s: csp %q", p, hdr.Get("Content-Security-Policy"))
+		}
+		if hdr.Get("Cache-Control") != "no-store" || hdr.Get("ETag") != "" || hdr.Get("Last-Modified") != "" {
+			t.Errorf("%s: cache headers %v", p, hdr)
+		}
+		if hdr.Get("Content-Type") != "text/html; charset=utf-8" {
+			t.Errorf("%s: content type %q", p, hdr.Get("Content-Type"))
+		}
+	}
+}
+
+// The Vite dev server (make dev, the e2e mock) sends the same policy as the panel, so the
+// e2e violation check covers the production CSP.
+func TestViteConfigMatchesCSP(t *testing.T) {
+	b, err := os.ReadFile("../../web/vite.config.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := string(b)
+	for _, want := range []string{httpx.CSP("${nonce}"), httpx.CSPReportOnly, "'" + webui.NoncePlaceholder + "'"} {
+		if !strings.Contains(cfg, want) {
+			t.Errorf("web/vite.config.ts does not contain %q", want)
 		}
 	}
 }

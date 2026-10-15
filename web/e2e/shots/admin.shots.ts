@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from '../test'
 import { shoot, signInMock } from './shoot'
 
 async function openNav(page: Page, name: string) {

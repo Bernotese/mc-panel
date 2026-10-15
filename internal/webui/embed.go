@@ -2,7 +2,10 @@
 package webui
 
 import (
+	"bytes"
+	"crypto/rand"
 	"embed"
+	"encoding/base64"
 	"io/fs"
 	"net/http"
 	"path"
@@ -22,6 +25,10 @@ func Handler() http.Handler {
 	return NewHandler(sub)
 }
 
+// NoncePlaceholder is the value of Vite's html.cspNonce in the production build
+// (web/vite.config.ts); serveIndex replaces it with a fresh nonce per response.
+const NoncePlaceholder = "MCPANEL_CSP_NONCE"
+
 // NewHandler serves files from fsys with SPA fallback to index.html.
 func NewHandler(fsys fs.FS) http.Handler {
 	files := http.FileServerFS(fsys)
@@ -36,7 +43,7 @@ func NewHandler(fsys fs.FS) http.Handler {
 		}
 		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
 		if name == "" || name == "index.html" {
-			serveIndex(w, r, files)
+			serveIndex(w, r, fsys)
 			return
 		}
 		if info, err := fs.Stat(fsys, name); err != nil || info.IsDir() {
@@ -45,7 +52,7 @@ func NewHandler(fsys fs.FS) http.Handler {
 				http.NotFound(w, r)
 				return
 			}
-			serveIndex(w, r, files)
+			serveIndex(w, r, fsys)
 			return
 		}
 		if strings.HasPrefix(name, "assets/") {
@@ -55,9 +62,24 @@ func NewHandler(fsys fs.FS) http.Handler {
 	})
 }
 
-func serveIndex(w http.ResponseWriter, r *http.Request, files http.Handler) {
-	w.Header().Set("Cache-Control", "no-cache")
-	r2 := r.Clone(r.Context())
-	r2.URL.Path = "/"
-	files.ServeHTTP(w, r2)
+// serveIndex sends index.html with a per-request style nonce in the body and the CSP. It is
+// never cached (no-store, no validators): a 304 would pair a cached body with a new header nonce.
+func serveIndex(w http.ResponseWriter, r *http.Request, fsys fs.FS) {
+	page, err := fs.ReadFile(fsys, "index.html")
+	if err != nil {
+		http.Error(w, "index.html unreadable", http.StatusInternalServerError)
+		return
+	}
+	b := make([]byte, 16)
+	_, _ = rand.Read(b) // never fails since Go 1.24
+	nonce := base64.StdEncoding.EncodeToString(b)
+	page = bytes.ReplaceAll(page, []byte(NoncePlaceholder), []byte(nonce))
+	h := w.Header()
+	h.Set("Content-Security-Policy", httpx.CSP(nonce))
+	h.Set("Cache-Control", "no-store")
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	if r.Method == http.MethodHead {
+		return
+	}
+	_, _ = w.Write(page)
 }

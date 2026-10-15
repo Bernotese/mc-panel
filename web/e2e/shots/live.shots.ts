@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { test } from '@playwright/test'
+import { test } from '../test'
 import { shoot, signInMock } from './shoot'
 
 /** Works before and after T2's routes: old tabs or new section links. */
