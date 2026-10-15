@@ -140,7 +140,8 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 	backupsH := backups.NewHandler(backups.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Notifier: disp, Files: d.Backups,
 		Instances: d.Instances, Console: d.Console,
-		Reconcile: func() { serversH.Trigger() },
+		Reconcile:   func() { serversH.Trigger() },
+		MaxDuration: cfg.Backups.MaxDuration.Duration,
 	})
 	serversH = servers.NewHandler(servers.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Box: box, Instances: d.Instances,

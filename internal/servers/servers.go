@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
@@ -137,11 +138,19 @@ func (h *Handler) handleGetServer(w http.ResponseWriter, r *http.Request) {
 }
 
 // redactFor hides the raw last_error from non-admins: it can name host paths, images and
-// Docker internals. The state (error) stays visible. The alert switch is admin-only too.
+// Docker internals. The state (error) stays visible. The alert switch is admin-only too. The
+// world seed is left out unless the caller is admin or has server.files on this server (it
+// reads server.properties anyway; SEC-28). v.Permissions are the caller's permissions.
 func redactFor(p principal.Principal, v serverJSON) serverJSON {
-	if !p.IsAdmin() {
-		v.Status.LastError = ""
-		v.DownAlerts = nil
+	if p.IsAdmin() {
+		return v
+	}
+	v.Status.LastError = ""
+	v.DownAlerts = nil
+	if v.Instance != nil && !slices.Contains(v.Permissions, rbac.PermServerFiles) {
+		in := *v.Instance
+		in.Properties.Seed = nil
+		v.Instance = &in
 	}
 	return v
 }

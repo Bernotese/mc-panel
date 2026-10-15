@@ -3,12 +3,14 @@ package files
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/Bernotese/mc-panel/internal/config"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 )
 
@@ -52,10 +54,37 @@ func (s *Service) CleanupTemp(ctx context.Context) int {
 // every temp entry of an earlier run it finds except keep (the top-level temp folder of a stuck
 // restore, "" = none); a temp-named symlink is removed as a link. A temp folder without a
 // journal entry is removed whatever it holds, never rolled back: a container can fake one.
+// Leftovers are removed per batch while the walk goes on; a data directory with more names
+// than the walk budget is left with a warning (SEC-23).
 func (s *Service) cleanupRoot(ctx context.Context, root *os.Root, id int64, keep string) int {
 	var victims []string
+	n := 0
+	flush := func() {
+		for _, v := range victims {
+			if ctx.Err() != nil {
+				break
+			}
+			if v == keep {
+				continue // a stuck restore: the journal entry protects its previous state
+			}
+			// The container may have made the leftover or its folder read-only (unlockTree).
+			err := unlockDir(root, rootName(parentOf(v)))
+			if err == nil {
+				err = unlockTree(root, v, s.cfg.Limits)
+			}
+			if err == nil {
+				err = root.RemoveAll(v)
+			}
+			if err != nil {
+				s.log.Warn("files: cannot remove a leftover temp entry", "id", id, "path", v, "err", err)
+				continue
+			}
+			n++
+		}
+		victims = victims[:0]
+	}
 	own := tempPrefix + s.tempToken + "-"
-	err := walkTree(root, "", func(p string, d fs.DirEntry, err error) error {
+	err := walkTree(root, "", newWalkBudget(s.cfg.Limits), func(p string, d fs.DirEntry, err error) error {
 		if cerr := ctx.Err(); cerr != nil {
 			return cerr
 		}
@@ -67,7 +96,9 @@ func (s *Service) cleanupRoot(ctx context.Context, root *os.Root, id int64, keep
 			return fs.SkipDir // a running upload, write or extract of this process
 		}
 		if strings.HasPrefix(d.Name(), tempPrefix) {
-			victims = append(victims, p)
+			if victims = append(victims, p); len(victims) >= walkBatch {
+				flush()
+			}
 			return fs.SkipDir
 		}
 		if d.IsDir() && strings.Count(p, "/") >= cleanupMaxDepth-1 {
@@ -75,31 +106,14 @@ func (s *Service) cleanupRoot(ctx context.Context, root *os.Root, id int64, keep
 		}
 		return nil
 	})
-	if err != nil {
-		return 0 // ctx ended
+	switch {
+	case ctx.Err() != nil:
+		return n
+	case err != nil:
+		s.log.Warn("files: temp cleanup skipped the rest of an instance", "id", id, "err", err)
+		return n
 	}
-	n := 0
-	for _, v := range victims {
-		if ctx.Err() != nil {
-			break
-		}
-		if v == keep {
-			continue // a stuck restore: the journal entry protects its previous state
-		}
-		// The container may have made the leftover or its folder read-only (unlockTree).
-		err := unlockDir(root, rootName(parentOf(v)))
-		if err == nil {
-			err = unlockTree(root, v)
-		}
-		if err == nil {
-			err = root.RemoveAll(v)
-		}
-		if err != nil {
-			s.log.Warn("files: cannot remove a leftover temp entry", "id", id, "path", v, "err", err)
-			continue
-		}
-		n++
-	}
+	flush()
 	return n
 }
 
@@ -133,7 +147,9 @@ func cleanRoot(p string) string {
 
 // unlockTree is unlockDir for folder p and every folder below it, so the whole tree can be
 // removed. It never follows a symlink (one *os.Root per level, openSubdir); a missing p is fine.
-func unlockTree(root *os.Root, p string) error {
+// Only folders count against the walk budget of lim: files cost no memory here, and a temp
+// folder full of files must stay removable (RemoveAll reads in batches itself).
+func unlockTree(root *os.Root, p string, lim config.FilesLimits) error {
 	fi, err := lstat(root, p)
 	if errors.Is(err, filesapi.ErrNotFound) {
 		return nil
@@ -152,10 +168,12 @@ func unlockTree(root *os.Root, p string) error {
 		return err
 	}
 	defer func() { _ = sub.Close() }()
-	return unlockBelow(sub, 1)
+	return unlockBelow(sub, 1, newWalkBudget(lim))
 }
 
-func unlockBelow(d *os.Root, depth int) error {
+// unlockBelow unlocks the folders below d. Names are read in batches; the folders among them
+// count against the walk budget b and only their names are kept until the listing is closed.
+func unlockBelow(d *os.Root, depth int, b *walkBudget) error {
 	if depth > maxUnlockDepth {
 		return nil // RemoveAll fails below; the error is logged by the caller
 	}
@@ -163,26 +181,45 @@ func unlockBelow(d *os.Root, depth int) error {
 	if err != nil {
 		return fsErr(err)
 	}
-	names, err := f.Readdirnames(-1)
-	_ = f.Close()
-	if err != nil {
-		return fsErr(err)
+	var subdirs []string
+	for {
+		batch, rerr := f.Readdirnames(walkBatch)
+		for _, n := range batch {
+			fi, err := d.Lstat(n)
+			if err != nil || !fi.IsDir() {
+				continue
+			}
+			if err := b.count(n); err != nil {
+				_ = f.Close()
+				return err
+			}
+			if fi.Mode().Perm()&0o700 != 0o700 {
+				if err := d.Chmod(n, fi.Mode().Perm()|0o700); err != nil {
+					_ = f.Close()
+					return fsErr(err)
+				}
+			}
+			subdirs = append(subdirs, n)
+		}
+		if errors.Is(rerr, io.EOF) || (rerr == nil && len(batch) == 0) {
+			break
+		}
+		if rerr != nil {
+			_ = f.Close()
+			return fsErr(rerr)
+		}
 	}
-	for _, n := range names {
+	_ = f.Close()
+	for _, n := range subdirs {
 		fi, err := d.Lstat(n)
 		if err != nil || !fi.IsDir() {
-			continue
-		}
-		if fi.Mode().Perm()&0o700 != 0o700 {
-			if err := d.Chmod(n, fi.Mode().Perm()|0o700); err != nil {
-				return fsErr(err)
-			}
+			continue // gone or swapped meanwhile
 		}
 		sub, err := openSubdir(d, n, fi)
 		if err != nil {
 			continue // swapped meanwhile: RemoveAll removes a symlink as a link
 		}
-		err = unlockBelow(sub, depth+1)
+		err = unlockBelow(sub, depth+1, b)
 		_ = sub.Close()
 		if err != nil {
 			return err

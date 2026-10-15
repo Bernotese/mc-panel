@@ -26,14 +26,17 @@ import (
 )
 
 const (
-	tempPrefix       = ".mcpanel-tmp-"
-	maxUploads       = 4
-	maxZipDownloads  = 4  // folder zips: each holds its central directory in memory (spec §4.1)
-	maxFileDownloads = 16 // single files
-	maxJobsTotal     = 2
-	cleanupMaxDepth  = 64
-	maxHashRuns      = 2    // concurrent jar checksum and metadata passes (spec 3c §5.1)
-	hashCacheSize    = 4096 // cached jars (spec 3c §5.1)
+	tempPrefix = ".mcpanel-tmp-"
+	maxUploads = 4
+	// maxCheckedUploads: uploads with a checksum (plugin installs, at most four jobs per panel)
+	// have their own slots, so user uploads cannot block them (SEC-24).
+	maxCheckedUploads = 4
+	maxZipDownloads   = 4  // folder zips: each holds its central directory in memory (spec §4.1)
+	maxFileDownloads  = 16 // single files
+	maxJobsTotal      = 2
+	cleanupMaxDepth   = 64
+	maxHashRuns       = 2    // concurrent jar checksum and metadata passes (spec 3c §5.1)
+	hashCacheSize     = 4096 // cached jars (spec 3c §5.1)
 	// maxHashBytesPerRequest bounds the bytes one jar listing hashes; further jars come without
 	// checksums (and uncached) until a later listing, so one server cannot hold the service-wide
 	// hash slots for long.
@@ -57,27 +60,28 @@ type Config struct {
 
 // Service performs the file operations of all instances.
 type Service struct {
-	cfg           Config
-	clock         clock.Clock
-	log           *slog.Logger
-	disk          DiskSpace
-	uploads       chan struct{} // at most maxUploads concurrent uploads
-	zipDownloads  chan struct{} // at most maxZipDownloads concurrent folder zips
-	fileDownloads chan struct{} // at most maxFileDownloads concurrent file downloads
-	jobs          *jobs
-	hashSlots     chan struct{}     // at most maxHashRuns jar passes at a time, for all requests
-	jarCache      *hashCache        // checksums and metadata by file identity
-	jarHashMax    int64             // larger jars get no checksums (filesapi.MaxJarHashBytes; tests lower it)
-	jarHook       func(name string) // tests: runs before every jar that is computed, not cached
-	jarHashBudget int64             // bytes one listing may hash (maxHashBytesPerRequest; tests lower it)
-	instMu        sync.Mutex
-	instHash      map[int64]*instSlot // one jar pass per instance at a time, on top of hashSlots
-	runner        resticRunner        // nil = no usable binary (runnerWhy says why)
-	runnerWhy     string
-	resticPaths   []string // the configured and the resolved restic binary: publicMessage hides them
-	backupMu      sync.Mutex
-	journalMu     sync.Mutex             // every operation on the restore journal (restorejournal.go)
-	backupStat    filesapi.BackupsStatus // set by InitBackups
+	cfg            Config
+	clock          clock.Clock
+	log            *slog.Logger
+	disk           DiskSpace
+	uploads        chan struct{} // at most maxUploads concurrent uploads
+	checkedUploads chan struct{} // at most maxCheckedUploads concurrent uploads with a checksum
+	zipDownloads   chan struct{} // at most maxZipDownloads concurrent folder zips
+	fileDownloads  chan struct{} // at most maxFileDownloads concurrent file downloads
+	jobs           *jobs
+	hashSlots      chan struct{}     // at most maxHashRuns jar passes at a time, for all requests
+	jarCache       *hashCache        // checksums and metadata by file identity
+	jarHashMax     int64             // larger jars get no checksums (filesapi.MaxJarHashBytes; tests lower it)
+	jarHook        func(name string) // tests: runs before every jar that is computed, not cached
+	jarHashBudget  int64             // bytes one listing may hash (maxHashBytesPerRequest; tests lower it)
+	instMu         sync.Mutex
+	instHash       map[int64]*instSlot // one jar pass per instance at a time, on top of hashSlots
+	runner         resticRunner        // nil = no usable binary (runnerWhy says why)
+	runnerWhy      string
+	resticPaths    []string // the configured and the resolved restic binary: publicMessage hides them
+	backupMu       sync.Mutex
+	journalMu      sync.Mutex             // every operation on the restore journal (restorejournal.go)
+	backupStat     filesapi.BackupsStatus // set by InitBackups
 	// backupHook runs before every entry of a backup stream; swapHook before every rename of
 	// a restore swap (tests: swap folders, fail a step).
 	backupHook func(p string)
@@ -96,15 +100,16 @@ type Service struct {
 func New(cfg Config) *Service {
 	s := &Service{
 		cfg: cfg, clock: cfg.Clock, log: cfg.Log, disk: cfg.Disk, jobs: newJobs(cfg.Limits.MaxBackupJobs),
-		uploads:       make(chan struct{}, maxUploads),
-		zipDownloads:  make(chan struct{}, maxZipDownloads),
-		fileDownloads: make(chan struct{}, maxFileDownloads),
-		hashSlots:     make(chan struct{}, maxHashRuns),
-		jarCache:      newHashCache(hashCacheSize),
-		jarHashMax:    filesapi.MaxJarHashBytes,
-		jarHashBudget: maxHashBytesPerRequest,
-		instHash:      map[int64]*instSlot{},
-		tempToken:     randomHex(4),
+		uploads:        make(chan struct{}, maxUploads),
+		checkedUploads: make(chan struct{}, maxCheckedUploads),
+		zipDownloads:   make(chan struct{}, maxZipDownloads),
+		fileDownloads:  make(chan struct{}, maxFileDownloads),
+		hashSlots:      make(chan struct{}, maxHashRuns),
+		jarCache:       newHashCache(hashCacheSize),
+		jarHashMax:     filesapi.MaxJarHashBytes,
+		jarHashBudget:  maxHashBytesPerRequest,
+		instHash:       map[int64]*instSlot{},
+		tempToken:      randomHex(4),
 	}
 	instances := regexp.QuoteMeta(filepath.Join(cfg.InstancesDir, "instances") + string(filepath.Separator))
 	s.dataPathRe = regexp.MustCompile(pathStart + instances + `[0-9]+/`)
@@ -369,19 +374,38 @@ func fsErr(err error) error {
 	return err
 }
 
-// reserve checks that need more bytes still leave the configured reserve free, counting the
-// bytes that running operations announced but have not written yet (all data directories
+// reserveBytes is the free space that every growing operation must leave on the file system
+// of dir: reserve_bytes or reserve_percent of its size, whichever is larger (SEC-04).
+func (s *Service) reserveBytes(dir string) (uint64, error) {
+	r := uint64(max(s.cfg.Limits.ReserveBytes, 0))
+	if p := s.cfg.Limits.ReservePercent; p > 0 {
+		total, err := s.disk.Total(dir)
+		if err != nil {
+			return 0, fmt.Errorf("check the disk size: %w", err)
+		}
+		r = max(r, total/100*uint64(p))
+	}
+	return r, nil
+}
+
+// reserve checks that need more bytes still leave the reserve (reserveBytes) free, counting
+// the bytes that running operations announced but have not written yet (all data directories
 // share one file system). The caller reports written bytes with landed and must release the
 // reservation when it ends.
 func (s *Service) reserve(id, need int64) (*reservation, error) {
 	need = max(need, 0)
-	avail, err := s.disk.Available(s.instanceDir(id))
+	dir := s.instanceDir(id)
+	avail, err := s.disk.Available(dir)
 	if err != nil {
 		return nil, fmt.Errorf("check free space: %w", err)
 	}
+	keep, err := s.reserveBytes(dir)
+	if err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	want := uint64(need) + uint64(max(s.cfg.Limits.ReserveBytes, 0)) + uint64(s.pending)
+	want := uint64(need) + keep + uint64(s.pending)
 	if avail < want {
 		return nil, fmt.Errorf("%w: %d bytes free, %d bytes needed including the reserve and running operations",
 			filesapi.ErrInsufficientStorage, avail, want)

@@ -332,7 +332,7 @@ func TestSwapJournalConsistency(t *testing.T) {
 	t.Run("new_moving cannot be recorded: undone", func(t *testing.T) {
 		root, data, tmp := swapSetup(t)
 		var phases []string
-		err := swapTop(root, tmp, nil, func(p string) error {
+		err := swapTop(root, tmp, testLimits(), nil, func(p string) error {
 			phases = append(phases, p)
 			if p == phaseNewMoving {
 				return errors.New("disk full")
@@ -351,7 +351,7 @@ func TestSwapJournalConsistency(t *testing.T) {
 	t.Run("stuck cannot be recorded: no undo, the journal says new_moving", func(t *testing.T) {
 		root, data, tmp := swapSetup(t)
 		journal := phaseOldMoving
-		err := swapTop(root, tmp, failAt(3), func(p string) error {
+		err := swapTop(root, tmp, testLimits(), failAt(3), func(p string) error {
 			if p == phaseStuck {
 				return errors.New("disk full")
 			}
