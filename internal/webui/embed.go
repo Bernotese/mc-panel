@@ -42,6 +42,11 @@ func NewHandler(fsys fs.FS) http.Handler {
 			return
 		}
 		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if strings.HasPrefix(name, ".") || strings.Contains(name, "/.") {
+			// dotfiles (the go:embed placeholder .gitkeep) are never part of the UI
+			http.NotFound(w, r)
+			return
+		}
 		if name == "" || name == "index.html" {
 			serveIndex(w, r, fsys)
 			return
