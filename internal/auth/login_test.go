@@ -278,3 +278,30 @@ func TestCompleteAttemptRecordedWithoutNotification(t *testing.T) {
 		})
 	}
 }
+
+// SEC-16: the admin allowlist applies to every API request of an admin session, not only to
+// the login. Users are not affected, and the web app itself still loads.
+func TestAdminAllowlistAppliesToSessions(t *testing.T) {
+	e := newTestEnv(t)
+	e.createUser("admin", "admin")
+	e.createUser("alice", "user")
+	admin := e.newClient("203.0.113.7")
+	if r := admin.login("admin", testPassword); r.code != http.StatusOK {
+		t.Fatalf("admin login = %d %s", r.code, r.body)
+	}
+	user := e.newClient("203.0.113.8")
+	if r := user.login("alice", testPassword); r.code != http.StatusOK {
+		t.Fatalf("user login = %d %s", r.code, r.body)
+	}
+	e.guard.AdminNetErr = defense.ErrAdminNetwork // the setting is switched on; neither IP is allowed
+	if r := admin.do(http.MethodGet, "/api/auth/me", nil); r.code != http.StatusForbidden || r.errCode() != "ip_blocked" {
+		t.Fatalf("admin request = %d %s, want 403 ip_blocked", r.code, r.body)
+	}
+	if r := user.do(http.MethodGet, "/api/auth/me", nil); r.code != http.StatusOK {
+		t.Fatalf("user request = %d %s, want 200", r.code, r.body)
+	}
+	e.guard.AdminNetErr = nil
+	if r := admin.do(http.MethodGet, "/api/auth/me", nil); r.code != http.StatusOK {
+		t.Fatalf("admin request from an allowed network = %d %s", r.code, r.body)
+	}
+}

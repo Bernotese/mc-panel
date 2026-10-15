@@ -6,8 +6,10 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/Bernotese/mc-panel/internal/defense"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/store"
@@ -56,6 +58,9 @@ func (s *Sessions) Middleware(next http.Handler) http.Handler {
 			httpx.Internal(w, r, err)
 			return
 		}
+		if !s.adminNetworkAllowed(w, r, user) {
+			return
+		}
 		if r.Header.Get(BackgroundHeader) != "1" {
 			if err := s.Touch(ctx, sess); err != nil {
 				httpx.Internal(w, r, err)
@@ -81,6 +86,26 @@ func (s *Sessions) Middleware(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, presentedTokenKey{}, sess.TokenHash)
 		next.ServeHTTP(w, r.WithContext(principal.With(ctx, p)))
 	})
+}
+
+// adminNetworkAllowed applies the admin allowlist to every API request of an admin session
+// (SEC-16): a stolen cookie, a session from before the setting was enabled or a user promoted
+// later must not work from any other network. It writes 403 ip_blocked and returns false when
+// the request is refused. Requests for the web app itself pass, so it can show the error.
+func (s *Sessions) adminNetworkAllowed(w http.ResponseWriter, r *http.Request, user store.User) bool {
+	if s.adminNet == nil || principal.Role(user.Role) != principal.RoleAdmin || !strings.HasPrefix(r.URL.Path, "/api/") {
+		return true
+	}
+	err := s.adminNet(r.Context(), httpx.ClientIP(r.Context()))
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, defense.ErrAdminNetwork):
+		httpx.WriteError(w, r, http.StatusForbidden, httpx.CodeIPBlocked, "admin access from your network is not allowed")
+	default:
+		httpx.Internal(w, r, err)
+	}
+	return false
 }
 
 // CSRF rejects state-changing cross-origin requests (Fetch Metadata / Origin)
