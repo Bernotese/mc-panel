@@ -52,9 +52,13 @@ test_install_cad_ensure_writes_the_caddy_dropin_once() {
   assert_file_contains "$f" 'LogsDirectory=caddy'
   assert_eq 644 "$(stat -c '%a' "$f")"
   assert_called 'systemctl daemon-reload'
+  # validate opens the access log before a restart could create its directory
+  assert_called "install -d -o caddy -g caddy -m 0750 -- $ROOT/var/log/caddy"
+  mkdir -p "$ROOT/var/log/caddy"
   : >"$WORK/calls.log"
   cad_ensure >/dev/null
   assert_not_called 'daemon-reload'
+  assert_not_called 'install -d'
   # another version rewrites the site (reload), but the drop-in stays: no Caddy restart
   TARGET_VERSION=1.2.4
   : >"$WORK/calls.log"
