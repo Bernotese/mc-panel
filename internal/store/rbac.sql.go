@@ -467,6 +467,25 @@ func (q *Queries) RbacRevokeUserSessions(ctx context.Context, arg RbacRevokeUser
 	return err
 }
 
+const rbacRevokeUserSessionsExcept = `-- name: RbacRevokeUserSessionsExcept :execrows
+UPDATE sessions SET revoked_at = ?1
+WHERE user_id = ?2 AND id <> ?3 AND revoked_at IS NULL
+`
+
+type RbacRevokeUserSessionsExceptParams struct {
+	RevokedAt sql.NullInt64
+	UserID    int64
+	KeepID    int64
+}
+
+func (q *Queries) RbacRevokeUserSessionsExcept(ctx context.Context, arg RbacRevokeUserSessionsExceptParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, rbacRevokeUserSessionsExcept, arg.RevokedAt, arg.UserID, arg.KeepID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const rbacUpdateUserPassword = `-- name: RbacUpdateUserPassword :exec
 UPDATE users SET password_hash = ?, password_changed_at = ?, updated_at = ? WHERE id = ?
 `
