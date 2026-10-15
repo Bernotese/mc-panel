@@ -37,11 +37,11 @@ func TestPasskeyRegistrationAndList(t *testing.T) {
 	if err := json.Unmarshal(begin.body, &opts); err != nil || opts.PublicKey.RP.ID != "localhost" || opts.PublicKey.User.Name != "alice" {
 		t.Fatalf("creation options = %s", begin.body)
 	}
-	if res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": " ", "credential": json.RawMessage(`{}`)}); res.code != 400 || res.errCode() != "validation_failed" {
+	if res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": " ", "credential": json.RawMessage(`{}`), "current_password": testPassword}); res.code != 400 || res.errCode() != "validation_failed" {
 		t.Fatalf("empty name = %d %s", res.code, res.body)
 	}
 	a := newSoftAuthenticator(t, e.cfg.RPID(), e.cfg.Origin())
-	res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "  YubiKey  ", "credential": a.register(begin.body)})
+	res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "  YubiKey  ", "credential": a.register(begin.body), "current_password": testPassword})
 	if res.code != 201 {
 		t.Fatalf("finish = %d %s", res.code, res.body)
 	}
@@ -58,7 +58,7 @@ func TestPasskeyRegistrationAndList(t *testing.T) {
 	if !bytes.Equal(credID, a.credID) || !strings.Contains(credJSON, "publicKey") {
 		t.Fatalf("stored credential id=%x json=%s", credID, credJSON)
 	}
-	if res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "again", "credential": a.register(begin.body)}); res.code != 400 {
+	if res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "again", "credential": a.register(begin.body), "current_password": testPassword}); res.code != 400 {
 		t.Fatalf("ceremony state must be one-shot, got %d", res.code)
 	}
 	var keys []passkeyJSON
@@ -79,7 +79,7 @@ func TestPasskeyRegistrationAndList(t *testing.T) {
 		t.Fatalf("existing credential must be in excludeCredentials: %s", begin2.body)
 	}
 	b := newSoftAuthenticator(t, e.cfg.RPID(), e.cfg.Origin())
-	res = c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "Phone", "credential": b.register(begin2.body)})
+	res = c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "Phone", "credential": b.register(begin2.body), "current_password": testPassword})
 	var created2 passkeyCreatedResponse
 	if res.code != 201 || json.Unmarshal(res.body, &created2) != nil || created2.RecoveryCodes == nil || len(created2.RecoveryCodes) != 0 {
 		t.Fatalf("second passkey = %d %s (recovery_codes must be [])", res.code, res.body)

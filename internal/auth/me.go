@@ -80,22 +80,7 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	// A stolen session must not allow brute-forcing the current password.
-	if err := h.guard.CheckLogin(ctx, httpx.ClientIP(ctx), user.Username); err != nil {
-		h.guardError(w, r, err)
-		return
-	}
-	valid, _, err := password.VerifyContext(ctx, req.CurrentPassword, user.PasswordHash)
-	if errors.Is(err, password.ErrBusy) {
-		busy(w, r)
-		return
-	}
-	if err != nil {
-		valid = false
-	}
-	if !valid {
-		h.recordAttempt(r, user.Username, user.ID, defense.StagePassword, false, reasonBadCurrentPassword)
-		httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeInvalidCredentials, "current password is incorrect")
+	if !h.verifyCurrentPassword(w, r, user, req.CurrentPassword) {
 		return
 	}
 	if err := password.Validate(req.NewPassword, user.Username); err != nil {
@@ -155,4 +140,55 @@ func (h *Handler) regenerateRecoveryCodes(w http.ResponseWriter, r *http.Request
 	h.auditLog(ctx, user.ID, user.Username, audit.ActionRecoveryRegenerate, user.Username, audit.ResultSuccess, nil)
 	h.notify2FAChanged(ctx, user, "recovery codes regenerated")
 	httpx.WriteJSON(w, http.StatusOK, recoveryCodesResponse{Codes: codes})
+}
+
+// verifyCurrentPassword checks the user's current password under the login guard, so a stolen
+// session cannot be used to brute-force it. A wrong password is recorded as a failed password
+// attempt (it counts towards the jail) and answered with 401 invalid_credentials; the function
+// writes every error response itself and returns false then.
+func (h *Handler) verifyCurrentPassword(w http.ResponseWriter, r *http.Request, user store.User, pw string) bool {
+	ctx := r.Context()
+	if err := h.guard.CheckLogin(ctx, httpx.ClientIP(ctx), user.Username); err != nil {
+		h.guardError(w, r, err)
+		return false
+	}
+	valid, _, err := password.VerifyContext(ctx, pw, user.PasswordHash)
+	if errors.Is(err, password.ErrBusy) {
+		busy(w, r)
+		return false
+	}
+	if err != nil {
+		valid = false
+	}
+	if !valid {
+		h.recordAttempt(r, user.Username, user.ID, defense.StagePassword, false, reasonBadCurrentPassword)
+		httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeInvalidCredentials, "current password is incorrect")
+		return false
+	}
+	return true
+}
+
+// confirmFirstFactor implements SEC-15: enrolling the first second factor locks out every
+// other session and hands the enrolling session the recovery codes, so it needs the current
+// password (a hijacked password-only session must not be able to take over the account). Once
+// a factor exists, adding another one needs sudo instead (guardAddFactor). It returns whether
+// the password was verified; ok is false when an error response was written.
+func (h *Handler) confirmFirstFactor(w http.ResponseWriter, r *http.Request, user store.User, pw string) (verified, ok bool) {
+	f, err := h.factors(r.Context(), h.q, user)
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return false, false
+	}
+	if f.has2FA() {
+		return false, true
+	}
+	if pw == "" || utf8.RuneCountInString(pw) > password.MaxLength {
+		httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeInvalidCredentials,
+			"current_password is required to set up the first two-factor method")
+		return false, false
+	}
+	if !h.verifyCurrentPassword(w, r, user, pw) {
+		return false, false
+	}
+	return true, true
 }

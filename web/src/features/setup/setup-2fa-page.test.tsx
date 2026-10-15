@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Me } from '@/api/types'
 import { meKey } from '@/features/auth/me'
-import { loginAs, MOCK_TOTP_CODE } from '@/mocks/db'
+import { loginAs, MOCK_PASSWORD, MOCK_TOTP_CODE } from '@/mocks/db'
 import { renderWithProviders } from '@/test/render'
 import { Setup2faPage } from './setup-2fa-page'
 
@@ -29,6 +29,7 @@ describe('Setup2faPage', () => {
     const { router, queryClient } = await renderPage()
     await user.click(screen.getByRole('button', { name: 'Einrichtung starten' }))
     await user.type(await screen.findByLabelText('Code aus der Authenticator-App'), MOCK_TOTP_CODE)
+    await user.type(screen.getByLabelText('Aktuelles Passwort'), MOCK_PASSWORD)
     await user.click(screen.getByRole('button', { name: 'Aktivieren' }))
 
     const list = await screen.findByRole('list', { name: 'Wiederherstellungscodes' })
@@ -53,6 +54,7 @@ describe('Setup2faPage', () => {
     const user = userEvent.setup()
     await renderPage()
     await user.click(screen.getByRole('tab', { name: 'Passkey' }))
+    await user.type(screen.getByLabelText('Aktuelles Passwort'), MOCK_PASSWORD)
     await user.click(screen.getByRole('button', { name: 'Passkey registrieren' }))
     expect(await screen.findByRole('list', { name: 'Wiederherstellungscodes' })).toBeInTheDocument()
   })
