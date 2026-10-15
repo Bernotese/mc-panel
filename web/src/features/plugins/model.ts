@@ -85,14 +85,23 @@ export function iconSrc(url: string | null | undefined): string | null {
   return url && ICON_PROXY.test(url) ? url : null
 }
 
-/** Links from upstream answers only for http(s); a javascript: or data: URL never becomes an href. */
+/** Links from upstream answers only for https; an http:, javascript: or data: URL never becomes an href. */
 export function externalHref(url: string | null | undefined): string | null {
   if (!url) return null
   try {
-    const { protocol } = new URL(url)
-    return protocol === 'https:' || protocol === 'http:' ? url : null
+    const { protocol, host } = new URL(url)
+    return protocol === 'https:' && host !== '' ? url : null
   } catch {
     return null
+  }
+}
+
+/** The host an external link points to, shown next to it (SEC-30). */
+export function linkHost(href: string): string {
+  try {
+    return new URL(href).host
+  } catch {
+    return ''
   }
 }
 
