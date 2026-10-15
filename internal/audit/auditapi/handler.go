@@ -1,14 +1,17 @@
 package auditapi
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/clock"
@@ -100,14 +103,73 @@ func (h *Handler) handleVerify(w http.ResponseWriter, r *http.Request) {
 	if !rep.OK {
 		id := rep.FirstBadID
 		out.FirstBadID = &id
-		h.notifier.Notify(r.Context(), notify.Event{
-			Type:    notify.EventAuditChainBroken,
-			Title:   "Audit chain broken",
-			Message: fmt.Sprintf("The audit log hash chain is broken at entry %d (%d entries verified before it).", rep.FirstBadID, rep.Checked),
-			Time:    h.clock.Now(),
-		})
+		h.notifyBroken(r.Context(), brokenMessage(rep))
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+func brokenMessage(rep audit.VerifyReport) string {
+	return fmt.Sprintf("The audit log hash chain is broken at entry %d (%d entries verified before it).", rep.FirstBadID, rep.Checked)
+}
+
+func (h *Handler) notifyBroken(ctx context.Context, msg string) {
+	h.notifier.Notify(ctx, notify.Event{
+		Type: notify.EventAuditChainBroken, Title: "Audit chain broken", Message: msg, Time: h.clock.Now(),
+	})
+}
+
+// VerifyInterval is how often Run verifies the audit chain.
+const VerifyInterval = 24 * time.Hour
+
+// verifyTick is how often Run checks whether a verification is due.
+const verifyTick = time.Hour
+
+// Run verifies the audit chain at start and then once per VerifyInterval and notifies
+// audit.chain_broken when it fails (SEC-17). last returns the newest entry this process wrote
+// (audit.SQLRecorder.LastWritten): it must still exist with the same hash, which also catches a
+// rewrite that recomputed the whole chain, or removed the newest entries, while the panel ran.
+func (h *Handler) Run(ctx context.Context, last func() audit.Anchor) {
+	t := time.NewTicker(verifyTick)
+	defer t.Stop()
+	var lastRun time.Time
+	for {
+		if now := h.clock.Now(); lastRun.IsZero() || now.Sub(lastRun) >= VerifyInterval {
+			lastRun = now
+			if _, err := h.VerifyOnce(ctx, last()); err != nil && ctx.Err() == nil {
+				slog.ErrorContext(ctx, "audit: scheduled verification failed", "err", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// VerifyOnce checks the chain and the entry the panel wrote last; it notifies and returns
+// false when either is broken.
+func (h *Handler) VerifyOnce(ctx context.Context, last audit.Anchor) (bool, error) {
+	rep, err := audit.Verify(ctx, h.db)
+	if err != nil {
+		return false, err
+	}
+	if !rep.OK {
+		h.notifyBroken(ctx, brokenMessage(rep))
+		return false, nil
+	}
+	if last.ID == 0 {
+		return true, nil
+	}
+	rows, err := h.q.AuditListAfter(ctx, store.AuditListAfterParams{ID: last.ID - 1, Limit: 1})
+	if err != nil {
+		return false, err
+	}
+	if len(rows) == 0 || rows[0].ID != last.ID || rows[0].Hash != last.Hash {
+		h.notifyBroken(ctx, fmt.Sprintf("Audit entry %d, which the panel wrote itself, was changed or removed (the chain itself verifies, so it was recomputed).", last.ID))
+		return false, nil
+	}
+	return true, nil
 }
 
 func toEntryJSON(row store.AuditLog) entryJSON {

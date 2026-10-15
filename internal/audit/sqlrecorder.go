@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -21,6 +22,13 @@ type SQLRecorder struct {
 	db    *sql.DB
 	clock clock.Clock
 	mu    sync.Mutex
+	last  Anchor // the newest entry this recorder wrote (guarded by mu)
+}
+
+// Anchor identifies one written entry by id and hash.
+type Anchor struct {
+	ID   int64
+	Hash string
 }
 
 var _ Recorder = (*SQLRecorder)(nil)
@@ -86,7 +94,18 @@ func (r *SQLRecorder) Record(ctx context.Context, e Entry) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("audit: commit: %w", err)
 	}
+	r.last = Anchor{ID: row.ID, Hash: row.Hash}
+	// The log line goes to journald (root-owned): `panel audit verify --journal` compares the
+	// chain against these anchors, which a rewrite of the database cannot change (SEC-17).
+	slog.InfoContext(ctx, AnchorLogMessage, "id", row.ID, "hash", row.Hash, "action", row.Action)
 	return nil
+}
+
+// LastWritten returns the newest entry this recorder wrote since the start (zero if none).
+func (r *SQLRecorder) LastWritten() Anchor {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.last
 }
 
 // normalize validates e and fills actor and IP fields from the context.
