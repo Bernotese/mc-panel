@@ -23,6 +23,7 @@ What CI covers: unit and integration tests, Docker integration (`dockerintegrati
 
 - [ ] **Server types:** create and start one server each of Vanilla, Paper, Fabric, NeoForge and a small Modrinth pack. Each reaches "running" and the client can join it via `<name>.<base domain>`.
 - [ ] **Permissions:** a user with only `server.power` on `survival` sees only `survival`, can start and stop it, sees no settings area; `PATCH /api/servers/<id>` answers `403`.
+- [ ] **Memory limit:** the server form shows the host's RAM, allows at most (host RAM − 1 GiB) / 1.25 and recommends a size per type when creating; `PATCH /api/servers/<id>` with a larger `memory_mib` answers `400 validation_failed`; if all servers together exceed the host RAM, the form warns.
 - [ ] **Change and restart:** change MOTD and memory → "restart required"; after restarting, the client shows the new MOTD, `sudo docker inspect mcpanel-mc-<id>` shows the new limit, the world is kept.
 - [ ] **Host reboot:** with servers running, `sudo reboot` the VM. Servers whose desired state is "running" run again afterwards.
 - [ ] **Delete and audit:** delete a throwaway server. Container and route are gone, its data is under `/srv/mc-panel/deleted/`, the audit log has the entry, and `ssh claude@192.168.1.117 "sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml"` reports OK.
@@ -65,7 +66,32 @@ What CI covers: service unit and Linux tests (path rules, `os.Root` limits, syml
 
 ## Plugins and mods
 
-Phase 1 of the docs refresh keeps this section in [`acceptance-tp3c.md`](acceptance-tp3c.md) until the plugin features in progress are merged; it moves here afterwards.
+What CI covers: upstream clients with real, shortened responses (Modrinth, Hangar, host allowlist incl. redirects, size and `Content-Length` checks, caches, filename fallback), resolving (depth, package limit, cycles, external, incompatible, client-only mods), the files service (`/v1/jars` with checksums, cache and metadata; symlinks, FIFOs and folders skipped; an upload with a wrong checksum leaves nothing behind), panel tests (permissions, CSRF, inventory matching, jobs, `file_exists`, updates, rate limit, icon proxy, audit), the mrpack index validation incl. path attacks, classification and import job, Vitest and Playwright against the mock (search → install with dependency → disable → update → remove; mrpack import), and the instance acceptance (`scripts/ci-instances.sh`: Chunky from Modrinth and ViaBackwards with ViaVersion from Hangar on a real Paper server, loaded after a restart, disabled not loaded, checksums, icon proxy, audit; an mrpack import on a Fabric server against the real Modrinth).
+
+Extra setup: a Fabric server `modded` (current game version, 2 GiB, started once); `helper` also has `server.plugins` and `server.power` on `modded`. On the Mac: an older LuckPerms jar for Paper from <https://modrinth.com/plugin/luckperms/versions>, and an `.mrpack` exported from the Modrinth app with Fabric API, Lithium, Sodium, Mod Menu and one own jar that is not on Modrinth, for the game version of `modded`.
+
+- [ ] **Outbound access:** `ssh claude@192.168.1.117 'for h in api.modrinth.com cdn.modrinth.com hangar.papermc.io hangarcdn.papermc.io; do sudo -u mcpanel curl -sS -o /dev/null -w "$h %{http_code}\n" "https://$h/"; done'` → four HTTP status codes (no `000`).
+- [ ] **Plugin from Modrinth:** as `helper` on `survival`, Discover → Modrinth → "LuckPerms" → install (default: newest release). Progress per jar; LuckPerms appears under Installed (source, version, icon); the restart banner appears.
+- [ ] **Plugin from Hangar with dependency:** Hangar → "ViaBackwards": the preview lists ViaVersion as installed along; both appear under Installed.
+- [ ] **Discover:** every hit carries a source badge, "Results from <source>" links to the source; "Hide installed" (on by default) hides the installed hits and says how many; scrolling to the end loads more.
+- [ ] **Active after restart:** restart from the banner; `plugins` in the console lists LuckPerms, ViaBackwards and ViaVersion; an older client can join (ViaBackwards).
+- [ ] **External only:** a Hangar project that is only linked externally shows "Only available externally" with a link and the hint to the files area; install is disabled (if none exists any more, note "not checkable").
+- [ ] **Mod with Fabric API:** on `modded`, Mods → Discover (Modrinth only) → "Chunky": Fabric API is installed along; the server starts and `chunky help` answers; client-only mods (e.g. "Sodium") do not appear in the search.
+- [ ] **Manual jar is matched:** remove LuckPerms, upload the older LuckPerms jar to `plugins/` in the files area. It shows as Modrinth/LuckPerms with its version, not as manual.
+- [ ] **Update:** "Check for updates" → update badge → "Update all (1)": the new version replaces the old jar (new file name); after a restart the new version runs.
+- [ ] **Not matched:** an own jar with `plugin.yml` and no Modrinth entry shows as manual with name and version from `plugin.yml` and the hint that updates are not possible.
+- [ ] **Installed filters:** the name filter, status (enabled/disabled) and origin filters narrow the list, the counter shows "x of y jars", "Reset filters" restores it.
+- [ ] **Disable, enable, remove:** disabling ViaBackwards renames it to `….jar.disabled` and it is not loaded after a restart (ViaVersion still is); enabling brings it back; removing Chunky on `modded` deletes the jar, Fabric API stays.
+- [ ] **One job per server:** starting an install on `survival` in two tabs at once: the second gets `409` and shows the running job; buttons are disabled meanwhile.
+- [ ] **Upstream unreachable:** block the panel's outbound HTTPS (`sudo nft add table inet plugtest; sudo nft add chain inet plugtest out "{ type filter hook output priority 0; }"; sudo nft add rule inet plugtest out meta skuid mcpanel tcp dport 443 reject`), search a new term: Discover shows the error with "Try again", Installed stays usable; `sudo nft delete table inet plugtest` restores it.
+- [ ] **Name collision:** upload another jar under the file name Chunky would get, then install Chunky: refused with `409 file_exists` (or the step fails if the file appears during the job); the existing jar is unchanged.
+- [ ] **mrpack preview:** upload an older Lithium to `mods/` of `modded`, then "Import modpack (.mrpack)" with the exported pack. The diff lists Fabric API as new (or unchanged), Lithium as updated (old → new), Sodium and Mod Menu as skipped (client only), the own jar as skipped (not on Modrinth, upload it by hand), other installed mods as staying installed, and ignored files outside `mods/`. The network tab shows that only the index was sent (request < 1 MiB).
+- [ ] **mrpack import:** import: progress per jar, new jars in `mods/`, the old Lithium is gone, restart banner; after the restart the server starts without mod errors. Optional entries can be deselected and are then not installed.
+- [ ] **mrpack version mismatch:** a pack for another Minecraft version shows a warning with both versions. As `admin`, "switch the server version" (sudo) reloads the preview without the warning; as `helper` only "Import anyway" is offered, and without it the import is refused (`409 mrpack_version_mismatch`).
+- [ ] **mrpack wrong loader:** a NeoForge pack on `modded` answers `409 mrpack_incompatible` with a clear message; a Paper server has no import button.
+- [ ] **Only `server.view`:** `friend` has no plugins area; `/api/servers/<id>/plugins` answers `403`.
+- [ ] **Audit:** one `plugin.install` per jar (also the dependencies), `plugin.update` (from/to), `plugin.toggle` (enabled), `plugin.remove`; mrpack imports add `via: mrpack` per jar and one `plugin.mrpack_import` with pack name, version and counts; search, inventory, update checks and icons are not audited.
+- [ ] **Mobile:** Installed as cards, search, install dialog, mrpack dialog and job progress usable.
 
 ## Backups
 
@@ -147,6 +173,7 @@ What CI covers (CI and `make test-vm`): token contrast in light and dark (`web/s
 - [ ] **Server header:** status, address, power and slots in every area; "restart required" after a settings change.
 - [ ] **Settings:** the danger zone "delete server" is at the end, with confirmation and sudo.
 - [ ] **Mobile** (390 px): drawer with rail and tree, no horizontal scrolling except tables and the console, slots 2×2. **Tablet** (~900 px): icon rail only; the server icon opens the tree as a flyout.
+- [ ] **Rail and layout:** on desktop the rail expands with labels and stays expanded after reload; all pages share the same content width; the server form, panel settings and profile use two columns on a wide window; stat values are readable (no pixel font).
 - [ ] **Keyboard:** tab through rail, tree and pages; focus is always visible.
 - [ ] **Login/2FA and sudo dialog** in the new style.
 - [ ] **CSP:** no CSP errors in the browser console; fonts load from the panel itself (no foreign hosts in the network tab).

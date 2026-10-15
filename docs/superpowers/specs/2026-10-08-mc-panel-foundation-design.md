@@ -175,7 +175,7 @@ Sensitive actions require a 2FA confirmation that is at most 10 min old. These i
 - Append-only table: id, time, actor (user ID or `system`/`cli`), action (e.g. `user.create`), target, IP, result, details (JSON), `prev_hash`, `hash`.
 - `hash = SHA-256(prev_hash || canonical JSON of the entry)`; writes are serialized in a transaction.
 - `panel audit verify` checks the whole chain and reports the first broken entry.
-- No update/delete through the API. An optional retention period is left to a later sub-project.
+- No update/delete through the API. An optional retention period is left to a later sub-project. (Now: there is still no retention; the audit log keeps every entry, and no query deletes from it.)
 
 ## 7. Defense and Security Center
 
