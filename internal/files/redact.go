@@ -63,7 +63,8 @@ key:
 			if i+1 >= len(raw) {
 				return 0, false // a trailing backslash: no separator follows
 			}
-			r, size := rune(raw[i+1]), 1
+			var r rune
+			size := 1
 			switch raw[i+1] {
 			case 't':
 				r = '\t'
