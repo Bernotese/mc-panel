@@ -45,6 +45,9 @@ function findSnapshot(c: Ctx, params: Params): BackupSnapshot | ErrorResponse {
 }
 
 /** Like the panel: no instance → 409 conflict, restic missing → 503, a job → 409 backup_running. */
+/** Like the panel: one manual backup per server every 10 minutes. */
+const MANUAL_EVERY_MS = 10 * 60_000
+
 function canStart(c: Ctx): ErrorResponse | null {
   if (!c.server.instance) return apiError(409, 'conflict', 'the server has no instance yet')
   if (!c.b.available) return apiError(503, 'backups_unavailable', 'restic is not available on this host')
@@ -233,6 +236,14 @@ export const backupOperations: MockOperation[] = [
       if (note !== null && note !== '' && !validNote(note)) return apiError(400, 'validation_failed', 'note: at most 64 characters, no control characters')
       const refused = canStart(c)
       if (refused) return refused
+      const wait = (c.b.manualAt ?? -Infinity) + MANUAL_EVERY_MS - Date.now()
+      if (wait > 0) {
+        return HttpResponse.json(
+          { error: 'rate_limited', message: 'the last manual backup of this server ended less than 10 minutes ago' },
+          { status: 429, headers: { 'Retry-After': String(Math.ceil(wait / 1000)) } },
+        )
+      }
+      c.b.manualAt = Date.now()
       const running = c.server.status.state === 'running'
       const steps: BackupJobStep[] = running ? ['saving', 'backing_up', 'resuming'] : ['backing_up']
       const snap = newSnapshot('manual', note || null, Math.round(1.2 * 1024 ** 3))
@@ -254,7 +265,7 @@ export const backupOperations: MockOperation[] = [
   op(
     'updateBackupSchedule',
     http.put(`${API}/servers/:id/backups/schedule`, async ({ request, params }) => {
-      const c = access(request, params)
+      const c = access(request, params, { sudo: true })
       if (c instanceof Response) return c
       const body = await readJson<Record<string, unknown>>(request)
       if (!body || typeof body !== 'object') return apiError(400, 'bad_request', 'invalid JSON body')
@@ -282,7 +293,7 @@ export const backupOperations: MockOperation[] = [
   op(
     'pinBackup',
     http.post(`${API}/servers/:id/backups/:snapshot/pin`, async ({ request, params }) => {
-      const c = access(request, params)
+      const c = access(request, params, { sudo: true })
       if (c instanceof Response) return c
       const snap = findSnapshot(c, params)
       if (snap instanceof Response) return snap

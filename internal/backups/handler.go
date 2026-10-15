@@ -37,7 +37,13 @@ type Deps struct {
 	Console   agentapi.ConsoleClient   // RCON; nil = running servers fail rcon_unavailable
 	Reconcile func()                   // asks servers for an immediate reconcile pass; nil = no-op
 	Log       *slog.Logger             // nil = slog.Default()
+	// MaxDuration bounds the service job of one backup (panel.toml backups.max_duration;
+	// 0 = defaultMaxDuration).
+	MaxDuration time.Duration
 }
+
+// defaultMaxDuration is backups.max_duration when Deps leaves it 0 (SEC-25).
+const defaultMaxDuration = 4 * time.Hour
 
 // Timings (spec §5, Global Constraints). The waits use wall time; clock.Clock only drives
 // logic (schedules, timestamps, the notification throttle). Tests shorten them.
@@ -76,6 +82,8 @@ type Handler struct {
 	tickMu    sync.Mutex // serialises ticks (Run and tests)
 	alerts    *alerts
 	downloads *userSlots
+	manual    *cooldowns    // manual backups per server (manualEvery)
+	maxBackup time.Duration // limit of a backup's service job (logic time, h.clock)
 	lastTZ    string        // panel time zone of the previous tick ("" before the first; guarded by tickMu)
 	ticked    chan struct{} // closed after the first tick of Run (tests wait for it)
 
@@ -103,8 +111,13 @@ func NewHandler(d Deps) *Handler {
 	h := &Handler{
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, notifier: n, files: d.Files, inst: d.Instances,
 		console: con, reconcile: rf, log: log, queue: newQueue(d.Clock), alerts: newAlerts(), downloads: newUserSlots(maxDownloadsPerUser),
+		manual:    newCooldowns(),
 		tickEvery: tickEvery, pollEvery: pollEvery, rconTimeout: rconTimeout, stopTimeout: stopTimeout,
 		shutdownWait: shutdownWait, ioTimeout: ioTimeout, ioClock: clock.Real{},
+	}
+	h.maxBackup = d.MaxDuration
+	if h.maxBackup <= 0 {
+		h.maxBackup = defaultMaxDuration
 	}
 	h.ticked = make(chan struct{})
 	h.rconT, _ = con.(agentapi.RconTimeoutClient)
@@ -120,8 +133,10 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Get("/servers/{id}/backups", rule, h.slow(h.handleOverview))
 	api.Post("/servers/{id}/backups", rule, h.handleCreate)
 	api.Get("/servers/{id}/backups/job", rule, h.handleJob)
-	api.Put("/servers/{id}/backups/schedule", rule, h.handleUpdateSchedule)
-	api.Post("/servers/{id}/backups/{snapshot}/pin", rule, h.slow(h.handlePin))
+	// SEC-05: a lowered retention or an unpin lets the next scheduled run prune snapshots, so
+	// both need sudo like restore and delete.
+	api.Put("/servers/{id}/backups/schedule", sudo, h.handleUpdateSchedule)
+	api.Post("/servers/{id}/backups/{snapshot}/pin", sudo, h.slow(h.handlePin))
 	api.Post("/servers/{id}/backups/{snapshot}/restore", sudo, h.slow(h.handleRestore))
 	api.Delete("/servers/{id}/backups/{snapshot}", sudo, h.slow(h.handleDelete))
 	api.Get("/servers/{id}/backups/{snapshot}/download", rule, h.slow(h.handleDownload))

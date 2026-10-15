@@ -83,15 +83,24 @@ function bumpRevision(s: MockServer): void {
   else s.runningRevision = s.revision
 }
 
-/** Like the panel: only admins get the raw last_error, other users see the state only. */
+/**
+ * Like the panel: only admins get the raw last_error, other users see the state only; the seed
+ * only goes to admins and users with server.files.
+ */
 function toServer(s: MockServer, permissions: Permission[], admin = true): Server {
   const base = db.serverSettings.base_domain
+  let instance = s.instance
+  if (instance && !admin && !permissions.includes('server.files')) {
+    const properties = { ...instance.properties }
+    delete properties.seed
+    instance = { ...instance, properties }
+  }
   return {
     id: s.id,
     name: s.name,
     permissions,
     address: s.instance && base ? `${s.name}.${base}` : null,
-    instance: s.instance,
+    instance,
     status: admin ? s.status : { ...s.status, last_error: '' },
     down_alerts: admin ? (db.monitoring.downAlerts[s.id] ?? true) : null,
   }

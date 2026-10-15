@@ -301,7 +301,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	// Full duplex: an error found before the body has been read completely (409, 413, 429, 507,
 	// a full disk) is answered while the client is still sending (failEarly).
 	_ = rc.EnableFullDuplex()
-	body := &deadlineReader{r: r.Body, rc: rc, now: s.io.Now}
+	body := newDeadlineReader(r.Body, rc, s.io.Now)
 	res, err := s.receive(r, rc, body)
 	_ = rc.SetReadDeadline(time.Time{})
 	_ = rc.SetWriteDeadline(s.io.Now().Add(ioTimeout))
@@ -383,7 +383,7 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 		// produces its first bytes only after some entries.
 		_ = rc.Flush()
 	}
-	err = s.svc.Download(r.Context(), id, q.Get("path"), start, &deadlineWriter{w: w, rc: rc, now: s.io.Now})
+	err = s.svc.Download(r.Context(), id, q.Get("path"), start, newDeadlineWriter(w, rc, s.io.Now))
 	if err == nil {
 		return
 	}
@@ -399,34 +399,60 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 }
 
 // deadlineReader renews the connection's read deadline before every read, so an upload may
-// take hours but never stalls for longer than ioTimeout. eof records that the body was read
-// to its end.
+// take hours but never stalls for longer than ioTimeout; guard cuts off a client that is too
+// slow or takes too long (slowclient.go). eof records that the body was read to its end.
 type deadlineReader struct {
-	r   io.Reader
-	rc  *http.ResponseController
-	now func() time.Time
-	eof bool
+	r     io.Reader
+	rc    *http.ResponseController
+	now   func() time.Time
+	guard *rateGuard
+	eof   bool
+}
+
+func newDeadlineReader(r io.Reader, rc *http.ResponseController, now func() time.Time) *deadlineReader {
+	return &deadlineReader{r: r, rc: rc, now: now, guard: newRateGuard(now, maxUploadTime)}
 }
 
 func (d *deadlineReader) Read(p []byte) (int, error) {
-	_ = d.rc.SetReadDeadline(d.now().Add(ioTimeout))
+	if err := d.guard.before(); err != nil {
+		return 0, err
+	}
+	start := d.now()
+	_ = d.rc.SetReadDeadline(start.Add(ioTimeout))
 	n, err := d.r.Read(p)
 	if errors.Is(err, io.EOF) {
 		d.eof = true
 	}
+	if gerr := d.guard.after(n, d.now().Sub(start)); gerr != nil && err == nil {
+		err = gerr
+	}
 	return n, err
 }
 
-// deadlineWriter renews the write deadline before every write (downloads).
+// deadlineWriter renews the write deadline before every write (downloads), with the
+// slow-client limits of guard.
 type deadlineWriter struct {
-	w   io.Writer
-	rc  *http.ResponseController
-	now func() time.Time
+	w     io.Writer
+	rc    *http.ResponseController
+	now   func() time.Time
+	guard *rateGuard
+}
+
+func newDeadlineWriter(w io.Writer, rc *http.ResponseController, now func() time.Time) *deadlineWriter {
+	return &deadlineWriter{w: w, rc: rc, now: now, guard: newRateGuard(now, maxDownloadTime)}
 }
 
 func (d *deadlineWriter) Write(p []byte) (int, error) {
-	_ = d.rc.SetWriteDeadline(d.now().Add(ioTimeout))
-	return d.w.Write(p)
+	if err := d.guard.before(); err != nil {
+		return 0, err
+	}
+	start := d.now()
+	_ = d.rc.SetWriteDeadline(start.Add(ioTimeout))
+	n, err := d.w.Write(p)
+	if gerr := d.guard.after(n, d.now().Sub(start)); gerr != nil && err == nil {
+		err = gerr
+	}
+	return n, err
 }
 
 func (s *Server) extract(w http.ResponseWriter, r *http.Request) {

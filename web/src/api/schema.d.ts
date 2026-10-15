@@ -1119,7 +1119,7 @@ export interface paths {
         };
         get?: never;
         /**
-         * Set schedule and retention of the server (audited)
+         * Set schedule and retention of the server (sudo; audited)
          * @description Times are in the panel time zone (ServerSettings.backup_timezone). The retention applies only to scheduled snapshots; manual, pre-restore and pinned ones stay.
          */
         put: operations["updateBackupSchedule"];
@@ -1156,7 +1156,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Pin or unpin a scheduled snapshot (pinned ones survive the retention; the snapshot gets a new ID; audited) */
+        /** Pin or unpin a scheduled snapshot (pinned ones survive the retention; the snapshot gets a new ID; sudo; audited) */
         post: operations["pinBackup"];
         delete?: never;
         options?: never;
@@ -1679,7 +1679,7 @@ export interface components {
             java: components["schemas"]["JavaVersion"];
             /** @description At most max_mib of GET /servers/memory on this host */
             memory_mib: number;
-            /** @description All fields set (defaults resolved) */
+            /** @description All fields set (defaults resolved); seed only for admins and users with server.files on the server */
             properties: components["schemas"]["ServerProperties"];
         };
         /**
@@ -5257,6 +5257,15 @@ export interface operations {
             404: components["responses"]["NotFound"];
             /** @description backup_running (a backup, restore or delete job of this server is queued or running) or conflict (the server has no instance yet) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: a manual backup only 10 minutes after the previous one of the server ended (one refused before the file service started it does not count; Retry-After header set) */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

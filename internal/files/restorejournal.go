@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/Bernotese/mc-panel/internal/config"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 )
 
@@ -285,7 +286,7 @@ func (s *Service) recoverRestore(id int64, j restoreJournal) bool {
 	if j.Phase == phaseNewMoving {
 		from, result = j.Tmp+"/new", "completed" // the snapshot was checked completely before
 	}
-	moved, err := moveUp(root, from)
+	moved, err := moveUp(root, from, s.cfg.Limits)
 	if err == nil {
 		err = syncRootDir(root, ".")
 	}
@@ -311,7 +312,7 @@ func (s *Service) dropJournal(id int64) bool {
 // moveUp moves every visible entry of folder from to the top level of root. An entry of that
 // name at the top is replaced only if it is not a folder (rename semantics); a folder there
 // fails the move.
-func moveUp(root *os.Root, from string) (int, error) {
+func moveUp(root *os.Root, from string, lim config.FilesLimits) (int, error) {
 	fi, err := lstat(root, from)
 	if errors.Is(err, filesapi.ErrNotFound) {
 		return 0, nil
@@ -327,7 +328,7 @@ func moveUp(root *os.Root, from string) (int, error) {
 			return 0, err
 		}
 	}
-	names, err := visibleNames(root, from)
+	names, err := visibleNames(root, from, lim)
 	if err != nil {
 		return 0, err
 	}

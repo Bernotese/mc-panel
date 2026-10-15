@@ -23,16 +23,22 @@ import (
 const (
 	defaultTail       = 500
 	heartbeatInterval = 15 * time.Second
-	recheckInterval   = 30 * time.Second
+	recheckInterval   = 5 * time.Second  // SEC-29: a revoke ends the stream within 5 s (≤ 14 streams, one cheap DB check each)
 	reconnectDelay    = 3 * time.Second  // first delay before the agent stream is re-opened
 	maxReconnectDelay = 10 * time.Second // the delay doubles up to this while nothing changes
 	writeTimeout      = 30 * time.Second
 	maxStreamsPerUser = 4
-	lineBuffer        = 64
+	// maxStreams bounds the streams of the whole panel below the agent's cap (16,
+	// agent.MaxLogStreams); admins may open adminStreamReserve more, so they can still look at
+	// a console while other users hold every slot (SEC-24).
+	maxStreams         = 12
+	adminStreamReserve = 2
+	lineBuffer         = 64
 )
 
 var (
 	errTooManyStreams = errors.New("console: too many open streams")
+	errPanelStreams   = errors.New("console: too many open streams on the panel")
 	errShuttingDown   = errors.New("console: shutting down")
 	errStop           = errors.New("console: stop stream")
 )
@@ -48,11 +54,12 @@ type stateEvent struct {
 	Running bool `json:"running"`
 }
 
-// streamSet counts open streams per user and cancels all of them on Shutdown.
+// streamSet counts open streams per user and in total and cancels all of them on Shutdown.
 type streamSet struct {
 	mu      sync.Mutex
 	closed  bool
 	next    int
+	total   int
 	perUser map[int64]int
 	cancels map[int]context.CancelFunc
 }
@@ -61,8 +68,9 @@ func newStreamSet() *streamSet {
 	return &streamSet{perUser: map[int64]int{}, cancels: map[int]context.CancelFunc{}}
 }
 
-// acquire registers a stream of userID; release must be called when it ends.
-func (s *streamSet) acquire(userID int64, cancel context.CancelFunc) (release func(), err error) {
+// acquire registers a stream of userID (admin: may use the reserved slots); release must be
+// called when it ends.
+func (s *streamSet) acquire(userID int64, admin bool, cancel context.CancelFunc) (release func(), err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -71,7 +79,15 @@ func (s *streamSet) acquire(userID int64, cancel context.CancelFunc) (release fu
 	if s.perUser[userID] >= maxStreamsPerUser {
 		return nil, errTooManyStreams
 	}
+	limit := maxStreams
+	if admin {
+		limit += adminStreamReserve
+	}
+	if s.total >= limit {
+		return nil, errPanelStreams
+	}
 	s.perUser[userID]++
+	s.total++
 	s.next++
 	id := s.next
 	s.cancels[id] = cancel
@@ -79,6 +95,7 @@ func (s *streamSet) acquire(userID int64, cancel context.CancelFunc) (release fu
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		delete(s.cancels, id)
+		s.total--
 		s.perUser[userID]--
 		if s.perUser[userID] <= 0 {
 			delete(s.perUser, userID)
@@ -109,10 +126,13 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 	p, _ := principal.From(r.Context()) // guaranteed by the rbac rule
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	release, err := h.streams.acquire(p.UserID, cancel)
+	release, err := h.streams.acquire(p.UserID, p.IsAdmin(), cancel)
 	switch {
 	case errors.Is(err, errTooManyStreams):
 		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "too many open consoles, close one first")
+		return
+	case errors.Is(err, errPanelStreams):
+		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "too many consoles are open on the panel, try again later")
 		return
 	case err != nil:
 		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeAgentUnavailable, "the panel is shutting down")

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
@@ -201,8 +202,11 @@ type waitMode struct {
 	// stall: the job reports byte progress (backup, pre-restore, restore); no change for
 	// stallTimeout cancels and fails it.
 	stall bool
-	// limit > 0 bounds the whole job instead (forget reports no bytes).
-	limit time.Duration
+	// limit > 0 bounds the whole job (forget reports no bytes; a backup holds save-off and the
+	// panel's single job slot); limitMsg is the job error then and onLimit (may be nil) runs.
+	limit    time.Duration
+	limitMsg string
+	onLimit  func(msg string)
 	// untilEnd: the restoring step, which holds the start gate. Poll errors never end the wait
 	// and a cancelled job is waited for until a successful poll shows its end, so the gate does
 	// not open while the service may still swap the data directory.
@@ -210,10 +214,26 @@ type waitMode struct {
 }
 
 var (
-	waitBackup  = waitMode{stall: true}
 	waitRestore = waitMode{stall: true, untilEnd: true}
-	waitForget  = waitMode{limit: forgetTimeout}
+	waitForget  = waitMode{limit: forgetTimeout, limitMsg: msgForgetTimeout}
 )
+
+// waitBackup watches the service job of a backup (also a pre-restore one): stall watchdog
+// and backups.max_duration (SEC-25).
+func (h *Handler) waitBackup() waitMode {
+	return waitMode{stall: true, limit: h.maxBackup, limitMsg: "the backup did not finish within " + fmtDuration(h.maxBackup)}
+}
+
+// fmtDuration writes d as hours and minutes ("4 hours", "90 minutes").
+func fmtDuration(d time.Duration) string {
+	if d%time.Hour == 0 {
+		if d == time.Hour {
+			return "1 hour"
+		}
+		return fmt.Sprintf("%d hours", d/time.Hour)
+	}
+	return fmt.Sprintf("%d minutes", d/time.Minute)
+}
 
 // waitService polls the service job jobID of the server until it ended; progress goes to j.
 // A cancelled ctx cancels the service job. Stall watchdog and overall limit (h.clock) follow
@@ -270,7 +290,10 @@ func (h *Handler) waitService(ctx context.Context, j *job, id int64, jobID strin
 		case m.stall && now.Sub(lastChange) >= stallTimeout:
 			over = msgStalled
 		case m.limit > 0 && now.Sub(started) >= m.limit:
-			over = msgForgetTimeout
+			over = m.limitMsg
+			if m.onLimit != nil {
+				m.onLimit(over)
+			}
 		}
 		if over != "" {
 			h.log.WarnContext(ctx, "backups: cancelling the service job", "server_id", id, "job", jobID, "reason", over)
@@ -340,7 +363,14 @@ func (h *Handler) runBackup(ctx context.Context, j *job, kind filesapi.SnapshotK
 	if err != nil {
 		return "", err
 	}
-	done, err := h.waitService(ctx, j, id, sj.ID, waitBackup)
+	j.serviceStarted = true
+	m := h.waitBackup()
+	if j.spec.trigger == triggerManual {
+		// Scheduled runs notify every failure (retention.go); a manual one only this one, the
+		// user may have left the page meanwhile.
+		m.onLimit = func(msg string) { h.alert(ctx, id, j.spec.name, alertBackup, msg) }
+	}
+	done, err := h.waitService(ctx, j, id, sj.ID, m)
 	if err != nil {
 		return "", err
 	}
@@ -377,10 +407,37 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
+	// The cooldown check, its mark and the queueing are one step, so a second request at the
+	// same time still gets 409 backup_running. The mark comes first: the job may fail (and clear
+	// it) right after it was queued.
+	h.manual.mu.Lock()
+	defer h.manual.mu.Unlock()
+	now := h.clock.Now()
+	if h.queue.busy(srv.ID) {
+		h.writeError(w, r, errBackupRunning)
+		return
+	}
+	if wait := h.manual.waitLocked(srv.ID, now); wait > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int((wait+time.Second-1)/time.Second)))
+		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited,
+			fmt.Sprintf("the last manual backup of this server ended less than %d minutes ago", int(manualEvery/time.Minute)))
+		return
+	}
+	h.manual.last[srv.ID] = now
 	v, err := h.queue.add(ctx, jobSpec{
 		serverID: srv.ID, name: srv.Name, kind: kindBackup, trigger: triggerManual,
 		run: func(ctx context.Context, j *job) (string, error) {
 			snap, err := h.runBackup(ctx, j, filesapi.SnapshotManual, note)
+			if j.serviceStarted {
+				// The cooldown runs from the end of a backup that ran, also of one that failed
+				// (time limit, stall, restic): it could otherwise be restarted at once and keep
+				// the server in save-off.
+				h.manual.mark(srv.ID, h.clock.Now())
+			} else if err != nil {
+				// Refused before the stream started (busy, no space, RCON or save-off failed):
+				// it does not count.
+				h.manual.clear(srv.ID, now)
+			}
 			if err = h.deletedOr(ctx, srv.ID, err); errors.Is(err, errServerDeleted) {
 				return "", err
 			}
@@ -396,6 +453,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if err != nil {
+		delete(h.manual.last, srv.ID)
 		h.writeError(w, r, err)
 		return
 	}

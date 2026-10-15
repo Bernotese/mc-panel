@@ -195,11 +195,19 @@ func (s *Service) Write(ctx context.Context, req filesapi.WriteRequest) (filesap
 		}
 		content = restorePassword(content, string(cur))
 	}
-	res, err := s.reserve(req.ID, int64(len(content)))
-	if err != nil {
-		return filesapi.WriteResponse{}, err
+	// Only growth needs the reserve (SEC-04): a server whose disk is already below it can still
+	// shorten or save its files unchanged.
+	grow := int64(len(content))
+	if fi != nil {
+		grow -= fi.Size()
 	}
-	defer res.release()
+	if grow > 0 {
+		res, err := s.reserve(req.ID, grow)
+		if err != nil {
+			return filesapi.WriteResponse{}, err
+		}
+		defer res.release()
+	}
 	if err := s.writeAtomic(root, clean, []byte(content), req.ExpectedMTime != nil); err != nil {
 		return filesapi.WriteResponse{}, err
 	}
