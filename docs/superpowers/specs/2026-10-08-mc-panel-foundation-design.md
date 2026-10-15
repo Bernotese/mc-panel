@@ -125,6 +125,7 @@ Linux-specific code sits behind interfaces, implementations are chosen by build 
 
 - argon2id (m=64 MiB, t=3, p=2; parameters stored in the hash string, re-hash on the next login when the parameters change).
 - Minimum length 12, maximum length 256, checked against an embedded list of common passwords (e.g. the top 100k).
+  (Now, security review SEC-18: the list comes from SecLists (MIT licence); passwords with at most 3 distinct characters are rejected as well.)
 - Unknown user: a dummy hash is computed anyway; the error message is always "wrong username or password".
 
 ### 4.2 Second factor
@@ -133,6 +134,7 @@ Linux-specific code sits behind interfaces, implementations are chosen by build 
 - **WebAuthn/passkeys**: several credentials per user, nameable, deletable. RP ID = configured domain (dev: `localhost`).
 - **Recovery codes**: 10 codes, 10 characters each, stored only hashed, single use, can be regenerated (sudo).
 - **Mandatory**: admins must set up 2FA before they can do anything else (forced setup flow). Can be enforced for `user` by a global setting.
+- (Now, SEC-15: setting up the **first** second factor asks for the current password, because there is no factor yet to confirm sudo with.)
 
 ### 4.3 Login flow
 
@@ -149,6 +151,7 @@ Every attempt (success/failure, step, IP, user agent, username) is recorded in `
 - Idle timeout 30 min, absolute lifetime 12 h (configurable).
 - Stored: user, created, last active, IP, user agent, country (GeoIP), sudo until.
 - Profile page: list of active sessions, revoke one or all others. A password change revokes all other sessions.
+- (Now, SEC-19 and SEC-45: requests the UI sends in the background (polling) carry `X-MCPanel-Background: 1` and do not extend the idle time; a role change ends all sessions of the target user.)
 
 ### 4.5 Sudo mode
 
@@ -174,7 +177,7 @@ Sensitive actions require a 2FA confirmation that is at most 10 min old. These i
 
 - Append-only table: id, time, actor (user ID or `system`/`cli`), action (e.g. `user.create`), target, IP, result, details (JSON), `prev_hash`, `hash`.
 - `hash = SHA-256(prev_hash || canonical JSON of the entry)`; writes are serialized in a transaction.
-- `panel audit verify` checks the whole chain and reports the first broken entry.
+- `panel audit verify` checks the whole chain and reports the first broken entry. (Now: with `-journal -` it also compares the DB with the anchors in the journal.)
 - No update/delete through the API. An optional retention period is left to a later sub-project. (Now: there is still no retention; the audit log keeps every entry, and no query deletes from it.)
 
 ## 7. Defense and Security Center
@@ -194,11 +197,15 @@ Token bucket (in memory, per process):
 
 Exceeding a limit → `429` with `Retry-After`.
 
+(Now, SEC-09: the username bucket counts only failed logins, and a device that signed in successfully as that user within the last 30 days (known device) skips it and gets a reserved argon2 slot, so it can still sign in while the username is under attack; a new device still gets `429` (a rate limit, not a lock-out).)
+
 ### 7.2 Jail
 
 - Failed attempts (password or 2FA) per IP: 5 in 10 min → ban for 15 min.
 - Repeat offenders: the duration doubles with each new ban within 30 days, at most 7 days.
+- (Now, SEC-09: against attackers rotating IPv6 addresses, failures also count per prefix: 20 failures in 10 min from one /56 or 50 from one /48 jail that prefix; the agent accepts bans down to /48.)
 - Jailed IPs get `403` for all requests (middleware before routing) and are added to the nftables set through the agent (with timeout = ban duration). If the agent fails, the in-app ban stays in effect; the sync is caught up later.
+- (Now, SEC-45: a password change also lifts this 2FA lockout.)
 - Accounts are never locked because of failed password logins (this prevents anonymous attackers from locking out the admin). The only exception: after 10 wrong 2FA/sudo codes in 15 min, this user's second factor is locked for 15 min. Only someone who already knows the password can trigger this; without this limit, guessing 2FA codes over rotating IPs would be unlimited. Lifting it: change the password (ends the other sessions) or restart the panel.
 - Allowlisted IPs are never jailed.
 - An admin can lift jails (sudo) or ban IPs manually.
@@ -207,6 +214,7 @@ Exceeding a limit → `429` with `Retry-After`.
 
 - Allow list and deny list with CIDR (IPv4/IPv6), optionally with a comment and expiry date.
 - Optional "admin access only from the allowlist": users with role `admin` can only sign in from allowed networks.
+  (Now, SEC-16: it applies to every request of an admin, not only to the sign-in, and saving it ends admin sessions from outside the allowed networks.)
 - Optional country filter (allowed countries) through a local DB-IP Lite database (MMDB, no API key needed). Without the database the feature is off and the country columns are empty.
 - Protection against locking yourself out: a change is rejected if it would exclude the admin's current IP. Emergency: `panel admin unlock` on the CLI.
 
@@ -226,6 +234,7 @@ Exceeding a limit → `429` with `Retry-After`.
 - Events: login from a new device/new IP, jail triggered, role/permissions changed, user created/deleted, 2FA changed, audit chain invalid.
 - Sent asynchronously with retry and deduplication (same event type + IP at most every 5 min); errors go to the log, not to the user.
 - "Send test" button in the UI.
+- (Now, SEC-20 and SEC-21: further events `auth.2fa_lockout`, `auth.2fa_failed`, `auth.recovery_code_used`, `auth.password_changed`; jail notifications at most 5 per 10 min, then one summary; operational events (backups, monitoring) have a queue of their own, so a flood of security events cannot delay them; a `Retry-After` of the target is honoured (at most 30 s); the test endpoint allows 6 calls per minute and user and no longer shows the target's HTTP status. SEC-17: every audit entry is also written to the journal as `{"msg":"audit","id":N,"hash":"…"}` (an anchor outside the DB); the panel verifies the chain every 24 h and notifies `audit.chain_broken`.)
 
 ## 8. Frontend
 

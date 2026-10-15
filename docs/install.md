@@ -191,7 +191,7 @@ Add these to your own host backups:
 | `/srv/mc-panel/backups/keys/` | the password of each restic repository; **without it a repository cannot be read** |
 | `/srv/mc-panel/backups/repos/` | the snapshots themselves (self-contained; copy them with their keys, e.g. `rsync -a /srv/mc-panel/backups/ <target>/`) |
 | `/var/lib/mc-panel/panel.db` | users, permissions, server settings, audit log (copy it with `sqlite3 … ".backup …"` or while the panel is stopped) |
-| `/var/lib/mc-panel/secret.key` | encrypts TOTP secrets and notification settings in the database; the database is of little use without it |
+| `/var/lib/mc-panel/secret.key` | encrypts TOTP secrets and notification settings in the database; the database is of little use without it. Keep it **apart** from the database backups (another medium or a password manager): a stolen backup with both decrypts every TOTP secret and notifier token. |
 | `/etc/mc-panel/`, `/etc/mc-panel-files/` | configuration |
 
 How to restore a snapshot without the panel is described in [`docs/dev/README.md`](dev/README.md) ("Backups").
@@ -223,7 +223,8 @@ Services: `mcpanel-panel.service` (+ `.socket`), `mcpanel-agent.service`, `mcpan
 - **Health check by hand:** the panel only accepts requests with `X-Forwarded-For` on its socket: `curl --unix-socket /run/mc-panel-web/panel.sock -H 'X-Forwarded-For: 127.0.0.1' http://panel/api/health`.
 - **A service fails:** `journalctl -u mcpanel-panel` (or `-agent`, `-files`). If the agent is down, the panel answers `503 agent_unavailable` for server actions; logins and in-app jails keep working.
 - **Locked out** (jail, admin-login allowlist, country filter): `sudo runuser -u mcpanel -- panel admin unlock -config /etc/mc-panel/panel.toml` lifts all active jails, turns off "Admin access only from the allowlist" and clears the country filter (audited). A 2FA lockout (10 wrong codes in 15 minutes) ends after 15 minutes or with a panel restart.
-- **Audit log integrity:** `sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml`.
+- **Audit log integrity:** `sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml` checks the hash chain. The panel also writes every entry's hash to the journal and checks the chain every 24 h itself (notification `audit.chain_broken`). To compare the database with these anchors: `journalctl -u mcpanel-panel -o cat | sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml -journal -`. Entries written by the CLI, and entries older than the journal keeps, show as "without anchor". After restoring `panel.db` from a backup, ids written after that backup appear again with different hashes; check only the time since the restore (`journalctl --since …`).
+- **Admin allowlist:** with "Admin access only from the allowlist" every admin request from another network is refused (`403`), and saving the setting ends admin sessions from outside it. `panel admin unlock` turns it off.
 - **Update exit code 3 or 4:** see [Rollback](#rollback); the details are in `/var/log/mc-panel-install.log`.
 - **A restore is stuck** ("the files service is busy for this server"): follow the runbook in [`docs/dev/README.md`](dev/README.md) ("Backups").
 - **Another reverse proxy instead of Caddy:** it must set `X-Forwarded-For` without a port, must not buffer uploads, downloads or the console's Server-Sent Events, and needs a body limit of at least 4 GiB. Details in [`docs/dev/README.md`](dev/README.md) ("Production").

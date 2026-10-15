@@ -17,6 +17,17 @@ Run the sections a release touches; run all of them for a release that changes m
 
 Most API checks below run in the browser DevTools console as `friend`, e.g. `await fetch('/api/servers/<id>/files').then(r => r.status)`; `<id>` comes from the URL.
 
+## Sign-in and Security Center
+
+What CI covers: auth, defense and notify unit tests, the e2e sign-in with TOTP, and the jail acceptance (`scripts/ci-acceptance.sh`).
+
+- [ ] **First factor needs the password:** a new user without 2FA must enter the current password when setting up the first TOTP or passkey; a wrong password is refused.
+- [ ] **Known device under attack:** script 20 failed logins for `helper` from another address (e.g. `curl` on the VM). Signing in as `helper` from your browser (signed in there before) still works; a fresh private window gets `429` (rate limit, no lock-out).
+- [ ] **Admin allowlist:** enable "Admin access only from the allowlist" with only your current network; an admin session from another address (e.g. via a phone hotspot) gets `403` on the next request and its session is gone after saving. `panel admin unlock` turns it off.
+- [ ] **Role change:** changing `helper` to admin and back ends `helper`'s open sessions.
+- [ ] **Idle timeout:** leave an open tab with polling areas (dashboard, monitoring) alone for 30 min: the session ends anyway.
+- [ ] **Audit anchors:** `journalctl -u mcpanel-panel -o cat | sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml -journal -` reports the chain intact (CLI entries as "without anchor").
+
 ## Instances
 
 What CI covers: unit and integration tests, Docker integration (`dockerintegration`), the instance acceptance through the agent (`scripts/ci-instances.sh`: routing, hardening, crash restart, delete), Playwright against the mock.
@@ -142,6 +153,7 @@ ssh claude@192.168.1.117 'sudo nft delete table inet mcpanel_test'   # reachable
 - [ ] **Only `server.view`:** `friend` sees no host values, no down-alert toggle and no monitoring settings; `/api/monitoring/host?range=1h` answers `403`, `/api/monitoring/overview` lists only `survival` with `host: null`, metrics of `creative` answer `403`.
 - [ ] **Settings and audit:** invalid values (e.g. 0 or 51 %) are rejected with the allowed range; valid ones need sudo; audit `monitoring.settings_update` (from/to) and `server.alerts_update`.
 - [ ] **Without a notification channel:** the monitoring settings warn that alerts are detected but not sent.
+- [ ] **Security notifications:** ntfy gets a message for a password change, a used recovery code, wrong 2FA codes and the 2FA lockout (10 wrong codes); 20 jails within 10 min send at most 5 messages plus one summary; "send test" works at most 6 times per minute and shows no HTTP status of the target.
 - [ ] **Deleted server:** its rows are gone (`sudo sqlite3 /var/lib/mc-panel/panel.db 'SELECT count(*) FROM metrics_raw WHERE series = <id>'` → `0`).
 - [ ] **DB size:** after a few days, about 23 000 raw rows per server and day that disappear after 24 h; 10 servers over 30 days stay well below 50 MB.
 - [ ] **Mobile:** host and server values readable, charts full width, tooltip by tap.
