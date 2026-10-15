@@ -225,8 +225,8 @@ func TestSecurityHeaders(t *testing.T) {
 			t.Errorf("CSP %q missing %q", csp, part)
 		}
 	}
-	if strings.Contains(csp, "'unsafe-inline'") || strings.Contains(csp, "'unsafe-eval'") {
-		t.Errorf("CSP must not allow inline or eval: %q", csp)
+	if strings.Contains(csp, "'unsafe-inline'") || strings.Contains(csp, "'unsafe-eval'") || strings.Contains(csp, "data:") {
+		t.Errorf("CSP must not allow inline, eval or data: URLs: %q", csp)
 	}
 	if ro := rec.Header().Get("Content-Security-Policy-Report-Only"); ro != "require-trusted-types-for 'script'; trusted-types 'none'" {
 		t.Errorf("report-only CSP = %q", ro)

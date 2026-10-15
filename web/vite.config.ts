@@ -52,7 +52,7 @@ function forbidMswInBuild(): Plugin {
 
 /** The panel's CSP (CSP in internal/httpx/middleware.go; a Go test in internal/webui keeps both equal). */
 const cspPolicy = (nonce: string) =>
-  `default-src 'self'; script-src 'self'; style-src 'self' 'nonce-${nonce}'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
+  `default-src 'self'; script-src 'self'; style-src 'self' 'nonce-${nonce}'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
 const CSP_REPORT_ONLY = "require-trusted-types-for 'script'; trusted-types 'none'"
 
 /** The panel replaces this in index.html with a fresh nonce per response (internal/webui). */
