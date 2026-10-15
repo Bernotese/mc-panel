@@ -23,6 +23,8 @@ const maxPasskeyName = 64
 type passkeyRegistrationRequest struct {
 	Name       string          `json:"name"`
 	Credential json.RawMessage `json:"credential"`
+	// CurrentPassword is required for the first second factor (SEC-15).
+	CurrentPassword string `json:"current_password"`
 }
 
 type passkeyJSON struct {
@@ -87,6 +89,10 @@ func (h *Handler) finishPasskeyRegistration(w http.ResponseWriter, r *http.Reque
 		httpx.WriteError(w, r, http.StatusBadRequest, httpx.CodeValidation, "name (1-64 characters) and credential are required")
 		return
 	}
+	pwVerified, ok := h.confirmFirstFactor(w, r, user, req.CurrentPassword)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	data, err := h.takeCeremony(ctx, p.SessionID, ceremonyRegister)
 	if errors.Is(err, errNoCeremony) {
@@ -121,7 +127,7 @@ func (h *Handler) finishPasskeyRegistration(w http.ResponseWriter, r *http.Reque
 	var row store.WebauthnCredential
 	var codes []string
 	err = h.withTx(ctx, func(q *store.Queries) error {
-		if err := h.guardAddFactor(ctx, q, p, user.ID); err != nil {
+		if err := h.guardAddFactor(ctx, q, p, user.ID, pwVerified); err != nil {
 			return err
 		}
 		var err error
@@ -140,6 +146,9 @@ func (h *Handler) finishPasskeyRegistration(w http.ResponseWriter, r *http.Reque
 		return
 	case errors.Is(err, errSudoRequired):
 		httpx.WriteError(w, r, http.StatusForbidden, httpx.CodeSudoRequired, "re-authentication required")
+		return
+	case errors.Is(err, errPasswordRequired):
+		passwordRequired(w, r)
 		return
 	case store.IsUniqueViolation(err):
 		httpx.WriteError(w, r, http.StatusBadRequest, httpx.CodeBadRequest, "this passkey is already registered")

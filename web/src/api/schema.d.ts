@@ -237,6 +237,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Activates the pending TOTP secret. The first second factor also needs current_password (401 invalid_credentials without it); further methods need sudo instead. */
         post: operations["enableTotp"];
         delete?: never;
         options?: never;
@@ -285,6 +286,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Stores the new passkey. The first second factor also needs current_password (401 invalid_credentials without it); further methods need sudo instead. */
         post: operations["finishPasskeyRegistration"];
         delete?: never;
         options?: never;
@@ -1572,6 +1574,13 @@ export interface components {
             credential: {
                 [key: string]: unknown;
             };
+            /** @description required for the first second factor */
+            current_password?: string;
+        };
+        TotpEnableRequest: {
+            code: string;
+            /** @description required for the first second factor */
+            current_password?: string;
         };
         SudoResponse: {
             /** Format: int64 */
@@ -3180,7 +3189,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CodeRequest"];
+                "application/json": components["schemas"]["TotpEnableRequest"];
             };
         };
         responses: {
@@ -3273,6 +3282,8 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     listPasskeys: {

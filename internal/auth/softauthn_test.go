@@ -171,5 +171,5 @@ func (e *testEnv) registerPasskey(c *client, name string) (*softAuthenticator, r
 	if begin.code != 200 {
 		e.t.Fatalf("passkey begin = %d %s", begin.code, begin.body)
 	}
-	return a, c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": name, "credential": a.register(begin.body)})
+	return a, c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": name, "credential": a.register(begin.body), "current_password": testPassword})
 }

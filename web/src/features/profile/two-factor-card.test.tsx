@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { loginAs, MOCK_TOTP_CODE } from '@/mocks/db'
+import { loginAs, MOCK_PASSWORD, MOCK_TOTP_CODE } from '@/mocks/db'
 import { renderWithProviders } from '@/test/render'
 import { TwoFactorCard } from './two-factor-card'
 
@@ -17,6 +17,7 @@ describe('TwoFactorCard', () => {
     const dialog = screen.getByRole('dialog', { name: 'Authenticator-App einrichten' })
     await user.click(within(dialog).getByRole('button', { name: 'Einrichtung starten' }))
     await user.type(await within(dialog).findByLabelText('Code aus der Authenticator-App'), MOCK_TOTP_CODE)
+    await user.type(within(dialog).getByLabelText('Aktuelles Passwort'), MOCK_PASSWORD)
     await user.click(within(dialog).getByRole('button', { name: 'Aktivieren' }))
     expect(await within(dialog).findByRole('list', { name: 'Wiederherstellungscodes' })).toBeInTheDocument()
     await user.click(within(dialog).getByRole('checkbox', { name: 'Ich habe die Codes sicher gespeichert.' }))
@@ -32,6 +33,7 @@ describe('TwoFactorCard', () => {
     const dialog = screen.getByRole('dialog', { name: 'Authenticator-App einrichten' })
     await user.click(within(dialog).getByRole('button', { name: 'Einrichtung starten' }))
     await user.type(await within(dialog).findByLabelText('Code aus der Authenticator-App'), MOCK_TOTP_CODE)
+    await user.type(within(dialog).getByLabelText('Aktuelles Passwort'), MOCK_PASSWORD)
     await user.click(within(dialog).getByRole('button', { name: 'Aktivieren' }))
     await within(dialog).findByRole('list', { name: 'Wiederherstellungscodes' })
 
