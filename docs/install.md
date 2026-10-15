@@ -85,7 +85,7 @@ The agent's jails (5 failed sign-ins, IP rules; table `inet mcpanel`) drop **all
 
 The three services run under systemd sandboxing (`systemd-analyze security` scores about 1.2 for the panel, 2.0 for the agent, 0.6 for the files service):
 
-- **panel** (`mcpanel`): no capabilities, writes only `/var/lib/mc-panel`, only Unix, IPv4 and IPv6 sockets, no link-local addresses (cloud metadata), a system-call filter, `MemoryMax=1G`, `TasksMax=512`.
+- **panel** (`mcpanel`): no capabilities, writes only `/var/lib/mc-panel`, only Unix, IPv4, IPv6 and netlink sockets (netlink to list its own addresses for the notifier filter), no link-local addresses (cloud metadata), a system-call filter, `MemoryMax=1G`, `TasksMax=512`.
 - **agent** (root): only `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_DAC_READ_SEARCH`, `CAP_FOWNER` and `CAP_NET_ADMIN`; writes only `/srv/mc-panel` and `/run/mc-panel`; only Unix and netlink sockets (Docker socket, nftables), no IP traffic. The Docker socket still makes it root-equivalent.
 - **files** (`mcpanel-mc`) and its child restic: no capabilities, no network namespace of the host, no `/proc` beyond its own processes, writes only `/srv/mc-panel/instances` and `/srv/mc-panel/backups`.
 
