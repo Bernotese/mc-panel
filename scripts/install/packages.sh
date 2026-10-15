@@ -152,16 +152,49 @@ pkg_caddy_repo() {
   echo changed
 }
 
+# pkg_installed_version NAME prints the installed version of package NAME ("" if none).
+pkg_installed_version() {
+  dpkg-query -W -f='${Version}' -- "$1" 2>/dev/null || true
+}
+
+# pkg_caddy_works: 0 if the installed caddy accepts the current Caddyfile (validated as caddy,
+# like cad_ensure) and caddy.service runs and stays up after a restart (a query; tests stub it).
+pkg_caddy_works() {
+  run_as caddy env HOME=/var/lib/caddy caddy validate --config "$CADDY_DIR/Caddyfile" --adapter caddyfile \
+    </dev/null >/dev/null 2>&1 || return 1
+  sys_systemctl restart caddy.service </dev/null || return 1
+  unit_settled caddy.service
+}
+
 # pkg_caddy_upgrade: installs caddy from the Caddy repository when the installed one comes from
-# elsewhere (Ubuntu's universe). The Caddyfile is a conffile: --force-confold keeps it.
+# elsewhere (Ubuntu's universe). The Caddyfile is a conffile: --force-confold keeps it. A newer
+# Caddy may reject a Caddyfile the old one took: then the previous version goes back and is held
+# (unattended-upgrades would break Caddy again), with a warning; the next install or update
+# tries again (--allow-change-held-packages) and releases the hold once Caddy works. Dies only
+# when even the way back fails.
 pkg_caddy_upgrade() {
   if pkg_caddy_from_repo; then
     return 0
   fi
+  local prev apt_opts=(-o "DPkg::Lock::Timeout=$PKG_APT_LOCK_WAIT" -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+  prev="$(pkg_installed_version caddy)"
   sys_apt -o "DPkg::Lock::Timeout=$PKG_APT_LOCK_WAIT" update </dev/null || die "apt-get update failed"
-  sys_apt -o "DPkg::Lock::Timeout=$PKG_APT_LOCK_WAIT" -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
-    install --no-install-recommends caddy </dev/null || die "apt-get install caddy (Caddy repository) failed"
-  log_changed "caddy $(pkg_caddy_version) from the Caddy repository"
+  sys_apt "${apt_opts[@]}" install --no-install-recommends --allow-change-held-packages caddy </dev/null ||
+    die "apt-get install caddy (Caddy repository) failed"
+  if pkg_caddy_works; then
+    sys_apt_mark unhold caddy </dev/null >/dev/null || true
+    log_changed "caddy $(pkg_caddy_version) from the Caddy repository"
+    return 0
+  fi
+  local new
+  new="$(pkg_caddy_version)"
+  [[ -n $prev ]] || die "caddy $new from the Caddy repository does not run with $CADDY_DIR/Caddyfile (journalctl -u caddy)"
+  warn "caddy $new rejects $CADDY_DIR/Caddyfile or does not stay up; going back to caddy $prev"
+  if ! sys_apt "${apt_opts[@]}" install --no-install-recommends --allow-downgrades --allow-change-held-packages "caddy=$prev" </dev/null ||
+    ! sys_apt_mark hold caddy </dev/null >/dev/null || ! sys_systemctl restart caddy.service </dev/null; then
+    die "going back to caddy $prev failed; Caddy may be down (journalctl -u caddy)"
+  fi
+  warn "caddy $prev is back and held (no automatic updates, doctor: caddy_package). Fix the Caddyfile for Caddy $new (caddy validate --config $CADDY_DIR/Caddyfile), then run install.sh update --force"
 }
 
 # pkg_caddy_ensure (update): the Caddy repository and caddy from it; existing installs switch
@@ -223,8 +256,14 @@ pkg_daemon_json_ensure() {
     return 0
   fi
   if [[ -n "$(pkg_running_containers)" ]]; then
-    # A restart now would stop the running containers (live-restore is not active yet).
-    warn "docker: log rotation and live-restore take effect on the next Docker restart (containers are running)"
+    # A restart now would stop the running containers (live-restore is not active yet), but
+    # live-restore is one of the options dockerd reloads (SIGHUP); log options are not.
+    if sys_systemctl reload docker.service </dev/null; then
+      log_changed "docker: live-restore (/etc/docker/daemon.json, reloaded)"
+      warn "docker: log rotation takes effect on the next Docker restart (containers are running; live-restore keeps them running then)"
+    else
+      warn "docker: log rotation and live-restore take effect on the next Docker restart (containers are running)"
+    fi
     return 0
   fi
   if sys_systemctl restart docker.service </dev/null; then

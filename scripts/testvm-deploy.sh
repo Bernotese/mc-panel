@@ -231,19 +231,21 @@ caddy_validate() {
 # uninstall removes exactly that line). It must be in place before the first install: the old
 # Caddyfile has the panel site inline, and the installer's import next to it would define the
 # site twice. Like a Caddyfile of the installer it moves Caddy's admin API to a socket in
-# /run/caddy, which the installer's drop-in caddy.service.d/mc-panel.conf creates. The previous
-# file stays in Caddyfile.testvm-prev for restore_caddy_frame. The installer validates and
-# reloads Caddy when its site changes; a frame that changed on its own is validated and applied
-# here (and put back if Caddy rejects it): with a restart, because caddy reload would send the
-# new configuration to the admin address it names. Without the drop-in yet (first deploy of
-# this frame) the installer writes it and restarts Caddy itself.
+# /run/caddy, but only once the installer's drop-in caddy.service.d/mc-panel.conf exists, which
+# creates that directory (so on a fresh VM from the second deploy on). The previous file stays
+# in Caddyfile.testvm-prev for restore_caddy_frame. The installer validates and reloads Caddy
+# when its site changes; a frame that changed on its own is validated and applied here (and put
+# back if Caddy rejects it): with a restart, because caddy reload would send the new
+# configuration to the admin address it names.
 write_caddy_frame() {
-  local panel_host="$1" ip="$2" tmp
+  local panel_host="$1" ip="$2" tmp admin=""
+  if [ -e "$CADDY_DROPIN" ]; then
+    admin=$'\tadmin unix//run/caddy/admin.sock\n'
+  fi
   tmp="$(mktemp)"
   cat >"$tmp" <<EOF
 {
-	admin unix//run/caddy/admin.sock
-	skip_install_trust
+${admin}	skip_install_trust
 }
 
 import mc-panel.caddy # managed by mc-panel
@@ -267,7 +269,7 @@ EOF
   rm -f "$tmp"
   # On the first run mc-panel.caddy does not exist yet: the installer writes it next and
   # reloads Caddy (the running Caddy keeps its old configuration until then).
-  if [ -e /etc/caddy/mc-panel.caddy ] && [ -e "$CADDY_DROPIN" ] && systemctl is-active --quiet caddy.service; then
+  if [ -e /etc/caddy/mc-panel.caddy ] && systemctl is-active --quiet caddy.service; then
     if ! caddy_validate; then
       restore_caddy_frame
       echo "testvm-deploy: caddy rejects the new Caddyfile frame; the previous one is back" >&2

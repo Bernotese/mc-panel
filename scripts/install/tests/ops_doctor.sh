@@ -200,7 +200,7 @@ test_ops_doctor_docker_version_and_live_restore() {
   out="$(cat "$WORK/out")"
   assert_contains "$out" "! Docker 28.5.1 is older than 29.1.3"
   assert_contains "$out" "! live-restore is set in /etc/docker/daemon.json but not active"
-  assert_contains "$out" "-> systemctl restart docker while no Minecraft servers are running"
+  assert_contains "$out" "-> systemctl reload docker (dockerd reloads live-restore; the servers keep running)"
   # without the setting an inactive live-restore is the operator's choice
   rm "$ROOT/etc/docker/daemon.json"
   doc_probe_docker_version() { echo 29.2.0; }

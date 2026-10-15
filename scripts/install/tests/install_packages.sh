@@ -156,7 +156,10 @@ test_install_pkg_daemon_json_no_restart_with_running_servers() {
   out="$(pkg_install)"
   assert_file_contains "$ROOT/etc/docker/daemon.json" '"live-restore": true'
   assert_not_called 'systemctl restart docker'
-  assert_contains "$out" "[warn]"
+  # live-restore is reloadable; log rotation waits for the next restart
+  assert_called 'systemctl reload docker.service'
+  assert_contains "$out" "[changed] docker: live-restore"
+  assert_contains "$out" "[warn] docker: log rotation takes effect on the next Docker restart"
 }
 
 test_install_pkg_install_fails_without_docker() {
@@ -273,12 +276,59 @@ test_install_pkg_install_switches_caddy_to_the_repository() {
   # shellcheck disable=SC2016 # expanded when the stub runs
   stub pkg_caddy_repo_ok '[[ -f $ROOT$PKG_CADDY_SOURCES ]]'
   stub pkg_caddy_from_repo 'return 1'
+  stub pkg_installed_version 'echo 2.6.2-14'
+  stub pkg_caddy_works 'return 0'
   local out
   out="$(pkg_install)"
   assert_contains "$out" "[changed] Caddy repository"
+  assert_contains "$out" "[changed] caddy 2.11.7 from the Caddy repository"
   assert_called 'apt-get -y -q -o DPkg::Lock::Timeout=300 update'
-  assert_called 'env DEBIAN_FRONTEND=noninteractive apt-get -y -q -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install --no-install-recommends caddy'
+  assert_called 'env DEBIAN_FRONTEND=noninteractive apt-get -y -q -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install --no-install-recommends --allow-change-held-packages caddy'
+  assert_called 'apt-mark unhold caddy'
+  assert_not_called 'allow-downgrades'
   assert_file "$ROOT/etc/apt/sources.list.d/caddy-stable.list"
+}
+
+test_install_pkg_caddy_upgrade_goes_back_when_the_new_caddy_fails() {
+  stub pkg_caddy_from_repo 'return 1'
+  stub pkg_installed_version 'echo 2.6.2-14'
+  stub pkg_caddy_version 'echo 2.11.7'
+  stub pkg_caddy_works 'return 1'
+  local out
+  out="$(pkg_caddy_upgrade)"
+  assert_contains "$out" "[warn] caddy 2.11.7 rejects /etc/caddy/Caddyfile or does not stay up; going back to caddy 2.6.2-14"
+  assert_contains "$out" "caddy 2.6.2-14 is back and held"
+  assert_not_contains "$out" "[changed]"
+  assert_called 'install --no-install-recommends --allow-downgrades --allow-change-held-packages caddy=2.6.2-14'
+  assert_called 'apt-mark hold caddy'
+  assert_called 'systemctl restart caddy.service'
+  assert_not_called 'apt-mark unhold'
+}
+
+test_install_pkg_caddy_upgrade_dies_when_going_back_fails() {
+  stub pkg_caddy_from_repo 'return 1'
+  stub pkg_installed_version 'echo 2.6.2-14'
+  stub pkg_caddy_version 'echo 2.11.7'
+  stub pkg_caddy_works 'return 1'
+  sys_apt() {
+    printf 'apt-get %s\n' "$*" >>"$WORK/calls.log"
+    [[ $* != *allow-downgrades* ]]
+  }
+  assert_fails pkg_caddy_upgrade
+  assert_contains "$(cat "$WORK/out")" "going back to caddy 2.6.2-14 failed"
+}
+
+test_install_pkg_caddy_works_validates_restarts_and_waits() {
+  # shellcheck disable=SC2016 # expanded when the stub runs
+  stub unit_settled 'echo "settled $1" >>"$WORK/calls.log"'
+  pkg_caddy_works
+  assert_called 'runuser -u caddy -- env HOME=/var/lib/caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile'
+  assert_called 'systemctl restart caddy.service'
+  assert_called 'settled caddy.service'
+  run_as() { return 1; } # validate fails: no restart
+  : >"$WORK/calls.log"
+  assert_fails pkg_caddy_works
+  assert_not_called 'restart'
 }
 
 test_install_pkg_install_fresh_host_installs_caddy_from_the_repository_once() {

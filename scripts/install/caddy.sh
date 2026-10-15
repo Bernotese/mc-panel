@@ -52,6 +52,11 @@ cad_dropin_ensure() {
   if [[ ! -d $ROOT${CAD_DROPIN%/*} ]]; then
     ensure_dir "${CAD_DROPIN%/*}" 0755 root root >/dev/null || return 1
   fi
+  # caddy validate (as caddy) already opens the access log, before LogsDirectory= of a restart
+  # could create its directory. Not ensure_dir: /var/log is group-writable (root:syslog 0775).
+  if [[ ! -d $ROOT/var/log/caddy ]]; then
+    sys_install -d -o caddy -g caddy -m 0750 -- "$ROOT/var/log/caddy" || return 1
+  fi
   r="$(write_template caddy/caddy-service-mc-panel.conf "$CAD_DROPIN" 0644 root root)" || return 1
   if [[ $r == changed ]]; then
     sys_systemctl daemon-reload </dev/null || return 1

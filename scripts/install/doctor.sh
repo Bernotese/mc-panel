@@ -426,8 +426,8 @@ doc_chk_system() {
     if [[ $lr == true ]]; then
       doc_result ok docker_live_restore "Docker live-restore is active (a Docker restart keeps the servers running)"
     elif grep -qE '"live-restore"[[:space:]]*:[[:space:]]*true' -- "$ROOT/etc/docker/daemon.json" 2>/dev/null; then
-      doc_result warn docker_live_restore "live-restore is set in /etc/docker/daemon.json but not active: Docker was not restarted since, so its next restart (a package update) stops every server" \
-        "systemctl restart docker while no Minecraft servers are running"
+      doc_result warn docker_live_restore "live-restore is set in /etc/docker/daemon.json but not active: the next Docker restart (a package update) stops every server" \
+        "systemctl reload docker (dockerd reloads live-restore; the servers keep running)"
     else
       doc_result ok docker_live_restore "Docker live-restore is not configured (/etc/docker/daemon.json)"
     fi
