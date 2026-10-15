@@ -129,6 +129,7 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
+	h.ResetSecondFactorLockout(user.ID) // spec §7.2: a password change lifts the 2FA lockout
 	h.auditLog(ctx, user.ID, user.Username, audit.ActionPasswordChange, user.Username, audit.ResultSuccess,
 		map[string]any{"revoked_sessions": revoked})
 	w.WriteHeader(http.StatusNoContent)

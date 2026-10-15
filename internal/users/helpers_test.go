@@ -37,6 +37,7 @@ type env struct {
 	rec    *audit.MemoryRecorder
 	notes  *notify.Recording
 	mux    http.Handler
+	h      *users.Handler
 	rootID int64
 }
 
@@ -53,7 +54,8 @@ func newEnvWithRecorder(t *testing.T, mk func(*sql.DB, clock.Clock) audit.Record
 	}
 	mux := chi.NewRouter()
 	rt := rbac.NewRouter(mux, rbac.NewDBChecker(db), e.clk)
-	users.NewHandler(db, e.clk, rec, e.notes).Routes(rt)
+	e.h = users.NewHandler(db, e.clk, rec, e.notes)
+	e.h.Routes(rt)
 	e.mux = mux
 	e.rootID = storetest.CreateUser(t, db, "root", "admin")
 	return e

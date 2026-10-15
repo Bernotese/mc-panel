@@ -71,6 +71,10 @@ func (l *twoFALocks) reset(userID int64) {
 	delete(l.users, userID)
 }
 
+// ResetSecondFactorLockout lifts the second-factor lockout of userID. A password change does
+// that (spec §7.2); cmd/panel also calls it when an admin sets the user's password.
+func (h *Handler) ResetSecondFactorLockout(userID int64) { h.twoFA.reset(userID) }
+
 func isSecondFactorStage(s defense.AttemptStage) bool {
 	switch s {
 	case defense.StageTOTP, defense.StageWebAuthn, defense.StageRecovery, defense.StageSudo:

@@ -116,6 +116,7 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	now := h.clock.Now().UnixMilli()
 	oldRole := u.Role
+	var revoked int64
 	err = h.inTx(ctx, func(q *store.Queries) error {
 		cur, err := getUser(ctx, q, id)
 		if err != nil {
@@ -129,6 +130,17 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			if err := q.RbacUpdateUserRole(ctx, store.RbacUpdateUserRoleParams{Role: *req.Role, UpdatedAt: now, ID: id}); err != nil {
 				return err
 			}
+			// A privilege change ends the target's sessions (spec §4.3: new session after every
+			// privilege change). The caller's own session stays, so an admin who demotes
+			// themselves is not logged out in the middle of the request.
+			p, _ := principal.From(ctx)
+			n, err := q.RbacRevokeUserSessionsExcept(ctx, store.RbacRevokeUserSessionsExceptParams{
+				RevokedAt: sql.NullInt64{Int64: now, Valid: true}, UserID: id, KeepID: p.SessionID,
+			})
+			if err != nil {
+				return err
+			}
+			revoked = n
 		}
 		if req.Password != nil {
 			if err := q.RbacUpdateUserPassword(ctx, store.RbacUpdateUserPasswordParams{
@@ -164,11 +176,15 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if roleChanged {
 		details["role_from"] = oldRole
 		details["role_to"] = *req.Role
+		details["revoked_sessions"] = revoked
 	}
 	if req.Password != nil {
 		details["password_changed"] = true
 	}
 	h.record(ctx, audit.ActionUserUpdate, userTarget(id), audit.ResultSuccess, details)
+	if req.Password != nil && h.passwordSet != nil {
+		h.passwordSet(id)
+	}
 	if roleChanged {
 		h.emit(r, notify.EventPermissionsChanged, "Role changed",
 			fmt.Sprintf("%s changed the role of %s from %s to %s", callerName(r), u.Username, oldRole, *req.Role), u.Username)

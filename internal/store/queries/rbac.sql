@@ -45,6 +45,10 @@ DELETE FROM recovery_codes WHERE user_id = ?;
 -- name: RbacRevokeUserSessions :exec
 UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL;
 
+-- name: RbacRevokeUserSessionsExcept :execrows
+UPDATE sessions SET revoked_at = sqlc.arg(revoked_at)
+WHERE user_id = sqlc.arg(user_id) AND id <> sqlc.arg(keep_id) AND revoked_at IS NULL;
+
 -- name: RbacCountUserPasskeys :one
 SELECT count(*) FROM webauthn_credentials WHERE user_id = ?;
 
