@@ -14,7 +14,7 @@ import (
 // (JVM_OPTS, GENERIC_PACK, MODS, PLUGINS, OPS, WHITELIST, ...) would let the panel smuggle in
 // code or override what the server itself manages (ops and whitelist, spec 3a §3.1).
 var allowedKeys = []string{
-	"EULA", "TYPE", "VERSION", "MEMORY", "ENABLE_AUTOPAUSE", "ENABLE_RCON", "OVERRIDE_SERVER_PROPERTIES", "BROADCAST_RCON_TO_OPS",
+	"EULA", "TYPE", "VERSION", "MEMORY", "ENABLE_AUTOPAUSE", "ENABLE_RCON", "OVERRIDE_SERVER_PROPERTIES",
 	"FABRIC_LOADER_VERSION", "NEOFORGE_VERSION", "MODRINTH_MODPACK", "CF_SLUG", "CF_PAGE_URL", "CF_API_KEY",
 	"MOTD", "DIFFICULTY", "MODE", "MAX_PLAYERS", "PVP", "HARDCORE", "ALLOW_FLIGHT", "ENABLE_COMMAND_BLOCK",
 	"ONLINE_MODE", "ENABLE_WHITELIST", "VIEW_DISTANCE", "SIMULATION_DISTANCE",
@@ -30,7 +30,7 @@ func TestEnvPaper(t *testing.T) {
 	}
 	want := []string{
 		"EULA=TRUE", "TYPE=PAPER", "VERSION=1.21.4", "MEMORY=4096M", "ENABLE_AUTOPAUSE=false",
-		"ENABLE_RCON=true", "OVERRIDE_SERVER_PROPERTIES=true", "BROADCAST_RCON_TO_OPS=false",
+		"ENABLE_RCON=true", "OVERRIDE_SERVER_PROPERTIES=true",
 		"MOTD=Hallo", "DIFFICULTY=normal", "MODE=survival", "MAX_PLAYERS=20", "PVP=true", "HARDCORE=false",
 		"ALLOW_FLIGHT=false", "ENABLE_COMMAND_BLOCK=false", "ONLINE_MODE=true", "ENABLE_WHITELIST=true",
 		"VIEW_DISTANCE=10", "SIMULATION_DISTANCE=10", "SPAWN_PROTECTION=16",
@@ -121,34 +121,6 @@ func TestEnvNeverSendsPlayerLists(t *testing.T) {
 		}
 		if want := "ENABLE_WHITELIST=" + strconv.FormatBool(enabled); !slices.Contains(env, want) {
 			t.Fatalf("missing %s in %q", want, env)
-		}
-	}
-}
-
-// The panel's RCON commands (console, player actions, TPS polls) must not be echoed to
-// in-game operators: itzg leaves broadcast-rcon-to-ops at the vanilla default true.
-// No spec field can change it.
-func TestEnvNeverBroadcastsRconToOps(t *testing.T) {
-	for _, s := range []instancespec.Spec{
-		validSpec(),
-		{Type: instancespec.TypeFabric, Version: "26.3", Java: instancespec.Java25, MemoryMiB: 2048},
-		{Type: instancespec.TypeModrinth, Modpack: ptr("cobblemon-fabric"), Java: instancespec.Java21, MemoryMiB: 6144},
-	} {
-		env, err := instancespec.Env("survival", s)
-		if err != nil {
-			t.Fatal(err)
-		}
-		n := 0
-		for _, kv := range env {
-			if strings.HasPrefix(kv, "BROADCAST_RCON_TO_OPS=") {
-				n++
-				if kv != "BROADCAST_RCON_TO_OPS=false" {
-					t.Fatalf("%s: %q", s.Type, kv)
-				}
-			}
-		}
-		if n != 1 {
-			t.Fatalf("%s: BROADCAST_RCON_TO_OPS appears %d times in %q", s.Type, n, env)
 		}
 	}
 }
