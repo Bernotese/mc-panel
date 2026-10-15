@@ -128,7 +128,7 @@ export function createApiClient(baseUrl: string = `${window.location.origin}/api
         return retryOnce(copy, schemaPath)
       }
       if (code === 'sudo_required' && !schemaPath.startsWith('/auth/')) {
-        const confirmed = await apiHandlers().requestSudo()
+        const confirmed = await apiHandlers().requestSudo({ method: request.method, path: schemaPath })
         return confirmed ? retryOnce(copy, schemaPath) : markSudoCancelled(response)
       }
       return response

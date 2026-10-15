@@ -29,6 +29,7 @@ test('sensitive actions ask for sudo once and then succeed', async ({ page }) =>
   await dialog.getByLabel('Initiales Passwort').fill('long-enough-password')
   await dialog.getByRole('button', { name: 'Anlegen' }).click()
   const sudo = page.getByRole('dialog', { name: 'Aktion bestätigen' })
+  await expect(sudo.getByText('Aktion: Benutzer anlegen')).toBeVisible()
   await sudo.getByLabel('Code aus der Authenticator-App').fill('123456')
   await sudo.getByRole('button', { name: 'Bestätigen' }).click()
   await expect(page.getByRole('row', { name: /carol/ })).toBeVisible()
