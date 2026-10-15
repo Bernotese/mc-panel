@@ -208,17 +208,32 @@ func (e *restoreStuckError) Causes() string {
 
 // visibleNames lists the names of folder dir that are not hidden (spec 4 §4.3: hidden entries
 // such as .rcon-cli.env and the service's temp folders stay where they are).
+// The names are read in batches against the walk budget (SEC-23).
 func visibleNames(root *os.Root, dir string) ([]string, error) {
 	f, _, err := openDir(root, dir)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	all, err := f.Readdirnames(-1)
-	if err != nil {
-		return nil, fsErr(err)
+	var b walkBudget
+	var out []string
+	for {
+		batch, rerr := f.Readdirnames(walkBatch)
+		for _, n := range batch {
+			if err := b.count(n); err != nil {
+				return nil, err
+			}
+			if !filesapi.IsHidden(n) {
+				out = append(out, n)
+			}
+		}
+		if errors.Is(rerr, io.EOF) || (rerr == nil && len(batch) == 0) {
+			break
+		}
+		if rerr != nil {
+			return nil, fsErr(rerr)
+		}
 	}
-	out := slices.DeleteFunc(all, func(n string) bool { return filesapi.IsHidden(n) })
 	slices.Sort(out)
 	return out, nil
 }
