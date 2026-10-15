@@ -64,12 +64,13 @@ func (q *Queries) RbacCreateServer(ctx context.Context, arg RbacCreateServerPara
 }
 
 const rbacCreateUser = `-- name: RbacCreateUser :one
-INSERT INTO users (username, password_hash, role, webauthn_handle, password_changed_at, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO users (id, username, password_hash, role, webauthn_handle, password_changed_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id, username, password_hash, role, locale, webauthn_handle, totp_secret_enc, totp_enabled, totp_last_step, password_changed_at, created_at, updated_at
 `
 
 type RbacCreateUserParams struct {
+	ID                int64
 	Username          string
 	PasswordHash      string
 	Role              string
@@ -81,6 +82,7 @@ type RbacCreateUserParams struct {
 
 func (q *Queries) RbacCreateUser(ctx context.Context, arg RbacCreateUserParams) (User, error) {
 	row := q.db.QueryRowContext(ctx, rbacCreateUser,
+		arg.ID,
 		arg.Username,
 		arg.PasswordHash,
 		arg.Role,
@@ -434,6 +436,21 @@ func (q *Queries) RbacListViewableServers(ctx context.Context, userID int64) ([]
 		return nil, err
 	}
 	return items, nil
+}
+
+const rbacNextUserID = `-- name: RbacNextUserID :one
+UPDATE user_ids
+SET last_id = max(last_id, (SELECT COALESCE(MAX(id), 0) FROM users)) + 1
+WHERE id = 1
+RETURNING last_id
+`
+
+// Allocates the ID of a new user: never one that was used before (see migration 00008).
+func (q *Queries) RbacNextUserID(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, rbacNextUserID)
+	var last_id int64
+	err := row.Scan(&last_id)
+	return last_id, err
 }
 
 const rbacRevokeUserSessions = `-- name: RbacRevokeUserSessions :exec
