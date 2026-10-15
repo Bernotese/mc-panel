@@ -175,11 +175,10 @@ A server must not fill the disk for everyone else. The files service keeps a res
 Backups are limited, too:
 
 - A backup that runs longer than `max_duration` under `[backups]` in `/etc/mc-panel/panel.toml` (default `"4h"`, allowed `"10m"` to `"7d"`) is cancelled; saving is switched on again and `backup.failed` is notified.
-- One manual backup per server every 10 minutes (failed ones do not count).
-- Files larger than 64 MiB that use less than an eighth of their size on disk (sparse files) are left out; the job counts them as skipped and the files service logs them.
+- A manual backup only 10 minutes after the previous one of the server ended (also a failed one; one refused before it started, e.g. for lack of space, does not count).
 - Changing a server's backup schedule and pinning or unpinning a snapshot need sudo.
 
-Restart `mcpanel-files` (or `mcpanel-panel`) after changing these keys.
+The 5 % can be a lot on a large disk (50 GiB of a 1 TB disk): if a fairly full disk suddenly refuses uploads, plugin installs or backups after an update, lower `reserve_percent` (or set it to 0, which leaves `reserve_bytes`). Restart `mcpanel-files` (or `mcpanel-panel`) after changing these keys.
 
 ## Backups of keys and data
 
