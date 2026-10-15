@@ -21,7 +21,8 @@ const deletedTimeFormat = "20060102T150405Z"
 func BackupsDir(instancesDir string) string { return filepath.Join(instancesDir, "backups") }
 
 // ensureLayout makes sure <instances_dir> exists (0755), that instances/ is root:<mc_user gid>
-// 0750, deleted/ root:root 0700 and backups/ <mc_user>:<mc_user gid> 0700 (in production). The
+// 0750, deleted/ root:<agent's group> 0700 (root:mcpanel under the systemd unit; the group gets
+// no access at 0700) and backups/ <mc_user>:<mc_user gid> 0700 (in production). The
 // panel user must not read world data; the files service (running as mc_user, spec 3b §3.3)
 // may enter instances/ but never write into it and owns backups/ (spec 4 §3.1); no container
 // user may swap either directory.

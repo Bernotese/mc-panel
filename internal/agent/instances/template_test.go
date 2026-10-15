@@ -40,7 +40,7 @@ func TestInstanceContainerGolden(t *testing.T) {
 		User:  "996:995",
 		Env: []string{
 			"EULA=TRUE", "TYPE=PAPER", "VERSION=1.21.4", "MEMORY=4096M", "ENABLE_AUTOPAUSE=false",
-			"ENABLE_RCON=true", "OVERRIDE_SERVER_PROPERTIES=true",
+			"ENABLE_RCON=true", "OVERRIDE_SERVER_PROPERTIES=true", "BROADCAST_RCON_TO_OPS=false",
 			"MOTD=Hallo", "DIFFICULTY=normal", "MODE=survival", "MAX_PLAYERS=20", "PVP=true", "HARDCORE=false",
 			"ALLOW_FLIGHT=false", "ENABLE_COMMAND_BLOCK=false", "ONLINE_MODE=true", "ENABLE_WHITELIST=false",
 			"VIEW_DISTANCE=10", "SIMULATION_DISTANCE=10", "SPAWN_PROTECTION=16",
@@ -55,16 +55,21 @@ func TestInstanceContainerGolden(t *testing.T) {
 		},
 		StopTimeout: 60,
 		HostConfig: docker.HostConfig{
-			Binds:         []string{"/srv/mc-panel/instances/7:/data"},
-			NetworkMode:   "mcpanel-mc",
-			RestartPolicy: docker.RestartPolicy{Name: "unless-stopped"},
-			CapDrop:       []string{"ALL"},
-			SecurityOpt:   []string{"no-new-privileges:true"},
-			Memory:        5120 << 20, // 4096 MiB × 1.25
-			MemorySwap:    5120 << 20,
-			PidsLimit:     1024,
-			CPUShares:     256, // cgroup v2 weight ≈ 10: a busy server never starves panel, agent or router
-			LogConfig:     docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
+			Binds:          []string{"/srv/mc-panel/instances/7:/data"},
+			NetworkMode:    "mcpanel-mc",
+			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
+			CapDrop:        []string{"ALL"},
+			SecurityOpt:    []string{"no-new-privileges:true"},
+			ReadonlyRootfs: true,
+			// The image only writes outside /data into /tmp (Java native libraries); exec
+			// because they are loaded from there, and /data is executable anyway.
+			Tmpfs:      map[string]string{"/tmp": "rw,exec,nosuid,nodev,size=512m"},
+			Memory:     5120 << 20, // 4096 MiB × 1.25
+			MemorySwap: 5120 << 20,
+			PidsLimit:  1024,
+			CPUShares:  256, // cgroup v2 weight ≈ 10: a busy server never starves panel, agent or router
+			Ulimits:    []docker.Ulimit{{Name: "nofile", Soft: 65536, Hard: 65536}},
+			LogConfig:  docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
 		},
 		NetworkingConfig: docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{"mcpanel-mc": {}}},
 	}
@@ -80,20 +85,21 @@ func TestRouterContainerGolden(t *testing.T) {
 	}
 	want := docker.ContainerConfig{
 		Image:        "itzg/mc-router@sha256:64ae69eaa7a6800a79bbf962f027f4020878efa25183359115bc7f6ee569c36e",
-		Cmd:          []string{"-routes-config", "/config/routes.json"},
+		Cmd:          []string{"-routes-config", "/config/routes.json", "-connection-rate-limit", "50"},
 		Labels:       map[string]string{"mcpanel.router": "1"},
 		ExposedPorts: map[string]struct{}{"25565/tcp": {}},
 		HostConfig: docker.HostConfig{
-			Binds:         []string{"/srv/mc-panel/router:/config:ro"},
-			NetworkMode:   "mcpanel-mc",
-			PortBindings:  map[string][]docker.PortBinding{"25565/tcp": {{HostPort: "25565"}}},
-			RestartPolicy: docker.RestartPolicy{Name: "unless-stopped"},
-			CapDrop:       []string{"ALL"},
-			SecurityOpt:   []string{"no-new-privileges:true"},
-			Memory:        256 << 20,
-			MemorySwap:    256 << 20,
-			PidsLimit:     1024,
-			LogConfig:     docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
+			Binds:          []string{"/srv/mc-panel/router:/config:ro"},
+			NetworkMode:    "mcpanel-mc",
+			PortBindings:   map[string][]docker.PortBinding{"25565/tcp": {{HostPort: "25565"}}},
+			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
+			CapDrop:        []string{"ALL"},
+			SecurityOpt:    []string{"no-new-privileges:true"},
+			ReadonlyRootfs: true,
+			Memory:         256 << 20,
+			MemorySwap:     256 << 20,
+			PidsLimit:      128,
+			LogConfig:      docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
 		},
 		NetworkingConfig: docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{"mcpanel-mc": {}}},
 	}
@@ -107,7 +113,7 @@ func TestRouterContainerGolden(t *testing.T) {
 
 // allowedEnvKeys mirrors the allowlist of instancespec.Env: the template must never add anything.
 var allowedEnvKeys = []string{
-	"EULA", "TYPE", "VERSION", "MEMORY", "ENABLE_AUTOPAUSE", "ENABLE_RCON", "OVERRIDE_SERVER_PROPERTIES",
+	"EULA", "TYPE", "VERSION", "MEMORY", "ENABLE_AUTOPAUSE", "ENABLE_RCON", "OVERRIDE_SERVER_PROPERTIES", "BROADCAST_RCON_TO_OPS",
 	"FABRIC_LOADER_VERSION", "NEOFORGE_VERSION", "MODRINTH_MODPACK", "CF_SLUG", "CF_PAGE_URL", "CF_API_KEY",
 	"MOTD", "DIFFICULTY", "MODE", "MAX_PLAYERS", "PVP", "HARDCORE", "ALLOW_FLIGHT", "ENABLE_COMMAND_BLOCK",
 	"ONLINE_MODE", "ENABLE_WHITELIST", "VIEW_DISTANCE", "SIMULATION_DISTANCE",
@@ -153,8 +159,12 @@ func TestInstanceContainerInvariants(t *testing.T) {
 		if len(hc.Binds) != 1 || hc.Binds[0] != instances.DataDir("/srv/mc-panel", req.ID)+":/data" {
 			t.Errorf("%s: binds = %v", req.Name, hc.Binds)
 		}
-		if hc.PortBindings != nil || c.ExposedPorts != nil || hc.CapAdd != nil || hc.Privileged || hc.ReadonlyRootfs {
+		if hc.PortBindings != nil || c.ExposedPorts != nil || hc.CapAdd != nil || hc.Privileged {
 			t.Errorf("%s: ports/caps/privileges must stay unset: %+v", req.Name, hc)
+		}
+		if !hc.ReadonlyRootfs || len(hc.Tmpfs) != 1 || !strings.Contains(hc.Tmpfs["/tmp"], "size=512m") || hc.NanoCPUs != 0 ||
+			!slices.Equal(hc.Ulimits, []docker.Ulimit{{Name: "nofile", Soft: 65536, Hard: 65536}}) {
+			t.Errorf("%s: rootfs/tmpfs/limits changed: %+v", req.Name, hc)
 		}
 		if !slices.Equal(hc.CapDrop, []string{"ALL"}) || !slices.Equal(hc.SecurityOpt, []string{"no-new-privileges:true"}) ||
 			hc.NetworkMode != "mcpanel-mc" || hc.PidsLimit != 1024 || hc.RestartPolicy.Name != "unless-stopped" {
@@ -209,6 +219,28 @@ func TestInstanceContainerRejectsInvalidRequests(t *testing.T) {
 	bad.Images.Router = "itzg/mc-router:latest"
 	if _, err := instances.RouterContainer(bad); err == nil {
 		t.Fatal("an unpinned router image must never reach Docker")
+	}
+}
+
+// TestTemplateHostLimits: cpu_per_instance and router_connection_rate_limit come from
+// the agent config (Host), never from the panel.
+func TestTemplateHostLimits(t *testing.T) {
+	h := testHost()
+	h.NanoCPUs = 1_500_000_000
+	h.RouterConnectionRateLimit = 200
+	c, err := instances.InstanceContainer(h, paperRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.HostConfig.NanoCPUs != 1_500_000_000 {
+		t.Fatalf("NanoCpus = %d", c.HostConfig.NanoCPUs)
+	}
+	r, err := instances.RouterContainer(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.Cmd, []string{"-routes-config", "/config/routes.json", "-connection-rate-limit", "200"}) || r.HostConfig.NanoCPUs != 0 {
+		t.Fatalf("router = %v, NanoCpus %d", r.Cmd, r.HostConfig.NanoCPUs)
 	}
 }
 

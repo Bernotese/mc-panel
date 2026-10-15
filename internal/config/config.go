@@ -4,12 +4,14 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -277,7 +279,22 @@ const (
 	DefaultDockerSocket = "/var/run/docker.sock"
 	DefaultInstancesDir = "/srv/mc-panel"
 	DefaultMCUser       = "mcpanel-mc"
+	// DefaultRouterConnectionRateLimit is mc-router's limit of new connections per
+	// second over all clients (its own default, 1/s, lets a single client starve
+	// every join and Server List Ping).
+	DefaultRouterConnectionRateLimit = 50
+
+	maxEgressDeny           = 64
+	maxRouterConnectionRate = 100000
+	minCPUPerInstance       = 0.01 // Docker's smallest NanoCpus value
 )
+
+// DefaultContainerEgressDeny is the destination list the Minecraft containers may
+// not open new connections to: link-local (cloud metadata), RFC 1918, CGNAT, IPv6
+// ULA and link-local. A fresh slice on every call.
+func DefaultContainerEgressDeny() []string {
+	return []string{"169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7", "fe80::/10"}
+}
 
 type Agent struct {
 	Dev          bool   `toml:"dev"`
@@ -289,7 +306,17 @@ type Agent struct {
 	// MCUser is the system user the Minecraft containers run as. Empty is only
 	// allowed in dev mode and means the uid:gid of the agent process.
 	MCUser string `toml:"mc_user"`
-	Images Images `toml:"images"`
+	// ContainerEgressDeny lists the destination prefixes the Minecraft containers may
+	// not open new connections to (nftables forward filter of the agent). A missing key
+	// means DefaultContainerEgressDeny; an empty list disables the filter.
+	ContainerEgressDeny []string `toml:"container_egress_deny"`
+	// RouterConnectionRateLimit is mc-router's -connection-rate-limit (new
+	// connections per second, all clients together).
+	RouterConnectionRateLimit int `toml:"router_connection_rate_limit"`
+	// CPUPerInstance caps every Minecraft container at this many CPUs; 0 = no cap
+	// (only the CPU weight applies).
+	CPUPerInstance float64 `toml:"cpu_per_instance"`
+	Images         Images  `toml:"images"`
 }
 
 func DefaultAgent() Agent {
@@ -301,6 +328,9 @@ func DefaultAgent() Agent {
 		InstancesDir: DefaultInstancesDir,
 		MCUser:       DefaultMCUser,
 		Images:       DefaultImages(),
+
+		ContainerEgressDeny:       DefaultContainerEgressDeny(),
+		RouterConnectionRateLimit: DefaultRouterConnectionRateLimit,
 	}
 }
 
@@ -385,11 +415,49 @@ func (a Agent) Validate() error {
 	if a.MCUser == "" && !a.Dev {
 		errs = append(errs, errors.New("mc_user must be set (system user for the Minecraft containers)"))
 	}
+	if _, err := parseEgressDeny(a.ContainerEgressDeny); err != nil {
+		errs = append(errs, err)
+	}
+	if a.RouterConnectionRateLimit < 1 || a.RouterConnectionRateLimit > maxRouterConnectionRate {
+		errs = append(errs, fmt.Errorf("router_connection_rate_limit must be between 1 and %d, got %d", maxRouterConnectionRate, a.RouterConnectionRateLimit))
+	}
+	if c := a.CPUPerInstance; math.IsNaN(c) || c < 0 || (c > 0 && c < minCPUPerInstance) || c > float64(runtime.NumCPU()) {
+		errs = append(errs, fmt.Errorf("cpu_per_instance must be 0 (no cap) or between %g and the host's %d CPUs, got %g", minCPUPerInstance, runtime.NumCPU(), c))
+	}
 	errs = append(errs, a.Images.validate()...)
 	if len(errs) > 0 {
 		return fmt.Errorf("config: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+// EgressDenyPrefixes returns ContainerEgressDeny parsed; call it only on a validated config.
+func (a Agent) EgressDenyPrefixes() []netip.Prefix {
+	p, _ := parseEgressDeny(a.ContainerEgressDeny)
+	return p
+}
+
+// parseEgressDeny accepts at most maxEgressDeny canonical prefixes (no host bits, no
+// zone, no IPv4-mapped IPv6) that do not overlap: they become elements of an nftables
+// interval set, which refuses overlapping ranges.
+func parseEgressDeny(list []string) ([]netip.Prefix, error) {
+	if len(list) > maxEgressDeny {
+		return nil, fmt.Errorf("container_egress_deny: at most %d entries, got %d", maxEgressDeny, len(list))
+	}
+	out := make([]netip.Prefix, 0, len(list))
+	for _, s := range list {
+		p, err := netip.ParsePrefix(s)
+		if err != nil || p != p.Masked() || p.Addr().Is4In6() {
+			return nil, fmt.Errorf("container_egress_deny: %q must be a network prefix such as 10.0.0.0/8 (no host bits)", s)
+		}
+		for _, q := range out {
+			if p.Overlaps(q) {
+				return nil, fmt.Errorf("container_egress_deny: %s and %s overlap", q, p)
+			}
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 func cleanAbsPath(key, p string) error {

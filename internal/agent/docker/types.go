@@ -32,11 +32,20 @@ type HostConfig struct {
 	SecurityOpt    []string                 `json:"SecurityOpt,omitempty"`
 	Privileged     bool                     `json:"Privileged"`
 	ReadonlyRootfs bool                     `json:"ReadonlyRootfs"`
+	Tmpfs          map[string]string        `json:"Tmpfs,omitempty"` // mount point -> mount options
 	Memory         int64                    `json:"Memory,omitempty"`
 	MemorySwap     int64                    `json:"MemorySwap,omitempty"`
 	PidsLimit      int64                    `json:"PidsLimit,omitempty"`
 	CPUShares      int64                    `json:"CpuShares,omitempty"` // relative CPU weight; 0 = Docker default 1024
+	NanoCPUs       int64                    `json:"NanoCpus,omitempty"`  // CPU cap in 1e-9 CPUs; 0 = no cap
+	Ulimits        []Ulimit                 `json:"Ulimits,omitempty"`
 	LogConfig      LogConfig                `json:"LogConfig"`
+}
+
+type Ulimit struct {
+	Name string `json:"Name"`
+	Soft int64  `json:"Soft"`
+	Hard int64  `json:"Hard"`
 }
 
 type PortBinding struct {

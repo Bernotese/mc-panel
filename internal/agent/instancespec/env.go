@@ -28,6 +28,8 @@ func Env(name string, s Spec) ([]string, error) {
 		"ENABLE_AUTOPAUSE=false",
 		"ENABLE_RCON=true",
 		"OVERRIDE_SERVER_PROPERTIES=true",
+		// The panel's RCON commands are not echoed to in-game operators (vanilla default true).
+		"BROADCAST_RCON_TO_OPS=false",
 	)
 	switch s.Type {
 	case TypeFabric:
