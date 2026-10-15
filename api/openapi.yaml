@@ -1489,6 +1489,7 @@ paths:
     post:
       operationId: testNotifier
       tags: [security]
+      description: Sends a test notification. A failed delivery is reported without the target's status (400); at most 6 per minute per user (429).
       parameters:
         - $ref: '#/components/parameters/IdPath'
         - $ref: '#/components/parameters/CSRF'
@@ -1497,6 +1498,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /security/agent:
     get:
       operationId: getAgentStatus

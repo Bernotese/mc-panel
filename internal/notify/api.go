@@ -5,16 +5,21 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/time/rate"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/secretbox"
 	"github.com/Bernotese/mc-panel/internal/store"
@@ -41,13 +46,50 @@ type Handler struct {
 	clock clock.Clock
 	dev   bool
 	log   *slog.Logger
+	tests *userLimiter // test notifications per user
 }
 
 func NewHandler(d HandlerDeps) *Handler {
 	if d.Logger == nil {
 		d.Logger = slog.Default()
 	}
-	return &Handler{q: store.New(d.DB), box: d.Box, disp: d.Dispatcher, audit: d.Audit, clock: d.Clock, dev: d.Dev, log: d.Logger}
+	return &Handler{
+		q: store.New(d.DB), box: d.Box, disp: d.Dispatcher, audit: d.Audit, clock: d.Clock, dev: d.Dev, log: d.Logger,
+		tests: newUserLimiter(),
+	}
+}
+
+// Test notifications per user: 6 per minute (SEC-22). Each one makes the panel connect to an
+// admin-chosen target, so they must not be usable as a fast scanner.
+const (
+	testEvery = 10 * time.Second
+	testBurst = 6
+)
+
+// userLimiter keeps one token bucket per user id (bounded by the number of users).
+type userLimiter struct {
+	mu    sync.Mutex
+	users map[int64]*rate.Limiter
+}
+
+func newUserLimiter() *userLimiter { return &userLimiter{users: make(map[int64]*rate.Limiter)} }
+
+// take consumes a token for userID at now; it returns 0 if allowed, otherwise the wait time
+// (no token is consumed then).
+func (l *userLimiter) take(userID int64, now time.Time) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	lim, ok := l.users[userID]
+	if !ok {
+		lim = rate.NewLimiter(rate.Every(testEvery), testBurst)
+		l.users[userID] = lim
+	}
+	r := lim.ReserveN(now, 1)
+	if d := r.DelayFrom(now); d > 0 {
+		r.CancelAt(now)
+		return d
+	}
+	return 0
 }
 
 // Routes registers the notifier endpoints with full paths relative to /api.
@@ -310,6 +352,12 @@ func (h *Handler) test(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	p, _ := principal.From(r.Context())
+	if d := h.tests.take(p.UserID, h.clock.Now()); d > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(d.Seconds()))))
+		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "too many test notifications, try again later")
+		return
+	}
 	err := h.disp.SendTest(r.Context(), id)
 	switch {
 	case err == nil:
@@ -323,7 +371,9 @@ func (h *Handler) test(w http.ResponseWriter, r *http.Request) {
 		h.log.Warn("notify: test notification failed", "notifier_id", id, "err", err)
 		validation(w, r, "test notification failed: the target could not be reached")
 	default:
-		// Sender errors are sanitized (no URL, topic or token).
-		validation(w, r, "test notification failed: "+err.Error())
+		// The target answered with an error status. The status stays in the log: passing it on
+		// would make the endpoint a port and status oracle for the network (SEC-22).
+		h.log.Warn("notify: test notification failed", "notifier_id", id, "err", err)
+		validation(w, r, "test notification failed: the target rejected the request")
 	}
 }
