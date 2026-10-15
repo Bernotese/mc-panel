@@ -3,6 +3,7 @@ import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { InstalledJar, PluginInventory, PluginUpdate } from '@/api/types'
 import { DataList, type Column } from '@/components/data-list'
+import { FileName } from '@/components/file-name'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -60,8 +61,14 @@ export function InstalledList({ inventory, updates, busy = false, pendingFile = 
       <div className="flex min-w-0 items-start gap-2">
         <PluginIcon url={jar.project?.icon_url} />
         <div className="min-w-0">
-          <p className="font-medium break-words">{name}</p>
-          {name !== jar.file ? <p className="text-muted-foreground font-mono text-xs break-all">{jar.file}</p> : null}
+          <p className="font-medium break-words">
+            <FileName name={name} />
+          </p>
+          {name !== jar.file ? (
+            <p className="text-muted-foreground font-mono text-xs break-all">
+              <FileName name={jar.file} />
+            </p>
+          ) : null}
           {jar.source === 'manual' ? <p className="text-muted-foreground text-xs">{t('plugins.installed.unmatched')}</p> : null}
         </div>
       </div>

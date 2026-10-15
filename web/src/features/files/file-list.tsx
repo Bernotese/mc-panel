@@ -1,6 +1,7 @@
 import { File, FileText, Folder, Link2, MoreHorizontal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { DataList, type Column } from '@/components/data-list'
+import { FileName } from '@/components/file-name'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -10,6 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { visibleName } from '@/lib/file-name'
 import { useFormat } from '@/lib/format'
 import { downloadUrl } from './api'
 import { EDITOR_MAX_BYTES, formatBytes, isZip } from './format'
@@ -42,7 +44,7 @@ export function FileList({ serverId, dir, entries, onOpenDir, onRename, onDelete
       return (
         <Button type="button" variant="link" className="h-auto max-w-full justify-start p-0" onClick={() => onOpenDir(entry.name)}>
           <Folder aria-hidden="true" />
-          <span className="truncate">{entry.name}</span>
+          <FileName name={entry.name} className="truncate" />
         </Button>
       )
     }
@@ -50,7 +52,7 @@ export function FileList({ serverId, dir, entries, onOpenDir, onRename, onDelete
       return (
         <Button type="button" variant="link" className="h-auto max-w-full justify-start p-0" onClick={() => onOpenFile(entry)}>
           <FileText aria-hidden="true" />
-          <span className="truncate">{entry.name}</span>
+          <FileName name={entry.name} className="truncate" />
         </Button>
       )
     }
@@ -58,7 +60,7 @@ export function FileList({ serverId, dir, entries, onOpenDir, onRename, onDelete
     return (
       <span className="flex min-w-0 items-center gap-1.5">
         <Icon aria-hidden="true" className="size-4 shrink-0" />
-        <span className="truncate">{entry.name}</span>
+        <FileName name={entry.name} className="truncate" />
         {entry.type === 'symlink' || entry.type === 'other' ? <Badge variant="outline">{t(`files.type.${entry.type}`)}</Badge> : null}
       </span>
     )
@@ -70,7 +72,7 @@ export function FileList({ serverId, dir, entries, onOpenDir, onRename, onDelete
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label={t('files.actions_label', { name: entry.name })}>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label={t('files.actions_label', { name: visibleName(entry.name) })}>
             <MoreHorizontal aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>
@@ -114,7 +116,7 @@ export function FileList({ serverId, dir, entries, onOpenDir, onRename, onDelete
       items={entries}
       columns={columns}
       rowKey={(e) => e.name}
-      caption={t('files.caption', { dir: dir || t('files.root') })}
+      caption={t('files.caption', { dir: dir ? visibleName(dir) : t('files.root') })}
       empty={t('files.empty')}
     />
   )
