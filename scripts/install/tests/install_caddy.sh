@@ -63,6 +63,7 @@ test_install_cad_ensure_site_has_the_access_log() {
   assert_file_contains "$ROOT$CADDY_DIR/mc-panel.caddy" 'output file /var/log/caddy/mc-panel.log {'
   assert_file_contains "$ROOT$CADDY_DIR/mc-panel.caddy" 'roll_size 50MiB'
   assert_file_contains "$ROOT$CADDY_DIR/mc-panel.caddy" 'roll_keep 14'
+  assert_file_contains "$ROOT$CADDY_DIR/mc-panel.caddy" 'request>headers>X-Csrf-Token delete'
 }
 
 test_install_cad_ensure_replaces_an_old_own_caddyfile() {
