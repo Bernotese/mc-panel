@@ -19,6 +19,10 @@ type presentedTokenKey struct{}
 const (
 	csrfHeader = "X-CSRF-Token"
 	loginPath  = "/api/auth/login"
+	// BackgroundHeader marks requests the web app makes on its own (polling, refetch on window
+	// focus). They are served normally but do not count as activity, so an open tab does not
+	// keep an idle session alive (SEC-19).
+	BackgroundHeader = "X-MCPanel-Background"
 )
 
 // Middleware loads the session from the cookie and stores the principal in the
@@ -52,9 +56,11 @@ func (s *Sessions) Middleware(next http.Handler) http.Handler {
 			httpx.Internal(w, r, err)
 			return
 		}
-		if err := s.Touch(ctx, sess); err != nil {
-			httpx.Internal(w, r, err)
-			return
+		if r.Header.Get(BackgroundHeader) != "1" {
+			if err := s.Touch(ctx, sess); err != nil {
+				httpx.Internal(w, r, err)
+				return
+			}
 		}
 		stage, err := s.effectiveStage(ctx, user, sess)
 		if err != nil {
