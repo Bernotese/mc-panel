@@ -1119,7 +1119,7 @@ export interface paths {
         };
         get?: never;
         /**
-         * Set schedule and retention of the server (audited)
+         * Set schedule and retention of the server (sudo; audited)
          * @description Times are in the panel time zone (ServerSettings.backup_timezone). The retention applies only to scheduled snapshots; manual, pre-restore and pinned ones stay.
          */
         put: operations["updateBackupSchedule"];
@@ -1156,7 +1156,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Pin or unpin a scheduled snapshot (pinned ones survive the retention; the snapshot gets a new ID; audited) */
+        /** Pin or unpin a scheduled snapshot (pinned ones survive the retention; the snapshot gets a new ID; sudo; audited) */
         post: operations["pinBackup"];
         delete?: never;
         options?: never;
