@@ -44,11 +44,6 @@ const (
 	RouterPidsLimit = 128
 	// NofileLimit is the open-files limit of instance containers (soft = hard).
 	NofileLimit = 65536
-	// TmpfsOptions bound the instance's /tmp, the only path the itzg image writes outside
-	// /data (Java native libraries, verified for Paper and Fabric). tmpfs is charged to
-	// the container's memory cgroup. exec: the libraries are loaded from there, and /data
-	// is executable anyway.
-	TmpfsOptions = "rw,exec,nosuid,nodev,size=512m"
 
 	routerPort        = "25565/tcp"
 	routerConfigDir   = "/config"
@@ -79,6 +74,16 @@ func DataDir(instancesDir string, id int64) string {
 
 // RouterDir is mounted read-only at /config in the router container.
 func RouterDir(instancesDir string) string { return filepath.Join(instancesDir, "router") }
+
+// TmpDir is mounted at /tmp: <instances_dir>/tmp/<id>. With a read-only rootfs it is the only
+// path the itzg image writes outside /data (Java native libraries; modpacks stage the whole
+// .mrpack there), so it is disk-backed next to the data instead of a tmpfs charged to the
+// container's memory, and outside instances/<id> so the files service and backups never see
+// it. The agent empties it whenever the container is (re)created and removes it with the
+// instance. Executable, like /data, because Java loads its native libraries from there.
+func TmpDir(instancesDir string, id int64) string {
+	return filepath.Join(instancesDir, "tmp", strconv.FormatInt(id, 10))
+}
 
 // DeletedDir receives the data of removed instances.
 func DeletedDir(instancesDir string) string { return filepath.Join(instancesDir, "deleted") }
@@ -132,14 +137,13 @@ func InstanceContainer(h Host, req agentapi.EnsureRequest) (docker.ContainerConf
 		},
 		StopTimeout: StopTimeoutSeconds,
 		HostConfig: docker.HostConfig{
-			Binds:          []string{DataDir(h.InstancesDir, req.ID) + ":/data"},
+			Binds:          []string{DataDir(h.InstancesDir, req.ID) + ":/data", TmpDir(h.InstancesDir, req.ID) + ":/tmp"},
 			NetworkMode:    NetworkName,
 			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
 			CapDrop:        []string{"ALL"},
 			SecurityOpt:    []string{"no-new-privileges:true"},
 			Privileged:     false,
 			ReadonlyRootfs: true,
-			Tmpfs:          map[string]string{"/tmp": TmpfsOptions},
 			Memory:         memory,
 			MemorySwap:     memory,
 			PidsLimit:      PidsLimit,

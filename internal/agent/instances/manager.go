@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -263,6 +264,9 @@ func (m *Manager) ensure(ctx context.Context, req agentapi.EnsureRequest) error 
 		}
 	}
 	m.setOp(req.ID, agentapi.OpCreating)
+	if err := m.resetTmpDir(req.ID); err != nil {
+		return err
+	}
 	if _, err := m.dc.CreateContainer(ctx, name, cfg); err != nil {
 		return err
 	}
@@ -355,6 +359,9 @@ func (m *Manager) remove(ctx context.Context, id int64) error {
 		}
 	}
 	m.setOp(id, agentapi.OpRemoving)
+	if err := os.RemoveAll(TmpDir(m.host.InstancesDir, id)); err != nil {
+		return err
+	}
 	if err := m.archiveData(id, instName); err != nil {
 		return err
 	}

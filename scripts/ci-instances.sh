@@ -5,7 +5,8 @@
 # criteria 2 and 5 on the panel/files-service path; sub-project 5, spec §10 criteria 1-6 on the
 # panel path): starts the real agent as root and the files service as mcpanel-mc, creates a
 # Paper server through the agent socket, waits until it answers a status ping routed by hostname
-# through mc-router, checks the container hardening (read-only rootfs, limits, the egress filter
+# through mc-router, checks the container hardening (read-only rootfs with a disk-backed /tmp,
+# limits, the egress filter
 # against metadata and private addresses, replies to a client in a private network through the
 # router), the console endpoints and the files service
 # (credentials, peer UID, upload, redaction, editing, symlinks, directory zip), crashes it,
@@ -684,12 +685,13 @@ checks = {
     "memory": h["Memory"] == 2048 * 1024 * 1024 * 5 // 4 and h["MemorySwap"] == h["Memory"],
     "pids": h["PidsLimit"] == 1024,
     "restart": h["RestartPolicy"]["Name"] == "unless-stopped",
-    "only_data_mount": [m["Destination"] for m in c["Mounts"]] == ["/data"],
+    "only_data_and_tmp_mounts": sorted((m["Destination"], m["Source"]) for m in c["Mounts"])
+        == [("/data", sys.argv[3] + "/instances/9001"), ("/tmp", sys.argv[3] + "/tmp/9001")],
     "no_ports": not h.get("PortBindings"),
     "network": list(c["NetworkSettings"]["Networks"]) == ["mcpanel-mc"],
     "label": cfg["Labels"].get("mcpanel.instance") == "9001",
     "readonly_rootfs": h["ReadonlyRootfs"] is True,
-    "tmpfs": h.get("Tmpfs") == {"/tmp": "rw,exec,nosuid,nodev,size=512m"},
+    "no_tmpfs": not h.get("Tmpfs"),
     "nofile": h.get("Ulimits") == [{"Name": "nofile", "Soft": 65536, "Hard": 65536}],
     "no_rcon_broadcast": "BROADCAST_RCON_TO_OPS=false" in cfg["Env"],
 }
@@ -697,7 +699,14 @@ bad = [k for k, ok in checks.items() if not ok]
 if bad:
     print("hardening failed:", bad, file=sys.stderr)
     sys.exit(1)
-print("OK: hardening", sorted(checks))' "$(id -u mcpanel-mc)" "$(id -g mcpanel-mc)" || fail "hardening"
+print("OK: hardening", sorted(checks))' "$(id -u mcpanel-mc)" "$(id -g mcpanel-mc)" "$work/mc" || fail "hardening"
+[ "$(stat -c '%U %a' "$work/mc/tmp")" = "root 700" ] || fail "tmp/ owner/mode: $(stat -c '%U:%G %a' "$work/mc/tmp")"
+[ "$(stat -c '%U:%G %a' "$work/mc/tmp/9001")" = "mcpanel-mc:mcpanel-mc 700" ] ||
+  fail "tmp/9001 owner/mode: $(stat -c '%U:%G %a' "$work/mc/tmp/9001")"
+if setpriv --reuid=mcpanel-mc --regid=mcpanel-mc --clear-groups ls "$work/mc/tmp" >/dev/null 2>&1; then
+  fail "mcpanel-mc (files service) can list tmp/"
+fi
+echo "OK: /tmp is tmp/9001 (mcpanel-mc 0700) below a root-only tmp/"
 docker inspect mcpanel-router | python3 -I -c '
 import json, sys
 c = json.load(sys.stdin)[0]
@@ -1137,7 +1146,8 @@ if grep -q 'citest.mc.localhost' "$routes"; then
   fail "route still present after remove"
 fi
 ls -d "$work"/mc/deleted/citest-* >/dev/null 2>&1 || fail "data not moved to deleted/"
-echo "OK: container and route removed, data moved to deleted/"
+[ ! -e "$work/mc/tmp/9001" ] || fail "tmp/9001 still there after remove"
+echo "OK: container and route removed, data moved to deleted/, tmp/9001 removed"
 
 echo "== plugins: panel (production mode, user mcpanel) on the agent and the files service"
 install -m 0755 "$3" "$work/bin/panel"
