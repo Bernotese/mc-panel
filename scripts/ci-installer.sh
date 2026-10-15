@@ -127,10 +127,10 @@ active() { systemctl is-active --quiet "$1"; }
 
 echo "== prepare: hosts entry, restic, staging"
 grep -q " $domain\$" /etc/hosts || echo "127.0.0.1 $domain" >>/etc/hosts
-# GitHub's runner image leaves /usr/local/bin group/world-writable; the installer rightly refuses
-# to put root's binaries there (another user could swap them), so the runner gets the Ubuntu
-# default first.
-chmod go-w /usr/local/bin
+# GitHub's runner image leaves /usr/local/bin and /usr/share/keyrings group/world-writable; the
+# installer rightly refuses to put root's binaries or apt's Caddy key there (another user could
+# swap them), so the runner gets the Ubuntu default first.
+chmod go-w /usr/local/bin /usr/share/keyrings /etc/apt/sources.list.d
 bash "$repo/scripts/install-restic.sh"
 v1="$work/v1" v2="$work/v2" broken="$work/broken"
 stage "$v1" 0.0.1-ci
