@@ -75,6 +75,8 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   'plugin_source_unavailable',
   'plugin_not_downloadable',
   'plugin_incompatible',
+  'mrpack_incompatible',
+  'mrpack_version_mismatch',
   'backups_unavailable',
   'backup_running',
   'internal',

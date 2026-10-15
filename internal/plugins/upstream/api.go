@@ -47,6 +47,40 @@ func (c *Client) Project(ctx context.Context, src Source, id string) (Project, e
 	})
 }
 
+// ModrinthProjects returns the Modrinth projects with these ids, keyed by id; unknown ids are
+// missing from the map. Cached projects (Project, by id) are not asked again; the others are
+// fetched MaxProjectBatch at a time and cached like Project.
+func (c *Client) ModrinthProjects(ctx context.Context, ids []string) (map[string]Project, error) {
+	out := map[string]Project{}
+	var missing []string
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if !validRef(id) || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if p, ok := c.projects.Peek(cacheKey(Modrinth, id)); ok {
+			out[id] = p
+			continue
+		}
+		missing = append(missing, id)
+	}
+	for chunk := range slices.Chunk(missing, MaxProjectBatch) {
+		ps, err := c.modrinthProjects(ctx, chunk)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range ps {
+			if !seen[p.ID] {
+				continue // not asked for (an answer by slug or a foreign id)
+			}
+			c.projects.Put(cacheKey(Modrinth, p.ID), p)
+			out[p.ID] = p
+		}
+	}
+	return out, nil
+}
+
 // Versions returns the versions of project that match f, newest first, at most MaxVersions
 // (the full list is cached 15 min).
 func (c *Client) Versions(ctx context.Context, src Source, project string, f VersionFilter) ([]Version, error) {
