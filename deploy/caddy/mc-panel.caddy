@@ -16,5 +16,8 @@
 			}
 		}
 	}
+	# Your additions (basic_auth, an IP allowlist, …) go into /etc/caddy/mc-panel.d/*.caddy;
+	# this file is rewritten by install and update, that directory never.
+	import /etc/caddy/mc-panel.d/*.caddy
 	reverse_proxy unix//run/mc-panel-web/panel.sock
 }
