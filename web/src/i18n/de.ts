@@ -145,6 +145,8 @@ export const de = {
     title: 'Zwei-Faktor-Anmeldung einrichten',
     description_admin: 'Als Administrator musst du einen zweiten Faktor einrichten, bevor du das Panel nutzen kannst.',
     description_user: 'Für dein Konto ist ein zweiter Faktor vorgeschrieben.',
+    description_permissions:
+      'Du hast Konsolen-, Datei-, Plugin- oder Backup-Rechte auf einem Server. Diese Rechte setzen einen zweiten Faktor voraus, deshalb musst du ihn einrichten, bevor du das Panel nutzen kannst.',
     tab_totp: 'Authenticator-App',
     tab_passkey: 'Passkey',
     codes_title: 'Fast geschafft',
@@ -1278,6 +1280,8 @@ export const de = {
     admin_note: 'Administratoren haben automatisch alle Rechte auf allen Servern.',
     no_servers: 'Noch keine Server angelegt.',
     unsaved: 'Ungespeicherte Änderungen',
+    two_factor_note:
+      '„Konsole“, „Dateien“, „Plugins/Mods“ und „Backups“ setzen die Zwei-Faktor-Anmeldung voraus: Wer eines davon auf irgendeinem Server hat, muss 2FA einrichten, bevor es weitergeht – auch in einer offenen Sitzung.',
     files_warning: '„Dateien“ erlaubt Code-Ausführung im Minecraft-Server (z. B. über Plugins). Vergib es nur an Personen, denen du voll vertraust.',
     plugins_warning: '„Plugins/Mods“ erlaubt Code-Ausführung im Minecraft-Server. Vergib es nur an Personen, denen du voll vertraust.',
     backups_warning:
@@ -1408,7 +1412,7 @@ export const de = {
     },
     settings: {
       enforce_2fa: 'Zwei-Faktor-Anmeldung für alle Benutzer erzwingen',
-      enforce_2fa_hint: 'Administratoren müssen 2FA immer einrichten.',
+      enforce_2fa_hint: 'Administratoren und Benutzer mit Konsolen-, Datei-, Plugin- oder Backup-Rechten müssen 2FA immer einrichten.',
       allowlist_only: 'Admin-Zugang nur aus der Allowlist',
       allowlist_only_hint: 'Administratoren können sich nur aus Netzen mit „Erlauben“-Regel anmelden. Änderungen, die dich aussperren würden, lehnt der Server ab.',
       countries: 'Erlaubte Länder',

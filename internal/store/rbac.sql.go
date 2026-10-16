@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 const rbacClearTOTP = `-- name: RbacClearTOTP :exec
@@ -520,4 +521,34 @@ type RbacUpdateUserRoleParams struct {
 func (q *Queries) RbacUpdateUserRole(ctx context.Context, arg RbacUpdateUserRoleParams) error {
 	_, err := q.db.ExecContext(ctx, rbacUpdateUserRole, arg.Role, arg.UpdatedAt, arg.ID)
 	return err
+}
+
+const rbacUserHasAnyPermission = `-- name: RbacUserHasAnyPermission :one
+SELECT EXISTS (
+  SELECT 1 FROM permissions WHERE user_id = ?1 AND permission IN (/*SLICE:perms*/?)
+)
+`
+
+type RbacUserHasAnyPermissionParams struct {
+	UserID int64
+	Perms  []string
+}
+
+// Whether the user holds one of the given permissions on any server (mandatory 2FA, SEC-10).
+func (q *Queries) RbacUserHasAnyPermission(ctx context.Context, arg RbacUserHasAnyPermissionParams) (bool, error) {
+	query := rbacUserHasAnyPermission
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.UserID)
+	if len(arg.Perms) > 0 {
+		for _, v := range arg.Perms {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:perms*/?", strings.Repeat(",?", len(arg.Perms))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:perms*/?", "NULL", 1)
+	}
+	row := q.db.QueryRowContext(ctx, query, queryParams...)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

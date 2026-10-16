@@ -179,20 +179,50 @@ func (h *Handler) factors(ctx context.Context, q *store.Queries, u store.User) (
 	return factors{totp: u.TotpEnabled == 1, passkeys: pk, recovery: rc}, nil
 }
 
-// twoFactorMandatory: admins always; users when enforcement is switched on.
+// Why 2FA is mandatory for a user (Me.two_factor_reason); reasonNone means it is optional.
+const (
+	reasonNone        = "none"
+	reasonAdmin       = "admin"
+	reasonPermissions = "permissions"
+	reasonPolicy      = "policy"
+)
+
+// twoFactorMandatory: admins always; users holding a full-trust permission on any server
+// (SEC-10); other users when enforcement is switched on.
 func (h *Handler) twoFactorMandatory(ctx context.Context, q *store.Queries, u store.User) (bool, error) {
 	return twoFactorMandatory(ctx, q, u)
 }
 
 func twoFactorMandatory(ctx context.Context, q *store.Queries, u store.User) (bool, error) {
+	reason, err := twoFactorReason(ctx, q, u)
+	return reason != reasonNone, err
+}
+
+// twoFactorReason is evaluated on every request (effectiveStage), so a permission granted to a
+// logged-in user takes effect at once and a revoked one makes 2FA optional again.
+func twoFactorReason(ctx context.Context, q *store.Queries, u store.User) (string, error) {
 	if principal.Role(u.Role) == principal.RoleAdmin {
-		return true, nil
+		return reasonAdmin, nil
+	}
+	perms := make([]string, len(rbac.FullTrustPermissions))
+	for i, p := range rbac.FullTrustPermissions {
+		perms[i] = string(p)
+	}
+	fullTrust, err := q.RbacUserHasAnyPermission(ctx, store.RbacUserHasAnyPermissionParams{UserID: u.ID, Perms: perms})
+	if err != nil {
+		return reasonNone, err
+	}
+	if fullTrust {
+		return reasonPermissions, nil
 	}
 	s, err := store.LoadSecuritySettings(ctx, q)
 	if err != nil {
-		return false, err
+		return reasonNone, err
 	}
-	return s.Enforce2FAForUsers, nil
+	if s.Enforce2FAForUsers {
+		return reasonPolicy, nil
+	}
+	return reasonNone, nil
 }
 
 type meResponse struct {
@@ -205,6 +235,7 @@ type meResponse struct {
 	PasskeyCount           int64    `json:"passkey_count"`
 	RecoveryCodesRemaining int64    `json:"recovery_codes_remaining"`
 	SecondFactors          []string `json:"second_factors"`
+	TwoFactorReason        string   `json:"two_factor_reason"`
 	SudoUntil              int64    `json:"sudo_until"`
 	CSRFToken              string   `json:"csrf_token"`
 }
@@ -219,10 +250,15 @@ func (h *Handler) writeMe(w http.ResponseWriter, r *http.Request, u store.User, 
 	if sudo <= h.clock.Now().UnixMilli() {
 		sudo = 0
 	}
+	reason, err := twoFactorReason(r.Context(), h.q, u)
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, meResponse{
 		ID: u.ID, Username: u.Username, Role: u.Role, Stage: sess.Stage, Locale: u.Locale,
 		TOTPEnabled: f.totp, PasskeyCount: f.passkeys, RecoveryCodesRemaining: f.recovery,
-		SecondFactors: f.secondFactors(), SudoUntil: sudo, CSRFToken: sess.CsrfToken,
+		SecondFactors: f.secondFactors(), TwoFactorReason: reason, SudoUntil: sudo, CSRFToken: sess.CsrfToken,
 	})
 }
 
