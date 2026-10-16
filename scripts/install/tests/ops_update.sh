@@ -68,6 +68,8 @@ ops_probes() {
   upd_db_restore() { cp -- "$1" "$ROOT$DATA_DIR/panel.db"; }
   upd_free_bytes() { echo "${OPS_FREE:-100000000000}"; }
   upd_probe_restarts() { echo 0; }
+  upd_probe_unit_state() { echo "active/running (success)"; }
+  upd_probe_unit_report() { echo "unit report since $1"; }
   # never the network in a test (tests that need a download define fetch themselves)
   fetch() { fail "network access in a test: $1"; }
   upd_fetch_latest_json() { fail "network access in a test: GitHub API"; }
@@ -631,6 +633,7 @@ test_ops_update_restarting_service_is_not_healthy() {
   }
   assert_exit 3 cmd_update
   assert_eq "1.0.0" "$("$ROOT$BIN_DIR/panel" version)"
+  assert_contains "$(cat "$WORK/out")" "1.1.0 is not healthy after 0s: systemd restarted mcpanel-panel.service 2 times"
 }
 
 test_ops_update_checks_the_socket_units() {
@@ -639,7 +642,36 @@ test_ops_update_checks_the_socket_units() {
   ops_fake_new_build 1.1.0
   UPD_HEALTH_SECS=0
   systemd_wait_active() { [[ $1 != mcpanel-panel.socket || $("$ROOT$BIN_DIR/panel" version) == 1.0.0 ]]; }
+  upd_probe_unit_state() { echo "failed/failed (exit-code)"; }
   assert_exit 3 cmd_update
+  assert_contains "$(cat "$WORK/out")" "not healthy after 0s: mcpanel-panel.socket is failed/failed (exit-code)"
+}
+
+test_ops_update_names_the_failing_endpoint_and_logs_the_units() {
+  ops_fake_install 1.0.0
+  ops_probes
+  ops_fake_new_build 1.1.0
+  : >"$ROOT$LOG_FILE"
+  UPD_HEALTH_SECS=0
+  upd_probe_health() {
+    if [[ $("$ROOT$BIN_DIR/panel" version) == 1.0.0 ]]; then return 0; fi
+    echo "panel: curl: (56) Recv failure: Connection reset by peer"
+    return 1
+  }
+  assert_exit 3 cmd_update
+  assert_contains "$(cat "$WORK/out")" "1.1.0 is not healthy after 0s: health check failed: panel: curl: (56) Recv failure"
+  assert_file_contains "$ROOT$LOG_FILE" "not healthy after 0s: health check failed: panel"
+  assert_file_contains "$ROOT$LOG_FILE" "unit report since"
+}
+
+test_ops_update_failed_rollback_names_the_reason() {
+  ops_fake_install 1.0.0
+  ops_probes
+  ops_fake_new_build 1.1.0
+  UPD_HEALTH_SECS=0
+  upd_probe_restarts() { [[ $1 == mcpanel-agent.service ]] && echo 1 || echo 0; }
+  assert_exit 4 cmd_update
+  assert_contains "$(cat "$WORK/out")" "1.0.0 is not healthy after 0s: systemd restarted mcpanel-agent.service 1 times"
 }
 
 test_ops_update_from_dir_hands_over_to_its_install_sh() {
