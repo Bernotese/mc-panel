@@ -17,6 +17,19 @@ Run the sections a release touches; run all of them for a release that changes m
 
 Most API checks below run in the browser DevTools console as `friend`, e.g. `await fetch('/api/servers/<id>/files').then(r => r.status)`; `<id>` comes from the URL.
 
+## Sign-in and Security Center
+
+What CI covers: auth, defense and notify unit tests, the e2e sign-in with TOTP, and the jail acceptance (`scripts/ci-acceptance.sh`).
+
+- [ ] **TOTP QR code:** the QR code of the 2FA setup (SVG) scans with a phone app.
+- [ ] **Sudo dialog names the action:** the sudo dialog says what it confirms ("Aktion: …", or "N Aktionen: …" for several requests at once).
+- [ ] **First factor needs the password:** a new user without 2FA must enter the current password when setting up the first TOTP or passkey; a wrong password is refused.
+- [ ] **Known device under attack:** script 20 failed logins for `helper` from another address (e.g. `curl` on the VM). Signing in as `helper` from your browser (signed in there before) still works; a fresh private window gets `429` (rate limit, no lock-out).
+- [ ] **Admin allowlist:** enable "Admin access only from the allowlist" with only your current network; an admin session from another address (e.g. via a phone hotspot) gets `403` on the next request and its session is gone after saving. `panel admin unlock` turns it off.
+- [ ] **Role change:** changing `helper` to admin and back ends `helper`'s open sessions.
+- [ ] **Idle timeout:** leave an open tab with polling areas (dashboard, monitoring) alone for 30 min: the session ends anyway.
+- [ ] **Audit anchors:** `sudo journalctl -u mcpanel-panel -o cat | sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml -journal -` reports the chain intact and exits 0 (CLI entries as "without anchor").
+
 ## Instances
 
 What CI covers: unit and integration tests, Docker integration (`dockerintegration`), the instance acceptance through the agent (`scripts/ci-instances.sh`: routing, hardening, crash restart, delete), Playwright against the mock.
@@ -25,6 +38,9 @@ What CI covers: unit and integration tests, Docker integration (`dockerintegrati
 - [ ] **Permissions:** a user with only `server.power` on `survival` sees only `survival`, can start and stop it, sees no settings area; `PATCH /api/servers/<id>` answers `403`.
 - [ ] **Memory limit:** the server form shows the host's RAM, allows at most (host RAM − 1 GiB) / 1.25 and recommends a size per type when creating; `PATCH /api/servers/<id>` with a larger `memory_mib` answers `400 validation_failed`; if all servers together exceed the host RAM, the form warns.
 - [ ] **Change and restart:** change MOTD and memory → "restart required"; after restarting, the client shows the new MOTD, `sudo docker inspect mcpanel-mc-<id>` shows the new limit, the world is kept.
+- [ ] **Seed:** a user with only `server.view` on `survival` does not see the seed (UI and `GET /api/servers/<id>`); a user with `server.files` and admins do.
+- [ ] **Hardened container:** after a settings change of `survival`, `sudo docker inspect mcpanel-mc-<id>` shows `ReadonlyRootfs: true`, mounts `/data` and `/tmp` (from `/srv/mc-panel/tmp/<id>`) and `nofile` 65536; Paper, Fabric and a Modrinth pack reach "running" this way.
+- [ ] **Egress filter:** a connection from the container to `169.254.169.254` or a LAN address (`sudo docker exec mcpanel-mc-<id> …` with `curl` or `wget`, whichever the image has) times out, and `sudo nft list chain inet mcpanel forward` shows the drop counter rising; a download from the internet (e.g. a plugin's own update check) still works, and a player in the LAN can join.
 - [ ] **Host reboot:** with servers running, `sudo reboot` the VM. Servers whose desired state is "running" run again afterwards.
 - [ ] **Delete and audit:** delete a throwaway server. Container and route are gone, its data is under `/srv/mc-panel/deleted/`, the audit log has the entry, and `ssh claude@192.168.1.117 "sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml"` reports OK.
 
@@ -43,7 +59,7 @@ What CI covers: agent (Docker demultiplexer, log stream, exec, player files) and
 - [ ] **Kick, ban, pardon:** kick (reason shown in the client), ban (join refused; entry with reason, by, since), pardon (join works again).
 - [ ] **In-game changes stay:** `/op <other>` or `/whitelist add <name>` in the game appear in the players area and survive a restart.
 - [ ] **Stopped server:** lists stay visible, change buttons and the console input are disabled with a hint.
-- [ ] **Revoked access:** while `helper` has the console open, remove `server.console` (or end the session in the Security Center). The stream ends within 30 s.
+- [ ] **Revoked access:** while `helper` has the console open, remove `server.console` (or end the session in the Security Center). The stream ends within about 5 s.
 - [ ] **Audit:** `server.console_command` (command text and result, not the output) and `server.player_action` (action, name, reason) entries; `panel audit verify` reports OK.
 - [ ] **Mobile:** console usable, the input stays visible at the bottom, players area without horizontal scrolling.
 
@@ -63,6 +79,7 @@ What CI covers: service unit and Linux tests (path rules, `os.Root` limits, syml
 - [ ] **Only `server.view`:** `friend` has no files area; `/api/servers/<id>/files` answers `403`.
 - [ ] **Audit:** `file.*` entries for upload (size), extract (target), rename (from/to), save, delete and download, by `helper`; listing and opening are not audited.
 - [ ] **Mobile:** file list as cards, upload via the file picker, the editor is usable.
+- [ ] **Unicode names:** a file whose name contains U+202E (right-to-left override) shows the character as ⟨U+202E⟩, in the list and in the download name it is dropped.
 
 ## Plugins and mods
 
@@ -92,6 +109,7 @@ Extra setup: a Fabric server `modded` (current game version, 2 GiB, started once
 - [ ] **Only `server.view`:** `friend` has no plugins area; `/api/servers/<id>/plugins` answers `403`.
 - [ ] **Audit:** one `plugin.install` per jar (also the dependencies), `plugin.update` (from/to), `plugin.toggle` (enabled), `plugin.remove`; mrpack imports add `via: mrpack` per jar and one `plugin.mrpack_import` with pack name, version and counts; search, inventory, update checks and icons are not audited.
 - [ ] **Mobile:** Installed as cards, search, install dialog, mrpack dialog and job progress usable.
+- [ ] **External links:** download and project links show their host; `http:` links are shown as text, not linked.
 
 ## Backups
 
@@ -110,6 +128,8 @@ What CI covers: files service (tar over `os.Root` with symlinks, special files, 
 - [ ] **Without restic:** with restic moved away and `mcpanel-files` restarted, the backups area shows only the "not available" hint; the file browser still works.
 - [ ] **Panel crash during a backup:** create a 3 GiB file in the data directory to slow the backup, start one, `sudo systemctl kill -s KILL mcpanel-panel` during "backing up data". After systemd restarts the panel, `save-on` in the console answers "Saving is already turned on"; no job is left; delete the big file afterwards.
 - [ ] **Concurrency:** a second backup or restore while one runs is refused (`409 backup_running`); extracting a zip during a backup is refused (`429 busy`).
+- [ ] **Sudo and rate limit:** saving the schedule and pinning or unpinning a snapshot ask for sudo; a second manual backup within 10 minutes after the first one ended shows the rate-limit message (also after a failed one); one refused for lack of space does not count.
+- [ ] **Reserve:** fill the disk below the reserve (`fallocate`, larger of 2 GiB and 5 %): an upload, a plugin install and a backup fail with "not enough space"; deleting a file, saving a shorter `server.properties` and starting the server still work.
 - [ ] **Disk full:** fill the disk to ~1 GiB free (`fallocate`) and restore a snapshot > 1 GiB: "not enough space on the host", data unchanged, the server starts again; after removing the fill file the restore works.
 - [ ] **Delete with and without backups:** deleting a throwaway server with "also delete backups" removes `backups/repos/<id>` and `backups/keys/<id>` (audit `server.delete` with `backups_purged: true`); without it, both stay and the dialog says so.
 - [ ] **Only `server.view`:** `friend` has no backups area; `/api/servers/<id>/backups` answers `403`.
@@ -139,6 +159,7 @@ ssh claude@192.168.1.117 'sudo nft delete table inet mcpanel_test'   # reachable
 - [ ] **Only `server.view`:** `friend` sees no host values, no down-alert toggle and no monitoring settings; `/api/monitoring/host?range=1h` answers `403`, `/api/monitoring/overview` lists only `survival` with `host: null`, metrics of `creative` answer `403`.
 - [ ] **Settings and audit:** invalid values (e.g. 0 or 51 %) are rejected with the allowed range; valid ones need sudo; audit `monitoring.settings_update` (from/to) and `server.alerts_update`.
 - [ ] **Without a notification channel:** the monitoring settings warn that alerts are detected but not sent.
+- [ ] **Security notifications:** ntfy gets a message for a password change, a used recovery code, wrong 2FA codes and the 2FA lockout (10 wrong codes); 20 jails within 10 min send at most 5 messages plus one summary; "send test" works at most 6 times per minute and shows no HTTP status of the target.
 - [ ] **Deleted server:** its rows are gone (`sudo sqlite3 /var/lib/mc-panel/panel.db 'SELECT count(*) FROM metrics_raw WHERE series = <id>'` → `0`).
 - [ ] **DB size:** after a few days, about 23 000 raw rows per server and day that disappear after 24 h; 10 servers over 30 days stay well below 50 MB.
 - [ ] **Mobile:** host and server values readable, charts full width, tooltip by tap.
@@ -152,9 +173,15 @@ Manual, on a fresh **real VPS** with Ubuntu 26.04, a public domain (`panel.<doma
 - [ ] **One-liner:** `curl -fsSL …/releases/download/<older>/install.sh | sudo bash -s -- install --domain panel.<domain> --email <mail>`; enter admin name and password. Ends with "mc-panel is installed: https://panel.<domain>/"; the panel has a valid Let's Encrypt certificate; login and 2FA work.
 - [ ] **Idempotent:** the same one-liner again prints no `[changed]` and no admin prompt.
 - [ ] **`doctor`:** only expected warnings (own file system, newer release, SSH password/root login, clock); exit code 1 with warnings, 0 without; `--json` matches.
+- [ ] **`doctor` new checks:** `touch /run/reboot-required` gives `! a reboot is pending since …` (remove it again); with `KbdInteractiveAuthentication yes` in sshd (and `UsePAM yes`) `ssh_kbdinteractive` warns; on a host where `live-restore` is in `daemon.json` but not active, `docker_live_restore` warns until `systemctl reload docker` (the servers keep running); with `"dns": ["192.168.1.1"]` in `/etc/docker/daemon.json` `docker_dns` warns (remove it again); with `/srv/mc-panel` on the root file system `storage_fs` names `/var/lib/mc-panel` and `/var/lib/docker`.
 - [ ] **`doctor` finds faults:** stop `mcpanel-files.socket` and `.service`; `chmod 0666` the panel socket; delete `instances_dir` from `panel.toml`. Each gives `✗` with a fitting hint and exit code 2; re-running `install` repairs it.
 - [ ] **Update:** with a Paper server running, a player connected and a backup made: `update --check` reports old and new version; `update` hands over, backs up to `/var/lib/mc-panel-rollback/<old>-<time>` (root, 0700, `phase=verified`) and ends with `updated <old> -> <new>`; the player stays connected; users, servers, world and backup unchanged.
 - [ ] **Rollback:** the CI job "Installer lifecycle (root)" is the evidence (exit code 3, old version runs, DB unchanged).
+- [ ] **Caddy switched by the update:** after an update from a release before the Caddy repository, `apt-cache policy caddy` shows the installed version from `dl.cloudsmith.io/public/caddy/stable`, `caddy version` ≥ 2.10, the Caddyfile (if the installer owns it) has `admin unix//run/caddy/admin.sock`, the panel and other Caddy sites answer. `sudo unattended-upgrade --dry-run --debug` lists `origin=cloudsmith/caddy/stable,archive=any-version` among the allowed origins.
+- [ ] **Caddy admin API:** `sudo -u mcpanel curl -m2 http://127.0.0.1:2019/config/` fails; `/run/caddy/admin.sock` is `caddy:caddy` mode 0200; `systemctl reload caddy` works.
+- [ ] **Access log:** after a sign-in, `/var/log/caddy/mc-panel.log` (only `caddy` and root can read it) has the request with the client IP; cookies are `REDACTED`, no `X-Csrf-Token`.
+- [ ] **Site additions:** a file `/etc/caddy/mc-panel.d/auth.caddy` with `basic_auth` (hash from `caddy hash-password`) asks for the password after `systemctl reload caddy`; an `update --force` keeps the file and the prompt.
+- [ ] **Sandboxing:** `systemd-analyze security mcpanel-panel.service` (and `-agent`, `-files`) is below 4, 6 and 3; with the sandbox a server starts, the console streams, a plugin installs, and backup, restore and download work; `journalctl -u 'mcpanel-*'` shows no `operation not permitted` or `read-only file system`.
 - [ ] **Firewall from outside:** `nmap -Pn -p 22,80,443,25565,8080,3306 <vps>` and `nmap -Pn -sU -p 443 <vps>`: only the SSH port, 80, 443, 25565/tcp and 443/udp are open; the SSH session survived the install.
 - [ ] **Other SSH port:** with `Port 2222` in sshd, the firewall allows 2222 and the session stays; `--allow-port 8443` adds a rule `tcp dport { 8443 } accept # --allow-port`, a later `install` without it removes it.
 - [ ] **Uninstall:** services, units, Caddy site and import line, firewall tables and the Minecraft containers are gone; `/srv/mc-panel`, `/var/lib/mc-panel`, `/var/lib/mc-panel-rollback`, `/etc/mc-panel*` and the users stay; packages stay.
@@ -177,3 +204,4 @@ What CI covers (CI and `make test-vm`): token contrast in light and dark (`web/s
 - [ ] **Keyboard:** tab through rail, tree and pages; focus is always visible.
 - [ ] **Login/2FA and sudo dialog** in the new style.
 - [ ] **CSP:** no CSP errors in the browser console; fonts load from the panel itself (no foreign hosts in the network tab).
+- [ ] **CSP and Trusted Types:** in both themes the browser console shows no CSP or Trusted Types message on the login, the 2FA setup (QR code), the files editor, toasts and dialogs.
