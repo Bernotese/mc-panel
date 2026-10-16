@@ -127,7 +127,7 @@ sudo runuser -u mcpanel -- /usr/local/bin/panel admin create -config /etc/mc-pan
 
 After the first login:
 
-1. Set up the second factor (authenticator app or passkey; mandatory for admins) and store the recovery codes.
+1. Set up the second factor (authenticator app or passkey; mandatory for admins and for users who hold `server.console`, `server.files`, `server.plugins` or `server.backups` on any server) and store the recovery codes.
 2. Settings: enter the base domain for the Minecraft servers.
 3. Security Center → notifications: add a Discord or ntfy channel and send a test. Failed backups and monitoring alerts go there.
 4. Add the files listed under [Backups of keys and data](#backups-of-keys-and-data) to your own host backups.

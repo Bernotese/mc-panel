@@ -134,6 +134,7 @@ Linux-specific code sits behind interfaces, implementations are chosen by build 
 - **WebAuthn/passkeys**: several credentials per user, nameable, deletable. RP ID = configured domain (dev: `localhost`).
 - **Recovery codes**: 10 codes, 10 characters each, stored only hashed, single use, can be regenerated (sudo).
 - **Mandatory**: admins must set up 2FA before they can do anything else (forced setup flow). Can be enforced for `user` by a global setting.
+  (Now, security review SEC-10: 2FA is also mandatory for every `user` who holds a full-trust permission (`server.console`, `server.files`, `server.plugins` or `server.backups`, `rbac.FullTrustPermissions`) on any server. The policy is evaluated on every request: a full session of a user without a factor who gets such a permission is downgraded to `setup` at the next request (`403 setup_2fa_required` on full routes; enrolment and logout stay possible), and losing the permission makes 2FA optional again (existing factors are kept, the last one may then be removed; a session still waiting in `setup` without a factor continues as `full`, like a new password login would). Open console streams follow at their 5 s recheck. `Me.two_factor_reason` (`none`, `admin`, `permissions`, `policy`) tells the setup page why; the permission matrix notes the requirement.)
 - (Now, SEC-15: setting up the **first** second factor asks for the current password, because there is no factor yet to confirm sudo with.)
 
 ### 4.3 Login flow

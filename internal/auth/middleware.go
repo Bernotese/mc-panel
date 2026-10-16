@@ -159,11 +159,14 @@ func sameOrigin(r *http.Request, origin string) bool {
 }
 
 // effectiveStage downgrades a stored full session to setup when 2FA is mandatory for the user
-// (admin, or user under enforcement) but the user has no method: a user promoted to admin or
-// newly under enforcement must set up 2FA before using the panel.
+// (admin, full-trust permission or enforcement) but the user has no method: a user promoted to
+// admin, granted such a permission or newly under enforcement must set up 2FA before using the
+// panel. The other way round, a stored setup session of a user without a method continues as
+// full once 2FA is optional again (e.g. the permission was revoked): a password login would give
+// a full session at that point too.
 func (s *Sessions) effectiveStage(ctx context.Context, user store.User, sess store.Session) (principal.Stage, error) {
 	stage := principal.Stage(sess.Stage)
-	if stage != principal.StageFull || user.TotpEnabled == 1 {
+	if (stage != principal.StageFull && stage != principal.StageSetup) || user.TotpEnabled == 1 {
 		return stage, nil
 	}
 	passkeys, err := s.q.AuthCountCredentials(ctx, user.ID)
@@ -177,5 +180,5 @@ func (s *Sessions) effectiveStage(ctx context.Context, user store.User, sess sto
 	if mandatory {
 		return principal.StageSetup, nil
 	}
-	return stage, nil
+	return principal.StageFull, nil
 }
