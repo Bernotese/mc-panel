@@ -194,6 +194,7 @@ In production the installer (`install.sh`, section "Installer"; operator guide i
               }
           }
       }
+      import /etc/caddy/mc-panel.d/*.caddy
       reverse_proxy unix//run/mc-panel-web/panel.sock
   }
   ```

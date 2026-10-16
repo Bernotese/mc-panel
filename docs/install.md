@@ -92,11 +92,11 @@ After an update the egress filter and the router's new settings apply at once. A
 
 **Admin API.** In a Caddyfile the installer owns (it replaces only a missing or unchanged package default), Caddy's admin API is a Unix socket, `admin unix//run/caddy/admin.sock`, that only `caddy` and root can open. On `127.0.0.1:2019` every local user, the panel included, could reconfigure Caddy and read its TLS keys. The drop-in `/etc/systemd/system/caddy.service.d/mc-panel.conf` creates `/run/caddy` and `/var/log/caddy`. Your own Caddyfile stays as it is; `doctor` (`caddy_admin`) warns until you add the line to its global options and restart Caddy (`systemctl restart caddy`; a reload cannot move the admin address). `systemctl reload caddy` works with the socket as before.
 
-**Access log.** The panel site logs every request to `/var/log/caddy/mc-panel.log` (JSON, rotated at 50 MiB, 14 old files; directory and files readable only by `caddy` and root). It contains client IP addresses, URLs, user agents and request headers; Caddy redacts cookies and `Authorization`, and the site drops the CSRF token. IP addresses are personal data: tell your users, and shorten `roll_keep` in `/etc/caddy/mc-panel.caddy` if you need less (`install` and `update` rewrite this file, so keep a local change in your notes).
+**Access log.** The panel site logs every request to `/var/log/caddy/mc-panel.log` (JSON, rotated at 50 MiB, 14 old files; directory and files readable only by `caddy` and root). It contains client IP addresses, URLs, user agents and request headers; Caddy redacts cookies and `Authorization`, and the site drops the CSRF token. IP addresses are personal data: tell your users. The rotation is set in `mc-panel.caddy`, which `install` and `update` rewrite; to keep less, delete old files with a timer of your own.
 
 **Behind a CDN or another proxy.** The panel takes the client address from `X-Forwarded-For` as Caddy passes it. Behind a CDN (or another proxy in front of Caddy) every request then seems to come from the CDN: jails, rate limits and bans hit the CDN's addresses, i.e. all users at once. Add the CDN's address ranges to Caddy (global option `servers { trusted_proxies static <ranges> }`, so Caddy keeps the client entry) **and** to `trusted_proxies` in `/etc/mc-panel/panel.toml` (so the panel skips them), then restart Caddy and `mcpanel-panel`. The host jail cannot block clients behind a CDN; only the in-app jail applies.
 
-**Optional: hide the panel.** The login page and the app bundle are public (as for any web app), so anyone can see that an mc-panel runs at the address. To hide it, add Caddy's `basic_auth` or an IP allowlist (a `remote_ip` matcher that answers 403 to everyone else) to the site in `/etc/caddy/mc-panel.caddy`, before `reverse_proxy`, and run `systemctl reload caddy`. `install` and `update` rewrite this file, so re-apply the change after each run (keep a copy). Check sign-in with passkeys and the live console afterwards.
+**Optional: hide the panel.** The login page and the app bundle are public (as for any web app), so anyone can see that an mc-panel runs at the address. To hide it, put Caddy's `basic_auth` or an IP allowlist into a file of your own in `/etc/caddy/mc-panel.d/` (e.g. `allow.caddy` with `@out not remote_ip 203.0.113.0/24` and `respond @out 403`), then `systemctl reload caddy`. The panel site imports `/etc/caddy/mc-panel.d/*.caddy`; `install` and `update` rewrite `mc-panel.caddy` but never touch that directory. Check sign-in with passkeys and the live console afterwards.
 
 ## Service sandboxing
 
@@ -227,6 +227,7 @@ How to restore a snapshot without the panel is described in [`docs/dev/README.md
 | `/var/lib/mc-panel-rollback/` | update backups |
 | `/var/log/mc-panel-install.log` | installer log |
 | `/etc/caddy/mc-panel.caddy` | the panel's Caddy site (rewritten by `install` and `update`) |
+| `/etc/caddy/mc-panel.d/*.caddy` | your additions to the panel site (imported inside it; never touched by the installer) |
 | `/etc/systemd/system/caddy.service.d/mc-panel.conf` | drop-in for Caddy: creates `/run/caddy` (admin socket) and `/var/log/caddy` |
 | `/var/log/caddy/mc-panel.log` | HTTP access log of the panel (see [Caddy](#caddy)) |
 | `/etc/apt/sources.list.d/caddy-stable.list`, `/usr/share/keyrings/caddy-stable-archive-keyring.gpg` | the Caddy repository and its signing key |
