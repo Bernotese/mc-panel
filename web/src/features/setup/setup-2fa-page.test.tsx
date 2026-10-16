@@ -8,7 +8,6 @@ import { loginAs, MOCK_PASSWORD, MOCK_TOTP_CODE } from '@/mocks/db'
 import { renderWithProviders } from '@/test/render'
 import { Setup2faPage } from './setup-2fa-page'
 
-vi.mock('qrcode', () => ({ default: { toDataURL: vi.fn(async () => 'data:image/png;base64,QR') } }))
 vi.mock('@simplewebauthn/browser', () => ({
   browserSupportsWebAuthn: vi.fn(() => true),
   startAuthentication: vi.fn(),

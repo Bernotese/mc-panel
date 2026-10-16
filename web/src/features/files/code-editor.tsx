@@ -7,6 +7,7 @@ import { EditorState, Prec, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { basicSetup } from 'codemirror'
 import { useEffect, useRef } from 'react'
+import { cspNonce } from '@/lib/csp-nonce'
 import { isFileDrag, lineSeparator, type EditorLanguage } from './format'
 
 export interface CodeEditorProps {
@@ -72,6 +73,8 @@ export default function CodeEditor({ value, language, label, onChange, onSave }:
             },
           }),
           theme,
+          // style-mod falls back to a <style> element where adoptedStyleSheets are missing (CSP style-src).
+          EditorView.cspNonce.of(cspNonce() ?? ''),
           EditorView.contentAttributes.of({ 'aria-label': label }),
           Prec.highest(
             keymap.of([

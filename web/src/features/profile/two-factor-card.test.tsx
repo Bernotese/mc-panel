@@ -1,11 +1,9 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { loginAs, MOCK_PASSWORD, MOCK_TOTP_CODE } from '@/mocks/db'
 import { renderWithProviders } from '@/test/render'
 import { TwoFactorCard } from './two-factor-card'
-
-vi.mock('qrcode', () => ({ default: { toDataURL: vi.fn(async () => 'data:image/png;base64,QR') } }))
 
 describe('TwoFactorCard', () => {
   it('sets up TOTP for a user without 2FA and shows the first recovery codes', async () => {
