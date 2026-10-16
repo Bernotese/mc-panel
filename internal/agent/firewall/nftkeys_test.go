@@ -146,3 +146,56 @@ func TestSplitExisting(t *testing.T) {
 		t.Fatalf("splitExisting(unknown) = %v, %v", exists, others)
 	}
 }
+
+func TestEgressElements(t *testing.T) {
+	v4, v6 := egressElements([]netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("fe80::/10"),
+		netip.MustParsePrefix("169.254.0.0/16"),
+		netip.MustParsePrefix("255.255.255.255/32"), // reaches the top: no end element
+		netip.MustParsePrefix("fc00::/7"),
+	})
+	want4 := []rawElem{
+		{Key: []byte{10, 0, 0, 0}}, {Key: []byte{11, 0, 0, 0}, IntervalEnd: true},
+		{Key: []byte{169, 254, 0, 0}}, {Key: []byte{169, 255, 0, 0}, IntervalEnd: true},
+		{Key: []byte{255, 255, 255, 255}},
+	}
+	want6 := []rawElem{
+		{Key: a16("fe80::")}, {Key: a16("fec0::"), IntervalEnd: true},
+		{Key: a16("fc00::")}, {Key: a16("fe00::"), IntervalEnd: true},
+	}
+	eq := func(a, b rawElem) bool { return bytes.Equal(a.Key, b.Key) && a.IntervalEnd == b.IntervalEnd }
+	if !slices.EqualFunc(v4, want4, eq) || !slices.EqualFunc(v6, want6, eq) {
+		t.Fatalf("v4 = %v\nv6 = %v", v4, v6)
+	}
+	if v4, v6 := egressElements(nil); len(v4) != 0 || len(v6) != 0 {
+		t.Fatalf("empty list = %v %v", v4, v6)
+	}
+	if v4, _ := egressElements([]netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}); len(v4) != 1 || !bytes.Equal(v4[0].Key, []byte{0, 0, 0, 0}) {
+		t.Fatalf("0.0.0.0/0 = %v", v4)
+	}
+}
+
+func TestEgressSubnets(t *testing.T) {
+	got, err := egressSubnets([]netip.Prefix{
+		netip.MustParsePrefix("172.18.0.0/16"),
+		netip.MustParsePrefix("fd00:1::/64"),
+		netip.MustParsePrefix("172.18.0.0/16"), // duplicate
+	})
+	want := []netip.Prefix{netip.MustParsePrefix("172.18.0.0/16"), netip.MustParsePrefix("fd00:1::/64")}
+	if err != nil || !slices.Equal(got, want) {
+		t.Fatalf("egressSubnets = %v, %v; want %v", got, err, want)
+	}
+	// Fail closed: one unusable subnet (or none at all) means no rule set at all.
+	for name, in := range map[string][]netip.Prefix{
+		"empty":      nil,
+		"invalid":    {netip.MustParsePrefix("172.18.0.0/16"), {}},
+		"not masked": {netip.MustParsePrefix("10.0.0.1/8")},
+		"4in6":       {netip.MustParsePrefix("::ffff:a00:0/104")},
+		"zero bits":  {netip.MustParsePrefix("0.0.0.0/0")},
+	} {
+		if got, err := egressSubnets(in); err == nil {
+			t.Errorf("%s: egressSubnets = %v, want an error", name, got)
+		}
+	}
+}

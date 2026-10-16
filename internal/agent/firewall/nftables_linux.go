@@ -6,7 +6,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/netip"
+	"slices"
 	"sync"
 	"time"
 
@@ -22,25 +24,33 @@ import (
 // NFTables manages the table "inet mcpanel" with the sets mcpanel_jail4
 // (ipv4_addr, timeout) and mcpanel_jail6 (ipv6_addr, interval+timeout), both
 // limited to SetSize elements, and a filter chain on the input hook at priority
-// -10 that drops new connections from jailed sources. It never touches any
-// other table.
+// -10 that drops new connections from jailed sources. Unless the egress deny list
+// is empty, it also keeps the interval sets mcpanel_egress_deny4/6 and a filter
+// chain on the forward hook at priority -10 that drops new connections from the
+// container subnets to those sets. It never touches any other table.
 type NFTables struct {
-	mu    sync.Mutex // serialises read-modify-write sequences (list -> delete/add)
-	opts  []nftables.ConnOption
-	log   *slog.Logger
-	table *nftables.Table
-	set4  *nftables.Set
-	set6  *nftables.Set
+	mu         sync.Mutex // serialises read-modify-write sequences (list -> delete/add)
+	opts       []nftables.ConnOption
+	log        *slog.Logger
+	table      *nftables.Table
+	set4       *nftables.Set
+	set6       *nftables.Set
+	egressDeny []netip.Prefix
+	egress4    *nftables.Set
+	egress6    *nftables.Set
 }
 
-var _ agentapi.Firewall = (*NFTables)(nil)
+var _ Backend = (*NFTables)(nil)
 
-// NewNFTables creates the backend and runs the idempotent setup. opts are
-// passed to every nftables.New call (tests use nftables.WithNetNSFd).
-func NewNFTables(log *slog.Logger, opts ...nftables.ConnOption) (*NFTables, error) {
+// NewNFTables creates the backend and runs the idempotent setup. egressDeny is the
+// container egress deny list (empty: no egress filter, leftovers are removed). opts
+// are passed to every nftables.New call (tests use nftables.WithNetNSFd).
+func NewNFTables(log *slog.Logger, egressDeny []netip.Prefix, opts ...nftables.ConnOption) (*NFTables, error) {
 	table := &nftables.Table{Family: nftables.TableFamilyINet, Name: TableName}
 	set4, set6 := newSets(table)
-	n := &NFTables{opts: opts, log: log, table: table, set4: set4, set6: set6}
+	egress4, egress6 := newEgressSets(table)
+	n := &NFTables{opts: opts, log: log, table: table, set4: set4, set6: set6,
+		egressDeny: slices.Clone(egressDeny), egress4: egress4, egress6: egress6}
 	if err := n.setup(); err != nil {
 		return nil, fmt.Errorf("nftables: setup: %w", err)
 	}
@@ -52,6 +62,26 @@ func newSets(table *nftables.Table) (set4, set6 *nftables.Set) {
 	set4 = &nftables.Set{Table: table, Name: Set4Name, KeyType: nftables.TypeIPAddr, HasTimeout: true, Size: SetSize}
 	set6 = &nftables.Set{Table: table, Name: Set6Name, KeyType: nftables.TypeIP6Addr, HasTimeout: true, Interval: true, Size: SetSize}
 	return set4, set6
+}
+
+// newEgressSets returns the definitions of the two egress deny sets.
+func newEgressSets(table *nftables.Table) (set4, set6 *nftables.Set) {
+	set4 = &nftables.Set{Table: table, Name: EgressSet4Name, KeyType: nftables.TypeIPAddr, Interval: true}
+	set6 = &nftables.Set{Table: table, Name: EgressSet6Name, KeyType: nftables.TypeIP6Addr, Interval: true}
+	return set4, set6
+}
+
+// egressChain is the forward chain of the egress filter.
+func (n *NFTables) egressChain() *nftables.Chain {
+	policy := nftables.ChainPolicyAccept
+	return &nftables.Chain{
+		Name:     EgressChainName,
+		Table:    n.table,
+		Type:     nftables.ChainTypeFilter,
+		Hooknum:  nftables.ChainHookForward,
+		Priority: nftables.ChainPriorityRef(ChainPriority),
+		Policy:   &policy,
+	}
 }
 
 func (n *NFTables) Name() string { return "nftables" }
@@ -66,6 +96,14 @@ func (n *NFTables) setup() error {
 	if err != nil {
 		return err
 	}
+	if err := n.addSetup(c); err != nil {
+		return err
+	}
+	return c.Flush()
+}
+
+// addSetup adds the setup steps to c's batch (see setup).
+func (n *NFTables) addSetup(c *nftables.Conn) error {
 	var stale []*nftables.Set
 	for _, want := range []*nftables.Set{n.set4, n.set6} {
 		// An error means the table or set does not exist yet: nothing to migrate.
@@ -96,7 +134,162 @@ func (n *NFTables) setup() error {
 	}
 	c.AddRule(&nftables.Rule{Table: n.table, Chain: chain, Exprs: dropExprs(unix.NFPROTO_IPV4, 12, 4, n.set4)})
 	c.AddRule(&nftables.Rule{Table: n.table, Chain: chain, Exprs: dropExprs(unix.NFPROTO_IPV6, 8, 16, n.set6)})
-	return c.Flush()
+	return n.setupEgress(c)
+}
+
+// setupEgress adds the egress filter to the setup batch. The forward chain keeps its
+// rules: after an agent restart the running containers stay filtered until the
+// instance manager calls SetEgressSubnets again. The deny sets get exactly the
+// configured elements. With an empty deny list chain and sets are removed.
+func (n *NFTables) setupEgress(c *nftables.Conn) error {
+	if len(n.egressDeny) == 0 {
+		// Errors mean the chain or set does not exist: nothing to remove.
+		if ch, err := c.ListChain(n.table, EgressChainName); err == nil {
+			c.FlushChain(ch)
+			c.DelChain(ch)
+		}
+		for _, name := range []string{EgressSet4Name, EgressSet6Name} {
+			if s, err := c.GetSetByName(n.table, name); err == nil {
+				c.DelSet(s)
+			}
+		}
+		return nil
+	}
+	c.AddChain(n.egressChain())
+	v4, v6 := egressElements(n.egressDeny)
+	for _, e := range []struct {
+		set *nftables.Set
+		els []rawElem
+	}{{n.egress4, v4}, {n.egress6, v6}} {
+		if err := c.AddSet(e.set, nil); err != nil {
+			return err
+		}
+		c.FlushSet(e.set)
+		if len(e.els) == 0 {
+			continue
+		}
+		if err := c.SetAddElements(e.set, fromRaw(e.els)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetEgressSubnets re-asserts the whole table (as at agent start: also after an external
+// "nft flush ruleset") and replaces the forward chain's rules with one drop rule per
+// container subnet, atomically in one batch. A subnet no rule can be built for is an
+// error, so the caller never creates a container the filter does not cover.
+func (n *NFTables) SetEgressSubnets(_ context.Context, subnets []netip.Prefix) error {
+	if len(n.egressDeny) == 0 {
+		return nil
+	}
+	valid, err := egressSubnets(subnets)
+	if err != nil {
+		return err
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	c, err := nftables.New(n.opts...)
+	if err != nil {
+		return fmt.Errorf("nftables: %w", err)
+	}
+	if err := n.addSetup(c); err != nil {
+		return fmt.Errorf("nftables: %w", err)
+	}
+	chain := n.egressChain()
+	c.FlushChain(chain)
+	for _, p := range valid {
+		set := n.egress4
+		if p.Addr().Is6() {
+			set = n.egress6
+		}
+		c.AddRule(&nftables.Rule{Table: n.table, Chain: chain, Exprs: egressExprs(p, set)})
+	}
+	if err := c.Flush(); err != nil {
+		return fmt.Errorf("nftables: egress filter: %w", err)
+	}
+	return nil
+}
+
+// EgressInPlace reports whether the egress filter for subnets is still installed: the
+// jail chain, the forward chain with one rule per subnet and both deny sets with their
+// elements exist. Something else (e.g. "nft flush ruleset" by nftables.service) may have
+// removed them since SetEgressSubnets.
+func (n *NFTables) EgressInPlace(_ context.Context, subnets []netip.Prefix) (bool, error) {
+	if len(n.egressDeny) == 0 {
+		return true, nil
+	}
+	valid, err := egressSubnets(subnets)
+	if err != nil {
+		return false, err
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	c, err := nftables.New(n.opts...)
+	if err != nil {
+		return false, fmt.Errorf("nftables: %w", err)
+	}
+	// Errors below mean a missing table, chain or set.
+	if _, err := c.ListChain(n.table, ChainName); err != nil {
+		return false, nil
+	}
+	chain, err := c.ListChain(n.table, EgressChainName)
+	if err != nil {
+		return false, nil
+	}
+	if rules, err := c.GetRules(n.table, chain); err != nil || len(rules) != len(valid) {
+		return false, nil
+	}
+	v4, v6 := egressElements(n.egressDeny)
+	for _, e := range []struct {
+		name string
+		want int
+	}{{EgressSet4Name, len(v4)}, {EgressSet6Name, len(v6)}} {
+		set, err := c.GetSetByName(n.table, e.name)
+		if err != nil {
+			return false, nil
+		}
+		els, err := c.GetSetElements(set)
+		if err != nil || (len(els) == 0) != (e.want == 0) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// egressExprs builds "meta nfproto <proto> <ip|ip6> saddr <subnet> <ip|ip6> daddr !=
+// <subnet> ct state new <ip|ip6> daddr @<deny set> counter drop". Only new
+// connections are dropped: replies of connections that came in through the router's
+// published port (e.g. from a LAN client) must still leave. Traffic inside the
+// subnet (router -> server) is exempt.
+func egressExprs(subnet netip.Prefix, set *nftables.Set) []expr.Any {
+	proto, saddr, daddr, length := byte(unix.NFPROTO_IPV4), uint32(12), uint32(16), uint32(4)
+	if subnet.Addr().Is6() {
+		proto, saddr, daddr, length = unix.NFPROTO_IPV6, 8, 24, 16
+	}
+	mask := net.CIDRMask(subnet.Bits(), int(length)*8)
+	network := subnet.Addr().AsSlice()
+	zero := make([]byte, length)
+	return []expr.Any{
+		&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}},
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: saddr, Len: length},
+		&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: length, Mask: mask, Xor: zero},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: network},
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: daddr, Len: length},
+		&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: length, Mask: mask, Xor: zero},
+		&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: network},
+		&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
+		&expr.Bitwise{
+			SourceRegister: 1, DestRegister: 1, Len: 4,
+			Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitNEW), Xor: []byte{0, 0, 0, 0},
+		},
+		&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: []byte{0, 0, 0, 0}},
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: daddr, Len: length},
+		&expr.Lookup{SourceRegister: 1, SetName: set.Name, SetID: set.ID},
+		&expr.Counter{},
+		&expr.Verdict{Kind: expr.VerdictDrop},
+	}
 }
 
 // dropExprs builds "ct state new meta nfproto <proto> <ip|ip6> saddr @set counter drop".
@@ -240,6 +433,14 @@ func setElements(spec elementSpec, timeout time.Duration) []nftables.SetElement 
 		els = append(els, nftables.SetElement{Key: spec.End, IntervalEnd: true})
 	}
 	return els
+}
+
+func fromRaw(els []rawElem) []nftables.SetElement {
+	out := make([]nftables.SetElement, 0, len(els))
+	for _, e := range els {
+		out = append(out, nftables.SetElement{Key: e.Key, IntervalEnd: e.IntervalEnd})
+	}
+	return out
 }
 
 func toRaw(els []nftables.SetElement) []rawElem {

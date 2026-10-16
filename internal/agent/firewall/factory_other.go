@@ -4,8 +4,7 @@ package firewall
 
 import (
 	"log/slog"
-
-	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"net/netip"
 )
 
-func newNFTables(*slog.Logger) (agentapi.Firewall, error) { return nil, ErrUnsupported }
+func newNFTables(*slog.Logger, []netip.Prefix) (Backend, error) { return nil, ErrUnsupported }
