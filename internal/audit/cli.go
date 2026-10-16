@@ -23,8 +23,9 @@ var ErrRestored = errors.New("audit: entries match only a later journal anchor")
 const maxListedIDs = 20
 
 // RunAuditVerify implements `panel audit verify [--journal file|-]`. It prints the result to
-// stdout and returns nil (exit 0) for a valid chain that agrees with the journal, an error
-// wrapping ErrChainBroken (exit 1) otherwise. journal is nil without --journal.
+// stdout and returns nil (exit 0) for a valid chain that agrees with the journal, ErrRestored
+// (exit 3) when the only disagreement is restored entries, and an error wrapping ErrChainBroken
+// (exit 1) otherwise. journal is nil without --journal.
 func RunAuditVerify(ctx context.Context, db *sql.DB, stdout io.Writer, journal io.Reader) error {
 	rep, err := Verify(ctx, db)
 	if err != nil {

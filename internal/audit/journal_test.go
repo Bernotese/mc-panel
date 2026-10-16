@@ -155,7 +155,7 @@ time=x level=INFO msg=audit id=4 hash=` + b + ` action=login
 }
 
 // A database restored from a backup writes ids again: entries that match only a later anchor of
-// their id are reported as restored (ErrRestored, exit 2), never as a clean result.
+// their id are reported as restored (ErrRestored, exit 3), never as a clean result.
 func TestVerifyJournalRestoredIsWarning(t *testing.T) {
 	ctx := context.Background()
 	db := storetest.Open(t)
