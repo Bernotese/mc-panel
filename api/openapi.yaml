@@ -1551,7 +1551,7 @@ components:
     SecondFactor: { type: string, enum: [totp, webauthn, recovery] }
     Me:
       type: object
-      required: [id, username, role, stage, locale, totp_enabled, passkey_count, recovery_codes_remaining, second_factors, sudo_until, csrf_token]
+      required: [id, username, role, stage, locale, totp_enabled, passkey_count, recovery_codes_remaining, second_factors, two_factor_reason, sudo_until, csrf_token]
       properties:
         id: { type: integer, format: int64 }
         username: { type: string }
@@ -1562,6 +1562,10 @@ components:
         passkey_count: { type: integer }
         recovery_codes_remaining: { type: integer }
         second_factors: { type: array, items: { $ref: '#/components/schemas/SecondFactor' }, description: Methods usable in preauth stage }
+        two_factor_reason:
+          type: string
+          enum: [none, admin, permissions, policy]
+          description: 'Why 2FA is mandatory: admin role, a full-trust permission (server.console, server.files, server.plugins or server.backups) on any server, or enforce_2fa_for_users; none = optional'
         sudo_until: { type: integer, format: int64, description: Unix ms; 0 = no sudo }
         csrf_token: { type: string }
     LoginRequest:

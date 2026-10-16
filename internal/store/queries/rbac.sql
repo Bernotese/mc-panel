@@ -82,6 +82,12 @@ DELETE FROM servers WHERE id = ?;
 -- name: RbacHasPermission :one
 SELECT count(*) FROM permissions WHERE user_id = ? AND server_id = ? AND permission = ?;
 
+-- name: RbacUserHasAnyPermission :one
+-- Whether the user holds one of the given permissions on any server (mandatory 2FA, SEC-10).
+SELECT EXISTS (
+  SELECT 1 FROM permissions WHERE user_id = sqlc.arg(user_id) AND permission IN (sqlc.slice(perms))
+);
+
 -- name: RbacListUserPermissions :many
 SELECT server_id, permission FROM permissions WHERE user_id = ? ORDER BY server_id, permission;
 
