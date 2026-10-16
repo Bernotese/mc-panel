@@ -63,8 +63,9 @@ rcon_lines="$(docker logs --since "${noise_window}s" "mcpanel-mc-$psrv" 2>&1 | g
 tps_source="$(jget "$mo/live.json" 'd["tps_source"]')"
 # tick_query and the paper fallback (mspt only) send one command per minute / time scale; Paper
 # logs two lines per RCON connection ("started", "shutting down"): 4 in 120 s unscaled, plus
-# one pass on the window edge. The live cadence (12x as often) would exceed it by far.
-max_lines=$((2 * (noise_window * ts / 60 + 1)))
+# two passes for the window edge and ticker jitter. The live cadence (12x as often) would exceed
+# it by far.
+max_lines=$((2 * (noise_window * ts / 60 + 2)))
 [ "$rcon_lines" -le "$max_lines" ] || fail "RCON noise: $rcon_lines lines in $noise_window s (source $tps_source, max $max_lines)"
 echo "OK: $rcon_lines RCON log lines in $noise_window s without a viewer (source $tps_source, time scale $ts)"
 
@@ -85,13 +86,13 @@ else
   fi
   low0="$(notified_count host.disk_low)"
   ok0="$(notified_count host.disk_ok)"
-  mon_settings '{"disk_min_percent": 50, "disk_min_bytes": 10995116277760, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": 30}'
+  mon_settings '{"disk_min_percent": 50, "disk_min_bytes": 10995116277760, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": '"$mon_crash_window"'}'
   pwait_for 90 "host.disk_low firing" mon_firing host.disk_low
   pwait_for 60 "host.disk_low delivered" notified host.disk_low $((low0 + 1))
   papi GET /monitoring/overview "$mo/overview.json"
   [ "$pcode" = 200 ] || fail "overview: HTTP $pcode $(cat "$mo/overview.json")"
   jcheck "$mo/overview.json" "host card shows the alert" '"host.disk_low" in d["host"]["alerts"]'
-  mon_settings '{"disk_min_percent": 1, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": 30}'
+  mon_settings '{"disk_min_percent": 1, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": '"$mon_crash_window"'}'
   pwait_for 90 "host.disk_low resolved" mon_not_firing host.disk_low
   pwait_for 60 "host.disk_ok delivered" notified host.disk_ok $((ok0 + 1))
   echo "OK: host.disk_low fired and delivered above the free space, host.disk_ok after lowering the thresholds"

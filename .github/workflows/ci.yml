@@ -121,7 +121,7 @@ jobs:
           if [ "${json}" = '[]' ]; then instances=false; fi
           echo "instances=${instances}" >> "${GITHUB_OUTPUT}"
           echo "instances=${instances}"
-          out release "^cmd/|^internal/webui/|^deploy/|^scripts/install/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
+          out release "^cmd/|^internal/(webui|timescale)/|^deploy/|^scripts/install/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
           # The installer jobs share one filter: the lint on every run; the lifecycle (root, not on
           # pushes to main) also on any internal/ change, since it runs the real panel, agent and
           # files service (like instances).
