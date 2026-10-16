@@ -42,7 +42,7 @@ need_node_modules() {
   hash="$(sha256sum web/package-lock.json | cut -d' ' -f1)"
   if [ "$(cat "${marker}" 2> /dev/null)" != "${hash}" ]; then
     log "npm ci (package-lock.json changed)"
-    (cd web && npm ci --no-audit --no-fund)
+    (cd web && npm ci --ignore-scripts --no-audit --no-fund)
     echo "${hash}" > "${marker}"
   fi
 }

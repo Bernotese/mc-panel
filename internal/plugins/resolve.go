@@ -109,10 +109,11 @@ func newPlanner(h *Handler, srv server, gv string, installed map[string]installe
 	return &planner{up: h.up, kind: srv.Kind, gv: gv, installed: installed, seen: seen}
 }
 
-// safeLink keeps only http(s) links of upstream texts (the browser renders them as links).
+// safeLink keeps only https links of upstream texts (the browser renders them as links; a
+// plain http link could be rewritten on the way to a jar the admin uploads by hand).
 func safeLink(raw string) string {
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return ""
 	}
 	return raw

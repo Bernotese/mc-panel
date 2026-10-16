@@ -6,13 +6,17 @@ import { createRoot } from 'react-dom/client'
 import { createQueryClient } from './app/query-client'
 import { routerNavigator, wireApi } from './app/wire-api'
 import { i18nReady } from './i18n'
+import { applyCspNonce } from './lib/csp-nonce'
 import { applyTheme, watchSystemTheme } from './lib/theme'
 import { createAppRouter } from './router'
 import './index.css'
+// sonner's own stylesheet as a file: its runtime <style> insertion is disabled in vite.config.ts (CSP style-src).
+import 'sonner/dist/styles.css'
 
 // Theme before the first paint – no inline script in index.html (CSP script-src 'self').
 applyTheme()
 watchSystemTheme()
+applyCspNonce()
 
 async function enableMocking(): Promise<void> {
   if (import.meta.env.VITE_MSW !== '1') return

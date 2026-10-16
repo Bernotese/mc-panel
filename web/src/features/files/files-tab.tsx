@@ -7,11 +7,13 @@ import { toast } from 'sonner'
 import { isApiError } from '@/api/errors'
 import type { FileEntry, FileList as FileListing, Server } from '@/api/types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { FileName } from '@/components/file-name'
 import { NativeSelect } from '@/components/native-select'
 import { Button } from '@/components/ui/button'
 import { Section } from '@/components/section'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { errorMessage, useErrorToast } from '@/lib/error-message'
+import { visibleName } from '@/lib/file-name'
 import { useMediaQuery } from '@/lib/use-media-query'
 import { cn } from '@/lib/utils'
 import { deleteFile, fileListKey, fileListQueryOptions, fileListsKey, makeDirectory, renameFile, writeFile } from './api'
@@ -49,7 +51,7 @@ export function FilesTab({ server }: FilesTabProps) {
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const list = useQuery(fileListQueryOptions(server.id, dir))
   const running = server.status.state === 'running'
-  const dirLabel = dir || t('files.root')
+  const dirLabel = dir ? visibleName(dir) : t('files.root')
 
   const refresh = useCallback(() => queryClient.invalidateQueries({ queryKey: fileListsKey(server.id) }), [queryClient, server.id])
   // A file the cached listing already shows is asked about before it is sent (review F2).
@@ -82,10 +84,10 @@ export function FilesTab({ server }: FilesTabProps) {
     const previous = lastState.current
     lastState.current = job?.state
     if (previous !== 'running' || !job || job.state === 'running') return
-    if (job.state === 'done') toast.success(t('files.extract.done', { name: baseName(job.path), dest: job.dest }))
+    if (job.state === 'done') toast.success(t('files.extract.done', { name: visibleName(baseName(job.path)), dest: visibleName(job.dest) }))
     else {
       const reason = t(`files.extract.reason.${extractFailureReason(job.error)}`)
-      toast.error(t('files.extract.failed', { name: baseName(job.path), reason }), { description: job.error || undefined })
+      toast.error(t('files.extract.failed', { name: visibleName(baseName(job.path)), reason }), { description: job.error || undefined })
     }
     void refresh()
   }, [job, refresh, t])
@@ -139,7 +141,7 @@ export function FilesTab({ server }: FilesTabProps) {
   const remove = useMutation({
     mutationFn: (entry: FileEntry) => deleteFile(server.id, joinPath(dir, entry.name)),
     onSuccess: (_data, entry) => {
-      toast.success(t('files.done.delete', { name: entry.name }))
+      toast.success(t('files.done.delete', { name: visibleName(entry.name) }))
       setDialog(null)
       void refresh()
     },
@@ -148,14 +150,14 @@ export function FilesTab({ server }: FilesTabProps) {
 
   async function createFolder(name: string) {
     await makeDirectory(server.id, joinPath(dir, name))
-    toast.success(t('files.done.mkdir', { name }))
+    toast.success(t('files.done.mkdir', { name: visibleName(name) }))
     setDialog(null)
     await refresh()
   }
 
   async function createFile(name: string) {
     await writeFile(server.id, { path: joinPath(dir, name), content: '', expected_mtime: null })
-    toast.success(t('files.done.newfile', { name }))
+    toast.success(t('files.done.newfile', { name: visibleName(name) }))
     setDialog(null)
     await refresh()
     setEditing(joinPath(dir, name))
@@ -171,7 +173,7 @@ export function FilesTab({ server }: FilesTabProps) {
       return
     }
     await renameFile(server.id, from, to)
-    toast.success(t('files.done.rename', { from, to }))
+    toast.success(t('files.done.rename', { from: visibleName(from), to: visibleName(to) }))
     setDialog(null)
     await refresh()
   }
@@ -258,11 +260,11 @@ export function FilesTab({ server }: FilesTabProps) {
                   </span>
                   {i === all.length - 1 ? (
                     <span aria-current="page" className="font-medium break-all">
-                      {crumb.name}
+                      <FileName name={crumb.name} />
                     </span>
                   ) : (
                     <Button type="button" variant="link" className="h-auto p-0" onClick={() => setDir(crumb.path)}>
-                      {crumb.name}
+                      <FileName name={crumb.name} />
                     </Button>
                   )}
                 </li>
@@ -361,7 +363,7 @@ export function FilesTab({ server }: FilesTabProps) {
         <Dialog open onOpenChange={(open) => (open ? undefined : uploads.skip(conflict.id))}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>{t('files.uploads.conflict_title', { name: conflict.name })}</DialogTitle>
+              <DialogTitle>{t('files.uploads.conflict_title', { name: visibleName(conflict.name) })}</DialogTitle>
               <DialogDescription>{t('files.uploads.conflict_description')}</DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -406,7 +408,7 @@ export function FilesTab({ server }: FilesTabProps) {
       ) : null}
       {dialog?.kind === 'rename' ? (
         <NameDialog
-          title={t('files.dialog.rename_title', { name: dialog.entry.name })}
+          title={t('files.dialog.rename_title', { name: visibleName(dialog.entry.name) })}
           label={t('files.dialog.target')}
           hint={t('files.dialog.target_hint')}
           initial={joinPath(dir, dialog.entry.name)}
@@ -423,7 +425,7 @@ export function FilesTab({ server }: FilesTabProps) {
         open={pendingOpen !== null}
         onOpenChange={(open) => (open ? undefined : setPendingOpen(null))}
         title={t('files.editor.discard_title')}
-        description={t('files.editor.discard_description', { name: editing ? baseName(editing) : '' })}
+        description={t('files.editor.discard_description', { name: editing ? visibleName(baseName(editing)) : '' })}
         confirmLabel={t('files.editor.discard')}
         destructive
         onConfirm={() => {
@@ -445,7 +447,7 @@ export function FilesTab({ server }: FilesTabProps) {
         <ConfirmDialog
           open
           onOpenChange={(open) => (open ? undefined : setDialog(null))}
-          title={t('files.dialog.delete_title', { name: dialog.entry.name })}
+          title={t('files.dialog.delete_title', { name: visibleName(dialog.entry.name) })}
           description={dialog.entry.type === 'dir' ? t('files.dialog.delete_dir') : t('files.dialog.delete_file')}
           confirmLabel={t('files.dialog.delete_submit')}
           destructive

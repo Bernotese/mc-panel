@@ -147,6 +147,8 @@ func TestResolveHangarDependencyAndExternal(t *testing.T) {
 			hdep("ViaVersion", 31, ""),
 			hdep("Vault", 0, "https://www.spigotmc.org/resources/vault.34315/"),
 			hdep("Evil", 0, "javascript:alert(1)"),
+			hdep("Plain", 0, "http://evil.example/plugin.jar"),
+			hdep("Data", 0, "data:text/html,hi"),
 		}})
 	code, res, ec := e.resolve(id, "hangar", "12", "")
 	if code != http.StatusOK {
@@ -158,9 +160,13 @@ func TestResolveHangarDependencyAndExternal(t *testing.T) {
 	if vv := res.Install[0]; vv.VersionID != "5.12.1" || vv.Channel != "release" || vv.Source != "hangar" || vv.ProjectID != "31" {
 		t.Fatalf("ViaVersion must be the newest Release, got %+v", vv)
 	}
-	if len(res.External) != 2 || res.External[0].Name != "Vault" || res.External[0].URL != "https://www.spigotmc.org/resources/vault.34315/" ||
-		res.External[1].Name != "Evil" || res.External[1].URL != "" {
-		t.Fatalf("external = %+v (only http(s) links pass)", res.External)
+	if len(res.External) != 4 || res.External[0].Name != "Vault" || res.External[0].URL != "https://www.spigotmc.org/resources/vault.34315/" {
+		t.Fatalf("external = %+v", res.External)
+	}
+	for _, x := range res.External[1:] {
+		if x.URL != "" {
+			t.Errorf("external %s: url %q, want empty (only https links pass)", x.Name, x.URL)
+		}
 	}
 }
 

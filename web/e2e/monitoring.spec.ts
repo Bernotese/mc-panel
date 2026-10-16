@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 import { confirmSudo, openServerSection, signIn } from './helpers'
 
 test('admin sees host and server values on the dashboard and explores the monitoring tab', async ({ page }) => {

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { loginAs, MOCK_TOTP_CODE } from '@/mocks/db'
 import { renderWithProviders } from '@/test/render'
+import type { SudoAction } from './sudo-actions'
 import { requestSudo } from './sudo-store'
 
 vi.mock('@simplewebauthn/browser', () => ({
@@ -16,10 +17,11 @@ beforeEach(() => {
   vi.mocked(browserSupportsWebAuthn).mockReturnValue(true)
 })
 
-function open(): Promise<boolean> {
+function open(...actions: SudoAction[]): Promise<boolean> {
   let answer: Promise<boolean> = Promise.resolve(false)
   act(() => {
-    answer = requestSudo()
+    answer = requestSudo(actions[0])
+    for (const a of actions.slice(1)) void requestSudo(a)
   })
   return answer
 }
@@ -39,6 +41,27 @@ describe('SudoDialog', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Bestätigen' }))
     await expect(answer).resolves.toBe(true)
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('names the action that needs the confirmation', async () => {
+    await renderWithProviders(<p>page</p>, { me: loginAs('admin') })
+    open({ method: 'DELETE', path: '/servers/{id}' })
+    const dialog = await screen.findByRole('dialog', { name: 'Aktion bestätigen' })
+    expect(within(dialog).getByText('Aktion: Server löschen')).toBeInTheDocument()
+  })
+
+  it('counts and lists concurrent actions', async () => {
+    await renderWithProviders(<p>page</p>, { me: loginAs('admin') })
+    open({ method: 'DELETE', path: '/servers/{id}' }, { method: 'POST', path: '/servers/{id}/backups/{snapshot}/restore' })
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('2 Aktionen: Server löschen, Backup wiederherstellen')).toBeInTheDocument()
+  })
+
+  it('adds no action line for an unknown route', async () => {
+    await renderWithProviders(<p>page</p>, { me: loginAs('admin') })
+    open({ method: 'POST', path: '/something/new' })
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).queryByText(/^Aktion:/)).not.toBeInTheDocument()
   })
 
   it('resolves false when cancelled', async () => {

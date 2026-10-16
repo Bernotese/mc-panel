@@ -1,4 +1,5 @@
 import createClient, { type Middleware } from 'openapi-fetch'
+import { BACKGROUND_HEADER, isBackground } from './background'
 import { getCsrfToken, setCsrfToken } from './csrf'
 import { markSudoCancelled } from './errors'
 import { apiHandlers } from './handlers'
@@ -98,6 +99,8 @@ export function createApiClient(baseUrl: string = `${window.location.origin}/api
 
   const middleware: Middleware = {
     onRequest({ request }) {
+      // Synchronous on purpose: isBackground() is only true during the poll callback (api/background.ts).
+      if (isBackground()) request.headers.set(BACKGROUND_HEADER, '1')
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         const token = getCsrfToken()
         if (token) request.headers.set('X-CSRF-Token', token)
@@ -128,7 +131,7 @@ export function createApiClient(baseUrl: string = `${window.location.origin}/api
         return retryOnce(copy, schemaPath)
       }
       if (code === 'sudo_required' && !schemaPath.startsWith('/auth/')) {
-        const confirmed = await apiHandlers().requestSudo()
+        const confirmed = await apiHandlers().requestSudo({ method: request.method, path: schemaPath })
         return confirmed ? retryOnce(copy, schemaPath) : markSudoCancelled(response)
       }
       return response

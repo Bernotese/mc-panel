@@ -1,8 +1,10 @@
 import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { FileName } from '@/components/file-name'
 import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
 import { errorMessage } from '@/lib/error-message'
+import { visibleName } from '@/lib/file-name'
 import { useFormat } from '@/lib/format'
 import { formatBytes } from './format'
 import type { UploadItem } from './upload-queue'
@@ -41,21 +43,19 @@ export function UploadList({ items, onCancel, onClear }: { items: UploadItem[]; 
           return (
             <li key={item.id} className="space-y-1 py-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate font-medium" title={item.path}>
-                  {item.name}
-                </span>
+                <FileName name={item.name} className="min-w-0 truncate font-medium" title={visibleName(item.path)} />
                 <span className="flex shrink-0 items-center gap-2 text-sm">
                   <span className="text-muted-foreground tabular-nums">{formatBytes(item.size, fmt.locale)}</span>
                   <span>{processing(item) ? t('files.uploads.processing') : t(`files.uploads.status.${item.status}`)}</span>
                   {active ? (
-                    <Button type="button" variant="ghost" size="icon-xs" aria-label={t('files.uploads.cancel', { name: item.name })} onClick={() => onCancel(item.id)}>
+                    <Button type="button" variant="ghost" size="icon-xs" aria-label={t('files.uploads.cancel', { name: visibleName(item.name) })} onClick={() => onCancel(item.id)}>
                       <X aria-hidden="true" />
                     </Button>
                   ) : null}
                 </span>
               </div>
               {item.status === 'uploading' ? (
-                <progress className="h-1.5 w-full" value={item.loaded} max={item.size || 1} aria-label={t('files.uploads.progress', { name: item.name })} />
+                <progress className="h-1.5 w-full" value={item.loaded} max={item.size || 1} aria-label={t('files.uploads.progress', { name: visibleName(item.name) })} />
               ) : null}
               {error ? (
                 <p role="alert" className="text-destructive text-sm">

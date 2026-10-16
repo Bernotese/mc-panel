@@ -225,7 +225,12 @@ func TestSecurityHeaders(t *testing.T) {
 			t.Errorf("CSP %q missing %q", csp, part)
 		}
 	}
-	// Only the script-src directive is checked: style-src intentionally allows 'unsafe-inline'.
+	if strings.Contains(csp, "'unsafe-inline'") || strings.Contains(csp, "'unsafe-eval'") || strings.Contains(csp, "data:") {
+		t.Errorf("CSP must not allow inline, eval or data: URLs: %q", csp)
+	}
+	if ro := rec.Header().Get("Content-Security-Policy-Report-Only"); ro != "require-trusted-types-for 'script'; trusted-types 'none'" {
+		t.Errorf("report-only CSP = %q", ro)
+	}
 	idx := strings.Index(csp, "script-src")
 	if idx < 0 {
 		t.Fatalf("CSP %q has no script-src directive", csp)
@@ -241,6 +246,16 @@ func TestSecurityHeaders(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
 	if rec.Header().Get("Cache-Control") == "no-store" {
 		t.Error("static assets must not get no-store")
+	}
+}
+
+func TestCSPStyleNonce(t *testing.T) {
+	if got := httpx.CSP(""); !strings.Contains(got, "style-src 'self';") {
+		t.Errorf("CSP without nonce = %q", got)
+	}
+	got := httpx.CSP("bm9uY2U=")
+	if !strings.Contains(got, "style-src 'self' 'nonce-bm9uY2U=';") || !strings.Contains(got, "script-src 'self';") {
+		t.Errorf("CSP with nonce = %q (the nonce applies to styles only)", got)
 	}
 }
 
