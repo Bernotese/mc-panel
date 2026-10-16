@@ -28,7 +28,7 @@ func TestTmpDirLayout(t *testing.T) {
 	if uid, gid, mode := owner(t, instances.TmpDir(e.dir, 1)); uid != os.Getuid() || gid != os.Getgid() || mode != 0o700 {
 		t.Fatalf("tmp/1 = %d:%d %v, want the container user and 0700", uid, gid, mode)
 	}
-	if binds := e.container(t, instances.ContainerName(1)).Config.HostConfig.Binds; len(binds) != 2 || binds[1] != instances.TmpDir(e.dir, 1)+":/tmp" {
+	if binds := e.container(t, instances.ContainerName(1)).Config.HostConfig.Binds; len(binds) != 3 || binds[1] != instances.TmpDir(e.dir, 1)+":/tmp" {
 		t.Fatalf("binds = %v", binds)
 	}
 }
