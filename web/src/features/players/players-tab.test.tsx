@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { renderSection } from '@/test/render-section'
-import { db, loginAs } from '@/mocks/db'
+import { db, enableTotp, loginAs } from '@/mocks/db'
 import { server } from '@/mocks/node'
 import { PlayersTab } from './players-tab'
 
@@ -96,6 +96,7 @@ describe('PlayersTab', () => {
   })
 
   it('tells other users that an admin switches the whitelist on', async () => {
+    enableTotp('alice') // full-trust permissions require 2FA (SEC-10)
     db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.console'] }])
     await openPlayers(1, 'alice')
     expect(await screen.findByText('Die Whitelist ist aus: Einträge wirken erst, wenn ein Admin sie einschaltet.')).toBeInTheDocument()
