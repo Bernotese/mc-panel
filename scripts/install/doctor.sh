@@ -99,6 +99,8 @@ doc_probe_docker_version() { timeout 20 docker version --format '{{.Server.Versi
 doc_probe_docker_live_restore() { timeout 20 docker info --format '{{.LiveRestoreEnabled}}' 2>/dev/null; }
 # doc_probe_shared_servers: the containers on the router's network mcpanel-mc, one per line.
 doc_probe_shared_servers() { timeout 20 docker network inspect -f '{{range .Containers}}{{.Name}}{{"\n"}}{{end}}' mcpanel-mc 2>/dev/null </dev/null; }
+# doc_probe_router_net_ipv6: "true" when the router's network mcpanel-mc has IPv6 enabled.
+doc_probe_router_net_ipv6() { timeout 20 docker network inspect -f '{{.EnableIPv6}}' mcpanel-mc 2>/dev/null </dev/null; }
 doc_probe_docker_root() { timeout 20 docker info --format '{{.DockerRootDir}}' 2>/dev/null; }
 doc_probe_caddy_version() { pkg_caddy_version; }
 doc_probe_caddy_from_repo() { pkg_caddy_from_repo; }
@@ -537,7 +539,12 @@ doc_chk_system() {
     while IFS= read -r n; do
       if [[ $n =~ ^mcpanel-mc-[0-9]+$ ]]; then shared+=("$n"); fi
     done < <(doc_probe_shared_servers || true)
-    if ((${#shared[@]} == 0)); then
+    if [[ $(doc_probe_router_net_ipv6) == true ]]; then
+      # The agent creates its networks IPv4-only; an older mcpanel-mc may have IPv6 from the
+      # daemon's defaults, which the egress filter covers but nothing expects.
+      doc_result warn docker_isolation "the network mcpanel-mc has IPv6 enabled (the agent creates its networks IPv4-only)" \
+        "systemctl stop mcpanel-agent; docker rm -f mcpanel-router; docker network rm mcpanel-mc; systemctl start mcpanel-agent (recreates both; servers keep running, joins pause briefly)"
+    elif ((${#shared[@]} == 0)); then
       doc_result ok docker_isolation "every Minecraft server is on its own network"
     else
       doc_result warn docker_isolation "${#shared[@]} Minecraft server(s) still share the network mcpanel-mc and can reach each other: ${shared[*]}" \

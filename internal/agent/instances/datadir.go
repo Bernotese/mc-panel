@@ -47,7 +47,6 @@ func (m *Manager) ensureLayout() error {
 // loosened) while every container is up to date, so no Ensure would ever fix it and the files
 // service could not enter it.
 func (m *Manager) Init() error {
-	m.CheckNetworkPool()
 	if err := m.ensureLayout(); err != nil {
 		return err
 	}

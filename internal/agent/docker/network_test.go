@@ -15,17 +15,17 @@ func TestCreateNetworkWithSubnet(t *testing.T) {
 	c := docker.New(d.Socket)
 	ctx := context.Background()
 	labels := map[string]string{"mcpanel.network": "1", "mcpanel.instance": "1"}
-	if err := c.CreateNetwork(ctx, "mcpanel-net-1", labels, netip.MustParsePrefix("10.213.0.0/28")); err != nil {
+	if _, err := c.CreateNetwork(ctx, "mcpanel-net-1", labels, netip.MustParsePrefix("10.213.0.0/28")); err != nil {
 		t.Fatal(err)
 	}
 	if got := d.NetworkSubnets("mcpanel-net-1"); !slices.Equal(got, []string{"10.213.0.0/28"}) {
 		t.Fatalf("subnets = %v", got)
 	}
-	err := c.CreateNetwork(ctx, "mcpanel-net-2", labels, netip.MustParsePrefix("10.213.0.0/24"))
+	_, err := c.CreateNetwork(ctx, "mcpanel-net-2", labels, netip.MustParsePrefix("10.213.0.0/24"))
 	if !docker.IsPoolOverlap(err) {
 		t.Fatalf("overlapping subnet: %v, want a pool overlap", err)
 	}
-	err = c.CreateNetwork(ctx, "mcpanel-net-1", labels, netip.MustParsePrefix("10.213.0.16/28"))
+	_, err = c.CreateNetwork(ctx, "mcpanel-net-1", labels, netip.MustParsePrefix("10.213.0.16/28"))
 	if !docker.IsConflict(err) || docker.IsPoolOverlap(err) {
 		t.Fatalf("existing name: %v, want a conflict", err)
 	}
@@ -35,7 +35,7 @@ func TestCreateNetworkWithSubnet(t *testing.T) {
 		"mcpanel-net-3": "fd00::/64",
 		"mcpanel-net-4": "10.213.1.1/28",
 	} {
-		if err := c.CreateNetwork(ctx, name, labels, netip.MustParsePrefix(subnet)); err == nil {
+		if _, err := c.CreateNetwork(ctx, name, labels, netip.MustParsePrefix(subnet)); err == nil {
 			t.Errorf("CreateNetwork(%q, %s) = nil, want error", name, subnet)
 		}
 	}
@@ -85,9 +85,12 @@ func TestNetworkConnectDisconnect(t *testing.T) {
 	if err != nil || !info.NetworkSettings.OnNetwork("mcpanel-mc") || !info.NetworkSettings.OnNetwork("mcpanel-net-1") {
 		t.Fatalf("inspect networks = %+v, %v", info.NetworkSettings, err)
 	}
-	members, err := c.NetworkContainers(ctx, "mcpanel-net-1")
-	if err != nil || !slices.Equal(members, []string{"mcpanel-mc-1"}) {
-		t.Fatalf("members = %v, %v", members, err)
+	n, err := c.InspectNetwork(ctx, "mcpanel-net-1")
+	if err != nil || !slices.Equal(n.Containers, []string{"mcpanel-mc-1"}) || n.ID == "" {
+		t.Fatalf("InspectNetwork = %+v, %v", n, err)
+	}
+	if ep := info.NetworkSettings.Networks["mcpanel-net-1"]; ep.NetworkID != n.ID {
+		t.Fatalf("endpoint network ID = %q, want %q", ep.NetworkID, n.ID)
 	}
 	if err := c.RemoveNetwork(ctx, "mcpanel-net-1"); err == nil {
 		t.Fatal("a network with a running container must not be removed")
@@ -110,8 +113,81 @@ func TestNetworkConnectDisconnect(t *testing.T) {
 	if err := c.NetworkConnect(ctx, "mcpanel-net-1", "../x"); err == nil {
 		t.Fatal("invalid container name accepted")
 	}
-	if _, err := c.NetworkContainers(ctx, "gone"); !docker.IsNotFound(err) {
+	if _, err := c.InspectNetwork(ctx, "gone"); !docker.IsNotFound(err) {
 		t.Fatalf("members of a missing network: %v", err)
+	}
+}
+
+// CreateNetwork and EnsureNetwork ask for IPv4 only, whatever the daemon's defaults.
+func TestNetworksAreIPv4Only(t *testing.T) {
+	d := dockertest.New(t)
+	c := docker.New(d.Socket)
+	ctx := context.Background()
+	if _, err := c.CreateNetwork(ctx, "mcpanel-net-1", nil, netip.MustParsePrefix("10.213.0.0/28")); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.EnsureNetwork(ctx, "mcpanel-mc", nil); err != nil {
+		t.Fatal(err)
+	}
+	nets, err := c.ListNetworks(ctx, "")
+	if err != nil || len(nets) != 2 || nets[0].HasIPv6() || nets[1].HasIPv6() {
+		t.Fatalf("networks = %+v, %v", nets, err)
+	}
+	d.SetNetworkIPv6("mcpanel-mc", true)
+	if n, err := c.InspectNetwork(ctx, "mcpanel-mc"); err != nil || !n.HasIPv6() {
+		t.Fatalf("IPv6 network = %+v, %v", n, err)
+	}
+	n := docker.Network{Driver: "bridge", Subnets: []netip.Prefix{netip.MustParsePrefix("fd00::/64")}}
+	if !n.HasIPv6() {
+		t.Fatal("an IPv6 subnet must count as IPv6")
+	}
+}
+
+// Only running containers have an endpoint in a network inspect, as in Docker.
+func TestInspectNetworkListsRunningContainersOnly(t *testing.T) {
+	d := dockertest.New(t)
+	c := docker.New(d.Socket)
+	d.AddNetwork("mcpanel-net-1", "bridge", nil, "10.213.0.0/28")
+	d.AddContainer("mcpanel-mc-1", docker.ContainerConfig{Image: "x", HostConfig: docker.HostConfig{NetworkMode: "mcpanel-net-1"}}, false)
+	if n, err := c.InspectNetwork(context.Background(), "mcpanel-net-1"); err != nil || len(n.Containers) != 0 {
+		t.Fatalf("created container listed: %+v, %v", n, err)
+	}
+}
+
+// A container that ran on a network deleted and created again does not start (stale
+// endpoint) until it is disconnected and connected again, as in Docker 29.
+func TestStaleEndpointAfterNetworkRecreate(t *testing.T) {
+	d := dockertest.New(t)
+	c := docker.New(d.Socket)
+	ctx := context.Background()
+	d.AddNetwork("mcpanel-net-1", "bridge", nil, "10.213.0.0/28")
+	d.AddContainer("mcpanel-mc-1", docker.ContainerConfig{Image: "x", HostConfig: docker.HostConfig{NetworkMode: "mcpanel-net-1"}}, false)
+	if err := c.Start(ctx, "mcpanel-mc-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Stop(ctx, "mcpanel-mc-1", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RemoveNetwork(ctx, "mcpanel-net-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start(ctx, "mcpanel-mc-1"); !docker.IsNotFound(err) {
+		t.Fatalf("start without the network = %v", err)
+	}
+	if _, err := c.CreateNetwork(ctx, "mcpanel-net-1", nil, netip.MustParsePrefix("10.213.0.0/28")); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start(ctx, "mcpanel-mc-1"); !docker.IsNotFound(err) {
+		t.Fatalf("start with a stale endpoint = %v", err)
+	}
+	if err := c.NetworkDisconnect(ctx, "mcpanel-net-1", "mcpanel-mc-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.NetworkConnect(ctx, "mcpanel-net-1", "mcpanel-mc-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start(ctx, "mcpanel-mc-1"); err != nil {
+		t.Fatalf("start after reconnect = %v", err)
 	}
 }
 

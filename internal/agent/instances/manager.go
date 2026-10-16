@@ -65,7 +65,8 @@ type Config struct {
 	// config.DefaultInstanceNetworkPool.
 	NetworkPool netip.Prefix
 	// HostPrefixes lists the host's own networks, which instance networks must not
-	// overlap; nil means HostPrefixes (the interfaces). Tests set it.
+	// overlap; nil means HostNetworks (interfaces and routes, without Docker's bridges).
+	// Tests set it.
 	HostPrefixes func() ([]netip.Prefix, error)
 	// NanoCPUs caps every instance container (cpu_per_instance); 0 = no cap.
 	NanoCPUs int64
@@ -115,6 +116,9 @@ type Manager struct {
 	hostPrefixes func() ([]netip.Prefix, error)
 	netMu        sync.Mutex // serialises creating and removing instance networks
 	shared       []int64    // running instances still on mcpanel-mc, last logged; guarded by netMu
+	// poolExhausted is the pool state last logged; guarded by netMu.
+	poolExhausted bool
+	poolChecked   bool // CheckNetworkPool ran (first loop round with Docker); loop goroutine only
 
 	routerMu sync.Mutex // serialises routes file + router container changes
 	// lastApplied is the routes file content the running router has loaded (nil:
@@ -151,9 +155,6 @@ func New(cfg Config) *Manager {
 		cancel:        cancel,
 		inst:          map[int64]*instanceState{},
 		stats:         map[int64]sample{},
-	}
-	if m.hostPrefixes == nil {
-		m.hostPrefixes = HostPrefixes
 	}
 	if !m.pool.IsValid() {
 		m.pool = netip.MustParsePrefix(config.DefaultInstanceNetworkPool)
@@ -273,7 +274,7 @@ func (m *Manager) ensure(ctx context.Context, req agentapi.EnsureRequest) error 
 	if err := m.ensureDataDir(req.ID); err != nil {
 		return err
 	}
-	if err := m.ensureInstanceNetwork(ctx, req.ID); err != nil {
+	if _, err := m.ensureInstanceNetwork(ctx, req.ID); err != nil {
 		return err
 	}
 	wasRunning := false
@@ -348,7 +349,7 @@ func (m *Manager) power(ctx context.Context, id int64, action agentapi.PowerActi
 	}
 	switch action {
 	case agentapi.PowerStart:
-		if err := m.isolateStopped(ctx, id, info); err != nil {
+		if err := m.prepareStart(ctx, id, info); err != nil {
 			return err
 		}
 		m.setOp(id, agentapi.OpStarting)
@@ -364,7 +365,7 @@ func (m *Manager) power(ctx context.Context, id int64, action agentapi.PowerActi
 		if err := m.dc.Stop(ctx, name, StopTimeoutSeconds); err != nil {
 			return err
 		}
-		if err := m.isolateStopped(ctx, id, docker.ContainerInfo{NetworkSettings: info.NetworkSettings}); err != nil {
+		if err := m.prepareStart(ctx, id, docker.ContainerInfo{NetworkSettings: info.NetworkSettings}); err != nil {
 			return err
 		}
 		m.setOp(id, agentapi.OpStarting)
@@ -372,9 +373,8 @@ func (m *Manager) power(ctx context.Context, id int64, action agentapi.PowerActi
 	}
 }
 
-// isolateStopped moves a stopped container of an older agent onto its own network
-// before it starts (see isolate); info is its inspect result. A running one (a start of a
-// running container is a no-op) keeps its networks until its next stop.
+// isolateStopped moves a container of an older agent that the agent just stopped onto
+// its own network (see isolate); info is its inspect result with a zero State.
 func (m *Manager) isolateStopped(ctx context.Context, id int64, info docker.ContainerInfo) error {
 	if info.State.Running || info.State.Restarting {
 		return nil
@@ -880,6 +880,9 @@ func cpuPercent(prev, cur sample, onlineCPUs uint32) float64 {
 func (m *Manager) Tick(ctx context.Context) {
 	if !m.CheckDocker(ctx) {
 		return
+	}
+	if !m.poolChecked {
+		m.poolChecked = m.CheckNetworkPool(ctx) == nil
 	}
 	// Before the router: its image pull may take minutes. Logged inside.
 	_ = m.syncEgress(ctx)

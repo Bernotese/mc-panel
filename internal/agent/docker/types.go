@@ -87,6 +87,10 @@ type NetworkSettings struct {
 
 // Endpoint is a container's connection to one network.
 type Endpoint struct {
+	// NetworkID is the network the endpoint was last set up on ("" for a container that
+	// never ran). After the network was deleted and created again under the same name it
+	// differs from the network's ID, and Docker refuses to start the container.
+	NetworkID string `json:"NetworkID"`
 	IPAddress string `json:"IPAddress"`
 }
 

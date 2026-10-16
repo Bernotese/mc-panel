@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -80,44 +79,33 @@ func NextSubnet(pool netip.Prefix, bits int, used []netip.Prefix) (netip.Prefix,
 	return netip.Prefix{}, false
 }
 
-// HostPrefixes returns the IPv4 networks of the host's interfaces, except Docker's own
-// bridges and veths (Docker networks are taken from Docker itself) and loopback.
-func HostPrefixes() ([]netip.Prefix, error) {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil, err
+// hostNetworks returns the host's own networks (HostNetworks), skipping the bridges of
+// the Docker networks nets, identified by their network IDs. Tests replace it.
+func (m *Manager) hostNetworks(nets []docker.Network) ([]netip.Prefix, error) {
+	if m.hostPrefixes != nil {
+		return m.hostPrefixes()
 	}
-	var out []netip.Prefix
-	for _, ifc := range ifaces {
-		if ifc.Flags&net.FlagLoopback != 0 || strings.HasPrefix(ifc.Name, "br-") ||
-			strings.HasPrefix(ifc.Name, "docker") || strings.HasPrefix(ifc.Name, "veth") {
-			continue
-		}
-		addrs, err := ifc.Addrs()
-		if err != nil {
-			return nil, err
-		}
-		for _, a := range addrs {
-			ipn, ok := a.(*net.IPNet)
-			if !ok {
-				continue
-			}
-			p, err := netip.ParsePrefix(ipn.String())
-			if err == nil && p.Addr().Is4() {
-				out = append(out, p.Masked())
-			}
+	skip := map[string]bool{}
+	for _, n := range nets {
+		if ifc := n.HostInterface(); ifc != "" {
+			skip[ifc] = true
 		}
 	}
-	return out, nil
+	return HostNetworks(skip)
 }
 
 // CheckNetworkPool warns when instance_network_pool overlaps a network of the host:
 // containers could then not reach those addresses, and the host might route them wrong.
-func (m *Manager) CheckNetworkPool() {
-	hp, err := m.hostPrefixes()
+// It needs Docker (to tell Docker's bridges from the host's networks).
+func (m *Manager) CheckNetworkPool(ctx context.Context) error {
+	nets, err := m.dc.ListNetworks(ctx, "")
+	if err != nil {
+		return err
+	}
+	hp, err := m.hostNetworks(nets)
 	if err != nil {
 		m.log.Warn("cannot read the host's networks to check instance_network_pool", "err", err)
-		return
+		return nil
 	}
 	for _, p := range hp {
 		if p.Overlaps(m.pool) {
@@ -125,41 +113,68 @@ func (m *Manager) CheckNetworkPool() {
 				"instance_network_pool", m.pool.String(), "host_network", p.String())
 		}
 	}
+	return nil
 }
 
-// ensureInstanceNetwork makes sure the network of instance id exists, the egress filter
-// covers its subnet (fail closed: no container is created on or connected to a network
-// the filter does not cover) and the router, if it exists, is connected to it.
-func (m *Manager) ensureInstanceNetwork(ctx context.Context, id int64) error {
+// ensureInstanceNetwork makes sure the network of instance id exists (IPv4 only), the
+// egress filter covers its subnet (fail closed: no container is created on or connected
+// to a network the filter does not cover) and mc-panel's router, if it exists, is
+// connected to it. It returns the network.
+func (m *Manager) ensureInstanceNetwork(ctx context.Context, id int64) (docker.Network, error) {
 	m.netMu.Lock()
 	defer m.netMu.Unlock()
 	name := InstanceNetwork(id)
 	nets, err := m.dc.ListNetworks(ctx, "")
 	if err != nil {
-		return err
+		return docker.Network{}, err
 	}
-	var subnets []netip.Prefix
-	i := slices.IndexFunc(nets, func(n docker.Network) bool { return n.Name == name })
-	if i >= 0 {
-		if got, ok := managedNetworkID(nets[i]); !ok || got != id {
-			return fmt.Errorf("docker: network %s exists but is not managed by mc-panel; leaving it untouched", name)
+	var n docker.Network
+	if i := slices.IndexFunc(nets, func(n docker.Network) bool { return n.Name == name }); i >= 0 {
+		n = nets[i]
+		if got, ok := managedNetworkID(n); !ok || got != id {
+			return docker.Network{}, fmt.Errorf("docker: network %s exists but is not managed by mc-panel; leaving it untouched", name)
 		}
-		subnets = nets[i].Subnets
 	} else {
-		subnet, err := m.createInstanceNetwork(ctx, id, nets)
-		if err != nil {
-			return err
+		if n, err = m.createInstanceNetwork(ctx, id, nets); err != nil {
+			return docker.Network{}, err
 		}
-		subnets = []netip.Prefix{subnet}
 	}
-	if len(subnets) == 0 {
-		return fmt.Errorf("docker: network %s has no subnet", name)
+	if n.HasIPv6() {
+		return docker.Network{}, fmt.Errorf("docker: network %s has IPv6, which the egress filter and the isolation do not expect; remove it (docker network rm %s)", name, name)
+	}
+	if len(n.Subnets) == 0 {
+		return docker.Network{}, fmt.Errorf("docker: network %s has no subnet", name)
 	}
 	if err := m.syncEgress(ctx); err != nil {
-		return fmt.Errorf("container egress filter: %w", err)
+		return docker.Network{}, fmt.Errorf("container egress filter: %w", err)
 	}
-	if !m.egressCovers(subnets) {
-		return fmt.Errorf("container egress filter: network %s (%v) is not covered", name, subnets)
+	if !m.egressCovers(n.Subnets) {
+		return docker.Network{}, fmt.Errorf("container egress filter: network %s (%v) is not covered", name, n.Subnets)
+	}
+	if err := m.connectRouter(ctx, name); err != nil {
+		return docker.Network{}, err
+	}
+	return n, nil
+}
+
+// ownRouter reports whether mcpanel-router exists and carries mc-panel's label; a
+// container that only shares the name is never connected, disconnected or replaced.
+func (m *Manager) ownRouter(ctx context.Context) (bool, error) {
+	info, err := m.dc.Inspect(ctx, RouterName)
+	if docker.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return info.Config.Labels[LabelRouter] == "1", nil
+}
+
+// connectRouter connects mc-panel's router (if it exists) to the network name.
+func (m *Manager) connectRouter(ctx context.Context, name string) error {
+	ok, err := m.ownRouter(ctx)
+	if err != nil || !ok {
+		return err
 	}
 	if err := m.dc.NetworkConnect(ctx, name, RouterName); err != nil && !docker.IsNotFound(err) {
 		return fmt.Errorf("connect %s to %s: %w", RouterName, name, err)
@@ -169,31 +184,49 @@ func (m *Manager) ensureInstanceNetwork(ctx context.Context, id int64) error {
 
 // createInstanceNetwork creates the network of instance id with the first free subnet of
 // the pool; nets are all existing networks. The caller holds netMu.
-func (m *Manager) createInstanceNetwork(ctx context.Context, id int64, nets []docker.Network) (netip.Prefix, error) {
-	used, err := m.hostPrefixes()
+func (m *Manager) createInstanceNetwork(ctx context.Context, id int64, nets []docker.Network) (docker.Network, error) {
+	used, err := m.hostNetworks(nets)
 	if err != nil {
-		return netip.Prefix{}, fmt.Errorf("read the host's networks: %w", err)
+		return docker.Network{}, fmt.Errorf("read the host's networks: %w", err)
 	}
 	for _, n := range nets {
 		used = append(used, n.Subnets...)
 	}
+	name := InstanceNetwork(id)
 	for range maxAllocationTries {
 		subnet, ok := NextSubnet(m.pool, config.InstanceNetworkBits, used)
 		if !ok {
-			return netip.Prefix{}, fmt.Errorf("%w (%s, /%d per server)", ErrPoolExhausted, m.pool, config.InstanceNetworkBits)
+			m.notePool(true)
+			return docker.Network{}, fmt.Errorf("%w (%s, /%d per server)", ErrPoolExhausted, m.pool, config.InstanceNetworkBits)
 		}
-		err := m.dc.CreateNetwork(ctx, InstanceNetwork(id), instanceNetworkLabels(id), subnet)
+		netID, err := m.dc.CreateNetwork(ctx, name, instanceNetworkLabels(id), subnet)
 		if docker.IsPoolOverlap(err) {
 			used = append(used, subnet)
 			continue
 		}
 		if err != nil {
-			return netip.Prefix{}, err
+			return docker.Network{}, err
 		}
-		m.log.Info("instance network created", "id", id, "network", InstanceNetwork(id), "subnet", subnet.String())
-		return subnet, nil
+		m.notePool(false)
+		m.log.Info("instance network created", "id", id, "network", name, "subnet", subnet.String())
+		return docker.Network{ID: netID, Name: name, Driver: "bridge", Labels: instanceNetworkLabels(id),
+			Subnets: []netip.Prefix{subnet}}, nil
 	}
-	return netip.Prefix{}, fmt.Errorf("network %s: every tried subnet overlaps another network", InstanceNetwork(id))
+	return docker.Network{}, fmt.Errorf("network %s: every tried subnet overlaps another network", name)
+}
+
+// notePool logs a change of the pool's state (exhausted or not) once. The caller holds netMu.
+func (m *Manager) notePool(exhausted bool) {
+	if exhausted == m.poolExhausted {
+		return
+	}
+	m.poolExhausted = exhausted
+	if exhausted {
+		m.log.Warn("instance_network_pool is exhausted: no new server can be created; set a larger range in agent.toml",
+			"instance_network_pool", m.pool.String())
+	} else {
+		m.log.Info("instance_network_pool has free subnets again", "instance_network_pool", m.pool.String())
+	}
 }
 
 // egressCovers reports whether the filter was last applied with all of subnets.
@@ -216,16 +249,39 @@ func (m *Manager) egressCovers(subnets []netip.Prefix) bool {
 func (m *Manager) removeInstanceNetwork(ctx context.Context, id int64) {
 	m.netMu.Lock()
 	defer m.netMu.Unlock()
+	if err := m.removeInstanceNetworkLocked(ctx, id); err != nil {
+		m.log.Warn("instance network not removed; the loop retries", "id", id, "network", InstanceNetwork(id), "err", sanitizeError(err))
+	}
+}
+
+// removeInstanceNetworkLocked removes the network of instance id if it is mc-panel's own
+// for that instance (labels); a foreign network of that name is left alone and logged.
+// The caller holds netMu.
+func (m *Manager) removeInstanceNetworkLocked(ctx context.Context, id int64) error {
 	name := InstanceNetwork(id)
-	err := m.dc.NetworkDisconnect(ctx, name, RouterName)
-	if err == nil {
-		err = m.dc.RemoveNetwork(ctx, name)
+	n, err := m.dc.InspectNetwork(ctx, name)
+	if docker.IsNotFound(err) {
+		return nil
 	}
 	if err != nil {
-		m.log.Warn("instance network not removed; the loop retries", "id", id, "network", name, "err", sanitizeError(err))
-		return
+		return err
+	}
+	if got, ok := managedNetworkID(n); !ok || got != id {
+		m.log.Warn("network not managed by mc-panel; leaving it untouched", "network", name)
+		return nil
+	}
+	if ok, err := m.ownRouter(ctx); err != nil {
+		return err
+	} else if ok {
+		if err := m.dc.NetworkDisconnect(ctx, name, RouterName); err != nil {
+			return err
+		}
+	}
+	if err := m.dc.RemoveNetwork(ctx, name); err != nil {
+		return err
 	}
 	m.log.Info("instance network removed", "id", id, "network", name)
+	return nil
 }
 
 // managedNetworks returns the subnets of mc-panel's own networks (mcpanel-mc and every
@@ -265,7 +321,7 @@ func (m *Manager) isolate(ctx context.Context, id int64, ns docker.NetworkSettin
 	name, own := ContainerName(id), InstanceNetwork(id)
 	changed := false
 	if !ns.OnNetwork(own) {
-		if err := m.ensureInstanceNetwork(ctx, id); err != nil {
+		if _, err := m.ensureInstanceNetwork(ctx, id); err != nil {
 			return false, err
 		}
 		if err := m.dc.NetworkConnect(ctx, own, name); err != nil {
@@ -282,6 +338,41 @@ func (m *Manager) isolate(ctx context.Context, id int64, ns docker.NetworkSettin
 		changed = true
 	}
 	return changed, nil
+}
+
+// prepareStart runs before the agent starts a stopped container (start, and restart
+// after its stop); info is its inspect result. It makes sure the instance network exists
+// (also after an external "docker network prune"), reconnects an endpoint that still
+// points to a deleted network of the same name (Docker would refuse the start), and moves
+// a container of an older agent onto its own network.
+func (m *Manager) prepareStart(ctx context.Context, id int64, info docker.ContainerInfo) error {
+	if info.State.Running || info.State.Restarting {
+		return nil // start is a no-op, the networks stay until the next stop
+	}
+	name, own := ContainerName(id), InstanceNetwork(id)
+	n, err := m.ensureInstanceNetwork(ctx, id)
+	if err != nil {
+		return err
+	}
+	changed := false
+	if ep, ok := info.NetworkSettings.Networks[own]; ok && ep.NetworkID != "" && ep.NetworkID != n.ID {
+		if err := m.dc.NetworkDisconnect(ctx, own, name); err != nil {
+			return err
+		}
+		if err := m.dc.NetworkConnect(ctx, own, name); err != nil {
+			return err
+		}
+		m.log.Warn("instance reconnected to its network, which was deleted and created again", "id", id, "network", own)
+		changed = true
+	}
+	moved, err := m.isolate(ctx, id, info.NetworkSettings, true)
+	if err != nil {
+		return fmt.Errorf("move %s onto its own network: %w", name, err)
+	}
+	if changed || moved {
+		m.refreshRouterAfter(ctx)
+	}
+	return nil
 }
 
 // busy reports whether a worker owns instance id right now (queued or running work).
@@ -330,7 +421,7 @@ func (m *Manager) reconcileNetworks(ctx context.Context) error {
 		return errors.Join(append(errs, err)...)
 	}
 	for id := range byID {
-		if !present[id] && !m.busy(id) {
+		if !present[id] {
 			if err := m.removeOrphanNetwork(ctx, id); err != nil {
 				errs = append(errs, err)
 			}
@@ -339,22 +430,32 @@ func (m *Manager) reconcileNetworks(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// removeOrphanNetwork removes the network of an instance without container, unless a
-// container other than the router is still connected to it.
+// removeOrphanNetwork removes the network of an instance without container. Everything is
+// checked again under netMu, because the list it was found in may be stale: a worker may
+// own the instance by now, and a container in state "created" is not a member in Docker's
+// network inspect, so its existence is checked by name. A network another container still
+// uses is left alone.
 func (m *Manager) removeOrphanNetwork(ctx context.Context, id int64) error {
+	m.netMu.Lock()
+	defer m.netMu.Unlock()
+	if m.busy(id) {
+		return nil
+	}
+	if _, err := m.dc.Inspect(ctx, ContainerName(id)); !docker.IsNotFound(err) {
+		return err // nil: the instance's container exists (in any state)
+	}
 	name := InstanceNetwork(id)
-	members, err := m.dc.NetworkContainers(ctx, name)
+	n, err := m.dc.InspectNetwork(ctx, name)
 	if docker.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if slices.ContainsFunc(members, func(c string) bool { return c != RouterName }) {
-		return fmt.Errorf("network %s has no instance but other containers (%v); leaving it", name, members)
+	if slices.ContainsFunc(n.Containers, func(c string) bool { return c != RouterName }) {
+		return fmt.Errorf("network %s has no instance but other containers (%v); leaving it", name, n.Containers)
 	}
-	m.removeInstanceNetwork(ctx, id)
-	return nil
+	return m.removeInstanceNetworkLocked(ctx, id)
 }
 
 // reportShared logs the running instances that are still on the shared network whenever
@@ -375,8 +476,9 @@ func (m *Manager) reportShared(ids []int64) {
 	}
 }
 
-// syncRouterNetworks connects mc-router to the network of every instance whose
-// container is on it and disconnects it from the networks of instances that are gone.
+// syncRouterNetworks connects mc-router to the network of every instance whose container
+// is on it and that the egress filter covers, and disconnects it from the networks of
+// instances that are gone. refreshRouter has checked the router's label.
 func (m *Manager) syncRouterNetworks(ctx context.Context, list []docker.ContainerSummary) error {
 	info, err := m.dc.Inspect(ctx, RouterName)
 	if docker.IsNotFound(err) {
@@ -385,9 +487,17 @@ func (m *Manager) syncRouterNetworks(ctx context.Context, list []docker.Containe
 	if err != nil {
 		return err
 	}
+	_, byID, err := m.managedNetworks(ctx)
+	if err != nil {
+		return err
+	}
 	want := map[string]bool{}
 	for _, c := range list {
-		if id, ok := managedID(c.Labels, c.Names...); ok && c.NetworkSettings.OnNetwork(InstanceNetwork(id)) {
+		id, ok := managedID(c.Labels, c.Names...)
+		if !ok || !c.NetworkSettings.OnNetwork(InstanceNetwork(id)) {
+			continue
+		}
+		if n, ok := byID[id]; ok && !n.HasIPv6() && m.egressCovers(n.Subnets) {
 			want[InstanceNetwork(id)] = true
 		}
 	}

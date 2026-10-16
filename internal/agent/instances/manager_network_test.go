@@ -2,6 +2,7 @@ package instances_test
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -236,8 +237,235 @@ func TestCheckNetworkPoolWarns(t *testing.T) {
 	e := newEnv(t, func(c *instances.Config) {
 		c.HostPrefixes = func() ([]netip.Prefix, error) { return prefixes("192.168.1.0/24", "10.213.4.0/24"), nil }
 	})
-	e.m.CheckNetworkPool()
+	if err := e.m.CheckNetworkPool(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(e.logs.String(), "instance_network_pool overlaps") || !strings.Contains(e.logs.String(), "10.213.4.0/24") {
 		t.Fatalf("no warning:\n%s", e.logs.String())
+	}
+}
+
+// Review SEC-03 #1: a server that was created but never started has no endpoint in
+// Docker's network inspect; the loop must not take it for an orphan and remove its
+// network, or the start would fail for good.
+func TestLoopKeepsNetworkOfCreatedContainer(t *testing.T) {
+	e := newEnv(t)
+	e.ensure(t, ensureReq(1, "survival", 1))
+	if c := e.container(t, "mcpanel-mc-1"); c.Status != "created" {
+		t.Fatalf("status = %s", c.Status)
+	}
+	e.m.Tick(context.Background())
+	if !e.d.HasNetwork("mcpanel-net-1") {
+		t.Fatal("the loop removed the network of a created container")
+	}
+	e.power(t, 1, agentapi.PowerStart)
+	if s := e.status(t, 1); s.State != agentapi.StateRunning || s.LastError != "" {
+		t.Fatalf("status = %+v", s)
+	}
+}
+
+// A start repairs a network deleted from outside (docker network prune while the server
+// and the router were off): the network is created again and the stale endpoint of the
+// container is reconnected, so Docker accepts the start.
+func TestPowerStartRepairsDeletedNetwork(t *testing.T) {
+	e := newEnv(t)
+	dc := docker.New(e.d.Socket)
+	ctx := context.Background()
+	e.ensure(t, ensureReq(1, "survival", 1))
+	e.power(t, 1, agentapi.PowerStart)
+	e.power(t, 1, agentapi.PowerStop)
+	if err := dc.NetworkDisconnect(ctx, "mcpanel-net-1", instances.RouterName); err != nil {
+		t.Fatal(err)
+	}
+	if err := dc.RemoveNetwork(ctx, "mcpanel-net-1"); err != nil {
+		t.Fatal(err)
+	}
+	e.power(t, 1, agentapi.PowerStart)
+	if s := e.status(t, 1); s.State != agentapi.StateRunning || s.LastError != "" {
+		t.Fatalf("status after the repair = %+v", s)
+	}
+	if !e.d.HasNetwork("mcpanel-net-1") || !slices.Contains(e.container(t, instances.RouterName).Networks, "mcpanel-net-1") {
+		t.Fatalf("networks %v, router %v", e.d.Networks(), e.container(t, instances.RouterName).Networks)
+	}
+	if !strings.Contains(e.logs.String(), "deleted and created again") {
+		t.Fatalf("no repair logged:\n%s", e.logs.String())
+	}
+
+	// A created container (never started) on a deleted network starts as well.
+	e.ensure(t, ensureReq(2, "creative", 1))
+	if err := dc.NetworkDisconnect(ctx, "mcpanel-net-2", instances.RouterName); err != nil {
+		t.Fatal(err)
+	}
+	if err := dc.RemoveNetwork(ctx, "mcpanel-net-2"); err != nil {
+		t.Fatal(err)
+	}
+	e.power(t, 2, agentapi.PowerStart)
+	if s := e.status(t, 2); s.State != agentapi.StateRunning || s.LastError != "" {
+		t.Fatalf("status of the created container = %+v", s)
+	}
+}
+
+// Review SEC-03 #2: a network called mcpanel-net-<id> without mc-panel's labels is never
+// disconnected or removed, also not when its server is removed.
+func TestRemoveLeavesForeignNetworkAlone(t *testing.T) {
+	e := newEnv(t)
+	e.d.AddNetwork("mcpanel-net-5", "bridge", map[string]string{"com.example": "x"}, "10.99.0.0/28")
+	e.d.AddNetwork("mcpanel-net-6", "bridge", map[string]string{instances.LabelNetwork: "1", instances.LabelInstance: "7"}, "10.99.0.16/28")
+	e.do(t, func(ctx context.Context) error { return e.m.Remove(ctx, 5) })
+	e.do(t, func(ctx context.Context) error { return e.m.Remove(ctx, 6) })
+	e.m.Tick(context.Background())
+	if !e.d.HasNetwork("mcpanel-net-5") || !e.d.HasNetwork("mcpanel-net-6") {
+		t.Fatalf("foreign network removed: %v", e.d.Networks())
+	}
+	if !strings.Contains(e.logs.String(), "network not managed by mc-panel; leaving it untouched") {
+		t.Fatalf("not logged:\n%s", e.logs.String())
+	}
+}
+
+// Review SEC-03 #2: a container called mcpanel-router without mc-panel's label is never
+// connected to a server's network.
+func TestForeignRouterIsNotConnected(t *testing.T) {
+	e := newEnv(t)
+	e.d.AddNetwork(instances.RouterNetwork, "bridge", map[string]string{instances.LabelNetwork: "1"}, "172.18.0.0/16")
+	e.d.AddContainer(instances.RouterName, docker.ContainerConfig{Image: "x", HostConfig: docker.HostConfig{NetworkMode: "bridge"}}, true)
+	e.ensure(t, ensureReq(1, "survival", 1))
+	if _, ok := e.d.Container("mcpanel-mc-1"); !ok {
+		t.Fatal("instance not created")
+	}
+	if got := e.container(t, instances.RouterName).Networks; slices.Contains(got, "mcpanel-net-1") {
+		t.Fatalf("foreign router connected: %v", got)
+	}
+	e.m.Tick(context.Background())
+	if got := e.container(t, instances.RouterName).Networks; !slices.Equal(got, []string{"bridge"}) {
+		t.Fatalf("foreign router networks = %v", got)
+	}
+}
+
+// Review SEC-03 #3: a managed network with IPv6 is not used.
+func TestIPv6InstanceNetworkIsRefused(t *testing.T) {
+	e := newEnv(t)
+	e.d.AddNetwork("mcpanel-net-1", "bridge", map[string]string{instances.LabelNetwork: "1", instances.LabelInstance: "1"}, "10.213.0.0/28")
+	e.d.SetNetworkIPv6("mcpanel-net-1", true)
+	e.ensure(t, ensureReq(1, "survival", 1))
+	if s := e.status(t, 1); s.State != agentapi.StateMissing || !strings.Contains(s.LastError, "IPv6") {
+		t.Fatalf("status = %+v", s)
+	}
+	e.d.AddNetwork("mcpanel-net-2", "bridge", map[string]string{instances.LabelNetwork: "1", instances.LabelInstance: "2"}, "10.213.0.16/28", "fd00:2::/64")
+	e.ensure(t, ensureReq(2, "creative", 1))
+	if s := e.status(t, 2); s.State != agentapi.StateMissing || !strings.Contains(s.LastError, "IPv6") {
+		t.Fatalf("status = %+v", s)
+	}
+}
+
+// Without a working egress filter the loop neither moves a container of an older agent
+// onto a new network nor connects the router to a network the filter does not cover.
+func TestNoMoveAndNoRouterConnectWithoutFilter(t *testing.T) {
+	e, fe := newEgressEnv(t)
+	e.d.AddImage(routerPinned)
+	e.d.AddNetwork(instances.RouterNetwork, "bridge", map[string]string{instances.LabelNetwork: "1"}, "172.18.0.0/16")
+	e.m.Tick(context.Background()) // filter for mcpanel-mc, router created
+	fe.fail(errors.New("netlink: operation not permitted"))
+	e.legacy(t, 1, "survival", false)
+	e.m.Tick(context.Background())
+	if got := e.container(t, "mcpanel-mc-1").Networks; !slices.Equal(got, []string{"mcpanel-mc"}) {
+		t.Fatalf("legacy container moved without filter: %v", got)
+	}
+	if got := e.container(t, instances.RouterName).Networks; !slices.Equal(got, []string{"mcpanel-mc"}) {
+		t.Fatalf("router networks = %v", got)
+	}
+
+	// A server network whose (changed) subnet the filter does not cover gets no router.
+	fe.fail(nil)
+	e.ensure(t, ensureReq(2, "creative", 1))
+	if !slices.Contains(e.container(t, instances.RouterName).Networks, "mcpanel-net-2") {
+		t.Fatalf("router not on mcpanel-net-2: %v", e.container(t, instances.RouterName).Networks)
+	}
+	fe.fail(errors.New("netlink: operation not permitted"))
+	e.d.SetNetworkSubnets("mcpanel-net-2", "10.213.7.0/28")
+	if err := docker.New(e.d.Socket).NetworkDisconnect(context.Background(), "mcpanel-net-2", instances.RouterName); err != nil {
+		t.Fatal(err)
+	}
+	e.m.Tick(context.Background())
+	if slices.Contains(e.container(t, instances.RouterName).Networks, "mcpanel-net-2") {
+		t.Fatal("router connected to a network the filter does not cover")
+	}
+}
+
+// fakeDisabledEgress behaves like the firewall with container_egress_deny = []: every
+// call succeeds and the filter always counts as in place.
+type fakeDisabledEgress struct{}
+
+func (fakeDisabledEgress) SetEgressSubnets(context.Context, []netip.Prefix) error { return nil }
+func (fakeDisabledEgress) EgressInPlace(context.Context, []netip.Prefix) (bool, error) {
+	return true, nil
+}
+
+func TestNetworksWithEgressFilterOff(t *testing.T) {
+	e := newEnv(t, func(c *instances.Config) { c.Egress = fakeDisabledEgress{} })
+	e.d.AddImage(routerPinned)
+	e.d.AddNetwork(instances.RouterNetwork, "bridge", map[string]string{instances.LabelNetwork: "1"}, "172.18.0.0/16")
+	e.legacy(t, 1, "survival", false)
+	e.ensure(t, ensureReq(2, "creative", 1))
+	e.m.Tick(context.Background())
+	if got := e.container(t, "mcpanel-mc-1").Networks; !slices.Equal(got, []string{"mcpanel-net-1"}) {
+		t.Fatalf("legacy container networks = %v", got)
+	}
+	if got := e.container(t, instances.RouterName).Networks; !slices.Equal(got, []string{"mcpanel-mc", "mcpanel-net-1", "mcpanel-net-2"}) {
+		t.Fatalf("router networks = %v", got)
+	}
+	e.power(t, 2, agentapi.PowerStart)
+	if s := e.status(t, 2); s.State != agentapi.StateRunning || s.LastError != "" {
+		t.Fatalf("status = %+v", s)
+	}
+}
+
+// An exhausted pool is logged once, and again when subnets are free.
+func TestPoolExhaustionLoggedOnce(t *testing.T) {
+	e := newEnv(t, func(c *instances.Config) { c.NetworkPool = netip.MustParsePrefix("10.213.0.0/28") })
+	e.ensure(t, ensureReq(1, "alpha", 1))
+	e.ensure(t, ensureReq(2, "bravo", 1))
+	e.ensure(t, ensureReq(3, "charlie", 1))
+	if n := strings.Count(e.logs.String(), "instance_network_pool is exhausted"); n != 1 {
+		t.Fatalf("exhaustion logged %d times:\n%s", n, e.logs.String())
+	}
+	e.do(t, func(ctx context.Context) error { return e.m.Remove(ctx, 1) })
+	e.ensure(t, ensureReq(2, "bravo", 1))
+	if !strings.Contains(e.logs.String(), "has free subnets again") {
+		t.Fatalf("recovery not logged:\n%s", e.logs.String())
+	}
+}
+
+func TestParseRoutes(t *testing.T) {
+	const table = `Iface	Destination	Gateway 	Flags	RefCnt	Use	Metric	Mask		MTU	Window	IRTT
+eth0	00000000	0101A8C0	0003	0	0	100	00000000	0	0	0
+eth0	0001A8C0	00000000	0001	0	0	100	00FFFFFF	0	0	0
+wg0	0000080A	00000000	0001	0	0	0	0000FFFF	0	0	0
+tun0	00D5000A	00000000	0000	0	0	0	0000FFFF	0	0	0
+br-0123456789ab	00D5000A	00000000	0001	0	0	0	F0FFFFFF	0	0	0
+lo	0000007F	00000000	0001	0	0	0	000000FF	0	0	0
+`
+	got, err := instances.ParseRoutes(strings.NewReader(table), map[string]bool{"br-0123456789ab": true})
+	if err != nil || !slices.Equal(got, prefixes("192.168.1.0/24", "10.8.0.0/16")) {
+		t.Fatalf("routes = %v, %v", got, err)
+	}
+	if _, err := instances.ParseRoutes(strings.NewReader("h\neth0 XYZ 0 0001 0 0 0 00FFFFFF\n"), nil); err == nil {
+		t.Fatal("a malformed line must fail")
+	}
+}
+
+func TestNetworkHostInterface(t *testing.T) {
+	id := strings.Repeat("ab", 32)
+	for _, c := range []struct {
+		n    docker.Network
+		want string
+	}{
+		{docker.Network{ID: id, Driver: "bridge"}, "br-abababababab"},
+		{docker.Network{ID: id, Driver: "bridge", BridgeName: "docker0"}, "docker0"},
+		{docker.Network{ID: id, Driver: "host"}, ""},
+		{docker.Network{ID: "x", Driver: "bridge"}, ""},
+	} {
+		if got := c.n.HostInterface(); got != c.want {
+			t.Errorf("HostInterface(%+v) = %q, want %q", c.n, got, c.want)
+		}
 	}
 }

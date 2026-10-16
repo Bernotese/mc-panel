@@ -46,6 +46,7 @@ ops_doctor_healthy() {
   doc_probe_docker_version() { echo 29.1.3; }
   doc_probe_docker_live_restore() { echo true; }
   doc_probe_shared_servers() { printf '%s\n' mcpanel-router; }
+  doc_probe_router_net_ipv6() { echo false; }
   doc_probe_docker_root() { echo /var/lib/docker; }
   doc_probe_caddy_version() { echo 2.11.7; }
   doc_probe_caddy_from_repo() { return 0; }
@@ -221,6 +222,9 @@ test_ops_doctor_shared_network_warns() {
   doc_probe_shared_servers() { return 1; } # no network mcpanel-mc (yet)
   assert_exit 0 cmd_doctor
   assert_contains "$(cat "$WORK/out")" "✓ every Minecraft server is on its own network"
+  doc_probe_router_net_ipv6() { echo true; }
+  assert_exit 1 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "! the network mcpanel-mc has IPv6 enabled"
 }
 
 test_ops_doctor_reboot_required_shows_age_and_packages() {

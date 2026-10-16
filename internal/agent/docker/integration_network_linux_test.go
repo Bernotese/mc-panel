@@ -34,13 +34,13 @@ func TestIntegrationNetworkCalls(t *testing.T) {
 	})
 	labels := map[string]string{"mcpanel.integration": "1"}
 	subnet := netip.MustParsePrefix("10.213.255.224/28")
-	if err := c.CreateNetwork(ctx, netA, labels, subnet); err != nil {
+	if _, err := c.CreateNetwork(ctx, netA, labels, subnet); err != nil {
 		t.Fatalf("CreateNetwork: %v", err)
 	}
-	if err := c.CreateNetwork(ctx, netB, labels, netip.MustParsePrefix("10.213.255.192/26")); !docker.IsPoolOverlap(err) {
+	if _, err := c.CreateNetwork(ctx, netB, labels, netip.MustParsePrefix("10.213.255.192/26")); !docker.IsPoolOverlap(err) {
 		t.Fatalf("overlapping subnet: %v, want a pool overlap", err)
 	}
-	if err := c.CreateNetwork(ctx, netA, labels, netip.MustParsePrefix("10.213.255.240/28")); !docker.IsConflict(err) {
+	if _, err := c.CreateNetwork(ctx, netA, labels, netip.MustParsePrefix("10.213.255.240/28")); !docker.IsConflict(err) {
 		t.Fatalf("existing name: %v, want a conflict", err)
 	}
 	nets, err := c.ListNetworks(ctx, "mcpanel.integration")
@@ -68,8 +68,9 @@ func TestIntegrationNetworkCalls(t *testing.T) {
 	if err != nil || !info.NetworkSettings.OnNetwork(netA) || !subnet.Contains(netip.MustParseAddr(info.NetworkSettings.Networks[netA].IPAddress)) {
 		t.Fatalf("inspect networks = %+v, %v", info.NetworkSettings, err)
 	}
-	if members, err := c.NetworkContainers(ctx, netA); err != nil || !slices.Equal(members, []string{name}) {
-		t.Fatalf("NetworkContainers = %v, %v", members, err)
+	if n, err := c.InspectNetwork(ctx, netA); err != nil || !slices.Equal(n.Containers, []string{name}) || n.HasIPv6() ||
+		n.ID == "" || n.HostInterface() != "br-"+n.ID[:12] {
+		t.Fatalf("InspectNetwork = %+v, %v", n, err)
 	}
 	if err := c.RemoveNetwork(ctx, netA); err == nil {
 		t.Fatal("a network with a running container was removed")
@@ -214,8 +215,26 @@ func TestIntegrationNetworkIsolation(t *testing.T) {
 		t.Fatalf("router cannot reach server 1 after the restart: exit %d", code)
 	}
 
+	// A network deleted from outside while its server and the router were off (docker
+	// network prune) is repaired by the next start: Docker 29 refuses to start a container
+	// whose endpoint points to the deleted network, so it is reconnected.
+	run(func() error { return m.Power(ctx, 2, agentapi.PowerStop) })
+	if err := c.NetworkDisconnect(ctx, instances.InstanceNetwork(2), instances.RouterName); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RemoveNetwork(ctx, instances.InstanceNetwork(2)); err != nil {
+		t.Fatal(err)
+	}
+	run(func() error { return m.Power(ctx, 2, agentapi.PowerStart) })
+	if two := inspect(instances.ContainerName(2)); !two.State.Running {
+		t.Fatalf("server 2 after the network repair: %+v", two.State)
+	}
+	if code := execExit(t, c, instances.RouterName, "nc", "-z", "-w", "3", instances.ContainerName(2), "25575"); code != 0 {
+		t.Fatalf("router cannot reach server 2 after the network repair: exit %d", code)
+	}
+
 	run(func() error { return m.Remove(ctx, 1) })
-	if members, err := c.NetworkContainers(ctx, instances.InstanceNetwork(1)); !docker.IsNotFound(err) {
-		t.Fatalf("network of a removed server: %v, %v", members, err)
+	if n, err := c.InspectNetwork(ctx, instances.InstanceNetwork(1)); !docker.IsNotFound(err) {
+		t.Fatalf("network of a removed server: %+v, %v", n, err)
 	}
 }

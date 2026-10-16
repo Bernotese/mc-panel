@@ -168,9 +168,11 @@ func (c *Client) PullImage(ctx context.Context, ref string) error {
 }
 
 type networkCreate struct {
-	Name   string            `json:"Name"`
-	Driver string            `json:"Driver"`
-	Labels map[string]string `json:"Labels,omitempty"`
+	Name       string            `json:"Name"`
+	Driver     string            `json:"Driver"`
+	Labels     map[string]string `json:"Labels,omitempty"`
+	EnableIPv4 bool              `json:"EnableIPv4"`
+	EnableIPv6 bool              `json:"EnableIPv6"`
 }
 
 type networkInfo struct {
@@ -193,7 +195,7 @@ func (c *Client) EnsureNetwork(ctx context.Context, name string, labels map[stri
 	err := c.call(ctx, c.timeout, http.MethodGet, path, nil, nil, &info)
 	if IsNotFound(err) {
 		err = c.call(ctx, c.timeout, http.MethodPost, "/networks/create", nil,
-			networkCreate{Name: name, Driver: "bridge", Labels: labels}, nil)
+			networkCreate{Name: name, Driver: "bridge", Labels: labels, EnableIPv4: true, EnableIPv6: false}, nil)
 		if !IsConflict(err) {
 			return err
 		}
