@@ -1,7 +1,7 @@
 import { HttpResponse, type HttpHandler } from 'msw'
 import type { ErrorCode, Permission, Stage } from '@/api/types'
 import { ALL_PERMISSIONS } from '@/api/types'
-import { currentSession, db, findUser, hasSecondFactor, type MockSession, type MockUser } from '../db'
+import { currentSession, db, findUser, hasSecondFactor, twoFactorMandatory, type MockSession, type MockUser } from '../db'
 
 /** Wildcard origin: matches in jsdom (http://localhost:3000) and in the browser worker. */
 export const API = '*/api'
@@ -42,8 +42,8 @@ export function guard(request: Request, opts: GuardOptions = {}): Authed | Error
     return apiError(403, 'csrf_invalid', 'missing or invalid CSRF token')
   }
   // Like the real middleware: a full session is downgraded to `setup` as soon as 2FA became mandatory for the user
-  // (admin without factor, or enforce_2fa_for_users with a plain user without factor).
-  if (session.stage === 'full' && !hasSecondFactor(user) && (user.role === 'admin' || db.settings.enforce_2fa_for_users)) {
+  // (admin, full-trust permission or enforce_2fa_for_users, and no factor).
+  if (session.stage === 'full' && !hasSecondFactor(user) && twoFactorMandatory(user)) {
     session.stage = 'setup'
   }
   const stages = opts.stages ?? ['full']

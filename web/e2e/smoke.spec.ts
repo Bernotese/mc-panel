@@ -36,6 +36,28 @@ test('sensitive actions ask for sudo once and then succeed', async ({ page }) =>
   await expect(sudo).toBeHidden()
 })
 
+test('granting file access makes 2FA mandatory for the user (SEC-10)', async ({ page }) => {
+  await signInAsAdmin(page)
+  await page.getByRole('link', { name: 'Benutzer', exact: true }).click()
+  await page.getByRole('link', { name: 'Rechte von alice' }).click()
+  await expect(page.getByText(/setzen die Zwei-Faktor-Anmeldung voraus/)).toBeVisible()
+  await page.getByRole('checkbox', { name: 'survival: Dateien' }).check()
+  await page.getByRole('button', { name: 'Speichern' }).click()
+  const sudo = page.getByRole('dialog', { name: 'Aktion bestätigen' })
+  await sudo.getByLabel('Code aus der Authenticator-App').fill('123456')
+  await sudo.getByRole('button', { name: 'Bestätigen' }).click()
+  await expect(page.getByText('Rechte gespeichert.')).toBeVisible()
+  await page.getByRole('button', { name: 'Abmelden', exact: true }).click()
+  await expect(page).toHaveURL(/\/login$/)
+
+  // The mock state lives in the page, so alice signs in without a reload.
+  await page.getByLabel('Benutzername').fill('alice')
+  await page.getByLabel('Passwort').fill('correct-horse-battery')
+  await page.getByRole('button', { name: 'Anmelden' }).click()
+  await expect(page).toHaveURL(/\/setup-2fa$/)
+  await expect(page.getByText(/Du hast Konsolen-, Datei-, Plugin- oder Backup-Rechte/)).toBeVisible()
+})
+
 test.describe('phone (360 px)', () => {
   test.use({ viewport: { width: 360, height: 740 } })
 

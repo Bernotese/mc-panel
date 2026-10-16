@@ -26,10 +26,17 @@ describe('UserPermissionsPage', () => {
     expect(screen.getByRole('button', { name: 'Speichern' })).toBeDisabled()
   })
 
+  it('notes that full-trust permissions require 2FA', async () => {
+    await renderWithProviders(<UserPermissionsPage userId={2} />, { me: loginAs('admin', { sudo: true }) })
+    await screen.findByRole('heading', { name: 'Rechte von alice' })
+    expect(screen.getByText(/„Konsole“, „Dateien“, „Plugins\/Mods“ und „Backups“ setzen die Zwei-Faktor-Anmeldung voraus/)).toBeInTheDocument()
+  })
+
   it('disables the matrix for administrators', async () => {
     await renderWithProviders(<UserPermissionsPage userId={3} />, { me: loginAs('admin') })
     expect(await screen.findByText('Administratoren haben automatisch alle Rechte auf allen Servern.')).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: 'survival: Ansehen' })).toBeDisabled()
+    expect(screen.queryByText(/setzen die Zwei-Faktor-Anmeldung voraus/)).not.toBeInTheDocument()
   })
 
   it('warns before granting file access', async () => {

@@ -1,6 +1,8 @@
 import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
+import type { Me } from '@/api/types'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AuthLayout } from '@/features/auth/auth-layout'
 import { LogoutButton } from '@/features/auth/logout-button'
@@ -9,6 +11,13 @@ import { isWebAuthnSupported } from '@/features/webauthn/webauthn'
 import { PasskeySetupCard } from './passkey-setup-card'
 import { RecoveryCodesPanel } from './recovery-codes-panel'
 import { TotpSetupCard } from './totp-setup-card'
+
+/** Why the setup is required (Me.two_factor_reason). */
+function setupDescription(reason: Me['two_factor_reason'] | undefined, t: TFunction): string {
+  if (reason === 'admin') return t('setup.description_admin')
+  if (reason === 'permissions') return t('setup.description_permissions')
+  return t('setup.description_user')
+}
 
 /**
  * Forced setup. The recovery codes live in local state, so they stay visible even though the API
@@ -36,7 +45,7 @@ export function Setup2faPage() {
   }
 
   return (
-    <AuthLayout wide title={t('setup.title')} description={me?.role === 'admin' ? t('setup.description_admin') : t('setup.description_user')}>
+    <AuthLayout wide title={t('setup.title')} description={setupDescription(me?.two_factor_reason, t)}>
       <Tabs defaultValue="totp">
         {passkeySupported ? (
           <TabsList className="grid w-full grid-cols-2">

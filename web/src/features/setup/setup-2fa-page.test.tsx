@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Me } from '@/api/types'
 import { meKey } from '@/features/auth/me'
-import { loginAs, MOCK_PASSWORD, MOCK_TOTP_CODE } from '@/mocks/db'
+import { db, loginAs, MOCK_PASSWORD, MOCK_TOTP_CODE } from '@/mocks/db'
 import { renderWithProviders } from '@/test/render'
 import { Setup2faPage } from './setup-2fa-page'
 
@@ -23,6 +23,17 @@ function renderPage() {
 }
 
 describe('Setup2faPage', () => {
+  it('explains the requirement for an administrator', async () => {
+    await renderPage()
+    expect(screen.getByText(/Als Administrator musst du einen zweiten Faktor einrichten/)).toBeInTheDocument()
+  })
+
+  it('explains that full-trust permissions require 2FA', async () => {
+    db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.files'] }])
+    await renderWithProviders(<Setup2faPage />, { path: '/setup-2fa', me: loginAs('alice', { stage: 'setup' }) })
+    expect(screen.getByText(/Du hast Konsolen-, Datei-, Plugin- oder Backup-Rechte auf einem Server/)).toBeInTheDocument()
+  })
+
   it('keeps the recovery codes on screen after Me turned full, then continues to /', async () => {
     const user = userEvent.setup()
     const { router, queryClient } = await renderPage()

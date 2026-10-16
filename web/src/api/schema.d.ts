@@ -1549,6 +1549,11 @@ export interface components {
             /** @description Methods usable in preauth stage */
             second_factors: components["schemas"]["SecondFactor"][];
             /**
+             * @description Why 2FA is mandatory: admin role, a full-trust permission (server.console, server.files, server.plugins or server.backups) on any server, or enforce_2fa_for_users; none = optional
+             * @enum {string}
+             */
+            two_factor_reason: "none" | "admin" | "permissions" | "policy";
+            /**
              * Format: int64
              * @description Unix ms; 0 = no sudo
              */
