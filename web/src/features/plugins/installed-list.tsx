@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
+import { visibleName } from '@/lib/file-name'
 import {
   externalHref,
   filterJars,
@@ -92,7 +93,7 @@ export function InstalledList({ inventory, updates, busy = false, pendingFile = 
       <Switch
         checked={jar.enabled}
         disabled={busy || pendingFile === jar.file}
-        aria-label={t('plugins.installed.enabled_label', { name: jarName(jar) })}
+        aria-label={t('plugins.installed.enabled_label', { name: visibleName(jarName(jar)) })}
         onCheckedChange={(on) => onToggle(jar, on)}
       />
     )
@@ -105,7 +106,7 @@ export function InstalledList({ inventory, updates, busy = false, pendingFile = 
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label={t('plugins.installed.actions_label', { name })}>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label={t('plugins.installed.actions_label', { name: visibleName(name) })}>
             <MoreHorizontal aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>

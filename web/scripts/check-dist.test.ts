@@ -18,6 +18,7 @@ describe('check-dist (SEC-42)', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dist-'))
     write('index.html', '<script type="module" src="/assets/index-abc.js"></script>')
     write('assets/index-abc.js', 'console.log("app")')
+    write('assets/vendor-ghi.js', 'const msw = "MSW-compatible"') // the bare word is no mock marker
     write('assets/font.woff2', 'msw sourceMappingURL=') // binary assets are not searched
     expect(findDevArtifacts(dir)).toEqual([])
   })
@@ -31,7 +32,7 @@ describe('check-dist (SEC-42)', () => {
     expect(findDevArtifacts(dir).sort()).toEqual([
       'assets/index-abc.js.map: must not be shipped',
       'assets/index-abc.js: contains /sourceMappingURL=/',
-      'assets/mocks-def.js: contains /\\bmsw\\b/',
+      'assets/mocks-def.js: contains /msw\\//',
       'assets/mocks-def.js: contains /setupWorker/',
       'mockServiceWorker.js: must not be shipped',
     ])
