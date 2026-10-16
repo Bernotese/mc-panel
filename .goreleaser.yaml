@@ -47,6 +47,11 @@ builds:
         - cmd: >-
             sh -c 'grep -aq "/assets/index-" "{{ .Path }}" || { echo "no embedded frontend in {{ .Path }} - run make web-build" >&2; exit 1; }'
           output: true
+        # The time scale of the instance acceptance (internal/timescale) exists only with the build
+        # tag acceptance; a release binary must not contain it (runs before any upload).
+        - cmd: >-
+            sh -c '! grep -aq "MCPANEL_ACCEPTANCE" "{{ .Path }}" || { echo "acceptance time scale in {{ .Path }}" >&2; exit 1; }'
+          output: true
 
   - id: agent
     main: ./cmd/agent
