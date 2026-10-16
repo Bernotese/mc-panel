@@ -576,7 +576,8 @@ jobs:
         run: sudo env "PATH=$PATH" "GOCACHE=$(go env GOCACHE)" "GOMODCACHE=$(go env GOMODCACHE)" scripts/ci-installer.sh .
 
   # The one result to wait for (gh pr checks): green when every job either passed or was not
-  # needed for this change.
+  # needed for this change. It only reads `needs` (no checkout) and runs on a GitHub-hosted runner:
+  # on the VM it starved behind busy runners and GitHub cancelled it ("not acquired by Runner").
   ci-ok:
     name: CI OK
     if: always()
@@ -591,7 +592,7 @@ jobs:
       - build
       - installer-lint
       - installer
-    runs-on: [self-hosted, mcpanel-vm]
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: All needed jobs passed
