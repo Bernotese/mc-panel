@@ -115,19 +115,19 @@ func TestPin(t *testing.T) {
 	e := newEnv(t)
 	id := e.instance("survival")
 	snap := e.files.add(id, filesapi.SnapshotScheduled, false, "")
-	rec := e.must(http.StatusOK, http.MethodPost, bPath(id, "/"+snap+"/pin"), map[string]any{"pinned": true}, e.admin())
+	rec := e.must(http.StatusOK, http.MethodPost, bPath(id, "/"+snap+"/pin"), map[string]any{"pinned": true}, e.sudoAdmin())
 	pinned := decode[struct {
 		Snapshot snapshotJSON `json:"snapshot"`
 	}](t, rec).Snapshot
 	if !pinned.Pinned || pinned.ID == snap {
 		t.Fatalf("pinned = %+v, want a new id", pinned)
 	}
-	e.must(http.StatusOK, http.MethodPost, bPath(id, "/"+pinned.ID+"/pin"), map[string]any{"pinned": false}, e.admin())
+	e.must(http.StatusOK, http.MethodPost, bPath(id, "/"+pinned.ID+"/pin"), map[string]any{"pinned": false}, e.sudoAdmin())
 	if got := e.rec.actions(); len(got) != 2 || got[0] != audit.ActionBackupPin+":success" || got[1] != audit.ActionBackupUnpin+":success" {
 		t.Fatalf("audit = %v", got)
 	}
 	manual := e.files.add(id, filesapi.SnapshotManual, false, "")
-	a := e.admin()
+	a := e.sudoAdmin()
 	if rec := e.do(http.MethodPost, bPath(id, "/"+manual+"/pin"), map[string]any{"pinned": true}, &a); rec.Code != http.StatusBadRequest {
 		t.Fatalf("pin manual = %d", rec.Code)
 	}
@@ -140,8 +140,8 @@ func TestPinTwiceOldIDGone(t *testing.T) {
 	e := newEnv(t)
 	id := e.instance("survival")
 	snap := e.files.add(id, filesapi.SnapshotScheduled, false, "")
-	e.must(http.StatusOK, http.MethodPost, bPath(id, "/"+snap+"/pin"), map[string]any{"pinned": true}, e.admin())
-	a := e.admin()
+	e.must(http.StatusOK, http.MethodPost, bPath(id, "/"+snap+"/pin"), map[string]any{"pinned": true}, e.sudoAdmin())
+	a := e.sudoAdmin()
 	if rec := e.do(http.MethodPost, bPath(id, "/"+snap+"/pin"), map[string]any{"pinned": true}, &a); rec.Code != http.StatusNotFound {
 		t.Fatalf("second tab with the old id = %d %s", rec.Code, rec.Body)
 	}
@@ -155,7 +155,7 @@ func TestPinWhileJobRunning(t *testing.T) {
 	defer release()
 	e.create(id, map[string]any{})
 	e.waitStep(id, "backing_up")
-	a := e.admin()
+	a := e.sudoAdmin()
 	if rec := e.do(http.MethodPost, bPath(id, "/"+snap+"/pin"), map[string]any{"pinned": true}, &a); rec.Code != http.StatusConflict || errCode(t, rec) != "backup_running" {
 		t.Fatalf("pin during a job = %d %s", rec.Code, rec.Body)
 	}
@@ -168,7 +168,7 @@ func TestPinWhileServiceBusy(t *testing.T) {
 	id := e.instance("survival")
 	snap := e.files.add(id, filesapi.SnapshotScheduled, false, "")
 	e.files.errs["pin"] = filesapi.ErrBusy
-	a := e.admin()
+	a := e.sudoAdmin()
 	rec := e.do(http.MethodPost, bPath(id, "/"+snap+"/pin"), map[string]any{"pinned": true}, &a)
 	if rec.Code != http.StatusConflict || errCode(t, rec) != "backup_running" ||
 		!strings.Contains(rec.Body.String(), "file service is busy") {

@@ -18,7 +18,7 @@ func TestDefaultFiles(t *testing.T) {
 	}
 	l := f.Limits
 	if l.MaxUploadBytes != 4<<30 || l.MaxExtractBytes != 20<<30 || l.MaxExtractEntries != 100000 ||
-		l.ReserveBytes != 2<<30 || l.MaxTextBytes != 5<<20 || l.MaxListEntries != 10000 {
+		l.ReserveBytes != 2<<30 || l.ReservePercent != 5 || l.MaxTextBytes != 5<<20 || l.MaxListEntries != 10000 {
 		t.Fatalf("limits = %+v", l)
 	}
 	if err := f.Validate(); err == nil || !strings.Contains(err.Error(), "panel_uid") {
@@ -74,6 +74,8 @@ func TestLoadFilesRejects(t *testing.T) {
 		"root dir":         "panel_uid = 998\ninstances_dir = \"/\"\n",
 		"zero limit":       "panel_uid = 998\n[limits]\nmax_text_bytes = 0\n",
 		"negative reserve": "panel_uid = 998\n[limits]\nreserve_bytes = -1\n",
+		"negative percent": "panel_uid = 998\n[limits]\nreserve_percent = -1\n",
+		"percent too high": "panel_uid = 998\n[limits]\nreserve_percent = 51\n",
 		"no panel uid":     "instances_dir = \"/srv/mc-panel\"\n",
 		"relative socket":  "panel_uid = 998\nsocket = \"files.sock\"\n",
 		"text over json":   "panel_uid = 998\n[limits]\nmax_text_bytes = 10485760\n", // > MaxJSONBytes/6

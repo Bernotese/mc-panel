@@ -34,7 +34,7 @@ func scheduleBody(mode string, interval, timeOfDay, weekday int) map[string]any 
 
 func putSchedule(e *env, id int64, body any) scheduleJSON {
 	e.t.Helper()
-	rec := e.must(http.StatusOK, http.MethodPut, bPath(id, "/schedule"), body, e.admin())
+	rec := e.must(http.StatusOK, http.MethodPut, bPath(id, "/schedule"), body, e.sudoAdmin())
 	return decode[struct {
 		Schedule scheduleJSON `json:"schedule"`
 	}](e.t, rec).Schedule
@@ -107,7 +107,7 @@ func TestUpdateScheduleValidation(t *testing.T) {
 		{"not json", "{", "bad_request"},
 	}
 	for _, c := range cases {
-		a := e.admin()
+		a := e.sudoAdmin()
 		rec := e.do(http.MethodPut, bPath(id, "/schedule"), c.body, &a)
 		if rec.Code != http.StatusBadRequest || errCode(t, rec) != c.code {
 			t.Errorf("%s: %d %s, want 400 %s", c.name, rec.Code, rec.Body, c.code)
@@ -128,8 +128,12 @@ func TestUpdateSchedulePermissions(t *testing.T) {
 	}
 	op := userP(storeUser(t, e, "op"), "op")
 	grant(t, e.db, op.UserID, id, "server.view", "server.backups")
+	if rec := e.do(http.MethodPut, bPath(id, "/schedule"), scheduleBody("daily", 24, 240, 0), &op); rec.Code != http.StatusForbidden || errCode(t, rec) != "sudo_required" {
+		t.Fatalf("server.backups without sudo = %d %s", rec.Code, rec.Body)
+	}
+	op.SudoUntil = t0.Add(time.Hour)
 	e.must(http.StatusOK, http.MethodPut, bPath(id, "/schedule"), scheduleBody("daily", 24, 240, 0), op)
-	a := e.admin()
+	a := e.sudoAdmin()
 	if rec := e.do(http.MethodPut, bPath(9999, "/schedule"), scheduleBody("daily", 24, 240, 0), &a); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown server = %d", rec.Code)
 	}

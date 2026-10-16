@@ -17,10 +17,12 @@ import (
 	"github.com/Bernotese/mc-panel/internal/config"
 )
 
-// fakeDisk reports a fixed amount of free space.
+// fakeDisk reports a fixed amount of free space and a fixed size (0: the percentage reserve is
+// 0 and reserve_bytes alone counts).
 type fakeDisk struct {
 	mu    sync.Mutex
 	avail uint64
+	total uint64
 	err   error
 }
 
@@ -28,6 +30,12 @@ func (d *fakeDisk) Available(string) (uint64, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.avail, d.err
+}
+
+func (d *fakeDisk) Total(string) (uint64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.total, d.err
 }
 
 func (d *fakeDisk) set(avail uint64) {

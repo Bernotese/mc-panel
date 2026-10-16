@@ -204,6 +204,7 @@ export interface MockBackups {
   available: boolean
   snapshots: BackupSnapshot[]
   schedule: Omit<BackupSchedule, 'timezone'> // timezone comes from serverSettings on every read
+  manualAt?: number // when the last manual backup was queued (one per 10 minutes, like the panel)
 }
 
 /** What a finished mock job changes. */

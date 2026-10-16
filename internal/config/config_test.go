@@ -291,3 +291,28 @@ func TestMonitoringKeyValidation(t *testing.T) {
 		}
 	}
 }
+
+// SEC-25: backups.max_duration defaults to 4 h and is bounded.
+func TestPanelBackupMaxDuration(t *testing.T) {
+	p := config.DefaultPanel()
+	if p.Backups.MaxDuration.Duration != 4*time.Hour {
+		t.Fatalf("default max_duration = %s", p.Backups.MaxDuration)
+	}
+	for src, ok := range map[string]bool{
+		"[backups]\nmax_duration = \"8h\"\n":   true,
+		"[backups]\nmax_duration = \"10m\"\n":  true,
+		"[backups]\nmax_duration = \"9m\"\n":   false,
+		"[backups]\nmax_duration = \"0s\"\n":   false,
+		"[backups]\nmax_duration = \"200h\"\n": false,
+		"[backups]\nmystery = 1\n":             false,
+	} {
+		path := filepath.Join(t.TempDir(), "panel.toml")
+		if err := os.WriteFile(path, []byte("public_url = \"https://x.org\"\n"+src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := config.LoadPanel(path, false, "")
+		if (err == nil) != ok {
+			t.Errorf("%q: err = %v, want ok %v", src, err, ok)
+		}
+	}
+}
