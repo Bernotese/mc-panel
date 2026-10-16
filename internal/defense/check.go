@@ -54,9 +54,6 @@ func (s *Service) CheckLogin(ctx context.Context, ip netip.Addr, username string
 	if s.jailed(ip, now) {
 		return ErrJailed
 	}
-	if s.aggregateJailed(ip, now) && !s.knownDevice(ctx, ip, username, now) {
-		return ErrJailed
-	}
 	allowlisted := s.snap.Load().allowed(normalizeIP(ip), now)
 	ipKey := httpx.IPKey(normalizeIP(ip)).String()
 	take := s.loginIP.take
@@ -65,6 +62,10 @@ func (s *Service) CheckLogin(ctx context.Context, ip netip.Addr, username string
 	}
 	if d := take(ipKey, now); d > 0 {
 		return &RateLimitError{RetryAfter: d}
+	}
+	// after the per-IP token, so a flood from a jailed prefix does not cost a query per request
+	if s.aggregateJailed(ip, now) && !s.knownDevice(ctx, ip, username, now) {
+		return ErrJailed
 	}
 	if allowlisted {
 		// allowlisted addresses skip the per-username bucket, so others cannot lock
@@ -111,11 +112,11 @@ func (s *Service) CheckSecondFactor(ctx context.Context, ip netip.Addr, key, use
 	if s.jailed(ip, now) {
 		return ErrJailed
 	}
-	if s.aggregateJailed(ip, now) && !s.knownDevice(ctx, ip, username, now) {
-		return ErrJailed
-	}
 	if d := s.secondFactor.take(key+"|"+httpx.IPKey(normalizeIP(ip)).String(), now); d > 0 {
 		return &RateLimitError{RetryAfter: d}
+	}
+	if s.aggregateJailed(ip, now) && !s.knownDevice(ctx, ip, username, now) {
+		return ErrJailed
 	}
 	return nil
 }

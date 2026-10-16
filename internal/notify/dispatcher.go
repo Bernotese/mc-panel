@@ -35,6 +35,15 @@ const (
 // critical events use the reserved queue and are never deduplicated.
 func critical(t EventType) bool { return t == EventAuditChainBroken || t == EventTest }
 
+// perUser events are deduplicated per user and IP, not per IP only.
+func perUser(t EventType) bool {
+	switch t {
+	case EventUserCreated, EventUserDeleted, EventPermissionsChanged, EventNewDeviceLogin:
+		return true
+	}
+	return strings.HasPrefix(string(t), "auth.")
+}
+
 // operational events have their own queue and worker, so a flood of security events (jails
 // from thousands of addresses) cannot delay or drop them.
 func operational(t EventType) bool {
@@ -144,7 +153,7 @@ func (d *Dispatcher) Notify(_ context.Context, e Event) {
 	key := ""
 	if e.IP != "" {
 		key = string(e.Type) + "|" + e.IP
-		if strings.HasPrefix(string(e.Type), "auth.") {
+		if perUser(e.Type) {
 			// account events: one user's event must not hide another user's from the same address
 			key += "|" + e.Username
 		}

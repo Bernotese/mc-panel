@@ -14,6 +14,11 @@ import (
 // the journal anchors.
 var ErrChainBroken = errors.New("audit: hash chain broken")
 
+// ErrRestored is returned by RunAuditVerify when the chain is valid but some entries only match
+// a later journal anchor of their id: either the database was restored or rolled back, or a
+// rewrite was hidden behind forged anchors. `panel audit verify` exits with 3 for it (2 is a usage error).
+var ErrRestored = errors.New("audit: entries match only a later journal anchor")
+
 // maxListedIDs bounds the ids printed per category.
 const maxListedIDs = 20
 
@@ -25,7 +30,7 @@ func RunAuditVerify(ctx context.Context, db *sql.DB, stdout io.Writer, journal i
 	if err != nil {
 		return fmt.Errorf("audit verify: %w", err)
 	}
-	broken := !rep.OK
+	broken, restored := !rep.OK, false
 	if rep.OK {
 		_, _ = fmt.Fprintf(stdout, "audit chain OK (%d entries)\n", rep.Checked)
 	} else {
@@ -41,13 +46,18 @@ func RunAuditVerify(ctx context.Context, db *sql.DB, stdout io.Writer, journal i
 			return fmt.Errorf("audit verify: %w", err)
 		}
 		printJournalReport(stdout, jr)
-		broken = broken || !jr.OK()
+		restored = jr.OnlyRestored()
+		broken = broken || (!jr.OK() && !restored)
 	}
 	if broken {
 		if !rep.OK {
 			return fmt.Errorf("%w at entry id %d", ErrChainBroken, rep.FirstBadID)
 		}
 		return fmt.Errorf("%w: database disagrees with the journal", ErrChainBroken)
+	}
+	if restored {
+		_, _ = fmt.Fprintln(stdout, "verify manually: if the database was restored or rolled back, re-run with the journal since then (journalctl -u mcpanel-panel -o cat --since \"<restore time>\"); otherwise treat it as tampering")
+		return ErrRestored
 	}
 	return nil
 }
@@ -72,7 +82,7 @@ func printJournalReport(w io.Writer, r JournalReport) {
 		_, _ = fmt.Fprintf(w, "  newest entries removed: the journal knows entry %d, the database ends at %d\n", r.MaxAnchorID, r.MaxDBID)
 	}
 	if len(r.Restored) > 0 {
-		_, _ = fmt.Fprintf(w, "  warning: entries match a later anchor of their id (the database was restored or rolled back; verify with `journalctl --since <restore time>`): %s\n", idList(r.Restored))
+		_, _ = fmt.Fprintf(w, "  entries matching only a later anchor of their id (restored or rolled back, or forged anchors): %s\n", idList(r.Restored))
 	}
 }
 

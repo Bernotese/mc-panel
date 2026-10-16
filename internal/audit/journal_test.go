@@ -154,8 +154,8 @@ time=x level=INFO msg=audit id=4 hash=` + b + ` action=login
 	}
 }
 
-// A database restored from a backup writes ids again: entries that match a later anchor of
-// their id are a warning, not a failure.
+// A database restored from a backup writes ids again: entries that match only a later anchor of
+// their id are reported as restored (ErrRestored, exit 2), never as a clean result.
 func TestVerifyJournalRestoredIsWarning(t *testing.T) {
 	ctx := context.Background()
 	db := storetest.Open(t)
@@ -166,10 +166,12 @@ func TestVerifyJournalRestoredIsWarning(t *testing.T) {
 	var lines [][2]any
 	lines = append(lines, [2]any{rows[0].ID, rows[0].Hash}, [2]any{rows[1].ID, rows[1].Hash}, [2]any{int64(3), other}, [2]any{rows[2].ID, rows[2].Hash})
 	var out bytes.Buffer
-	if err := audit.RunAuditVerify(ctx, db, &out, strings.NewReader(journalFor(t, lines))); err != nil {
-		t.Fatalf("restored entries must not fail: %v (%s)", err, out.String())
+	err := audit.RunAuditVerify(ctx, db, &out, strings.NewReader(journalFor(t, lines)))
+	if !errors.Is(err, audit.ErrRestored) || errors.Is(err, audit.ErrChainBroken) {
+		t.Fatalf("err = %v, want ErrRestored (%s)", err, out.String())
 	}
-	if !strings.Contains(out.String(), "warning: entries match a later anchor") || !strings.Contains(out.String(), "journal OK") {
+	if !strings.Contains(out.String(), "matching only a later anchor of their id") || !strings.Contains(out.String(), "--since") ||
+		!strings.Contains(out.String(), "journal MISMATCH") {
 		t.Fatalf("output = %q", out.String())
 	}
 }
