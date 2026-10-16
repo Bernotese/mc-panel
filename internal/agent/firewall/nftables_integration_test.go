@@ -546,3 +546,59 @@ func TestNFTablesEgressSelfRepair(t *testing.T) {
 		t.Fatalf("after refused calls: %d egress rules, %v", len(rules), err)
 	}
 }
+
+// TestNFTablesEgressManyInstanceSubnets (SEC-03): one rule per network, for the router's
+// network and many small per-server networks; adding and removing a server's network
+// rewrites the rules, and a missing one counts as not in place.
+func TestNFTablesEgressManyInstanceSubnets(t *testing.T) {
+	fd := newNetNS(t)
+	c := rawConn(t, fd)
+	fw := newBackend(t, fd)
+	ctx := context.Background()
+	subnets := []netip.Prefix{netip.MustParsePrefix("172.18.0.0/16")}
+	for i := range 64 {
+		subnets = append(subnets, netip.PrefixFrom(netip.AddrFrom4([4]byte{10, 213, byte(i / 16), byte(i % 16 * 16)}), 28))
+	}
+	if err := fw.SetEgressSubnets(ctx, subnets); err != nil {
+		t.Fatal(err)
+	}
+	rules, err := egressRules(t, c)
+	if err != nil || len(rules) != len(subnets) {
+		t.Fatalf("got %d rules (%v), want %d", len(rules), err, len(subnets))
+	}
+	// Each rule matches its own network as source (the first compare holds the address).
+	var sources []netip.Addr
+	for _, r := range rules {
+		for _, e := range r.Exprs {
+			if cmp, ok := e.(*expr.Cmp); ok && cmp.Op == expr.CmpOpEq && len(cmp.Data) == 4 {
+				a, _ := netip.AddrFromSlice(cmp.Data)
+				sources = append(sources, a)
+				break
+			}
+		}
+	}
+	for _, p := range subnets {
+		if !slices.Contains(sources, p.Addr()) {
+			t.Fatalf("no rule for %s (sources %v)", p, sources)
+		}
+	}
+	if ok, err := fw.EgressInPlace(ctx, subnets); err != nil || !ok {
+		t.Fatalf("in place = %v, %v", ok, err)
+	}
+	more := append(slices.Clone(subnets), netip.MustParsePrefix("10.213.4.0/28"))
+	if ok, _ := fw.EgressInPlace(ctx, more); ok {
+		t.Fatal("a new server's network without a rule must count as not in place")
+	}
+	if err := fw.SetEgressSubnets(ctx, more); err != nil {
+		t.Fatal(err)
+	}
+	if rules, err := egressRules(t, c); err != nil || len(rules) != len(more) {
+		t.Fatalf("after adding: %d rules, %v", len(rules), err)
+	}
+	if err := fw.SetEgressSubnets(ctx, subnets[:3]); err != nil {
+		t.Fatal(err)
+	}
+	if rules, err := egressRules(t, c); err != nil || len(rules) != 3 {
+		t.Fatalf("after removing: %d rules, %v", len(rules), err)
+	}
+}

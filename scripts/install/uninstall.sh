@@ -26,6 +26,8 @@ uni_probe_has_router() {
 uni_probe_has_network() {
   [[ $(docker network inspect -f '{{index .Labels "mcpanel.network"}}' mcpanel-mc 2>/dev/null </dev/null) == 1 ]]
 }
+# The per-server networks mcpanel-net-<id> (one per Minecraft server) carry the same label.
+uni_probe_instance_networks() { docker network ls --filter label=mcpanel.network --format '{{.Name}}' 2>/dev/null </dev/null; }
 uni_probe_has_table() { nft list table inet "$1" >/dev/null 2>&1 </dev/null; }
 uni_probe_user_exists() { getent passwd "$1" >/dev/null 2>&1; }
 uni_probe_mountpoint() { mountpoint -q -- "$1" 2>/dev/null; }
@@ -159,7 +161,7 @@ uni_firewall() {
 # worlds and removes them, then the router and the network (only with the agent's labels)
 # directly: the agent is stopped by now. Other containers are never touched.
 uni_docker() {
-  local ids=() running=() id
+  local ids=() running=() nets=() id
   while IFS= read -r id; do
     if [[ $id =~ ^[0-9a-f]{12,64}$ ]]; then running+=("$id"); fi
   done < <(uni_probe_running_containers || true)
@@ -181,6 +183,13 @@ uni_docker() {
   if uni_probe_has_router; then
     sys_docker rm -f mcpanel-router </dev/null || warn "could not remove mcpanel-router"
     log_changed "removed the container mcpanel-router"
+  fi
+  while IFS= read -r id; do
+    if [[ $id =~ ^mcpanel-net-[0-9]+$ ]]; then nets+=("$id"); fi
+  done < <(uni_probe_instance_networks || true)
+  if ((${#nets[@]} > 0)); then
+    sys_docker network rm "${nets[@]}" </dev/null || warn "could not remove all server networks"
+    log_changed "removed ${#nets[@]} server network(s) mcpanel-net-<id>"
   fi
   if uni_probe_has_network; then
     sys_docker network rm mcpanel-mc </dev/null || warn "could not remove the network mcpanel-mc"
