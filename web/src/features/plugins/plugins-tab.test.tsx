@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
-import { db } from '@/mocks/db'
+import { db, enableTotp } from '@/mocks/db'
 import { server } from '@/mocks/node'
 import { setViewport } from '@/test/media'
 import { searchKey } from './api'
@@ -117,6 +117,7 @@ describe('PluginsTab – installed', () => {
   })
 
   it('shows no restart button without the power permission', async () => {
+    enableTotp('alice') // full-trust permissions require 2FA (SEC-10)
     db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.plugins'] }])
     mockInventory(inventory({ restart_needed: true }))
     await openPlugins(1, 'alice')

@@ -13,6 +13,7 @@ function me(stage: Me['stage'], role: Me['role'] = 'admin'): Me {
     passkey_count: 0,
     recovery_codes_remaining: 10,
     second_factors: ['totp'],
+    two_factor_reason: 'none',
     sudo_until: 0,
     csrf_token: 't',
   }

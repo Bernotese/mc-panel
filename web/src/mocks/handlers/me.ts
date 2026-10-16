@@ -11,6 +11,7 @@ import {
   rotateSession,
   toMe,
   toSession,
+  twoFactorMandatory,
   WEBAUTHN_CHALLENGE,
 } from '../db'
 import { API, apiError, guard, idParam, noContent, op, readJson, type Authed, type MockOperation } from './util'
@@ -104,7 +105,7 @@ export const meOperations: MockOperation[] = [
       if (g instanceof Response) return g
       if (!g.user.totpEnabled) return apiError(409, 'conflict', 'TOTP is not enabled')
       const lastFactor = g.user.passkeys.length === 0
-      if (lastFactor && (g.user.role === 'admin' || db.settings.enforce_2fa_for_users)) {
+      if (lastFactor && twoFactorMandatory(g.user)) {
         return apiError(409, 'conflict', 'cannot remove the last second factor')
       }
       g.user.totpEnabled = false
@@ -177,7 +178,7 @@ export const meOperations: MockOperation[] = [
       const passkey = g.user.passkeys.find((p) => p.id === id)
       if (!passkey) return apiError(404, 'not_found', 'passkey not found')
       const lastFactor = !g.user.totpEnabled && g.user.passkeys.length === 1
-      if (lastFactor && (g.user.role === 'admin' || db.settings.enforce_2fa_for_users)) {
+      if (lastFactor && twoFactorMandatory(g.user)) {
         return apiError(409, 'conflict', 'cannot remove the last second factor')
       }
       g.user.passkeys = g.user.passkeys.filter((p) => p.id !== id)
