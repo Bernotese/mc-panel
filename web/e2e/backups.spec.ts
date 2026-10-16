@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 import { confirmSudo, openServer, openServerSection, signIn } from './helpers'
 
 test('admin creates a backup with a note, pins a scheduled snapshot and restores one', async ({ page }) => {

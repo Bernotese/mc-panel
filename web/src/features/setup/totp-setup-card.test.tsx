@@ -5,8 +5,6 @@ import { loginAs, MOCK_TOTP_CODE, MOCK_TOTP_SECRET } from '@/mocks/db'
 import { renderWithProviders } from '@/test/render'
 import { TotpSetupCard } from './totp-setup-card'
 
-vi.mock('qrcode', () => ({ default: { toDataURL: vi.fn(async () => 'data:image/png;base64,QR') } }))
-
 describe('TotpSetupCard', () => {
   it('shows QR code and secret, rejects wrong codes and reports the recovery codes', async () => {
     const user = userEvent.setup()
@@ -14,7 +12,8 @@ describe('TotpSetupCard', () => {
     await renderWithProviders(<TotpSetupCard onEnabled={onEnabled} />, { me: loginAs('newadmin', { stage: 'setup' }) })
     await user.click(screen.getByRole('button', { name: 'Einrichtung starten' }))
     const qr = await screen.findByRole('img', { name: 'QR-Code für die Authenticator-App' })
-    expect(qr).toHaveAttribute('src', 'data:image/png;base64,QR')
+    expect(qr.tagName).toBe('svg')
+    expect(qr.querySelector('path')?.getAttribute('d')).toMatch(/^M1 1h1v1h-1z/)
     expect(screen.getByTestId('totp-secret')).toHaveTextContent(MOCK_TOTP_SECRET)
 
     const input = screen.getByLabelText('Code aus der Authenticator-App')

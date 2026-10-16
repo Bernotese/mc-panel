@@ -19,7 +19,7 @@ describe('FilesTab', () => {
     await user.click(await within(region).findByRole('button', { name: 'plugins' }))
     expect(await within(region).findByRole('button', { name: 'Essentials' })).toBeInTheDocument()
     const crumbs = screen.getByRole('navigation', { name: 'Pfad' })
-    expect(within(crumbs).getByText('plugins')).toHaveAttribute('aria-current', 'page')
+    expect(within(crumbs).getByText('plugins').closest('span')).toHaveAttribute('aria-current', 'page')
     await user.click(within(crumbs).getByRole('button', { name: 'Server-Daten' }))
     expect(await within(region).findByText('server.properties')).toBeInTheDocument()
   })
@@ -86,6 +86,21 @@ describe('FilesTab', () => {
     expect(within(dialog).getByText('Der Ordner wird inklusive Inhalt endgültig gelöscht.')).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: 'Endgültig löschen' }))
     await waitFor(() => expect(within(region).queryByRole('button', { name: 'logs' })).not.toBeInTheDocument())
+  })
+
+  it('isolates file names and shows format characters (SEC-38)', async () => {
+    const spoof = 'evil\u202Egpj.jar'
+    server.use(
+      http.get('*/api/servers/:id/files', () =>
+        HttpResponse.json({ path: '', truncated: false, entries: [{ name: spoof, type: 'file', size: 10, mtime: 0 }] }),
+      ),
+    )
+    const { user, region } = await openFiles()
+    const shown = await within(region).findByText('evil⟨U+202E⟩gpj.jar')
+    expect(shown.tagName).toBe('BDI')
+    await user.click(within(region).getByRole('button', { name: 'Aktionen für evil⟨U+202E⟩gpj.jar' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Löschen' }))
+    expect(await screen.findByRole('dialog', { name: '„evil⟨U+202E⟩gpj.jar“ löschen?' })).toBeInTheDocument()
   })
 
   it('explains a server that was never started', async () => {

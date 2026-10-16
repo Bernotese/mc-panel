@@ -11,7 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMe } from '@/features/auth/me'
 import { isWebAuthnSupported, sudoWithPasskey } from '@/features/webauthn/webauthn'
 import { errorMessage } from '@/lib/error-message'
-import { settleSudo, useSudoOpen } from './sudo-store'
+import { GENERIC_SUDO_ACTION, sudoActionKey } from './sudo-actions'
+import { settleSudo, useSudoActions, useSudoOpen } from './sudo-store'
 
 /** Mounted fresh for every sudo request, so no state survives between requests. */
 function SudoContent({ me }: { me: Me }) {
@@ -93,6 +94,20 @@ function SudoContent({ me }: { me: Me }) {
   )
 }
 
+/** Names what the confirmation is for (SEC-36): one action, or the count and list of concurrent ones. */
+function SudoActions() {
+  const { t } = useTranslation()
+  const keys = useSudoActions().map(sudoActionKey)
+  // An unknown single action adds nothing to the title ("Aktion bestätigen").
+  if (keys.length === 0 || (keys.length === 1 && keys[0] === GENERIC_SUDO_ACTION)) return null
+  const labels = keys.map((k) => t(k))
+  return (
+    <p className="text-foreground text-sm font-medium">
+      {labels.length === 1 ? t('sudo.subject_single', { action: labels[0] }) : t('sudo.subject_multiple', { n: labels.length, actions: labels.join(', ') })}
+    </p>
+  )
+}
+
 /** Global confirmation dialog; opened by the API middleware on 403 sudo_required. */
 export function SudoDialog() {
   const { t } = useTranslation()
@@ -112,6 +127,7 @@ export function SudoDialog() {
             {t('sudo.title')}
           </DialogTitle>
           <DialogDescription>{t('sudo.description')}</DialogDescription>
+          <SudoActions />
         </DialogHeader>
         {open && me ? (
           <div className="pt-2">

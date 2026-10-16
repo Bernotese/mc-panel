@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 import { base32Decode, totp } from './totp'
 
 // ASCII "12345678901234567890" in base32
