@@ -8,6 +8,9 @@ test_install_upg_ensure_writes_both_files_and_enables() {
   assert_contains "$out" "[changed]"
   assert_file_contains "$ROOT/etc/apt/apt.conf.d/21mc-panel-auto-upgrades" 'APT::Periodic::Unattended-Upgrade "1";'
   assert_file_contains "$ROOT/etc/apt/apt.conf.d/52mc-panel-unattended-upgrades" 'Unattended-Upgrade::Automatic-Reboot "false";'
+  # Caddy from its repository (SEC-01): origin and suite of its Release file
+  assert_file_contains "$ROOT/etc/apt/apt.conf.d/52mc-panel-unattended-upgrades" 'Unattended-Upgrade::Origins-Pattern {'
+  assert_file_contains "$ROOT/etc/apt/apt.conf.d/52mc-panel-unattended-upgrades" '"origin=cloudsmith/caddy/stable,archive=any-version";'
   assert_eq 644 "$(stat -c '%a' "$ROOT/etc/apt/apt.conf.d/52mc-panel-unattended-upgrades")"
   assert_called 'systemctl enable --now unattended-upgrades.service'
 }

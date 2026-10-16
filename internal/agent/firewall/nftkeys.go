@@ -222,3 +222,49 @@ func splitExisting(p netip.Prefix, entries []entry) (bool, []netip.Prefix) {
 	}
 	return exists, others
 }
+
+// egressElements maps the egress deny prefixes to interval set elements: the start
+// key and, unless the range reaches the top of the address space, the exclusive end
+// key. Prefixes are canonical and do not overlap (validated in config).
+func egressElements(deny []netip.Prefix) (v4, v6 []rawElem) {
+	for _, p := range deny {
+		a := p.Addr()
+		if a.Is4() {
+			k := a.As4()
+			v4 = append(v4, rawElem{Key: k[:]})
+			if end := uint64(binary.BigEndian.Uint32(k[:])) + 1<<(32-p.Bits()); end <= 0xffffffff {
+				v4 = append(v4, rawElem{Key: binary.BigEndian.AppendUint32(nil, uint32(end)), IntervalEnd: true})
+			}
+			continue
+		}
+		k := a.As16()
+		v6 = append(v6, rawElem{Key: k[:]})
+		if p.Bits() > 0 {
+			if end, overflow := u128From(k).add(pow2(128 - p.Bits())); !overflow {
+				e := end.bytes()
+				v6 = append(v6, rawElem{Key: e[:], IntervalEnd: true})
+			}
+		}
+	}
+	return v4, v6
+}
+
+// egressSubnets checks the container subnets a filter rule is built for: each must be
+// valid, canonical, not IPv4-mapped and not /0 (that would exempt every destination);
+// duplicates are dropped. An unusable subnet or an empty list is an error: the filter
+// must never silently cover less than the network.
+func egressSubnets(subnets []netip.Prefix) ([]netip.Prefix, error) {
+	if len(subnets) == 0 {
+		return nil, errors.New("firewall: egress filter: the container network has no subnet")
+	}
+	var out []netip.Prefix
+	for _, p := range subnets {
+		if !p.IsValid() || p != p.Masked() || p.Addr().Is4In6() || p.Bits() == 0 {
+			return nil, fmt.Errorf("firewall: egress filter: unusable container subnet %s", p)
+		}
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}

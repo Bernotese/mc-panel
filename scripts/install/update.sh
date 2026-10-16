@@ -470,6 +470,30 @@ upd_apply() {
   return 0
 }
 
+# upd_system brings the parts outside the rollback copy up to date once the target version runs
+# healthy: Caddy from its repository (existing installs switch here, SEC-01), the Caddy site,
+# drop-in and admin socket (SEC-14, SEC-35), unattended-upgrades with the Caddy origin. Each
+# step runs in its own subshell with errexit on (a die ends only that step); a failure is a
+# warning, the update itself stays done.
+UPD_SYSTEM_STEPS=(pkg_caddy_ensure cad_ensure upg_ensure)
+upd_system() {
+  local step rc e=0
+  if [[ $- == *e* ]]; then e=1; fi
+  for step in "${UPD_SYSTEM_STEPS[@]}"; do
+    set +e
+    (
+      set -e
+      "$step"
+    )
+    rc=$?
+    if [[ $e == 1 ]]; then set -e; fi
+    if [[ $rc != 0 ]]; then
+      warn "$step failed (exit $rc); mc-panel itself is updated. Details in $LOG_FILE; install.sh update --force retries it"
+    fi
+  done
+  return 0
+}
+
 # upd_handover_args: the options after "update" for the install.sh handed over to.
 upd_handover_args() {
   if [[ $FORCE == 1 ]]; then printf '%s\n' --force; fi
@@ -653,6 +677,7 @@ cmd_update() {
     upd_state_set_phase "$UPD_DIR" verified
     log_ok "updated $UPD_FROM -> $target"
     upd_prune
+    upd_system
     return 0
   fi
   if upd_rollback "$UPD_DIR" 1; then

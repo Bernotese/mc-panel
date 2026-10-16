@@ -5,8 +5,10 @@
 package instances
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strconv"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
@@ -39,6 +41,10 @@ const (
 	CPUShares = 256
 	// RouterMemoryBytes caps mc-router (it needs a few MiB).
 	RouterMemoryBytes = 256 << 20
+	// RouterPidsLimit caps mc-router's threads (about 13 under a flood of 200 connections).
+	RouterPidsLimit = 128
+	// NofileLimit is the open-files limit of instance containers (soft = hard).
+	NofileLimit = 65536
 
 	routerPort        = "25565/tcp"
 	routerConfigDir   = "/config"
@@ -53,7 +59,16 @@ type Host struct {
 	InstancesDir string
 	UID, GID     int
 	Images       config.Images
+	// NanoCPUs caps every instance container (cpu_per_instance); 0 = no cap. Above the
+	// host's CPUs it is clamped (MaxNanoCPUs).
+	NanoCPUs int64
+	// RouterConnectionRateLimit is mc-router's -connection-rate-limit; 0 means
+	// config.DefaultRouterConnectionRateLimit.
+	RouterConnectionRateLimit int
 }
+
+// MaxNanoCPUs is the CPU cap of this host: all its CPUs.
+func MaxNanoCPUs() int64 { return int64(runtime.NumCPU()) * 1e9 }
 
 func ContainerName(id int64) string { return ContainerPrefix + strconv.FormatInt(id, 10) }
 
@@ -64,6 +79,16 @@ func DataDir(instancesDir string, id int64) string {
 
 // RouterDir is mounted read-only at /config in the router container.
 func RouterDir(instancesDir string) string { return filepath.Join(instancesDir, "router") }
+
+// TmpDir is mounted at /tmp: <instances_dir>/tmp/<id>. With a read-only rootfs it is the only
+// path the itzg image writes outside /data (Java native libraries; modpacks stage the whole
+// .mrpack there), so it is disk-backed next to the data instead of a tmpfs charged to the
+// container's memory, and outside instances/<id> so the files service and backups never see
+// it. The agent empties it whenever the container is (re)created and removes it with the
+// instance. Executable, like /data, because Java loads its native libraries from there.
+func TmpDir(instancesDir string, id int64) string {
+	return filepath.Join(instancesDir, "tmp", strconv.FormatInt(id, 10))
+}
 
 // DeletedDir receives the data of removed instances.
 func DeletedDir(instancesDir string) string { return filepath.Join(instancesDir, "deleted") }
@@ -117,17 +142,19 @@ func InstanceContainer(h Host, req agentapi.EnsureRequest) (docker.ContainerConf
 		},
 		StopTimeout: StopTimeoutSeconds,
 		HostConfig: docker.HostConfig{
-			Binds:          []string{DataDir(h.InstancesDir, req.ID) + ":/data"},
+			Binds:          []string{DataDir(h.InstancesDir, req.ID) + ":/data", TmpDir(h.InstancesDir, req.ID) + ":/tmp"},
 			NetworkMode:    NetworkName,
 			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
 			CapDrop:        []string{"ALL"},
 			SecurityOpt:    []string{"no-new-privileges:true"},
 			Privileged:     false,
-			ReadonlyRootfs: false, // itzg writes outside /data (e.g. /tmp)
+			ReadonlyRootfs: true,
 			Memory:         memory,
 			MemorySwap:     memory,
 			PidsLimit:      PidsLimit,
 			CPUShares:      CPUShares,
+			NanoCPUs:       min(h.NanoCPUs, MaxNanoCPUs()),
+			Ulimits:        []docker.Ulimit{{Name: "nofile", Soft: NofileLimit, Hard: NofileLimit}},
 			LogConfig:      logConfig(),
 		},
 		NetworkingConfig: network(),
@@ -143,22 +170,26 @@ func RouterContainer(h Host) (docker.ContainerConfig, error) {
 		return docker.ContainerConfig{}, err
 	}
 	return docker.ContainerConfig{
-		Image:        img,
-		Cmd:          []string{"-routes-config", routerConfigDir + "/" + routesFileName},
+		Image: img,
+		Cmd: []string{
+			"-routes-config", routerConfigDir + "/" + routesFileName,
+			"-connection-rate-limit", strconv.Itoa(cmp.Or(h.RouterConnectionRateLimit, config.DefaultRouterConnectionRateLimit)),
+		},
 		Labels:       map[string]string{LabelRouter: "1"},
 		ExposedPorts: map[string]struct{}{routerPort: {}},
 		HostConfig: docker.HostConfig{
 			// Directory, not file: an atomic rename of routes.json stays visible.
-			Binds:         []string{RouterDir(h.InstancesDir) + ":" + routerConfigDir + ":ro"},
-			NetworkMode:   NetworkName,
-			PortBindings:  map[string][]docker.PortBinding{routerPort: {{HostPort: strconv.Itoa(MinecraftPort)}}},
-			RestartPolicy: docker.RestartPolicy{Name: "unless-stopped"},
-			CapDrop:       []string{"ALL"},
-			SecurityOpt:   []string{"no-new-privileges:true"},
-			Memory:        RouterMemoryBytes,
-			MemorySwap:    RouterMemoryBytes,
-			PidsLimit:     PidsLimit,
-			LogConfig:     logConfig(),
+			Binds:          []string{RouterDir(h.InstancesDir) + ":" + routerConfigDir + ":ro"},
+			NetworkMode:    NetworkName,
+			PortBindings:   map[string][]docker.PortBinding{routerPort: {{HostPort: strconv.Itoa(MinecraftPort)}}},
+			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
+			CapDrop:        []string{"ALL"},
+			SecurityOpt:    []string{"no-new-privileges:true"},
+			ReadonlyRootfs: true,
+			Memory:         RouterMemoryBytes,
+			MemorySwap:     RouterMemoryBytes,
+			PidsLimit:      RouterPidsLimit,
+			LogConfig:      logConfig(),
 		},
 		NetworkingConfig: network(),
 	}, nil

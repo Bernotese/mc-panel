@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -127,6 +128,33 @@ func TestEnsureNetworkIsIdempotent(t *testing.T) {
 	}
 	if creates != 1 {
 		t.Fatalf("network created %d times, calls %v", creates, d.Calls())
+	}
+}
+
+func TestNetworkSubnets(t *testing.T) {
+	d := dockertest.New(t)
+	c := docker.New(d.Socket)
+	ctx := context.Background()
+	labels := map[string]string{"mcpanel.network": "1"}
+	if _, err := c.NetworkSubnets(ctx, "mcpanel-mc", labels); !docker.IsNotFound(err) {
+		t.Fatalf("missing network: err = %v, want not found", err)
+	}
+	if err := c.EnsureNetwork(ctx, "mcpanel-mc", labels); err != nil {
+		t.Fatal(err)
+	}
+	d.SetNetworkSubnets("mcpanel-mc", "172.18.0.0/16", "fd00:dead:beef::/64")
+	got, err := c.NetworkSubnets(ctx, "mcpanel-mc", labels)
+	if err != nil || !slices.Equal(got, []netip.Prefix{netip.MustParsePrefix("172.18.0.0/16"), netip.MustParsePrefix("fd00:dead:beef::/64")}) {
+		t.Fatalf("subnets = %v, %v", got, err)
+	}
+
+	d.AddNetwork("foreign", "bridge", nil, "10.9.0.0/16")
+	if _, err := c.NetworkSubnets(ctx, "foreign", labels); err == nil || !strings.Contains(err.Error(), "not managed") {
+		t.Fatalf("foreign network: %v", err)
+	}
+	d.SetNetworkSubnets("mcpanel-mc", "not-a-subnet")
+	if _, err := c.NetworkSubnets(ctx, "mcpanel-mc", labels); err == nil {
+		t.Fatal("an invalid subnet must be an error, not an empty filter")
 	}
 }
 
