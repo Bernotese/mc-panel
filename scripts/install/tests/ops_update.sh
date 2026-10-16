@@ -91,6 +91,11 @@ ops_counter() {
   echo "$n"
 }
 
+# ops_calls_after_last LINE: the calls.log lines after the last one that is exactly LINE.
+ops_calls_after_last() {
+  awk -v l="$1" '{ a[NR] = $0 } $0 == l { last = NR } END { for (i = last + 1; i <= NR; i++) print a[i] }' "$WORK/calls.log"
+}
+
 # ops_only_dir: the single rollback dir.
 ops_only_dir() {
   find "$ROOT$ROLLBACK_DIR" -mindepth 1 -maxdepth 1 -type d
@@ -273,11 +278,33 @@ test_ops_update_rollback_failure_exits_4() {
   UPD_HEALTH_SECS=0
   assert_exit 4 cmd_update
   assert_contains "$(cat "$WORK/out")" "rollback to 1.0.0 failed"
+  assert_file_contains "$(ops_only_dir)/state" "phase=rollback_failed"
+  # everything was put back: the restored 1.0.0 keeps running (no stop after its restart)
+  assert_eq "1.0.0" "$("$ROOT$BIN_DIR/panel" version)"
+  assert_eq "" "$(ops_calls_after_last 'systemctl restart mcpanel-panel.service' | grep 'systemctl stop' || true)"
+  assert_contains "$(cat "$WORK/out")" "1.0.0 is back in place and keeps running, but it is not healthy"
+  assert_contains "$(cat "$WORK/out")" "sudo bash install.sh doctor"
+  assert_not_contains "$(cat "$WORK/out")" "all mc-panel services are stopped"
+}
+
+test_ops_update_rollback_that_cannot_restore_stops_everything() {
+  ops_fake_install 1.0.0
+  ops_probes
+  ops_fake_new_build 1.1.0
+  TARGET_VERSION=1.1.0
+  FROM_DIR="$WORK/build"
+  OPS_UNHEALTHY=1
+  UPD_HEALTH_SECS=0
+  # the database copy cannot be put back: a half-restored system must not run
+  upd_db_restore() { return 1; }
+  assert_exit 4 cmd_update
+  assert_contains "$(cat "$WORK/out")" "could not put the database back"
+  assert_contains "$(cat "$WORK/out")" "all mc-panel services are stopped"
   assert_contains "$(cat "$WORK/out")" "systemctl daemon-reload"
   assert_file_contains "$(ops_only_dir)/state" "phase=rollback_failed"
+  # no restart of the half-restored version; the last calls stop the services
+  assert_eq "" "$(ops_calls_after_last 'systemctl stop mcpanel-agent.service' | grep 'systemctl restart' || true)"
   assert_called 'systemctl stop mcpanel-panel.service'
-  # what the rollback could put back is back
-  assert_eq "1.0.0" "$("$ROOT$BIN_DIR/panel" version)"
 }
 
 test_ops_update_rolls_back_on_signal() {

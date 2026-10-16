@@ -31,6 +31,7 @@ UPD_SWAP_RC=0  # exit code of the swap subshell
 UPD_APPLY_OK=0 # 1 when the target version is installed and healthy
 UPD_HEALTH_REASON="" # why the last upd_healthy failed (versions, a unit, an endpoint)
 UPD_RESTARTS_BASE=() # NRestarts of each of UPD_SERVICES when the health wait began
+UPD_ROLLBACK_STOPPED=0 # 1 when a failed rollback left the services stopped
 
 # --- probes (tests redefine these) ---------------------------------------------------------
 
@@ -462,8 +463,10 @@ upd_trap_signals() {
 }
 
 # upd_rollback DIR [DB]: puts binaries, units, configuration and (DB=1, the default) the
-# database of DIR back and checks the old version: 0 = rolled back, 1 = rollback failed (the
-# services stay stopped). INT and TERM are ignored meanwhile (the children inherit that), so a
+# database of DIR back and checks the old version: 0 = rolled back, 1 = rollback failed. If
+# putting something back failed, the services stay stopped (UPD_ROLLBACK_STOPPED=1); if only
+# the restart or the health check of the restored version failed, it keeps running (a
+# possibly degraded old version beats a panel that is certainly down). INT and TERM are ignored meanwhile (the children inherit that), so a
 # second Ctrl-C cannot stop it halfway; phase rolling_back makes the next update finish it.
 # Callers call it in a conditional context: every step is best effort, failures are counted.
 upd_rollback() {
@@ -491,6 +494,7 @@ upd_rollback() {
     warn "could not put the database back"
     ok=0
   fi
+  UPD_ROLLBACK_STOPPED=0
   if [[ $ok == 1 ]]; then
     if ! upd_restart_all; then
       warn "restarting the services of $from failed"
@@ -501,8 +505,10 @@ upd_rollback() {
     else
       warn "$from is not healthy after ${UPD_HEALTH_SECS}s: $UPD_HEALTH_REASON"
     fi
+  else
+    upd_stop_all
+    UPD_ROLLBACK_STOPPED=1
   fi
-  upd_stop_all
   upd_state_set_phase "$dir" rollback_failed || true
   upd_trap_signals
   return 1
@@ -692,7 +698,13 @@ upd_finish_unfinished() {
 upd_failed_rollback_help() {
   local d="$ROLLBACK_DIR/${UPD_DIR##*/}"
   warn "update to $1 failed AND the rollback to $UPD_FROM failed."
-  warn "All mc-panel services are stopped. The old binaries, units, configuration and database are in $d:"
+  if [[ $UPD_ROLLBACK_STOPPED != 1 ]]; then
+    warn "$UPD_FROM is back in place and keeps running, but it is not healthy: ${UPD_HEALTH_REASON:-its services did not restart}."
+    warn "Check it with: sudo bash install.sh doctor; then fix the cause (details: $LOG_FILE) and run install.sh update again."
+    warn "The copy of $UPD_FROM (binaries, units, configuration, database) stays in $d."
+    return 0
+  fi
+  warn "Putting $UPD_FROM back failed, so all mc-panel services are stopped. The old binaries, units, configuration and database are in $d:"
   warn "  install -m 0755 $d/bin/* $BIN_DIR/ && cp $d/units/* $UNIT_DIR/"
   warn "  cp $d/config/panel.toml $d/config/agent.toml $ETC_PANEL/ && cp $d/config/files.toml $ETC_FILES/   (owners and modes: $d/config/files)"
   warn "  runuser -u mcpanel -- sh -c 'cat >$DATA_DIR/panel.db.restore && rm -f $DATA_DIR/panel.db-wal $DATA_DIR/panel.db-shm && mv $DATA_DIR/panel.db.restore $DATA_DIR/panel.db' <$d/panel.db"
