@@ -151,7 +151,7 @@ Every attempt (success/failure, step, IP, user agent, username) is recorded in `
 - Idle timeout 30 min, absolute lifetime 12 h (configurable).
 - Stored: user, created, last active, IP, user agent, country (GeoIP), sudo until.
 - Profile page: list of active sessions, revoke one or all others. A password change revokes all other sessions.
-- (Now, SEC-19 and SEC-45: requests the UI sends in the background (polling) carry `X-MCPanel-Background: 1` and do not extend the idle time; a role change ends all sessions of the target user.)
+- (Now, SEC-19 and SEC-45: requests the UI sends in the background (polling) carry `X-MCPanel-Background: 1` and do not extend the idle time (honoured only on `GET`/`HEAD`); a role change ends all sessions of the target user.)
 
 ### 4.5 Sudo mode
 
@@ -163,7 +163,7 @@ Sensitive actions require a 2FA confirmation that is at most 10 min old. These i
 
 - `SameSite=Strict` + check of `Sec-Fetch-Site` (only `same-origin`/`none`) or `Origin` on state-changing requests + synchronizer token (`X-CSRF-Token`, bound to the session).
 - Security headers from the panel itself (independent of Caddy): strict CSP (`default-src 'self'`, no inline script), `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, minimal `Permissions-Policy`, `frame-ancestors 'none'`.
-  (Now, security review SEC-31, SEC-43, SEC-48: no `'unsafe-inline'` for styles either; `index.html` gets a per-request style nonce. `img-src 'self'` without `data:` (the TOTP QR code is rendered as SVG). Trusted Types run report-only (`require-trusted-types-for 'script'; trusted-types 'none'`) with violation reports, to be enforced later.)
+  (Now, security review SEC-31, SEC-43, SEC-48: no `'unsafe-inline'` for styles either; `index.html` gets a per-request style nonce. `img-src 'self'` without `data:` (the TOTP QR code is rendered as SVG). Trusted Types run report-only (`require-trusted-types-for 'script'; trusted-types 'none'`, no report endpoint: violations appear in the browser console and fail the e2e tests), to be enforced later.)
 - Request body limit (default 1 MiB), timeouts for header/read/write.
 
 ## 5. Permissions
@@ -171,6 +171,7 @@ Sensitive actions require a 2FA confirmation that is at most 10 min old. These i
 - Roles: `admin` (all permissions, global) and `user` (only explicitly granted permissions).
 - Per-server permissions: `server.view`, `server.power`; planned for later sub-projects: `server.console`, `server.files`, `server.plugins`, `server.backups`. (Now: all six exist.)
 - Deny by default; new users have no permissions.
+- (Now, SEC-40: user IDs are never reused (a counter table, like server IDs), so a new user does not inherit the last login or known devices of a deleted one, and audit actor IDs stay unambiguous.)
 - Enforced in the middleware `rbac.Require(perm, serverIDFromPath)`: every route declares its permission; a test ensures that no route is registered without a permission declaration. (Now: routes are registered through `*rbac.Router` with a `Rule` (`rbac.Public()`, `Authenticated()`, `Admin()`, `Server(perm, "param")`, optionally `.WithSudo()`); `TestEveryRouteDeclaresARule` checks it.)
 - The `servers` table exists as a stub (id, name) so that permissions and UI can be tested. (Now: sub-project 2 added the `instances` table with the real server configuration.)
 
@@ -204,7 +205,7 @@ Exceeding a limit → `429` with `Retry-After`.
 
 - Failed attempts (password or 2FA) per IP: 5 in 10 min → ban for 15 min.
 - Repeat offenders: the duration doubles with each new ban within 30 days, at most 7 days.
-- (Now, SEC-09: against attackers rotating IPv6 addresses, failures also count per prefix: 20 failures in 10 min from one /56 or 50 from one /48 jail that prefix; the agent accepts bans down to /48.)
+- (Now, SEC-09: against attackers rotating IPv6 addresses, failed logins and second factors also count per prefix: 20 failures in 10 min from one /56 or 50 from one /48 jail that prefix. These aggregate jails are app-level only (never in the firewall), apply only to login and second factor, and exempt known devices; a /64 is still jailed, in the app and the firewall, after its own 5 failures.)
 - Jailed IPs get `403` for all requests (middleware before routing) and are added to the nftables set through the agent (with timeout = ban duration). If the agent fails, the in-app ban stays in effect; the sync is caught up later.
 - (Now, SEC-45: a password change also lifts this 2FA lockout.)
 - Accounts are never locked because of failed password logins (this prevents anonymous attackers from locking out the admin). The only exception: after 10 wrong 2FA/sudo codes in 15 min, this user's second factor is locked for 15 min. Only someone who already knows the password can trigger this; without this limit, guessing 2FA codes over rotating IPs would be unlimited. Lifting it: change the password (ends the other sessions) or restart the panel.
@@ -215,7 +216,7 @@ Exceeding a limit → `429` with `Retry-After`.
 
 - Allow list and deny list with CIDR (IPv4/IPv6), optionally with a comment and expiry date.
 - Optional "admin access only from the allowlist": users with role `admin` can only sign in from allowed networks.
-  (Now, SEC-16: it applies to every request of an admin, not only to the sign-in, and saving it ends admin sessions from outside the allowed networks.)
+  (Now, SEC-16: it applies to every request of an admin, not only to the sign-in (logout is exempt), and saving it ends admin sessions from outside the allowed networks.)
 - Optional country filter (allowed countries) through a local DB-IP Lite database (MMDB, no API key needed). Without the database the feature is off and the country columns are empty.
 - Protection against locking yourself out: a change is rejected if it would exclude the admin's current IP. Emergency: `panel admin unlock` on the CLI.
 
@@ -235,12 +236,12 @@ Exceeding a limit → `429` with `Retry-After`.
 - Events: login from a new device/new IP, jail triggered, role/permissions changed, user created/deleted, 2FA changed, audit chain invalid.
 - Sent asynchronously with retry and deduplication (same event type + IP at most every 5 min); errors go to the log, not to the user.
 - "Send test" button in the UI.
-- (Now, SEC-20 and SEC-21: further events `auth.2fa_lockout`, `auth.2fa_failed`, `auth.recovery_code_used`, `auth.password_changed`; jail notifications at most 5 per 10 min, then one summary; operational events (backups, monitoring) have a queue of their own, so a flood of security events cannot delay them; a `Retry-After` of the target is honoured (at most 30 s); the test endpoint allows 6 calls per minute and user and no longer shows the target's HTTP status. SEC-17: every audit entry is also written to the journal as `{"msg":"audit","id":N,"hash":"…"}` (an anchor outside the DB); the panel verifies the chain every 24 h and notifies `audit.chain_broken`.)
+- (Now, SEC-20 and SEC-21: further events `auth.2fa_lockout`, `auth.2fa_failed`, `auth.recovery_code_used`, `auth.password_changed`; jail notifications at most 5 per 10 min, then one summary; operational events (backups, monitoring) have a queue of their own, so a flood of security events cannot delay them; a `Retry-After` of the target is honoured (at most 30 s); the test endpoint allows 6 calls per minute and user and no longer shows the target's HTTP status. SEC-17: every audit entry is also written to the journal as `{"msg":"audit","id":N,"hash":"…"}` (an anchor outside the DB); the panel verifies the chain every 24 h (without the journal, which the service cannot read) and notifies `audit.chain_broken`.)
 
 ## 8. Frontend
 
 - Pages: login, 2FA challenge, forced 2FA setup (TOTP QR code, passkey, show recovery codes + confirmation), dashboard (placeholder with server stubs), user management with a permission matrix (user × server × permission), Security Center, audit log, profile (password, 2FA methods, sessions).
-- Global sudo dialog: reacts to `sudo_required` and repeats the action after confirmation.
+- Global sudo dialog: reacts to `sudo_required` and repeats the action after confirmation. (Now, SEC-36: the dialog names the action it confirms, or the number and names of the pending actions.)
 - The fetch wrapper sends the CSRF token automatically.
 - Dark mode (system default + toggle), usable on mobile, languages de/en. (Now: sub-project 7 replaced the look with the dark "M2" and light "Clean" themes.)
 - No inline script, no external CDNs (CSP-compliant).
