@@ -48,7 +48,17 @@ func (m *Manager) ensureLayout() error {
 // service could not enter it.
 func (m *Manager) Init() error {
 	m.CheckNetworkPool()
-	return m.ensureLayout()
+	if err := m.ensureLayout(); err != nil {
+		return err
+	}
+	return m.ensurePatches()
+}
+
+// ensurePatches writes the itzg patch definitions the instance containers mount read-only.
+// It runs before every create and start: Docker would create a missing bind source as an
+// empty directory, and itzg would then fail to read PATCH_DEFINITIONS.
+func (m *Manager) ensurePatches() error {
+	return WritePatches(PatchesDir(m.host.InstancesDir))
 }
 
 // ensureDir creates dir if needed and enforces owner = agent process (root in production),

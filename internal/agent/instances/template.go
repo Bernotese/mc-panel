@@ -92,6 +92,11 @@ func TmpDir(instancesDir string, id int64) string {
 	return filepath.Join(instancesDir, "tmp", strconv.FormatInt(id, 10))
 }
 
+// PatchesDir holds the itzg patch definitions (instancespec.Patches), root-owned and mounted
+// read-only at instancespec.PatchesDir in every instance container. The agent writes it,
+// never a data directory.
+func PatchesDir(instancesDir string) string { return filepath.Join(instancesDir, "patches") }
+
 // DeletedDir receives the data of removed instances.
 func DeletedDir(instancesDir string) string { return filepath.Join(instancesDir, "deleted") }
 
@@ -144,7 +149,11 @@ func InstanceContainer(h Host, req agentapi.EnsureRequest) (docker.ContainerConf
 		},
 		StopTimeout: StopTimeoutSeconds,
 		HostConfig: docker.HostConfig{
-			Binds:          []string{DataDir(h.InstancesDir, req.ID) + ":/data", TmpDir(h.InstancesDir, req.ID) + ":/tmp"},
+			Binds: []string{
+				DataDir(h.InstancesDir, req.ID) + ":/data",
+				TmpDir(h.InstancesDir, req.ID) + ":/tmp",
+				PatchesDir(h.InstancesDir) + ":" + instancespec.PatchesDir + ":ro",
+			},
 			NetworkMode:    InstanceNetwork(req.ID),
 			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
 			CapDrop:        []string{"ALL"},

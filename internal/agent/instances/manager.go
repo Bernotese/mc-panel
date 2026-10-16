@@ -292,6 +292,9 @@ func (m *Manager) ensure(ctx context.Context, req agentapi.EnsureRequest) error 
 	if err := m.resetTmpDir(req.ID); err != nil {
 		return err
 	}
+	if err := m.ensurePatches(); err != nil {
+		return err
+	}
 	if _, err := m.dc.CreateContainer(ctx, name, cfg); err != nil {
 		return err
 	}
@@ -333,9 +336,13 @@ func (m *Manager) power(ctx context.Context, id int64, action agentapi.PowerActi
 		return err
 	}
 	// The /tmp bind source must exist with its owner and mode before a start; Docker
-	// would create a missing one as root 0755. Its content stays.
+	// would create a missing one as root 0755. Its content stays. The patches must be
+	// there too (an empty directory would fail PATCH_DEFINITIONS).
 	if action != agentapi.PowerStop {
 		if err := m.ensureTmpDir(id); err != nil {
+			return err
+		}
+		if err := m.ensurePatches(); err != nil {
 			return err
 		}
 	}
