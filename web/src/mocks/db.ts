@@ -21,6 +21,7 @@ import type {
   Notifier,
   OnlinePlayer,
   Passkey,
+  Permission,
   PermissionGrant,
   PlayerBan,
   PlayerEntry,
@@ -769,6 +770,7 @@ export function toMe(u: MockUser, s: MockSession): Me {
     passkey_count: u.passkeys.length,
     recovery_codes_remaining: u.recoveryCodes.length,
     second_factors: secondFactorsOf(u),
+    two_factor_reason: twoFactorReason(u),
     sudo_until: s.sudoUntil,
     csrf_token: s.csrf,
   }
@@ -829,9 +831,25 @@ export function rotateSession(s: MockSession): void {
   db.currentSessionId = s.id
 }
 
+/** Permissions that make 2FA mandatory for a plain user (rbac.FullTrustPermissions). */
+export const FULL_TRUST_PERMISSIONS: readonly Permission[] = ['server.console', 'server.files', 'server.plugins', 'server.backups']
+
+/** Mirrors twoFactorReason in internal/auth: admin, then full-trust permissions, then the policy. */
+export function twoFactorReason(u: MockUser): Me['two_factor_reason'] {
+  if (u.role === 'admin') return 'admin'
+  const grants = db.grants.get(u.id) ?? []
+  if (grants.some((g) => g.permissions.some((p) => FULL_TRUST_PERMISSIONS.includes(p)))) return 'permissions'
+  if (db.settings.enforce_2fa_for_users) return 'policy'
+  return 'none'
+}
+
+export function twoFactorMandatory(u: MockUser): boolean {
+  return twoFactorReason(u) !== 'none'
+}
+
 export function stageAfterPassword(u: MockUser): Stage {
   if (hasSecondFactor(u)) return 'preauth'
-  if (u.role === 'admin' || db.settings.enforce_2fa_for_users) return 'setup'
+  if (twoFactorMandatory(u)) return 'setup'
   return 'full'
 }
 
@@ -886,6 +904,13 @@ export function normalizeCode(code: string): string {
 /** Mock-only approximation of httpx.IPKey: IPv4 → /32, IPv6 → /64 (no real prefix math). */
 export function ipKeyOf(ip: string): string {
   return ip.includes(':') ? `${ip}/64` : `${ip}/32`
+}
+
+/** Enables TOTP for a mock user, e.g. before a test grants a full-trust permission (SEC-10). */
+export function enableTotp(username: string): void {
+  const user = findUserByName(username)
+  if (!user) throw new Error(`unknown mock user ${username}`)
+  user.totpEnabled = true
 }
 
 /** Test/dev helper: puts the "browser" into an authenticated session without HTTP. */

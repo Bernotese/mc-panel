@@ -24,6 +24,7 @@ What CI covers: auth, defense and notify unit tests, the e2e sign-in with TOTP, 
 - [ ] **TOTP QR code:** the QR code of the 2FA setup (SVG) scans with a phone app.
 - [ ] **Sudo dialog names the action:** the sudo dialog says what it confirms ("Aktion: …", or "N Aktionen: …" for several requests at once).
 - [ ] **First factor needs the password:** a new user without 2FA must enter the current password when setting up the first TOTP or passkey; a wrong password is refused.
+- [ ] **2FA for full-trust permissions:** granting `server.files` to a signed-in user without 2FA sends their open session to the 2FA setup at the next action, with the reason „Konsolen-, Datei-, Plugin- oder Backup-Rechte“; logout works there; after the permission is removed, 2FA is optional again and existing factors stay.
 - [ ] **Known device under attack:** script 20 failed logins for `helper` from another address (e.g. `curl` on the VM). Signing in as `helper` from your browser (signed in there before) still works; a fresh private window gets `429` (rate limit, no lock-out).
 - [ ] **Admin allowlist:** enable "Admin access only from the allowlist" with only your current network; an admin session from another address (e.g. via a phone hotspot) gets `403` on the next request and its session is gone after saving. `panel admin unlock` turns it off.
 - [ ] **Role change:** changing `helper` to admin and back ends `helper`'s open sessions.

@@ -147,6 +147,8 @@ export const en: Messages = {
     title: 'Set up two-factor authentication',
     description_admin: 'As an administrator you must set up a second factor before using the panel.',
     description_user: 'Your account requires a second factor.',
+    description_permissions:
+      'You have console, file, plugin or backup rights on a server. These rights require a second factor, so you must set one up before using the panel.',
     tab_totp: 'Authenticator app',
     tab_passkey: 'Passkey',
     codes_title: 'Almost done',
@@ -1279,6 +1281,8 @@ export const en: Messages = {
     admin_note: 'Administrators automatically hold every permission on every server.',
     no_servers: 'No servers created yet.',
     unsaved: 'Unsaved changes',
+    two_factor_note:
+      '“Console”, “Files”, “Plugins/mods” and “Backups” require two-factor authentication: a user who holds one of them on any server must set up 2FA before continuing, even in an open session.',
     files_warning: '“Files” allows running code inside the Minecraft server (e.g. via plugins). Grant it only to people you fully trust.',
     plugins_warning: '“Plugins/mods” allows running code inside the Minecraft server. Grant it only to people you fully trust.',
     backups_warning:
@@ -1409,7 +1413,7 @@ export const en: Messages = {
     },
     settings: {
       enforce_2fa: 'Require two-factor authentication for all users',
-      enforce_2fa_hint: 'Administrators always have to set up 2FA.',
+      enforce_2fa_hint: 'Administrators and users with console, file, plugin or backup rights always have to set up 2FA.',
       allowlist_only: 'Admin access only from the allowlist',
       allowlist_only_hint: 'Administrators can only sign in from networks with an “allow” rule. The server rejects changes that would lock you out.',
       countries: 'Allowed countries',
