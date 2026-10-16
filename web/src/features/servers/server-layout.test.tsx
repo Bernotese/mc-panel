@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { db, loginAs } from '@/mocks/db'
+import { db, enableTotp, loginAs } from '@/mocks/db'
 import { server } from '@/mocks/node'
 import { renderApp } from './test-utils'
 
@@ -108,6 +108,7 @@ describe('ServerLayout', () => {
   })
 
   it('shows the console to a user with the console permission', async () => {
+    enableTotp('alice') // full-trust permissions require 2FA (SEC-10)
     db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.console'] }])
     await renderApp('/servers/1', loginAs('alice'))
     await screen.findByRole('heading', { name: 'survival', level: 1 })
@@ -151,6 +152,7 @@ describe('ServerLayout', () => {
   })
 
   it('leaves a section whose permission is revoked while it is open', async () => {
+    enableTotp('alice') // full-trust permissions require 2FA (SEC-10)
     db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.console'] }])
     const { router, queryClient } = await renderApp('/servers/1/players', loginAs('alice'))
     expect(await screen.findByRole('heading', { name: 'survival', level: 1 })).toBeInTheDocument()
@@ -307,6 +309,7 @@ describe('ServerLayout', () => {
   })
 
   it('shows the plugins section to a user with the plugins permission', async () => {
+    enableTotp('alice') // full-trust permissions require 2FA (SEC-10)
     db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.plugins'] }])
     await renderApp('/servers/1', loginAs('alice'))
     await screen.findByRole('heading', { name: 'survival', level: 1 })
@@ -348,6 +351,7 @@ describe('ServerLayout', () => {
   })
 
   it('shows the backups section to a user with the backups permission, also on vanilla servers', async () => {
+    enableTotp('alice') // full-trust permissions require 2FA (SEC-10)
     db.grants.set(2, [{ server_id: 2, permissions: ['server.view', 'server.backups'] }])
     await renderApp('/servers/2', loginAs('alice'))
     await screen.findByRole('heading', { name: 'creative', level: 1 })
