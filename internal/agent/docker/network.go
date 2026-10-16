@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -23,12 +24,39 @@ func checkObjectName(kind, name string) error {
 	return nil
 }
 
-// Network is a bridge network as GET /networks reports it.
+// Network is a network as GET /networks reports it.
 type Network struct {
-	Name    string
-	Driver  string
-	Labels  map[string]string
-	Subnets []netip.Prefix // IPAM config, masked
+	ID         string
+	Name       string
+	Driver     string
+	Labels     map[string]string
+	EnableIPv6 bool
+	Subnets    []netip.Prefix // IPAM config, masked
+	// BridgeName is the host interface of a bridge that sets it explicitly (option
+	// com.docker.network.bridge.name, e.g. docker0); otherwise Docker uses "br-<ID[:12]>".
+	BridgeName string
+	// Containers are the names of the running containers on it; only InspectNetwork
+	// fills it (Docker lists no endpoint for a created or stopped container).
+	Containers []string
+}
+
+// HasIPv6 reports whether the network has IPv6 enabled or an IPv6 subnet.
+func (n Network) HasIPv6() bool {
+	return n.EnableIPv6 || slices.ContainsFunc(n.Subnets, func(p netip.Prefix) bool { return p.Addr().Is6() })
+}
+
+// HostInterface is the name of the network's bridge interface on the host ("" for
+// non-bridge networks or an unknown ID).
+func (n Network) HostInterface() string {
+	switch {
+	case n.Driver != "bridge":
+		return ""
+	case n.BridgeName != "":
+		return n.BridgeName
+	case len(n.ID) >= 12:
+		return "br-" + n.ID[:12]
+	}
+	return ""
 }
 
 type networkIPAM struct {
@@ -39,18 +67,25 @@ type networkIPAMConfig struct {
 	Subnet string `json:"Subnet"`
 }
 
+// networkCreateIPAM always sets both IP families explicitly: IPv4 only, whatever the
+// daemon's defaults (daemon.json "ipv6" or default-network-opts) say.
 type networkCreateIPAM struct {
-	Name   string            `json:"Name"`
-	Driver string            `json:"Driver"`
-	Labels map[string]string `json:"Labels,omitempty"`
-	IPAM   networkIPAM       `json:"IPAM"`
+	Name       string            `json:"Name"`
+	Driver     string            `json:"Driver"`
+	Labels     map[string]string `json:"Labels,omitempty"`
+	EnableIPv4 bool              `json:"EnableIPv4"`
+	EnableIPv6 bool              `json:"EnableIPv6"`
+	IPAM       networkIPAM       `json:"IPAM"`
 }
 
 type networkListEntry struct {
-	Name   string            `json:"Name"`
-	Driver string            `json:"Driver"`
-	Labels map[string]string `json:"Labels"`
-	IPAM   networkIPAM       `json:"IPAM"`
+	ID         string            `json:"Id"`
+	Name       string            `json:"Name"`
+	Driver     string            `json:"Driver"`
+	Labels     map[string]string `json:"Labels"`
+	EnableIPv6 bool              `json:"EnableIPv6"`
+	Options    map[string]string `json:"Options"`
+	IPAM       networkIPAM       `json:"IPAM"`
 	// Containers is filled only by GET /networks/{name}, keyed by container ID.
 	Containers map[string]struct {
 		Name string `json:"Name"`
@@ -58,7 +93,12 @@ type networkListEntry struct {
 }
 
 func (e networkListEntry) network() (Network, error) {
-	n := Network{Name: e.Name, Driver: e.Driver, Labels: e.Labels}
+	n := Network{ID: e.ID, Name: e.Name, Driver: e.Driver, Labels: e.Labels, EnableIPv6: e.EnableIPv6,
+		BridgeName: e.Options["com.docker.network.bridge.name"]}
+	for _, ct := range e.Containers {
+		n.Containers = append(n.Containers, strings.TrimPrefix(ct.Name, "/"))
+	}
+	slices.Sort(n.Containers)
 	for _, cfg := range e.IPAM.Config {
 		p, err := netip.ParsePrefix(cfg.Subnet)
 		if err != nil {
@@ -69,20 +109,24 @@ func (e networkListEntry) network() (Network, error) {
 	return n, nil
 }
 
-// CreateNetwork creates the bridge network name with exactly one IPv4 subnet. A
-// subnet that overlaps an existing network fails with an error for which
-// IsPoolOverlap reports true; an existing name fails with IsConflict.
-func (c *Client) CreateNetwork(ctx context.Context, name string, labels map[string]string, subnet netip.Prefix) error {
+// CreateNetwork creates the bridge network name with exactly one IPv4 subnet and no IPv6,
+// and returns its ID. A subnet that overlaps an existing network fails with an error for
+// which IsPoolOverlap reports true; an existing name fails with IsConflict.
+func (c *Client) CreateNetwork(ctx context.Context, name string, labels map[string]string, subnet netip.Prefix) (string, error) {
 	if err := checkObjectName("network", name); err != nil {
-		return err
+		return "", err
 	}
 	if !subnet.IsValid() || !subnet.Addr().Is4() || subnet != subnet.Masked() {
-		return fmt.Errorf("docker: network %s: subnet %s is not a canonical IPv4 prefix", name, subnet)
+		return "", fmt.Errorf("docker: network %s: subnet %s is not a canonical IPv4 prefix", name, subnet)
 	}
-	return c.call(ctx, c.timeout, http.MethodPost, "/networks/create", nil, networkCreateIPAM{
-		Name: name, Driver: "bridge", Labels: labels,
+	var out struct {
+		ID string `json:"Id"`
+	}
+	err := c.call(ctx, c.timeout, http.MethodPost, "/networks/create", nil, networkCreateIPAM{
+		Name: name, Driver: "bridge", Labels: labels, EnableIPv4: true, EnableIPv6: false,
 		IPAM: networkIPAM{Config: []networkIPAMConfig{{Subnet: subnet.String()}}},
-	}, nil)
+	}, &out)
+	return out.ID, err
 }
 
 // IsPoolOverlap reports Docker's refusal of a subnet that overlaps another network.
@@ -115,21 +159,17 @@ func (c *Client) ListNetworks(ctx context.Context, label string) ([]Network, err
 	return out, nil
 }
 
-// NetworkContainers returns the names of the containers connected to the network
-// name. A missing network is an error for which IsNotFound reports true.
-func (c *Client) NetworkContainers(ctx context.Context, name string) ([]string, error) {
+// InspectNetwork returns the network name with its running containers. A missing network
+// is an error for which IsNotFound reports true.
+func (c *Client) InspectNetwork(ctx context.Context, name string) (Network, error) {
 	if err := checkObjectName("network", name); err != nil {
-		return nil, err
+		return Network{}, err
 	}
 	var e networkListEntry
 	if err := c.call(ctx, c.timeout, http.MethodGet, "/networks/"+url.PathEscape(name), nil, nil, &e); err != nil {
-		return nil, err
+		return Network{}, err
 	}
-	names := make([]string, 0, len(e.Containers))
-	for _, ct := range e.Containers {
-		names = append(names, strings.TrimPrefix(ct.Name, "/"))
-	}
-	return names, nil
+	return e.network()
 }
 
 type networkMember struct {
