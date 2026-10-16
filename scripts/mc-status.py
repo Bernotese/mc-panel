@@ -4,11 +4,17 @@
 Unlike generic tools it sends an explicit server address in the handshake, which is what
 mc-router routes on. Usage: mc-status.py HOST PORT SERVER_ADDRESS
 Prints the status JSON and exits 0, or prints the error and exits 1.
+
+With --login NAME it starts a login instead (protocol from a status ping first; Login Start
+with name and UUID, Minecraft 1.20.2 and later) and prints the server's first answer:
+"login: encryption_request" (online mode), "login: set_compression" or "login: login_success"
+exit 0, "disconnect: <reason>" (e.g. "Connection throttled!") exits 1.
 """
 import json
 import socket
 import struct
 import sys
+import uuid
 
 
 def varint(n: int) -> bytes:
@@ -81,12 +87,46 @@ def status(host: str, port: int, server_address: str) -> dict:
     return json.loads(data[pos : pos + strlen].decode("utf-8"))
 
 
+LOGIN_ANSWERS = {0x01: "encryption_request", 0x02: "login_success", 0x03: "set_compression"}
+
+
+def login(host: str, port: int, server_address: str, name: str) -> tuple[bool, str]:
+    protocol = int(status(host, port, server_address)["version"]["protocol"])
+    addr = server_address.encode("utf-8")
+    handshake = varint(protocol) + varint(len(addr)) + addr + struct.pack(">H", port) + varint(2)
+    raw = name.encode("utf-8")
+    start = varint(len(raw)) + raw + uuid.uuid3(uuid.NAMESPACE_OID, name).bytes
+    with socket.create_connection((host, port), timeout=10) as sock:
+        sock.sendall(packet(0x00, handshake))
+        sock.sendall(packet(0x00, start))
+        length = read_varint_sock(sock)
+        if length <= 0 or length > 1 << 21:
+            raise ValueError(f"implausible packet length {length}")
+        data = recv_exact(sock, length)
+    packet_id, pos = read_varint_buf(data, 0)
+    if packet_id == 0x00:
+        strlen, pos = read_varint_buf(data, pos)
+        return False, "disconnect: " + data[pos : pos + strlen].decode("utf-8", "replace")
+    if packet_id not in LOGIN_ANSWERS:
+        raise ValueError(f"unexpected login packet id {packet_id}")
+    return True, "login: " + LOGIN_ANSWERS[packet_id]
+
+
 def main() -> int:
-    if len(sys.argv) != 4:
-        print("usage: mc-status.py HOST PORT SERVER_ADDRESS", file=sys.stderr)
+    args = sys.argv[1:]
+    if len(args) == 5 and args[3] == "--login":
+        try:
+            ok, answer = login(args[0], int(args[1]), args[2], args[4])
+        except (OSError, EOFError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            print(f"mc-status: {exc}", file=sys.stderr)
+            return 1
+        print(answer)
+        return 0 if ok else 1
+    if len(args) != 3:
+        print("usage: mc-status.py HOST PORT SERVER_ADDRESS [--login NAME]", file=sys.stderr)
         return 2
     try:
-        result = status(sys.argv[1], int(sys.argv[2]), sys.argv[3])
+        result = status(args[0], int(args[1]), args[2])
     except (OSError, EOFError, ValueError, json.JSONDecodeError) as exc:
         print(f"mc-status: {exc}", file=sys.stderr)
         return 1

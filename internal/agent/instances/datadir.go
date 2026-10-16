@@ -47,7 +47,17 @@ func (m *Manager) ensureLayout() error {
 // loosened) while every container is up to date, so no Ensure would ever fix it and the files
 // service could not enter it.
 func (m *Manager) Init() error {
-	return m.ensureLayout()
+	if err := m.ensureLayout(); err != nil {
+		return err
+	}
+	return m.ensurePatches()
+}
+
+// ensurePatches writes the itzg patch definitions the instance containers mount read-only.
+// It runs before every create and start: Docker would create a missing bind source as an
+// empty directory, and itzg would then fail to read PATCH_DEFINITIONS.
+func (m *Manager) ensurePatches() error {
+	return WritePatches(PatchesDir(m.host.InstancesDir))
 }
 
 // ensureDir creates dir if needed and enforces owner = agent process (root in production),
