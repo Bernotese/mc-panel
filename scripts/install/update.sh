@@ -30,6 +30,7 @@ UPD_SIGNALED=0 # INT/TERM/HUP arrived
 UPD_SWAP_RC=0  # exit code of the swap subshell
 UPD_APPLY_OK=0 # 1 when the target version is installed and healthy
 UPD_HEALTH_REASON="" # why the last upd_healthy failed (versions, a unit, an endpoint)
+UPD_RESTARTS_BASE=() # NRestarts of each of UPD_SERVICES when the health wait began
 
 # --- probes (tests redefine these) ---------------------------------------------------------
 
@@ -365,10 +366,13 @@ upd_restart_all() {
 
 # upd_health_reason VERSION prints why the system is not healthy yet, nothing when it is: all
 # three binaries report VERSION, services and sockets are active, no service was restarted by
-# systemd on its own since the restart (a crashing service looks active for a moment; as
-# units.sh of B1 checks) and the health endpoints answer.
+# systemd on its own since the health wait began (a crashing service looks active for a
+# moment; as units.sh of B1 checks) and the health endpoints answer. The restarts count from
+# UPD_RESTARTS_BASE, not from 0: systemd 255 keeps NRestarts across a manual stop and start of
+# a service that was crash-looping (the broken version before a rollback), so an absolute 0
+# would never come.
 upd_health_reason() {
-  local ver="$1" v u n out
+  local ver="$1" v u n i out
   v="$(upd_binary_versions)"
   if [[ $v != "$ver $ver $ver" ]]; then
     echo "versions $v"
@@ -380,10 +384,12 @@ upd_health_reason() {
       return 0
     fi
   done
-  for u in "${UPD_SERVICES[@]}"; do
+  for i in "${!UPD_SERVICES[@]}"; do
+    u="${UPD_SERVICES[i]}"
     n="$(upd_probe_restarts "$u")" || n=""
-    if [[ ${n:-0} != 0 ]]; then
-      echo "systemd restarted $u $n times"
+    [[ $n =~ ^[0-9]+$ ]] || n=0
+    if ((n > ${UPD_RESTARTS_BASE[i]:-0})); then
+      echo "systemd restarted $u $((n - ${UPD_RESTARTS_BASE[i]:-0})) times"
       return 0
     fi
   done
@@ -396,9 +402,15 @@ upd_health_reason() {
 # spec §5 step 5); otherwise 1 with the last reason in UPD_HEALTH_REASON and the units' status
 # and journal in the install log.
 upd_healthy() {
-  local ver="$1" start deadline
+  local ver="$1" start deadline u n
   start="$(date +%s)"
   deadline=$((start + UPD_HEALTH_SECS))
+  UPD_RESTARTS_BASE=()
+  for u in "${UPD_SERVICES[@]}"; do
+    n="$(upd_probe_restarts "$u")" || n=""
+    [[ $n =~ ^[0-9]+$ ]] || n=0
+    UPD_RESTARTS_BASE+=("$n")
+  done
   while :; do
     UPD_HEALTH_REASON="$(upd_health_reason "$ver")"
     if [[ -z $UPD_HEALTH_REASON ]]; then
