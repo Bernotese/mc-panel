@@ -44,7 +44,7 @@ rc_before="$(inst_field "$psrv" 'i["restart_count"]')"
 # The crashes are real Paper shutdowns and boots (about 40 s each) that the time scale does not
 # shorten. Keep the real-time margin of an unscaled run: down_after_min 1 (60 s) covers the
 # shutdown before Docker's restart, so it is $ts alert minutes (60 s) during the crashes.
-mon_settings "{\"disk_min_percent\": 1, \"disk_min_bytes\": 1073741824, \"down_after_min\": $ts, \"crash_restarts\": 3, \"crash_window_min\": 30}"
+mon_settings "{\"disk_min_percent\": 1, \"disk_min_bytes\": 1073741824, \"down_after_min\": $ts, \"crash_restarts\": 3, \"crash_window_min\": $mon_crash_window}"
 for n in 1 2 3; do
   p_crash
   echo "crash $n done (restart_count $(inst_field "$psrv" 'i["restart_count"]'))"
@@ -54,7 +54,7 @@ rc_after="$(inst_field "$psrv" 'i["restart_count"]')"
 pwait_for 120 "server.crash_loop firing" mon_firing server.crash_loop "$psrv"
 pwait_for 60 "server.crash_loop delivered" notified server.crash_loop $((crash0 + 1))
 mon_not_firing server.down "$psrv" || fail "server.down must not fire while the crash loop fires (and within the start grace)"
-# Resolving needs a full window without restarts: shorten it to 1 min instead of waiting 30
+# Resolving needs a full window without restarts: shorten it to 1 min instead of waiting the whole window
 # (down_after_min back to 1: the crash loop fires, so no server.down meanwhile).
 rec0="$(notified_count server.recovered)"
 mon_settings '{"disk_min_percent": 1, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": 1}'

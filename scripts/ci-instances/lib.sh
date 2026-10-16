@@ -717,22 +717,25 @@ echo "OK: server $psrv (ciplugins, Paper 1.21.11) running"
 mon_notifier() {
 install -d -m 0755 "$mo"
 echo "== monitoring: notifier (unreachable on purpose) and short alert windows"
-# Spec §8 names 5 min for the crash window; 30 alert minutes (3 min at time scale 10) leave three
-# Paper restarts on a slow runner enough room. Disk thresholds at the minimum: runners often have less than 10 GiB free.
-mon_settings '{"disk_min_percent": 1, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": 30}'
+# Spec §8 names 5 min for the crash window; 10 real minutes (10 alert minutes x time scale, at
+# most the limit 120) leave three Paper restarts on a slow runner enough room. Disk thresholds at
+# the minimum: runners often have less than 10 GiB free.
+mon_crash_window=$((10 * ts))
+[ "$mon_crash_window" -le 120 ] || mon_crash_window=120
+mon_settings '{"disk_min_percent": 1, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": '"$mon_crash_window"'}'
 jcheck "$mo/settings.json" "settings stored, no server alert so far" '
   d["disk_min_percent"] == 1 and d["disk_min_bytes"] == 1073741824 and d["down_after_min"] == 1
-  and d["crash_restarts"] == 3 and d["crash_window_min"] == 30
-  and [x for x in d["alerts"] if x["kind"] != "host.disk_low"] == []'
+  and d["crash_restarts"] == 3 and d["crash_window_min"] == int(a[0])
+  and [x for x in d["alerts"] if x["kind"] != "host.disk_low"] == []' "$mon_crash_window"
 # The sudo of mon_settings still holds for the notifier and the refused update.
 papi POST /security/notifiers "$mo/notifier.json" \
   '{"kind": "ntfy", "name": "ci-monitoring", "enabled": true, "url": "https://ntfy.invalid", "topic": "citest"}'
 [ "$pcode" = 201 ] || fail "notifier: HTTP $pcode $(cat "$mo/notifier.json")"
-papi PUT /monitoring/settings "$mo/bad.json" '{"disk_min_percent": 0, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": 30}'
+papi PUT /monitoring/settings "$mo/bad.json" '{"disk_min_percent": 0, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": '"$mon_crash_window"'}'
 is_perror "$mo/bad.json" "$pcode" 400 validation_failed || fail "disk_min_percent 0: HTTP $pcode $(cat "$mo/bad.json")"
-papi PUT /monitoring/settings "$mo/bad.json" '{"disk_min_percent": 1, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": 30, "x": 1}'
+papi PUT /monitoring/settings "$mo/bad.json" '{"disk_min_percent": 1, "disk_min_bytes": 1073741824, "down_after_min": 1, "crash_restarts": 3, "crash_window_min": '"$mon_crash_window"', "x": 1}'
 is_perror "$mo/bad.json" "$pcode" 400 bad_request || fail "unknown field: HTTP $pcode $(cat "$mo/bad.json")"
-echo "OK: ntfy notifier to https://ntfy.invalid, down after 1 min, crash loop 3 restarts in 30 min, invalid values refused"
+echo "OK: ntfy notifier to https://ntfy.invalid, down after 1 min, crash loop 3 restarts in $mon_crash_window alert min, invalid values refused"
 }
 
 # mon_audit_settings: every successful PUT /monitoring/settings of this shard is audited.
