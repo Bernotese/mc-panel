@@ -534,4 +534,13 @@ test_ops_doctor_release_signature_states() {
   rm -f -- "$ROOT$RELEASE_RECORD"
   cmd_doctor >"$WORK/out" 2>&1 || true
   assert_contains "$(cat "$WORK/out")" '"id":"release_signature","status":"warn"'
+  assert_contains "$(cat "$WORK/out")" 'download and verify install.sh of v0.5.0 or later'
+}
+
+test_ops_doctor_release_signature_needs_root() {
+  ops_doctor_healthy
+  doc_probe_euid() { echo 1000; }
+  JSON=1
+  cmd_doctor >"$WORK/out" 2>&1 || true
+  assert_contains "$(cat "$WORK/out")" '{"id":"release_signature","status":"warn","message":"release_signature: skipped (needs root)"'
 }

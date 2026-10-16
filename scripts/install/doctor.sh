@@ -310,13 +310,16 @@ doc_chk_versions() {
 # by bin_install). A record of another version (installed before signed releases, or an update
 # rolled back across it) says nothing about the installed binaries.
 doc_chk_release_signature() {
+  doc_need_root release_signature || return 0 # RELEASE_RECORD is below /etc/mc-panel (0750)
   local f="$ROOT$RELEASE_RECORD" p v how key
   read -r p _ _ <<<"$(upd_binary_versions)"
   v="$(awk -F= '$1 == "version" { print $2; exit }' "$f" 2>/dev/null)" || v=""
   how="$(awk -F= '$1 == "verified" { print $2; exit }' "$f" 2>/dev/null)" || how=""
   key="$(awk -F= '$1 == "key" { print $2; exit }' "$f" 2>/dev/null)" || key=""
   if [[ -z $v || $v != "$p" ]]; then
-    doc_result warn release_signature "no signature record for $p (installed before signed releases)" "install.sh update to a signed release (v$SIGNED_SINCE or later)"
+    # The install.sh of those releases checks no signature: the step to v$SIGNED_SINCE starts
+    # from a downloaded and verified install.sh (docs/install.md, "Signed releases").
+    doc_result warn release_signature "no signature record for $p (installed before signed releases)" "download and verify install.sh of v$SIGNED_SINCE or later (docs/install.md, Signed releases), then run its update"
     return 0
   fi
   case "$how" in

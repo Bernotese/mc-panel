@@ -75,7 +75,7 @@ installer:
 # ~/.ssh/mc-panel-release.
 sign-release:
 	@test -n "$(TAG)" || { echo "usage: make sign-release TAG=vX.Y.Z [KEY=path]"; exit 2; }
-	scripts/sign-release.sh "$(TAG)" $(KEY)
+	scripts/sign-release.sh "$(TAG)" $(if $(KEY),"$(KEY)")
 
 # Builds REF on the internal test VM from GitHub and (re)deploys it there (docs/dev/README.md, "Test VM").
 TESTVM ?= claude@192.168.1.117

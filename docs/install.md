@@ -49,13 +49,27 @@ mc-panel-release namespaces="mc-panel-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5A
 KEY
 ssh-keygen -Y verify -f allowed_signers -I mc-panel-release -n mc-panel-release \
   -s checksums.txt.sig <checksums.txt                      # must say: Good "mc-panel-release" signature
+grep -q " mc-panel_${v#v}_linux_$(dpkg --print-architecture).tar.gz\$" checksums.txt &&
+  echo "checksums.txt belongs to $v"                        # must say so: no signature of another release
 sha256sum --ignore-missing -c checksums.txt               # must say: install.sh: OK
 sudo bash install.sh install --domain panel.example.com --email you@example.com
 ```
 
 The key line above must match the one in this guide on GitHub and in `scripts/install/release-signers` of the release; its fingerprint is `SHA256:dG7cM49r+jg1kTjqritVZ/augtw33VlFnNgcHOeBOaY` (ED25519; `ssh-keygen -Y verify` prints it). The `install.sh` you checked this way checks everything after it.
 
-Releases before v0.5.0 have no signature. `install --version v0.4.0` or an `update` (also a downgrade) to such a release stops unless you add `--allow-unsigned`; then it warns loudly and checks only `checksums.txt` of the same release. `--allow-unsigned` never admits an unsigned release from v0.5.0 on. `doctor` shows how the installed release was checked (`release_signature`).
+The `grep` line matters: a signature only says that the maintainer signed *some* `checksums.txt`. Checking that it lists this version's archive makes sure you did not get the signed file of another (older) release.
+
+**Updating from v0.4.x or older.** The `install.sh` of those releases checks no signatures, and `update` hands over to the target's `install.sh` only after its own (unsigned) checks. So do not run `update` with the old script: download the `install.sh` of v0.5.0 or later, verify it as above, and run its `update`:
+
+```bash
+sudo bash install.sh update     # the verified install.sh of v0.5.0 or later
+```
+
+From then on every `update` checks the signature of the next release itself. `doctor` of a verified `install.sh` points at this step on a host without a signature record.
+
+**Unsigned releases.** v0.1.0 to v0.4.0 have no signature. `install --version v0.4.0` or an `update --version` (a downgrade) to one of them stops unless you add `--allow-unsigned`; then `install.sh` warns loudly and accepts only the `checksums.txt` that was published back then (its SHA-256 is built into `install.sh`). No other unsigned release is accepted, and `--allow-unsigned` never admits one from v0.5.0 on (pre-releases such as v0.5.0-rc.1 included). `doctor` shows how the installed release was checked (`release_signature`).
+
+**No silent downgrades.** Without `--version`, `update` takes GitHub's latest release. If that is older than the installed version, `update` refuses (exit code 1) instead of downgrading: someone who controls the GitHub release could point "latest" at an old signed release with known holes (a rollback attack). Downgrade on purpose with `update --version vX.Y.Z`.
 
 The steps, in order: preflight, packages (with the Caddy repository), layout (users, directories), binaries, configuration, systemd units, Caddy site, firewall, security updates, first admin, and a final `doctor` run. Each step prints `[ok]`, `[changed]`, `[skip]` or `[warn]`. A second run with the same options changes nothing. At the end the installer prints the panel URL, the admin and the next steps. The log is in `/var/log/mc-panel-install.log` (0600).
 
