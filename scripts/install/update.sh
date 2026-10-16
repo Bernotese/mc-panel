@@ -16,7 +16,8 @@ UPD_RELEASE_BASE="$RELEASE_BASE/download"
 UPD_UNITS=(mcpanel-agent.service mcpanel-files.socket mcpanel-files.service mcpanel-panel.socket
   mcpanel-panel.service mcpanel-fw.service)
 UPD_BINARIES=(panel agent files)
-UPD_CONFIGS=("$ETC_PANEL/panel.toml" "$ETC_PANEL/agent.toml" "$ETC_FILES/files.toml")
+# RELEASE_RECORD goes back with the binaries it describes (doctor's release_signature).
+UPD_CONFIGS=("$ETC_PANEL/panel.toml" "$ETC_PANEL/agent.toml" "$ETC_FILES/files.toml" "$RELEASE_RECORD")
 # Restart order of spec §5 step 4: agent, files, panel (sockets before their services).
 UPD_RESTART=(mcpanel-agent.service mcpanel-files.socket mcpanel-files.service mcpanel-panel.socket
   mcpanel-panel.service)
@@ -501,13 +502,18 @@ upd_handover_args() {
   return 0
 }
 
-# upd_handover downloads and verifies the target's install.sh and execs it (spec §5 step 2).
+# upd_handover downloads and verifies the target's install.sh and execs it (spec §5 step 2):
+# the signature of checksums.txt first (release_verify, SEC-07), then the checksum. The target
+# install.sh verifies its own downloads again; --allow-unsigned is not passed on (releases
+# before SIGNED_SINCE do not know it, later ones are signed).
 upd_handover() {
-  local tag script="$WORK/install.sh" sums="$WORK/checksums.txt" args=()
+  local tag script="$WORK/install.sh" sums="$WORK/checksums.txt" args=() verified
   tag="$(release_tag "$TARGET_VERSION")"
   fetch "$UPD_RELEASE_BASE/$tag/checksums.txt" "$sums"
+  verified="$(release_verify "$UPD_RELEASE_BASE/$tag" "$sums" "${tag#v}")" || exit 1
   fetch "$UPD_RELEASE_BASE/$tag/install.sh" "$script"
   sha256_verify "$script" "$sums" install.sh
+  log_ok "release $tag: ${verified%% *}"
   mapfile -t args < <(upd_handover_args)
   log_ok "handing over to install.sh $tag"
   # setup_work in the child takes WORK over and removes it (overview V4)

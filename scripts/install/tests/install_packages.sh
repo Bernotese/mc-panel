@@ -63,7 +63,7 @@ pkg_daemon_json_present() {
 
 test_install_pkg_missing_lists_only_missing() {
   pkg_fake_dpkg caddy nftables restic tzdata sqlite3 unattended-upgrades curl ca-certificates
-  assert_eq bzip2 "$(pkg_missing "${PKG_LIST[@]}" | xargs)"
+  assert_eq "bzip2 openssh-client" "$(pkg_missing "${PKG_LIST[@]}" | xargs)"
 }
 
 test_install_pkg_install_installs_missing_once() {
@@ -73,7 +73,7 @@ test_install_pkg_install_installs_missing_once() {
   pkg_daemon_json_present
   assert_fails pkg_install # the final Docker check fails in the stubbed world
   assert_called 'apt-get -y -q -o DPkg::Lock::Timeout=300 update'
-  assert_called 'env DEBIAN_FRONTEND=noninteractive apt-get -y -q -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install --no-install-recommends caddy nftables restic tzdata sqlite3 unattended-upgrades bzip2 docker.io'
+  assert_called 'env DEBIAN_FRONTEND=noninteractive apt-get -y -q -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install --no-install-recommends caddy nftables restic tzdata sqlite3 unattended-upgrades bzip2 openssh-client docker.io'
   assert_eq 1 "$(grep -c ' install ' "$WORK/calls.log")"
 }
 

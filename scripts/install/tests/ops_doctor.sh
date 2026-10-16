@@ -72,6 +72,7 @@ ops_doctor_healthy() {
   printf '%s\n' 'socket = "/run/mc-panel-files/files.sock"' 'panel_uid = 998' 'instances_dir = "/srv/mc-panel"' \
     'restic_binary = "/usr/bin/restic"' >"$ROOT$ETC_FILES/files.toml"
   printf 'panel.example.com {\n\ttls you@example.com\n}\n' >"$ROOT$CADDY_DIR/mc-panel.caddy"
+  printf 'version=1.2.0\nverified=signed\nkey=SHA256:abc\n' >"$ROOT$RELEASE_RECORD"
   printf '{\n\tadmin unix//run/caddy/admin.sock\n}\n:80 {\n}\nimport mc-panel.caddy # managed by mc-panel\n' >"$ROOT$CADDY_DIR/Caddyfile"
 }
 
@@ -107,7 +108,7 @@ test_ops_doctor_healthy_system_is_ok() {
   local out
   out="$(cat "$WORK/out")"
   assert_contains "$out" "✓ all mc-panel services are running"
-  assert_contains "$out" "30 checks: 0 failed, 0 warnings"
+  assert_contains "$out" "31 checks: 0 failed, 0 warnings"
   assert_not_contains "$out" "✗"
   assert_not_called 'systemctl'
 }
@@ -400,7 +401,7 @@ test_ops_doctor_json_is_valid_and_complete() {
   assert_contains "$out" '{"id":"ssh_password","status":"warn","message":"SSH allows password logins (PasswordAuthentication yes)","hint":"use SSH keys and set PasswordAuthentication no"}'
   assert_not_contains "$out" "==>"
   local id
-  for id in services sockets files_process versions update_available update_state config permissions \
+  for id in services sockets files_process versions update_available release_signature update_state config permissions \
     caddy_config caddy_import caddy_package caddy_admin certificate dns firewall docker docker_version \
     docker_live_restore docker_dns restic tzdata time_sync upgrades reboot_required storage_fs storage_free \
     backup_keys ssh_password ssh_root ssh_kbdinteractive; do
@@ -411,7 +412,7 @@ test_ops_doctor_json_is_valid_and_complete() {
 import json, sys
 d = json.load(sys.stdin)
 assert d["status"] == "warn"
-assert len(d["checks"]) == 30
+assert len(d["checks"]) == 31
 for c in d["checks"]:
     assert set(c) == {"id", "status", "message", "hint"}, c
     assert c["status"] in ("ok", "warn", "fail"), c
@@ -513,4 +514,24 @@ test_ops_doctor_docker_dns_follows_container_egress_deny() {
   assert_eq "" "$(doc_egress_deny)"
   assert_exit 0 cmd_doctor
   assert_contains "$(cat "$WORK/out")" "the egress filter is off"
+}
+
+test_ops_doctor_release_signature_states() {
+  ops_doctor_healthy
+  JSON=1
+  cmd_doctor >"$WORK/out" 2>&1 || true
+  assert_contains "$(cat "$WORK/out")" '{"id":"release_signature","status":"ok","message":"1.2.0 was signature-checked (key SHA256:abc)"'
+  printf 'version=1.2.0\nverified=from-dir\nkey=\n' >"$ROOT$RELEASE_RECORD"
+  cmd_doctor >"$WORK/out" 2>&1 || true
+  assert_contains "$(cat "$WORK/out")" '{"id":"release_signature","status":"ok","message":"1.2.0 is a local build (--from-dir), no signature check"'
+  printf 'version=1.2.0\nverified=unsigned\nkey=\n' >"$ROOT$RELEASE_RECORD"
+  cmd_doctor >"$WORK/out" 2>&1 || true
+  assert_contains "$(cat "$WORK/out")" '{"id":"release_signature","status":"warn","message":"1.2.0 was installed without a signature (--allow-unsigned)"'
+  # a record of another version (rolled back across it) says nothing about 1.2.0
+  printf 'version=1.3.0\nverified=signed\nkey=SHA256:abc\n' >"$ROOT$RELEASE_RECORD"
+  cmd_doctor >"$WORK/out" 2>&1 || true
+  assert_contains "$(cat "$WORK/out")" '{"id":"release_signature","status":"warn","message":"no signature record for 1.2.0 (installed before signed releases)"'
+  rm -f -- "$ROOT$RELEASE_RECORD"
+  cmd_doctor >"$WORK/out" 2>&1 || true
+  assert_contains "$(cat "$WORK/out")" '"id":"release_signature","status":"warn"'
 }

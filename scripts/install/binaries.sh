@@ -1,9 +1,11 @@
 # shellcheck shell=bash
 # binaries.sh - installer spec §4.4: the release tarball and checksums.txt of the same release,
-# SHA-256 check, extraction into $WORK, atomic install of panel, agent and files into BIN_DIR.
-# Nothing is written to the system before the download is verified. With --from-dir the local
-# build is used as is (no network). Sets BIN_SOURCE_DIR (render_template then takes deploy/
-# from there) and BIN_CHANGED (units.sh restarts the services when a binary changed).
+# the signature of checksums.txt (release_verify, SEC-07), SHA-256 check, extraction into
+# $WORK, atomic install of panel, agent and files into BIN_DIR. Nothing is written to the
+# system before the download is verified. With --from-dir the local build is used as is (no
+# network). Sets BIN_SOURCE_DIR (render_template then takes deploy/ from there) and BIN_CHANGED
+# (units.sh restarts the services when a binary changed); RELEASE_RECORD says how the
+# installed release was verified (doctor).
 
 BIN_NAMES=(panel agent files)
 BIN_CHANGED=0
@@ -33,25 +35,44 @@ bin_tar_safe() {
 }
 
 # bin_source prints the directory that holds panel, agent, files and deploy/: FROM_DIR, or the
-# verified and extracted release tarball. Runs in $(...): every failure dies explicitly.
+# verified and extracted release tarball. Runs in $(...): every failure dies explicitly. The
+# verification result goes to $WORK/release-verified for bin_install: "signed FINGERPRINT",
+# "unsigned" or "from-dir" (update verifies the download first and passes it on as FROM_DIR,
+# which keeps the result of that download).
 bin_source() {
   if [[ -n $FROM_DIR ]]; then
+    if [[ $FROM_DIR != "$WORK/release" || ! -f $WORK/release-verified ]]; then
+      echo from-dir >"$WORK/release-verified"
+    fi
     echo "$FROM_DIR"
     return 0
   fi
-  local v tarball dir
+  local v tarball dir verified
   v="$(bin_version)"
   [[ $v != dev ]] || die "this install.sh has no release version; use --version or --from-dir"
   tarball="mc-panel_${v}_linux_${ARCH}.tar.gz"
-  fetch "$(bin_url "$tarball")" "$WORK/$tarball" || die "download of $tarball failed"
   fetch "$(bin_url checksums.txt)" "$WORK/checksums.txt" || die "download of checksums.txt failed"
+  verified="$(release_verify "$RELEASE_BASE/download/v$v" "$WORK/checksums.txt" "$v")" || exit 1
+  fetch "$(bin_url "$tarball")" "$WORK/$tarball" || die "download of $tarball failed"
   sha256_verify "$WORK/$tarball" "$WORK/checksums.txt" "$tarball" || die "checksum of $tarball does not match"
   bin_tar_safe "$WORK/$tarball" || die "$tarball contains unsafe entries (absolute paths, .., links)"
   dir="$WORK/release"
   rm -rf -- "$dir"
   mkdir -m 0700 -- "$dir" || die "cannot create $dir"
   tar -xzf "$WORK/$tarball" -C "$dir" --no-same-owner --no-same-permissions || die "cannot extract $tarball"
+  printf '%s\n' "$verified" >"$WORK/release-verified"
   echo "$dir"
+}
+
+# bin_record writes RELEASE_RECORD (version and how it was verified, from bin_source).
+bin_record() {
+  local how="" r
+  if [[ -f $WORK/release-verified ]]; then
+    how="$(head -n 1 -- "$WORK/release-verified")"
+  fi
+  r="$(printf 'version=%s\nverified=%s\nkey=%s\n' "$(bin_version)" "${how%% *}" \
+    "$([[ $how == "signed "* ]] && echo "${how#signed }")" |
+    write_file "$RELEASE_RECORD" 0644 root root)" || return 1
 }
 
 # shellcheck disable=SC2034 # BIN_SOURCE_DIR (render_template, update) and BIN_CHANGED (units.sh)
@@ -78,6 +99,7 @@ bin_install() {
     [[ $r == unchanged ]] || changed+=("$b")
   done
   BIN_SOURCE_DIR="$src"
+  bin_record || return 1
   if ((${#changed[@]} > 0)); then
     BIN_CHANGED=1
     log_changed "${changed[*]} $(bin_version) in $BIN_DIR"

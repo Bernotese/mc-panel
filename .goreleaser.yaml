@@ -131,9 +131,12 @@ changelog:
     - title: Other changes
       order: 999
 
+# A draft: the owner checks it, signs checksums.txt with the release key outside GitHub and
+# publishes it with make sign-release (docs/dev/README.md, "Release process"; SEC-07). Until
+# then it is not /releases/latest and its download URLs do not resolve.
 release:
   name_template: "mc-panel {{ .Version }}"
   prerelease: auto
-  draft: false
+  draft: true
   extra_files:
     - glob: ./build/install.sh

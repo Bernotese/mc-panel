@@ -99,7 +99,7 @@ jobs:
           # The installer jobs share one filter: the lint on every run; the lifecycle (root, not on
           # pushes to main) also on any internal/ change, since it runs the real panel, agent and
           # files service (like instances).
-          installer="^scripts/install/|^deploy/|^scripts/(ci-installer|install-restic|testvm-deploy)\.sh$|^cmd/|^internal/(config|unixsock)/|^\.goreleaser\.yaml$|^Makefile$|${gomod}"
+          installer="^scripts/install/|^deploy/|^scripts/(ci-installer|install-restic|testvm-deploy|sign-release)\.sh$|^cmd/|^internal/(config|unixsock)/|^\.goreleaser\.yaml$|^Makefile$|${gomod}"
           out installer "${installer}"
           out installer_root "${installer}|^internal/" root
 
@@ -542,7 +542,7 @@ jobs:
         run: make installer INSTALLER_VERSION=0.0.0-ci
 
       - name: shellcheck
-        run: shellcheck --version && shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh scripts/ci-installer.sh scripts/testvm-deploy.sh
+        run: shellcheck --version && shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh scripts/ci-installer.sh scripts/testvm-deploy.sh scripts/sign-release.sh
 
       - name: Bash tests
         run: bash scripts/install/test.sh

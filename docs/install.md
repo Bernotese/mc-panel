@@ -32,7 +32,30 @@ curl -fsSL https://github.com/Bernotese/mc-panel/releases/latest/download/instal
   | sudo bash -s -- install --domain panel.example.com --email you@example.com
 ```
 
-`install.sh` is attached to every release (`…/releases/download/<tag>/install.sh`, its SHA-256 is in `checksums.txt`). It downloads the release archive for the host architecture and verifies it against `checksums.txt` of the same release.
+`install.sh` is attached to every release (`…/releases/download/<tag>/install.sh`, its SHA-256 is in `checksums.txt`). It downloads the release archive for the host architecture, checks the signature of `checksums.txt` (below) and then the archive against `checksums.txt`.
+
+### Signed releases
+
+From v0.5.0 on every release carries `checksums.txt.sig`, an SSH signature of `checksums.txt` made with the maintainer's release key, which is kept outside GitHub. `install.sh` contains the public key and refuses a release whose signature is missing or does not verify, before it changes anything: on `install`, on `update` (also before it runs the target version's `install.sh`) and for every download in between. So someone who takes over the GitHub account or the release can no longer push code onto your host through `update`.
+
+The one step nothing checks for you is the very first `install.sh` you run: piping it from `curl` into `sudo bash` trusts whatever GitHub serves at that moment. To check it yourself first (needs `ssh-keygen` from `openssh-client`):
+
+```bash
+v=v0.5.0   # the release to install
+base=https://github.com/Bernotese/mc-panel/releases/download/$v
+curl -fsSL -O "$base/install.sh" -O "$base/checksums.txt" -O "$base/checksums.txt.sig"
+cat >allowed_signers <<'KEY'
+mc-panel-release namespaces="mc-panel-release" RELEASE-KEY-PLACEHOLDER
+KEY
+ssh-keygen -Y verify -f allowed_signers -I mc-panel-release -n mc-panel-release \
+  -s checksums.txt.sig <checksums.txt                      # must say: Good "mc-panel-release" signature
+sha256sum --ignore-missing -c checksums.txt               # must say: install.sh: OK
+sudo bash install.sh install --domain panel.example.com --email you@example.com
+```
+
+The key line above must match the one in this guide on GitHub and in `scripts/install/release-signers` of the release; its fingerprint is `RELEASE-KEY-FINGERPRINT-PLACEHOLDER`. The `install.sh` you checked this way checks everything after it.
+
+Releases before v0.5.0 have no signature. `install --version v0.4.0` or an `update` (also a downgrade) to such a release stops unless you add `--allow-unsigned`; then it warns loudly and checks only `checksums.txt` of the same release. `--allow-unsigned` never admits an unsigned release from v0.5.0 on. `doctor` shows how the installed release was checked (`release_signature`).
 
 The steps, in order: preflight, packages (with the Caddy repository), layout (users, directories), binaries, configuration, systemd units, Caddy site, firewall, security updates, first admin, and a final `doctor` run. Each step prints `[ok]`, `[changed]`, `[skip]` or `[warn]`. A second run with the same options changes nothing. At the end the installer prints the panel URL, the admin and the next steps. The log is in `/var/log/mc-panel-install.log` (0600).
 
@@ -51,7 +74,8 @@ sudo bash install.sh doctor
 | `--email ADDRESS` | contact address for Let's Encrypt (required with Let's Encrypt) |
 | `--tls letsencrypt\|internal` | `letsencrypt` (default) or Caddy's own CA (`internal`, e.g. for a host without public DNS; browsers warn until you trust the CA, and passkeys do not work with certificate errors). With `internal` and no `--domain` the panel runs on `localhost`. |
 | `--version vX.Y.Z` | install this release instead of the version of the script |
-| `--from-dir DIR` | install a local build (binaries, `deploy/` and `install.sh` in `DIR`) without network downloads; excludes `--version` |
+| `--from-dir DIR` | install a local build (binaries, `deploy/` and `install.sh` in `DIR`) without network downloads or signature check; excludes `--version` |
+| `--allow-unsigned` | allow a release from before v0.5.0, which has no signature (see [Signed releases](#signed-releases)) |
 | `--ssh-port N` | SSH port to keep open; default: read from `sshd -T` and compared with the ports sshd really listens on (a mismatch aborts) |
 | `--allow-port PORT[/tcp\|/udp]` | open another port in the host firewall; repeatable. Give it again on every later `install`, or the port is closed again. |
 | `--no-firewall` | skip the host firewall step |
@@ -138,11 +162,12 @@ sudo bash install.sh update           # update to the latest release
 |---|---|
 | `--version vX.Y.Z` | update to this release instead of the latest |
 | `--from-dir DIR` | update to a local build |
+| `--allow-unsigned` | allow a target release from before v0.5.0, which has no signature (see [Signed releases](#signed-releases)) |
 | `--check` | only report the installed and the available version |
 | `--force` | reinstall the installed version; also rolls back an interrupted update with the database copy without asking |
 | `--yes` | answer yes to confirmations |
 
-`update` hands over to the `install.sh` of the target version. It backs up the binaries, the units, the three configuration files and the database (consistent SQLite copy) to `/var/lib/mc-panel-rollback/<old version>-<time>/` (root only; the three newest are kept), swaps binaries and units, adds missing configuration keys, restarts the services and checks their health. Minecraft containers keep running; players stay connected.
+`update` checks the signature of the target release and hands over to the `install.sh` of the target version. It backs up the binaries, the units, the three configuration files and the database (consistent SQLite copy) to `/var/lib/mc-panel-rollback/<old version>-<time>/` (root only; the three newest are kept), swaps binaries and units, adds missing configuration keys, restarts the services and checks their health. Minecraft containers keep running; players stay connected.
 
 Once the new version runs healthy, `update` also brings Caddy up to date: it adds the Caddy repository and installs Caddy from it (an older install still has Ubuntu's package), rewrites `/etc/caddy/mc-panel.caddy` and the drop-in `caddy.service.d/mc-panel.conf`, moves the admin API of an installer-owned Caddyfile to a socket, and writes the `unattended-upgrades` settings (see [Caddy](#caddy)). These steps are outside the rollback copy: if one fails, `update` prints a `[warn]`, the update itself stays done, and `update --force` retries it. `update` does not change the firewall; run `install` again for that.
 
@@ -159,12 +184,13 @@ sudo bash install.sh doctor          # human-readable: ✓ ok, ! warning, ✗ fa
 sudo bash install.sh doctor --json   # {"status": "ok|warn|fail", "checks": [{"id", "status", "message", "hint"}]}
 ```
 
-Exit code 0 means all ok, 1 warnings, 2 failures. Without root the checks that need root report "skipped". The checks: `services`, `sockets`, `files_process`, `versions`, `update_available`, `update_state`, `config`, `permissions`, `caddy_config`, `caddy_import`, `caddy_package`, `caddy_admin`, `certificate`, `dns`, `firewall`, `docker`, `docker_version`, `docker_live_restore`, `docker_dns`, `restic`, `tzdata`, `time_sync`, `upgrades`, `reboot_required`, `storage_fs`, `storage_free`, `backup_keys`, `ssh_password`, `ssh_root`, `ssh_kbdinteractive`.
+Exit code 0 means all ok, 1 warnings, 2 failures. Without root the checks that need root report "skipped". The checks: `services`, `sockets`, `files_process`, `versions`, `update_available`, `release_signature`, `update_state`, `config`, `permissions`, `caddy_config`, `caddy_import`, `caddy_package`, `caddy_admin`, `certificate`, `dns`, `firewall`, `docker`, `docker_version`, `docker_live_restore`, `docker_dns`, `restic`, `tzdata`, `time_sync`, `upgrades`, `reboot_required`, `storage_fs`, `storage_free`, `backup_keys`, `ssh_password`, `ssh_root`, `ssh_kbdinteractive`.
 
 Common warnings:
 
 | Check | Meaning and fix |
 |---|---|
+| `release_signature` | The installed release was installed with `--allow-unsigned`, or before signed releases (no record in `/etc/mc-panel/release`). `install.sh update` to a signed release (v0.5.0 or later) fixes it. A local build (`--from-dir`) is reported as ok, without a signature check. |
 | `storage_fs` | `/srv/mc-panel` shares a file system with `/var/lib/mc-panel` (database) or Docker's data root (`/var/lib/docker`). A server that fills the disk then also stops the panel or Docker. The installer does not create a file system; mount one at `/srv/mc-panel` before you install (or move the data there while everything is stopped). |
 | `caddy_package` | Caddy is older than 2.10 or does not come from the Caddy repository (Ubuntu's package gets no security updates). `install.sh update --force` switches it. |
 | `caddy_admin` | Caddy's admin API listens on TCP (default `127.0.0.1:2019`), so any local user, the panel included, can reconfigure Caddy and read its TLS keys. The installer moves it only in a Caddyfile it owns; for your own Caddyfile add `admin unix//run/caddy/admin.sock` to the global options and run `systemctl restart caddy`. |
@@ -225,6 +251,7 @@ How to restore a snapshot without the panel is described in [`docs/dev/README.md
 | `/srv/mc-panel/backups/` | restic repositories and keys |
 | `/srv/mc-panel/tmp/<id>` | the `/tmp` of each Minecraft container (disposable, not backed up) |
 | `/var/lib/mc-panel-rollback/` | update backups |
+| `/etc/mc-panel/release` | how the installed release was checked (`version`, `verified=signed\|unsigned\|from-dir`, the signing key's fingerprint) |
 | `/var/log/mc-panel-install.log` | installer log |
 | `/etc/caddy/mc-panel.caddy` | the panel's Caddy site (rewritten by `install` and `update`) |
 | `/etc/caddy/mc-panel.d/*.caddy` | your additions to the panel site (imported inside it; never touched by the installer) |
