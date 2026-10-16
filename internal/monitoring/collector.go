@@ -9,15 +9,20 @@ import (
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
 	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/timescale"
 )
 
 // collectEvery, tpsEvery, liveTPSEvery, liveWindow and maxParallelPings come from types.go.
 const (
 	statusTimeout   = 10 * time.Second
 	rconTimeout     = 10 * time.Second
-	liveFresh       = 10 * time.Second // a 5-s live reading counts as current this long
-	tpsCarry        = 90 * time.Second // the last valid TPS/MSPT is carried this long (V5)
-	maxParallelRcon = 4                // RCON calls at once, pass and live loop together
+	maxParallelRcon = 4 // RCON calls at once, pass and live loop together
+)
+
+// Scaled with collectEvery in acceptance builds (types.go).
+var (
+	liveFresh = timescale.D(10 * time.Second) // a 5-s live reading counts as current this long
+	tpsCarry  = timescale.D(90 * time.Second) // the last valid TPS/MSPT is carried this long (V5)
 	// tpsDue tolerates ticker jitter: a pass a little early after tpsEvery still asks.
 	tpsDue = tpsEvery - collectEvery/2
 )

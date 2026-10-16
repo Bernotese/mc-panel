@@ -14,7 +14,7 @@ generate:
 check:
 	@files="$$(gofmt -l $$(git ls-files '*.go'))"; if [ -n "$$files" ]; then echo "gofmt needed:"; echo "$$files"; exit 1; fi
 	$(GO) vet ./...
-	GOOS=linux $(GO) vet -tags nftintegration,dockerintegration ./...
+	GOOS=linux $(GO) vet -tags nftintegration,dockerintegration,acceptance ./...
 	GOOS=linux GOARCH=arm64 $(GO) build ./...
 	cd web && npm run typecheck
 	@for f in scripts/install/*.sh scripts/install/tests/*.sh; do bash -n "$$f" || exit 1; done
@@ -24,9 +24,11 @@ test: test-go test-web
 
 test-go:
 	$(GO) test ./...
+	$(GO) test -tags acceptance ./internal/timescale
 
 test-race:
 	CGO_ENABLED=1 $(GO) test -race ./...
+	CGO_ENABLED=1 $(GO) test -race -tags acceptance ./internal/timescale
 
 test-web:
 	cd web && npm test
