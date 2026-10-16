@@ -89,8 +89,9 @@ type Daemon struct {
 }
 
 type network struct {
-	driver string
-	labels map[string]string
+	driver  string
+	labels  map[string]string
+	subnets []string // IPAM config, like Docker's address pools
 }
 
 type hold struct {
@@ -205,10 +206,19 @@ func (d *Daemon) HasNetwork(name string) bool {
 }
 
 // AddNetwork seeds a network, e.g. a foreign one mc-panel must not adopt.
-func (d *Daemon) AddNetwork(name, driver string, labels map[string]string) {
+func (d *Daemon) AddNetwork(name, driver string, labels map[string]string, subnets ...string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.networks[name] = network{driver: driver, labels: labels}
+	d.networks[name] = network{driver: driver, labels: labels, subnets: subnets}
+}
+
+// SetNetworkSubnets replaces the IPAM subnets of an existing network.
+func (d *Daemon) SetNetworkSubnets(name string, subnets ...string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := d.networks[name]
+	n.subnets = subnets
+	d.networks[name] = n
 }
 
 // SetImage changes the image a container reports on inspect, e.g. to the form
@@ -449,7 +459,12 @@ func (d *Daemon) network(w http.ResponseWriter, r *http.Request, name string) {
 			writeError(w, http.StatusNotFound, "network "+name+" not found")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"Name": name, "Driver": n.driver, "Labels": n.labels})
+		cfg := []map[string]string{}
+		for _, sub := range n.subnets {
+			cfg = append(cfg, map[string]string{"Subnet": sub, "Gateway": "ignored"})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"Name": name, "Driver": n.driver, "Labels": n.labels,
+			"IPAM": map[string]any{"Driver": "default", "Config": cfg}})
 		return
 	}
 	var req struct {
@@ -465,7 +480,9 @@ func (d *Daemon) network(w http.ResponseWriter, r *http.Request, name string) {
 		writeError(w, http.StatusConflict, "network with name "+req.Name+" already exists")
 		return
 	}
-	d.networks[req.Name] = network{driver: req.Driver, labels: req.Labels}
+	// Docker hands out one IPv4 subnet per bridge network from its default pools.
+	sub := fmt.Sprintf("172.%d.0.0/16", 18+len(d.networks))
+	d.networks[req.Name] = network{driver: req.Driver, labels: req.Labels, subnets: []string{sub}}
 	writeJSON(w, http.StatusCreated, map[string]string{"Id": "net-" + req.Name})
 }
 
