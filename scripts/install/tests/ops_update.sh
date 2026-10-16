@@ -68,6 +68,8 @@ ops_probes() {
   upd_db_restore() { cp -- "$1" "$ROOT$DATA_DIR/panel.db"; }
   upd_free_bytes() { echo "${OPS_FREE:-100000000000}"; }
   upd_probe_restarts() { echo 0; }
+  upd_probe_unit_state() { echo "active/running (success)"; }
+  upd_probe_unit_report() { echo "unit report since $1"; }
   # never the network in a test (tests that need a download define fetch themselves)
   fetch() { fail "network access in a test: $1"; }
   upd_fetch_latest_json() { fail "network access in a test: GitHub API"; }
@@ -77,6 +79,21 @@ ops_probes() {
   pkg_caddy_ensure() { echo "step pkg_caddy_ensure" >>"$WORK/calls.log"; }
   cad_ensure() { echo "step cad_ensure $DOMAIN $TLS_MODE" >>"$WORK/calls.log"; }
   upg_ensure() { echo "step upg_ensure" >>"$WORK/calls.log"; }
+}
+
+# ops_counter NAME prints 1, 2, 3, ... on successive calls (a value that grows on every look,
+# e.g. NRestarts of a crash-looping service).
+ops_counter() {
+  local f="$WORK/counter.$1" n=0
+  [[ ! -f $f ]] || n="$(cat "$f")"
+  n=$((n + 1))
+  echo "$n" >"$f"
+  echo "$n"
+}
+
+# ops_calls_after_last LINE: the calls.log lines after the last one that is exactly LINE.
+ops_calls_after_last() {
+  awk -v l="$1" '{ a[NR] = $0 } $0 == l { last = NR } END { for (i = last + 1; i <= NR; i++) print a[i] }' "$WORK/calls.log"
 }
 
 # ops_only_dir: the single rollback dir.
@@ -261,11 +278,33 @@ test_ops_update_rollback_failure_exits_4() {
   UPD_HEALTH_SECS=0
   assert_exit 4 cmd_update
   assert_contains "$(cat "$WORK/out")" "rollback to 1.0.0 failed"
+  assert_file_contains "$(ops_only_dir)/state" "phase=rollback_failed"
+  # everything was put back: the restored 1.0.0 keeps running (no stop after its restart)
+  assert_eq "1.0.0" "$("$ROOT$BIN_DIR/panel" version)"
+  assert_eq "" "$(ops_calls_after_last 'systemctl restart mcpanel-panel.service' | grep 'systemctl stop' || true)"
+  assert_contains "$(cat "$WORK/out")" "1.0.0 is back in place and keeps running, but it is not healthy"
+  assert_contains "$(cat "$WORK/out")" "sudo bash install.sh doctor"
+  assert_not_contains "$(cat "$WORK/out")" "all mc-panel services are stopped"
+}
+
+test_ops_update_rollback_that_cannot_restore_stops_everything() {
+  ops_fake_install 1.0.0
+  ops_probes
+  ops_fake_new_build 1.1.0
+  TARGET_VERSION=1.1.0
+  FROM_DIR="$WORK/build"
+  OPS_UNHEALTHY=1
+  UPD_HEALTH_SECS=0
+  # the database copy cannot be put back: a half-restored system must not run
+  upd_db_restore() { return 1; }
+  assert_exit 4 cmd_update
+  assert_contains "$(cat "$WORK/out")" "could not put the database back"
+  assert_contains "$(cat "$WORK/out")" "all mc-panel services are stopped"
   assert_contains "$(cat "$WORK/out")" "systemctl daemon-reload"
   assert_file_contains "$(ops_only_dir)/state" "phase=rollback_failed"
+  # no restart of the half-restored version; the last calls stop the services
+  assert_eq "" "$(ops_calls_after_last 'systemctl stop mcpanel-agent.service' | grep 'systemctl restart' || true)"
   assert_called 'systemctl stop mcpanel-panel.service'
-  # what the rollback could put back is back
-  assert_eq "1.0.0" "$("$ROOT$BIN_DIR/panel" version)"
 }
 
 test_ops_update_rolls_back_on_signal() {
@@ -625,12 +664,38 @@ test_ops_update_restarting_service_is_not_healthy() {
   ops_probes
   ops_fake_new_build 1.1.0
   UPD_HEALTH_SECS=0
-  # the new panel crashes and is restarted by systemd
+  # the new panel crashes and systemd restarts it again and again (one more per look)
   upd_probe_restarts() {
-    if [[ $1 == mcpanel-panel.service && $("$ROOT$BIN_DIR/panel" version) == 1.1.0 ]]; then echo 2; else echo 0; fi
+    if [[ $1 == mcpanel-panel.service && $("$ROOT$BIN_DIR/panel" version) == 1.1.0 ]]; then
+      ops_counter panel-restarts
+    else
+      echo 0
+    fi
   }
   assert_exit 3 cmd_update
   assert_eq "1.0.0" "$("$ROOT$BIN_DIR/panel" version)"
+  assert_contains "$(cat "$WORK/out")" "1.1.0 is not healthy after 0s: systemd restarted mcpanel-panel.service 1 times"
+}
+
+test_ops_update_rollback_ignores_restarts_of_the_broken_version() {
+  # systemd 255 keeps NRestarts of the crash-looping new panel (43) across the rollback's stop
+  # and start; the old panel then runs fine and the rollback must count as healthy
+  ops_fake_install 1.0.0
+  ops_probes
+  ops_fake_new_build 1.1.0
+  UPD_HEALTH_SECS=0
+  upd_probe_restarts() {
+    if [[ $1 != mcpanel-panel.service ]]; then
+      echo 0
+    elif [[ $("$ROOT$BIN_DIR/panel" version) == 1.1.0 ]]; then
+      ops_counter panel-restarts
+    else
+      echo 43
+    fi
+  }
+  assert_exit 3 cmd_update
+  assert_eq "1.0.0" "$("$ROOT$BIN_DIR/panel" version)"
+  assert_file_contains "$(ops_only_dir)/state" "phase=rolled_back"
 }
 
 test_ops_update_checks_the_socket_units() {
@@ -639,7 +704,37 @@ test_ops_update_checks_the_socket_units() {
   ops_fake_new_build 1.1.0
   UPD_HEALTH_SECS=0
   systemd_wait_active() { [[ $1 != mcpanel-panel.socket || $("$ROOT$BIN_DIR/panel" version) == 1.0.0 ]]; }
+  upd_probe_unit_state() { echo "failed/failed (exit-code)"; }
   assert_exit 3 cmd_update
+  assert_contains "$(cat "$WORK/out")" "not healthy after 0s: mcpanel-panel.socket is failed/failed (exit-code)"
+}
+
+test_ops_update_names_the_failing_endpoint_and_logs_the_units() {
+  ops_fake_install 1.0.0
+  ops_probes
+  ops_fake_new_build 1.1.0
+  mkdir -p "$ROOT${LOG_FILE%/*}"
+  : >"$ROOT$LOG_FILE"
+  UPD_HEALTH_SECS=0
+  upd_probe_health() {
+    if [[ $("$ROOT$BIN_DIR/panel" version) == 1.0.0 ]]; then return 0; fi
+    echo "panel: curl: (56) Recv failure: Connection reset by peer"
+    return 1
+  }
+  assert_exit 3 cmd_update
+  assert_contains "$(cat "$WORK/out")" "1.1.0 is not healthy after 0s: health check failed: panel: curl: (56) Recv failure"
+  assert_file_contains "$ROOT$LOG_FILE" "not healthy after 0s: health check failed: panel"
+  assert_file_contains "$ROOT$LOG_FILE" "unit report since"
+}
+
+test_ops_update_failed_rollback_names_the_reason() {
+  ops_fake_install 1.0.0
+  ops_probes
+  ops_fake_new_build 1.1.0
+  UPD_HEALTH_SECS=0
+  upd_probe_restarts() { if [[ $1 == mcpanel-agent.service ]]; then ops_counter agent-restarts; else echo 0; fi; }
+  assert_exit 4 cmd_update
+  assert_contains "$(cat "$WORK/out")" "1.0.0 is not healthy after 0s: systemd restarted mcpanel-agent.service 1 times"
 }
 
 test_ops_update_from_dir_hands_over_to_its_install_sh() {
