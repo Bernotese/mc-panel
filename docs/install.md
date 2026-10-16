@@ -150,7 +150,7 @@ Once the new version runs healthy, `update` also brings Caddy up to date: it add
 
 ### Rollback
 
-If the new version does not come up healthy, `update` rolls back automatically to the old binaries, units, configuration and database and exits with code **3**. If the rollback fails too, it stops all services, prints instructions and exits with code **4**.
+If the new version does not come up healthy, `update` rolls back automatically to the old binaries, units, configuration and database and exits with code **3**. "Healthy" means: all three binaries report the version, services and sockets are active, systemd has not restarted a service on its own during the wait, and the health endpoints answer within 90 s; the warning names what failed, and the install log gets the units' status and journal. If the rollback fails too, `update` exits with code **4**: when the old version was put back but does not come up healthy, it keeps running (check it with `doctor`, fix the cause, run `update` again); only when putting the old files or the database back failed are all services stopped, and `update` prints the commands to restore them by hand.
 
 If an update was cut off hard (power loss, `kill -9`, dropped SSH session), the next `update` finishes it first: nothing swapped yet → aborted; target version installed and healthy → done; otherwise it rolls back with the database copy after asking (or with `--force`/`--yes`), because changes since the backup are lost. `doctor` reports such directories (`update_state`).
 
