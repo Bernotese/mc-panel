@@ -91,10 +91,16 @@ type JournalReport struct {
 	MaxAnchorID int64
 }
 
-// OK reports whether the database agrees with the anchors. Restored entries are warnings: after
-// a restore or rollback, check only the journal written since then (journalctl --since).
+// OK reports whether the database agrees with the first anchor of every id. Restored entries
+// (matching only a later anchor) are not OK either: a compromised panel can log a later anchor
+// itself. After a real restore or rollback, check the journal since then (journalctl --since).
 func (r JournalReport) OK() bool {
-	return len(r.Changed) == 0 && len(r.Missing) == 0
+	return len(r.Changed) == 0 && len(r.Missing) == 0 && len(r.Restored) == 0
+}
+
+// OnlyRestored reports a mismatch that consists of restored entries only.
+func (r JournalReport) OnlyRestored() bool {
+	return len(r.Changed) == 0 && len(r.Missing) == 0 && len(r.Restored) > 0
 }
 
 // Truncated reports whether the newest anchored entries are gone from the database.

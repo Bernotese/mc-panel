@@ -438,10 +438,12 @@ func TestLocalAddrs(t *testing.T) {
 func TestNotifyDedupAuthEventsPerUser(t *testing.T) {
 	e := newDispEnv(t, DispatcherOptions{QueueSize: 20})
 	ctx := context.Background()
-	for _, u := range []string{"alice", "bob", "alice"} {
-		e.d.Notify(ctx, Event{Type: EventPasswordChanged, IP: "203.0.113.7", Username: u})
+	for _, typ := range []EventType{EventPasswordChanged, EventUserCreated, EventUserDeleted, EventPermissionsChanged, EventNewDeviceLogin} {
+		for _, u := range []string{"alice", "bob", "alice"} {
+			e.d.Notify(ctx, Event{Type: typ, IP: "203.0.113.7", Username: u})
+		}
 	}
-	if n := len(e.d.ch); n != 2 {
-		t.Fatalf("queued %d, want 2 (one per user)", n)
+	if n := len(e.d.ch) + len(e.d.ops); n != 10 {
+		t.Fatalf("queued %d, want 10 (one per type and user)", n)
 	}
 }

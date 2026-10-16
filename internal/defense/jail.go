@@ -149,9 +149,10 @@ func (s *Service) jailLevels(ip netip.Addr, key netip.Prefix) []jailLevel {
 	}, levels...)
 }
 
-// maybeJail jails ip's key, or for IPv6 its /56 or /48, when one of them reached its failure
-// threshold. The widest prefix wins: once it is jailed, narrower jails would add nothing.
-// Allowlisted and loopback addresses are never jailed.
+// maybeJail jails ip's key, and for IPv6 its /56 and /48, when they reached their failure
+// thresholds. A jailed /56 or /48 never ends the check: it is app-level only and exempts known
+// devices, so the /64 must still be jailed (also in the firewall) when it crosses its own
+// threshold. Allowlisted and loopback addresses are never jailed.
 func (s *Service) maybeJail(ctx context.Context, ip netip.Addr, key netip.Prefix, now time.Time) error {
 	if ip.IsLoopback() || s.snap.Load().allowed(ip, now) {
 		return nil
@@ -160,7 +161,7 @@ func (s *Service) maybeJail(ctx context.Context, ip netip.Addr, key netip.Prefix
 	defer s.jailMu.Unlock()
 	for _, l := range s.jailLevels(ip, key) {
 		done, err := s.jailIfOver(ctx, ip, l, now)
-		if err != nil || done {
+		if err != nil || (done && !isAggregateKey(l.key)) {
 			return err
 		}
 	}

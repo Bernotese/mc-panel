@@ -78,6 +78,9 @@ func run(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, usageText)
 		return 2
 	}
+	if errors.Is(err, audit.ErrRestored) {
+		return 3 // verify printed its report and the hint; 2 is a usage error
+	}
 	if err != nil {
 		if !errors.Is(err, audit.ErrChainBroken) { // verify already printed its report
 			_, _ = fmt.Fprintln(stderr, "error:", err)

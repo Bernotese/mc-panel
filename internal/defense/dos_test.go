@@ -179,3 +179,54 @@ func TestAllowlistedNeverAggregated(t *testing.T) {
 		t.Fatalf("an allowlisted address must never be jailed by an aggregated jail: %v", err)
 	}
 }
+
+// A jailed /56 does not end the check: the /64 of a known device inside it is still jailed
+// after its own five failures (the known-device exemption must not allow endless guessing).
+func TestKnownDeviceInsideAggregateGetsSlash64Jail(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.knownDevice(t, "2001:db8:5:ee::1")
+	for i := range Net56FailureThreshold {
+		e.failPassword(t, fmt.Sprintf("2001:db8:5:%x::1", i), "admin")
+	}
+	if err := e.svc.CheckLogin(ctx, addr("2001:db8:5:ee::1"), "admin"); err != nil {
+		t.Fatalf("precondition: the known device passes the /56 jail: %v", err)
+	}
+	for range FailureThreshold {
+		e.failPassword(t, "2001:db8:5:ee::1", "admin")
+	}
+	if err := e.svc.CheckLogin(ctx, addr("2001:db8:5:ee::1"), "admin"); !errors.Is(err, ErrJailed) {
+		t.Fatalf("known device after five failures = %v, want ErrJailed", err)
+	}
+	if rec := e.filter("2001:db8:5:ee::1", "/"); rec.Code != http.StatusForbidden {
+		t.Fatalf("the /64 jail applies in the IP filter, got %d", rec.Code)
+	}
+}
+
+// A /64 that crosses its threshold with the failure that creates the aggregate jail is jailed
+// too, and synced to the firewall.
+func TestSlash64JailedTogetherWithAggregate(t *testing.T) {
+	ag := newFakeAgent()
+	e := newEnv(t, withAgent(ag))
+	ctx := context.Background()
+	for i := range Net56FailureThreshold - FailureThreshold {
+		e.failPassword(t, fmt.Sprintf("2001:db8:5:%x::1", i+1), "admin")
+	}
+	for range FailureThreshold { // the fifth failure is also the twentieth in the /56
+		e.failPassword(t, "2001:db8:5:ff::1", "admin")
+	}
+	keys := map[string]bool{}
+	for _, j := range e.activeJails(t) {
+		keys[j.IpKey] = true
+	}
+	if !keys["2001:db8:5::/56"] || !keys["2001:db8:5:ff::/64"] || len(keys) != 2 {
+		t.Fatalf("jails = %v, want the /56 and the /64", keys)
+	}
+	if err := e.svc.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	bans, _, _ := ag.calls()
+	if len(bans) != 1 || bans[0].String() != "2001:db8:5:ff::/64" {
+		t.Fatalf("firewall bans = %v, want only the /64", bans)
+	}
+}
