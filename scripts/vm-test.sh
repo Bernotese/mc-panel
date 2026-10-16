@@ -124,6 +124,8 @@ suite_go() {
   CGO_ENABLED=1 go test -race -count=1 -exec true ./... > /dev/null
   log "go test -race ./... (MCPANEL_TEST_RESTIC=${MCPANEL_TEST_RESTIC})"
   with_lock env CGO_ENABLED=1 go test -race -count=1 ./...
+  log "go test -race -tags acceptance ./internal/timescale (acceptance time scale)"
+  env CGO_ENABLED=1 go test -race -count=1 -tags acceptance ./internal/timescale
 }
 
 need_shellcheck() {

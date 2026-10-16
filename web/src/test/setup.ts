@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, vi } from 'vitest'
 import { setCsrfToken } from '@/api/csrf'
 import { resetApiHandlers } from '@/api/handlers'
@@ -20,6 +20,10 @@ Element.prototype.hasPointerCapture ??= () => false
 Element.prototype.releasePointerCapture ??= () => {}
 // jsdom only reports "Not implemented" for scrollTo; the router calls it on navigation.
 window.scrollTo = vi.fn() as unknown as typeof window.scrollTo
+
+// Like testTimeout in vite.config.ts: on the shared VM a render under load can miss the default
+// 1 s of findBy/waitFor. Passing tests do not wait longer; only failures report later.
+configure({ asyncUtilTimeout: 5000 })
 
 installMatchMedia()
 await i18nReady

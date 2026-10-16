@@ -11,6 +11,8 @@ run:
   build-tags:
     - nftintegration
     - dockerintegration
+    # internal/timescale's acceptance variant (the instance acceptance's panel build)
+    - acceptance
   modules-download-mode: readonly
 
 linters:
