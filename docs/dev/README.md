@@ -308,6 +308,8 @@ CI job details:
 
 `make test-vm SUITE=lint` lints the Linux-specific files (golangci-lint runs on Linux there).
 
+**Dependabot** (`.github/dependabot.yml`) opens one grouped minor/patch PR per ecosystem (GitHub Actions, Go modules, `web/`, `tools/redocly/`) and week, at most five open PRs in total. Semver-major updates are ignored: majors (including `@types/node`, which follows the Node runtime major) are done as planned upgrades.
+
 ## Lint conventions
 
 - The configuration is in `.golangci.yml`; gosec runs as part of golangci-lint.
