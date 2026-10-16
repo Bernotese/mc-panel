@@ -60,7 +60,7 @@ func TestInstanceContainerGolden(t *testing.T) {
 				"/srv/mc-panel/instances/7:/data", "/srv/mc-panel/tmp/7:/tmp",
 				"/srv/mc-panel/patches:/mcpanel-patches:ro",
 			},
-			NetworkMode:    "mcpanel-mc",
+			NetworkMode:    "mcpanel-net-7", // its own network: no other server reaches it (SEC-03)
 			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
 			CapDrop:        []string{"ALL"},
 			SecurityOpt:    []string{"no-new-privileges:true"},
@@ -72,7 +72,7 @@ func TestInstanceContainerGolden(t *testing.T) {
 			Ulimits:        []docker.Ulimit{{Name: "nofile", Soft: 65536, Hard: 65536}},
 			LogConfig:      docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
 		},
-		NetworkingConfig: docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{"mcpanel-mc": {}}},
+		NetworkingConfig: docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{"mcpanel-net-7": {}}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("template =\n%+v\nwant\n%+v", got, want)
@@ -169,7 +169,7 @@ func TestInstanceContainerInvariants(t *testing.T) {
 			t.Errorf("%s: rootfs/tmpfs/limits changed: %+v", req.Name, hc)
 		}
 		if !slices.Equal(hc.CapDrop, []string{"ALL"}) || !slices.Equal(hc.SecurityOpt, []string{"no-new-privileges:true"}) ||
-			hc.NetworkMode != "mcpanel-mc" || hc.PidsLimit != 1024 || hc.RestartPolicy.Name != "unless-stopped" {
+			hc.NetworkMode != instances.InstanceNetwork(req.ID) || hc.PidsLimit != 1024 || hc.RestartPolicy.Name != "unless-stopped" {
 			t.Errorf("%s: hardening changed: %+v", req.Name, hc)
 		}
 		if want := int64(req.Spec.MemoryMiB) * 5 << 20 / 4; hc.Memory != want || hc.MemorySwap != want {

@@ -76,6 +76,28 @@ type ContainerSummary struct {
 	Image  string            `json:"Image"`
 	Labels map[string]string `json:"Labels"`
 	State  string            `json:"State"` // created, running, paused, restarting, removing, exited, dead
+	// NetworkSettings lists the networks the container is connected to.
+	NetworkSettings NetworkSettings `json:"NetworkSettings"`
+}
+
+// NetworkSettings is the network part of a container summary or inspect answer.
+type NetworkSettings struct {
+	Networks map[string]Endpoint `json:"Networks"`
+}
+
+// Endpoint is a container's connection to one network.
+type Endpoint struct {
+	// NetworkID is the network the endpoint was last set up on ("" for a container that
+	// never ran). After the network was deleted and created again under the same name it
+	// differs from the network's ID, and Docker refuses to start the container.
+	NetworkID string `json:"NetworkID"`
+	IPAddress string `json:"IPAddress"`
+}
+
+// OnNetwork reports whether the container is connected to the network called name.
+func (n NetworkSettings) OnNetwork(name string) bool {
+	_, ok := n.Networks[name]
+	return ok
 }
 
 // HasName reports whether the container is called name (Docker prefixes names with "/").
@@ -95,8 +117,9 @@ type ContainerInfo struct {
 	State ContainerState `json:"State"`
 	// RestartCount counts restarts by the restart policy since the container was created
 	// (Docker inspect "RestartCount"; TP5 crash-loop detection).
-	RestartCount int        `json:"RestartCount"`
-	Config       InfoConfig `json:"Config"`
+	RestartCount    int             `json:"RestartCount"`
+	Config          InfoConfig      `json:"Config"`
+	NetworkSettings NetworkSettings `json:"NetworkSettings"`
 }
 
 type ContainerState struct {

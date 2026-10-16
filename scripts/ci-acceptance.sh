@@ -41,7 +41,9 @@ cleanup() {
   nft delete table inet mcpanel 2>/dev/null || true
   # The agent's instance manager creates the mc-router container and its network.
   docker rm -f mcpanel-router >/dev/null 2>&1 || true
-  docker network rm mcpanel-mc >/dev/null 2>&1 || true
+  for net in $(docker network ls -q --filter label=mcpanel.network); do
+    docker network rm "$net" >/dev/null 2>&1 || true # mcpanel-mc and every mcpanel-net-<id>
+  done
   rm -rf "$work"
 }
 trap cleanup EXIT

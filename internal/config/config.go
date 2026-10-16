@@ -301,6 +301,13 @@ const (
 	// second over all clients (its own default, 1/s, lets a single client starve
 	// every join and Server List Ping).
 	DefaultRouterConnectionRateLimit = 50
+	// DefaultInstanceNetworkPool is the IPv4 range the agent carves the per-server
+	// networks from (one /28 each, 4096 in a /16). Docker's own default pools are
+	// 172.17.0.0/16–172.31.0.0/16 and 192.168.0.0/16.
+	DefaultInstanceNetworkPool = "10.213.0.0/16"
+	// InstanceNetworkBits is the prefix length of one server's network: 14 addresses for
+	// the gateway, the server and mc-router.
+	InstanceNetworkBits = 28
 
 	maxEgressDeny           = 64
 	maxRouterConnectionRate = 100000
@@ -338,7 +345,10 @@ type Agent struct {
 	// CPUPerInstance caps every Minecraft container at this many CPUs; 0 = no cap
 	// (only the CPU weight applies).
 	CPUPerInstance float64 `toml:"cpu_per_instance"`
-	Images         Images  `toml:"images"`
+	// InstanceNetworkPool is the IPv4 prefix (/8 to /24) the per-server Docker networks
+	// get their /28 subnets from.
+	InstanceNetworkPool string `toml:"instance_network_pool"`
+	Images              Images `toml:"images"`
 }
 
 func DefaultAgent() Agent {
@@ -353,6 +363,7 @@ func DefaultAgent() Agent {
 
 		ContainerEgressDeny:       DefaultContainerEgressDeny(),
 		RouterConnectionRateLimit: DefaultRouterConnectionRateLimit,
+		InstanceNetworkPool:       DefaultInstanceNetworkPool,
 	}
 }
 
@@ -446,11 +457,35 @@ func (a Agent) Validate() error {
 	if c := a.CPUPerInstance; math.IsNaN(c) || c < 0 || (c > 0 && c < minCPUPerInstance) || c > maxCPUPerInstance {
 		errs = append(errs, fmt.Errorf("cpu_per_instance must be 0 (no cap) or between %g and %d, got %g", minCPUPerInstance, maxCPUPerInstance, c))
 	}
+	if _, err := parseNetworkPool(a.InstanceNetworkPool); err != nil {
+		errs = append(errs, err)
+	}
 	errs = append(errs, a.Images.validate()...)
 	if len(errs) > 0 {
 		return fmt.Errorf("config: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+// NetworkPool returns InstanceNetworkPool parsed; call it only on a validated config.
+func (a Agent) NetworkPool() netip.Prefix {
+	p, _ := parseNetworkPool(a.InstanceNetworkPool)
+	return p
+}
+
+func parseNetworkPool(s string) (netip.Prefix, error) {
+	p, err := netip.ParsePrefix(s)
+	switch {
+	case err != nil:
+		return netip.Prefix{}, fmt.Errorf("instance_network_pool: %q is not a prefix", s)
+	case !p.Addr().Is4():
+		return netip.Prefix{}, fmt.Errorf("instance_network_pool: %s must be an IPv4 prefix", s)
+	case p != p.Masked():
+		return netip.Prefix{}, fmt.Errorf("instance_network_pool: %s has host bits set (want %s)", s, p.Masked())
+	case p.Bits() < 8 || p.Bits() > 24:
+		return netip.Prefix{}, fmt.Errorf("instance_network_pool: %s must be between /8 and /24", s)
+	}
+	return p, nil
 }
 
 // EgressDenyPrefixes returns ContainerEgressDeny parsed; call it only on a validated config.

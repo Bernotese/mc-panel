@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -70,6 +71,8 @@ func (e *env) config(opts ...func(*instances.Config)) instances.Config {
 		Docker: docker.New(e.d.Socket), InstancesDir: e.dir, UID: os.Getuid(), GID: os.Getgid(),
 		Images: config.DefaultImages(), Clock: e.clk,
 		Log: slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		// The test host's own interfaces must not decide which subnets the tests see.
+		HostPrefixes: func() ([]netip.Prefix, error) { return nil, nil },
 	}
 	for _, o := range opts {
 		o(&cfg)
@@ -143,8 +146,11 @@ func TestEnsureCreatesInstance(t *testing.T) {
 	if c.Status != "created" || c.Config.Labels["mcpanel.revision"] != "1" || c.Config.Image != java21Pinned {
 		t.Fatalf("container = %+v", c)
 	}
-	if !e.d.HasNetwork("mcpanel-mc") {
-		t.Fatal("network mcpanel-mc not created")
+	if !e.d.HasNetwork("mcpanel-net-1") || !e.d.HasNetwork("mcpanel-mc") {
+		t.Fatalf("networks = %v, want mcpanel-net-1 and the router's mcpanel-mc", e.d.Networks())
+	}
+	if !slices.Equal(c.Networks, []string{"mcpanel-net-1"}) {
+		t.Fatalf("instance networks = %v, want only its own", c.Networks)
 	}
 	if got := e.d.Pulls(); !slices.Equal(got, []string{java21Pinned, routerPinned}) {
 		t.Fatalf("pulls = %v", got)
@@ -241,8 +247,15 @@ func TestPowerActions(t *testing.T) {
 	e.power(t, 1, agentapi.PowerStart)
 	mark := len(e.d.Calls())
 	e.power(t, 1, agentapi.PowerRestart)
-	if got := e.callsAfter(mark); !slices.Equal(got, []string{"inspect mcpanel-mc-1", "stop mcpanel-mc-1", "start mcpanel-mc-1"}) {
-		t.Fatalf("restart calls = %v", got)
+	// Container calls only: before the start, the network is ensured (prepareStart).
+	var got []string
+	for _, call := range e.callsAfter(mark) {
+		if strings.HasSuffix(call, " mcpanel-mc-1") {
+			got = append(got, call)
+		}
+	}
+	if !slices.Equal(got, []string{"inspect mcpanel-mc-1", "stop mcpanel-mc-1", "start mcpanel-mc-1"}) {
+		t.Fatalf("restart calls = %v (all: %v)", got, e.callsAfter(mark))
 	}
 	if s := e.status(t, 1); s.State != agentapi.StateRunning || s.Operation != agentapi.OpNone || s.LastError != "" {
 		t.Fatalf("status = %+v", s)
