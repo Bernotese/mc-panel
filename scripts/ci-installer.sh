@@ -173,6 +173,14 @@ for u in mcpanel-panel mcpanel-agent mcpanel-files; do
   systemd-analyze security --no-pager "$u.service" | tail -n 1
 done
 echo "OK: caddy $cv from its repository, admin socket only, reload works"
+[ "$(stat -c '%U:%G %a' /etc/caddy/mc-panel.d)" = "root:root 755" ] || fail "/etc/caddy/mc-panel.d: $(stat -c '%U:%G %a' /etc/caddy/mc-panel.d)"
+printf 'respond /ci-site-hook 204\n' >/etc/caddy/mc-panel.d/ci.caddy
+systemctl reload caddy.service || fail "reload with a file in mc-panel.d"
+code="$(https /ci-site-hook -o /dev/null -w '%{http_code}')"
+[ "$code" = 204 ] || fail "the panel site does not import mc-panel.d (HTTP $code)"
+rm /etc/caddy/mc-panel.d/ci.caddy
+systemctl reload caddy.service || fail "reload after removing the mc-panel.d file"
+echo "OK: the panel site imports /etc/caddy/mc-panel.d/*.caddy"
 
 echo "== doctor"
 n="$(doctor_fails)"
