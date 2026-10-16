@@ -169,7 +169,7 @@ build() {
   local lock_sum
   lock_sum="$(sha256sum "$SRC/web/package-lock.json" | cut -d' ' -f1)"
   if [ "$(cat "$SRC/web/node_modules/.mcpanel-lock.sha256" 2>/dev/null)" != "$lock_sum" ]; then
-    (cd "$SRC/web" && quiet npm ci --no-audit --no-fund)
+    (cd "$SRC/web" && quiet npm ci --ignore-scripts --no-audit --no-fund)
     echo "$lock_sum" >"$SRC/web/node_modules/.mcpanel-lock.sha256"
   fi
   (cd "$SRC/web" && quiet npm run build)
