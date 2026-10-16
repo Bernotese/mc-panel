@@ -32,6 +32,7 @@ What mc-panel trusts, and what it does not protect against:
 - **Plugins, mods and modpacks are code.** A user with `server.files` or `server.plugins` on a server can run any code in its container. Jars come only from Modrinth and Hangar and are checked against the checksum their API reports. That protects against a manipulated download, not against a compromised project or author account.
 - **Downloads at run time.** The Minecraft image is pinned by digest, but inside the container it downloads server jars, loaders and modpacks from their upstreams at start (Mojang, PaperMC, Fabric, NeoForge, Modrinth, CurseForge). The panel cannot verify those.
 - **Checksums while a server runs.** A plugin or mod jar is checked against the upstream checksum before it is moved into place. The temporary file sits in a folder the server's container can write to, so a running server could change it in between: "verified" is no integrity guarantee against the server itself.
+- **Browser:** a strict Content Security Policy without `'unsafe-inline'` (styles of `index.html` carry a per-request nonce; images only from the panel, the TOTP QR code is SVG) and Trusted Types in report-only mode, to be enforced later. Background polling sends `X-MCPanel-Background: 1` and does not keep an idle session alive.
 - **Backups live on the same host** under the user the containers run as; see [docs/install.md](docs/install.md#backups-of-keys-and-data) for the residual risk and off-host copies.
 
 ## Requirements

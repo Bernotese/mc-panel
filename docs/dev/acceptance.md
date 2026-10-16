@@ -21,6 +21,8 @@ Most API checks below run in the browser DevTools console as `friend`, e.g. `awa
 
 What CI covers: auth, defense and notify unit tests, the e2e sign-in with TOTP, and the jail acceptance (`scripts/ci-acceptance.sh`).
 
+- [ ] **TOTP QR code:** the QR code of the 2FA setup (SVG) scans with a phone app.
+- [ ] **Sudo dialog names the action:** the sudo dialog says what it confirms ("Aktion: …", or "N Aktionen: …" for several requests at once).
 - [ ] **First factor needs the password:** a new user without 2FA must enter the current password when setting up the first TOTP or passkey; a wrong password is refused.
 - [ ] **Known device under attack:** script 20 failed logins for `helper` from another address (e.g. `curl` on the VM). Signing in as `helper` from your browser (signed in there before) still works; a fresh private window gets `429` (rate limit, no lock-out).
 - [ ] **Admin allowlist:** enable "Admin access only from the allowlist" with only your current network; an admin session from another address (e.g. via a phone hotspot) gets `403` on the next request and its session is gone after saving. `panel admin unlock` turns it off.
@@ -77,6 +79,7 @@ What CI covers: service unit and Linux tests (path rules, `os.Root` limits, syml
 - [ ] **Only `server.view`:** `friend` has no files area; `/api/servers/<id>/files` answers `403`.
 - [ ] **Audit:** `file.*` entries for upload (size), extract (target), rename (from/to), save, delete and download, by `helper`; listing and opening are not audited.
 - [ ] **Mobile:** file list as cards, upload via the file picker, the editor is usable.
+- [ ] **Unicode names:** a file whose name contains U+202E (right-to-left override) shows the character as ⟨U+202E⟩, in the list and in the download name it is dropped.
 
 ## Plugins and mods
 
@@ -106,6 +109,7 @@ Extra setup: a Fabric server `modded` (current game version, 2 GiB, started once
 - [ ] **Only `server.view`:** `friend` has no plugins area; `/api/servers/<id>/plugins` answers `403`.
 - [ ] **Audit:** one `plugin.install` per jar (also the dependencies), `plugin.update` (from/to), `plugin.toggle` (enabled), `plugin.remove`; mrpack imports add `via: mrpack` per jar and one `plugin.mrpack_import` with pack name, version and counts; search, inventory, update checks and icons are not audited.
 - [ ] **Mobile:** Installed as cards, search, install dialog, mrpack dialog and job progress usable.
+- [ ] **External links:** download and project links show their host; `http:` links are shown as text, not linked.
 
 ## Backups
 
@@ -199,3 +203,4 @@ What CI covers (CI and `make test-vm`): token contrast in light and dark (`web/s
 - [ ] **Keyboard:** tab through rail, tree and pages; focus is always visible.
 - [ ] **Login/2FA and sudo dialog** in the new style.
 - [ ] **CSP:** no CSP errors in the browser console; fonts load from the panel itself (no foreign hosts in the network tab).
+- [ ] **CSP and Trusted Types:** in both themes the browser console shows no CSP or Trusted Types message on the login, the 2FA setup (QR code), the files editor, toasts and dialogs.
