@@ -4,11 +4,14 @@
 package dockertest
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,15 +30,21 @@ const (
 	OpImage   = "image" // GET /images/{ref}/json
 	OpPull    = "pull"
 	OpNetwork = "network" // GET /networks/{name} and POST /networks/create
-	OpCreate  = "create"
-	OpStart   = "start"
-	OpStop    = "stop"
-	OpRestart = "restart"
-	OpKill    = "kill"
-	OpRemove  = "remove"
-	OpInspect = "inspect"
-	OpList    = "list"
-	OpStats   = "stats"
+	// OpNetworkList is GET /networks, OpNetworkConnect/OpNetworkDisconnect are POST
+	// /networks/{name}/connect|disconnect and OpNetworkRemove is DELETE /networks/{name}.
+	OpNetworkList       = "network_list"
+	OpNetworkConnect    = "network_connect"
+	OpNetworkDisconnect = "network_disconnect"
+	OpNetworkRemove     = "network_remove"
+	OpCreate            = "create"
+	OpStart             = "start"
+	OpStop              = "stop"
+	OpRestart           = "restart"
+	OpKill              = "kill"
+	OpRemove            = "remove"
+	OpInspect           = "inspect"
+	OpList              = "list"
+	OpStats             = "stats"
 
 	OpLogs        = "logs"         // GET /containers/{id}/logs
 	OpExecCreate  = "exec_create"  // POST /containers/{id}/exec
@@ -54,6 +63,9 @@ type Container struct {
 	StartedAt    time.Time
 	Kills        []string // signals received
 	StopTimes    []int    // t= of every stop/restart
+	Networks     []string // connected networks, sorted
+	// NetIDs holds the network ID of each endpoint once the container ran on it.
+	NetIDs map[string]string
 }
 
 type failure struct {
@@ -89,9 +101,18 @@ type Daemon struct {
 }
 
 type network struct {
-	driver  string
-	labels  map[string]string
-	subnets []string // IPAM config, like Docker's address pools
+	id         string
+	driver     string
+	labels     map[string]string
+	subnets    []string // IPAM config, like Docker's address pools
+	enableIPv6 bool
+}
+
+// newNetworkID returns a fresh network ID (caller holds d.mu): a network created again
+// under the same name gets a new one, like in Docker.
+func (d *Daemon) newNetworkID() string {
+	d.seq++
+	return fmt.Sprintf("%064x", 1<<40+d.seq)
 }
 
 type hold struct {
@@ -168,6 +189,8 @@ func (d *Daemon) Container(name string) (Container, bool) {
 	cp := *c
 	cp.Kills = slices.Clone(c.Kills)
 	cp.StopTimes = slices.Clone(c.StopTimes)
+	cp.Networks = slices.Clone(c.Networks)
+	cp.NetIDs = maps.Clone(c.NetIDs)
 	return cp, true
 }
 
@@ -209,7 +232,45 @@ func (d *Daemon) HasNetwork(name string) bool {
 func (d *Daemon) AddNetwork(name, driver string, labels map[string]string, subnets ...string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.networks[name] = network{driver: driver, labels: labels, subnets: subnets}
+	d.networks[name] = network{id: d.newNetworkID(), driver: driver, labels: labels, subnets: subnets}
+}
+
+// SetNetworkIPv6 sets EnableIPv6 of an existing network.
+func (d *Daemon) SetNetworkIPv6(name string, on bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := d.networks[name]
+	n.enableIPv6 = on
+	d.networks[name] = n
+}
+
+// NetworkSubnets returns the IPAM subnets of the network called name.
+func (d *Daemon) NetworkSubnets(name string) []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.networks[name].subnets)
+}
+
+// Networks returns the names of all networks, sorted.
+func (d *Daemon) Networks() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	names := make([]string, 0, len(d.networks))
+	for n := range d.networks {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// Connect connects the container called name to network (no checks), e.g. to seed
+// a container of an older agent version.
+func (d *Daemon) Connect(name, network string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if c, ok := d.containers[name]; ok {
+		c.connect(network)
+	}
 }
 
 // SetNetworkSubnets replaces the IPAM subnets of an existing network.
@@ -297,8 +358,29 @@ func (d *Daemon) Hold(op string) (arrived <-chan string, release func()) {
 func (d *Daemon) newContainer(name string, cfg docker.ContainerConfig) *Container {
 	d.seq++
 	c := &Container{ID: fmt.Sprintf("%064x", d.seq), Name: name, Config: cfg, Status: "created"}
+	if mode := cfg.HostConfig.NetworkMode; mode != "" {
+		c.connect(mode)
+	}
+	for n := range cfg.NetworkingConfig.EndpointsConfig {
+		c.connect(n)
+	}
 	d.containers[name] = c
 	return c
+}
+
+func (c *Container) connect(network string) {
+	if !slices.Contains(c.Networks, network) {
+		c.Networks = append(c.Networks, network)
+		slices.Sort(c.Networks)
+	}
+}
+
+func (c *Container) settings() docker.NetworkSettings {
+	ns := docker.NetworkSettings{Networks: map[string]docker.Endpoint{}}
+	for i, n := range c.Networks {
+		ns.Networks[n] = docker.Endpoint{NetworkID: c.NetIDs[n], IPAddress: fmt.Sprintf("192.0.2.%d", i+2)}
+	}
+	return ns
 }
 
 // lookup finds a container by name or full ID (caller holds d.mu).
@@ -333,6 +415,14 @@ func route(method, path string) (op, target string) {
 		return OpPull, ""
 	case method == http.MethodGet && strings.HasPrefix(path, "/images/") && strings.HasSuffix(path, "/json"):
 		return OpImage, strings.TrimSuffix(strings.TrimPrefix(path, "/images/"), "/json")
+	case method == http.MethodGet && path == "/networks":
+		return OpNetworkList, ""
+	case method == http.MethodPost && strings.HasPrefix(path, "/networks/") && strings.HasSuffix(path, "/connect"):
+		return OpNetworkConnect, strings.TrimSuffix(strings.TrimPrefix(path, "/networks/"), "/connect")
+	case method == http.MethodPost && strings.HasPrefix(path, "/networks/") && strings.HasSuffix(path, "/disconnect"):
+		return OpNetworkDisconnect, strings.TrimSuffix(strings.TrimPrefix(path, "/networks/"), "/disconnect")
+	case method == http.MethodDelete && strings.HasPrefix(path, "/networks/"):
+		return OpNetworkRemove, strings.TrimPrefix(path, "/networks/")
 	case path == "/networks/create" || strings.HasPrefix(path, "/networks/"):
 		return OpNetwork, strings.TrimPrefix(path, "/networks/")
 	case method == http.MethodPost && path == "/containers/create":
@@ -425,6 +515,12 @@ func (d *Daemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		d.pull(w, target)
 	case OpNetwork:
 		d.network(w, r, target)
+	case OpNetworkList:
+		d.networkList(w, r)
+	case OpNetworkConnect, OpNetworkDisconnect:
+		d.networkMember(w, r, op, target)
+	case OpNetworkRemove:
+		d.networkRemove(w, target)
 	case OpCreate:
 		d.create(w, r, target)
 	case OpList:
@@ -463,14 +559,25 @@ func (d *Daemon) network(w http.ResponseWriter, r *http.Request, name string) {
 		for _, sub := range n.subnets {
 			cfg = append(cfg, map[string]string{"Subnet": sub, "Gateway": "ignored"})
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"Name": name, "Driver": n.driver, "Labels": n.labels,
-			"IPAM": map[string]any{"Driver": "default", "Config": cfg}})
+		// Like Docker, only running containers have an endpoint here.
+		members := map[string]any{}
+		for _, c := range d.containers {
+			if slices.Contains(c.Networks, name) && c.Status == "running" {
+				members[c.ID] = map[string]string{"Name": c.Name}
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"Id": n.id, "Name": name, "Driver": n.driver, "Labels": n.labels, "EnableIPv6": n.enableIPv6,
+			"IPAM": map[string]any{"Driver": "default", "Config": cfg}, "Containers": members})
 		return
 	}
 	var req struct {
-		Name   string
-		Driver string
-		Labels map[string]string
+		Name       string
+		Driver     string
+		Labels     map[string]string
+		EnableIPv6 bool
+		IPAM       struct {
+			Config []struct{ Subnet string }
+		}
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" || req.Driver != "bridge" {
 		writeError(w, http.StatusBadRequest, "bad network request")
@@ -482,8 +589,108 @@ func (d *Daemon) network(w http.ResponseWriter, r *http.Request, name string) {
 	}
 	// Docker hands out one IPv4 subnet per bridge network from its default pools.
 	sub := fmt.Sprintf("172.%d.0.0/16", 18+len(d.networks))
-	d.networks[req.Name] = network{driver: req.Driver, labels: req.Labels, subnets: []string{sub}}
-	writeJSON(w, http.StatusCreated, map[string]string{"Id": "net-" + req.Name})
+	if len(req.IPAM.Config) > 0 {
+		want, err := netip.ParsePrefix(req.IPAM.Config[0].Subnet)
+		if err != nil || len(req.IPAM.Config) != 1 {
+			writeError(w, http.StatusBadRequest, "bad IPAM config")
+			return
+		}
+		for _, n := range d.networks {
+			for _, have := range n.subnets {
+				if p, err := netip.ParsePrefix(have); err == nil && p.Overlaps(want) {
+					writeError(w, http.StatusForbidden, "invalid pool request: Pool overlaps with other one on this address space")
+					return
+				}
+			}
+		}
+		sub = want.String()
+	}
+	id := d.newNetworkID()
+	d.networks[req.Name] = network{id: id, driver: req.Driver, labels: req.Labels, subnets: []string{sub}, enableIPv6: req.EnableIPv6}
+	writeJSON(w, http.StatusCreated, map[string]string{"Id": id})
+}
+
+func (d *Daemon) networkList(w http.ResponseWriter, r *http.Request) {
+	var filters map[string][]string
+	if f := r.URL.Query().Get("filters"); f != "" {
+		if err := json.Unmarshal([]byte(f), &filters); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid filters")
+			return
+		}
+	}
+	out := []map[string]any{}
+	for _, name := range slices.Sorted(maps.Keys(d.networks)) {
+		n := d.networks[name]
+		if !matchLabels(n.labels, filters["label"]) {
+			continue
+		}
+		cfg := []map[string]string{}
+		for _, sub := range n.subnets {
+			cfg = append(cfg, map[string]string{"Subnet": sub})
+		}
+		// Like Docker, the list never fills Containers.
+		out = append(out, map[string]any{"Id": n.id, "Name": name, "Driver": n.driver, "Labels": n.labels, "EnableIPv6": n.enableIPv6,
+			"IPAM": map[string]any{"Config": cfg}, "Containers": map[string]any{}})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// networkMember answers connect and disconnect like Docker 29: connecting a running
+// container twice is 403 "already exists", disconnecting one that is not connected 500.
+func (d *Daemon) networkMember(w http.ResponseWriter, r *http.Request, op, name string) {
+	var req struct {
+		Container string
+		Force     bool
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Container == "" {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if _, ok := d.networks[name]; !ok {
+		writeError(w, http.StatusNotFound, "network "+name+" not found")
+		return
+	}
+	c := d.lookup(req.Container)
+	if c == nil {
+		writeError(w, http.StatusNotFound, "No such container: "+req.Container)
+		return
+	}
+	on := slices.Contains(c.Networks, name)
+	switch {
+	case op == OpNetworkConnect && on && c.Status == "running":
+		writeError(w, http.StatusForbidden, "endpoint with name "+c.Name+" already exists in network "+name)
+	case op == OpNetworkConnect:
+		c.connect(name)
+		if c.Status == "running" {
+			if c.NetIDs == nil {
+				c.NetIDs = map[string]string{}
+			}
+			c.NetIDs[name] = d.networks[name].id
+		}
+		w.WriteHeader(http.StatusOK)
+	case !on:
+		writeError(w, http.StatusInternalServerError, "container "+c.ID+" is not connected to network "+name)
+	default:
+		c.Networks = slices.DeleteFunc(c.Networks, func(n string) bool { return n == name })
+		delete(c.NetIDs, name)
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func (d *Daemon) networkRemove(w http.ResponseWriter, name string) {
+	if _, ok := d.networks[name]; !ok {
+		writeError(w, http.StatusNotFound, "network "+name+" not found")
+		return
+	}
+	for _, c := range d.containers {
+		if slices.Contains(c.Networks, name) && c.Status == "running" {
+			writeError(w, http.StatusForbidden, "error while removing network: network "+name+" has active endpoints")
+			return
+		}
+	}
+	// Stopped containers keep their (now stale) endpoint, as in Docker.
+	delete(d.networks, name)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (d *Daemon) create(w http.ResponseWriter, r *http.Request, name string) {
@@ -541,6 +748,7 @@ func (d *Daemon) list(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, docker.ContainerSummary{
 			ID: c.ID, Names: []string{"/" + c.Name}, Image: c.Config.Image, Labels: c.Config.Labels, State: c.Status,
+			NetworkSettings: c.settings(),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -570,6 +778,21 @@ func (d *Daemon) container(w http.ResponseWriter, r *http.Request, op, ref strin
 		if c.Status == "running" {
 			w.WriteHeader(http.StatusNotModified)
 			return
+		}
+		// Like Docker: an endpoint set up on a network that is gone (or was created again
+		// under the same name) fails the start; a never-started one resolves by name.
+		for _, name := range c.Networks {
+			n, ok := d.networks[name]
+			if !ok || (c.NetIDs[name] != "" && c.NetIDs[name] != n.id) {
+				writeError(w, http.StatusNotFound, "failed to set up container networking: network "+cmp.Or(c.NetIDs[name], name)+" not found")
+				return
+			}
+		}
+		if c.NetIDs == nil {
+			c.NetIDs = map[string]string{}
+		}
+		for _, name := range c.Networks {
+			c.NetIDs[name] = d.networks[name].id
 		}
 		c.Status, c.ExitCode, c.StartedAt = "running", 0, d.now
 		w.WriteHeader(http.StatusNoContent)
@@ -620,8 +843,9 @@ func (d *Daemon) container(w http.ResponseWriter, r *http.Request, op, ref strin
 				Status: c.Status, Running: c.Status == "running", Restarting: c.Status == "restarting",
 				ExitCode: c.ExitCode, StartedAt: started,
 			},
-			RestartCount: c.RestartCount,
-			Config:       docker.InfoConfig{Image: c.Config.Image, Labels: c.Config.Labels},
+			RestartCount:    c.RestartCount,
+			Config:          docker.InfoConfig{Image: c.Config.Image, Labels: c.Config.Labels},
+			NetworkSettings: c.settings(),
 		})
 	case OpStats:
 		writeJSON(w, http.StatusOK, d.stats[c.Name])

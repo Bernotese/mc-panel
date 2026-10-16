@@ -58,9 +58,16 @@ type Config struct {
 	RconCommand string
 	// RconTimeout bounds one console command; 0 means RconTimeout.
 	RconTimeout time.Duration
-	// Egress is the container egress filter, given the subnets of the mcpanel-mc
-	// network whenever they change; nil = none (tests).
+	// Egress is the container egress filter, given the subnets of mcpanel-mc and of
+	// every instance network whenever they change; nil = none (tests).
 	Egress EgressFilter
+	// NetworkPool is instance_network_pool; the zero value means
+	// config.DefaultInstanceNetworkPool.
+	NetworkPool netip.Prefix
+	// HostPrefixes lists the host's own networks, which instance networks must not
+	// overlap; nil means HostNetworks (interfaces and routes, without Docker's bridges).
+	// Tests set it.
+	HostPrefixes func() ([]netip.Prefix, error)
 	// NanoCPUs caps every instance container (cpu_per_instance); 0 = no cap.
 	NanoCPUs int64
 	// RouterConnectionRateLimit is mc-router's -connection-rate-limit; 0 = default.
@@ -105,6 +112,14 @@ type Manager struct {
 	egressApplied []netip.Prefix
 	egressErr     string // last sync error, logged on change; guarded by egressMu
 
+	pool         netip.Prefix
+	hostPrefixes func() ([]netip.Prefix, error)
+	netMu        sync.Mutex // serialises creating and removing instance networks
+	shared       []int64    // running instances still on mcpanel-mc, last logged; guarded by netMu
+	// poolExhausted is the pool state last logged; guarded by netMu.
+	poolExhausted bool
+	poolChecked   bool // CheckNetworkPool ran (first loop round with Docker); loop goroutine only
+
 	routerMu sync.Mutex // serialises routes file + router container changes
 	// lastApplied is the routes file content the running router has loaded (nil:
 	// unknown, e.g. after an agent restart). Guarded by routerMu.
@@ -128,6 +143,8 @@ func New(cfg Config) *Manager {
 		host: Host{InstancesDir: cfg.InstancesDir, UID: cfg.UID, GID: cfg.GID, Images: cfg.Images,
 			NanoCPUs: cfg.NanoCPUs, RouterConnectionRateLimit: cfg.RouterConnectionRateLimit},
 		egress:        cfg.Egress,
+		pool:          cfg.NetworkPool,
+		hostPrefixes:  cfg.HostPrefixes,
 		clock:         cfg.Clock,
 		log:           cfg.Log,
 		customize:     cfg.Customize,
@@ -138,6 +155,9 @@ func New(cfg Config) *Manager {
 		cancel:        cancel,
 		inst:          map[int64]*instanceState{},
 		stats:         map[int64]sample{},
+	}
+	if !m.pool.IsValid() {
+		m.pool = netip.MustParsePrefix(config.DefaultInstanceNetworkPool)
 	}
 	m.idle = sync.NewCond(&m.mu)
 	if m.host.NanoCPUs > MaxNanoCPUs() {
@@ -254,7 +274,7 @@ func (m *Manager) ensure(ctx context.Context, req agentapi.EnsureRequest) error 
 	if err := m.ensureDataDir(req.ID); err != nil {
 		return err
 	}
-	if err := m.ensureNetwork(ctx); err != nil {
+	if _, err := m.ensureInstanceNetwork(ctx, req.ID); err != nil {
 		return err
 	}
 	wasRunning := false
@@ -329,19 +349,44 @@ func (m *Manager) power(ctx context.Context, id int64, action agentapi.PowerActi
 	}
 	switch action {
 	case agentapi.PowerStart:
+		if err := m.prepareStart(ctx, id, info); err != nil {
+			return err
+		}
 		m.setOp(id, agentapi.OpStarting)
 		return m.dc.Start(ctx, name)
 	case agentapi.PowerStop:
 		m.setOp(id, agentapi.OpStopping)
-		return m.dc.Stop(ctx, name, StopTimeoutSeconds)
+		if err := m.dc.Stop(ctx, name, StopTimeoutSeconds); err != nil {
+			return err
+		}
+		return m.isolateStopped(ctx, id, docker.ContainerInfo{NetworkSettings: info.NetworkSettings})
 	default: // restart: stop and start separately so the reported operation is accurate
 		m.setOp(id, agentapi.OpStopping)
 		if err := m.dc.Stop(ctx, name, StopTimeoutSeconds); err != nil {
 			return err
 		}
+		if err := m.prepareStart(ctx, id, docker.ContainerInfo{NetworkSettings: info.NetworkSettings}); err != nil {
+			return err
+		}
 		m.setOp(id, agentapi.OpStarting)
 		return m.dc.Start(ctx, name)
 	}
+}
+
+// isolateStopped moves a container of an older agent that the agent just stopped onto
+// its own network (see isolate); info is its inspect result with a zero State.
+func (m *Manager) isolateStopped(ctx context.Context, id int64, info docker.ContainerInfo) error {
+	if info.State.Running || info.State.Restarting {
+		return nil
+	}
+	changed, err := m.isolate(ctx, id, info.NetworkSettings, true)
+	if err != nil {
+		return fmt.Errorf("move %s onto its own network: %w", ContainerName(id), err)
+	}
+	if changed {
+		m.refreshRouterAfter(ctx)
+	}
+	return nil
 }
 
 func (m *Manager) remove(ctx context.Context, id int64) error {
@@ -379,6 +424,7 @@ func (m *Manager) remove(ctx context.Context, id int64) error {
 		}
 	}
 	m.setOp(id, agentapi.OpRemoving)
+	m.removeInstanceNetwork(ctx, id)
 	if err := os.RemoveAll(TmpDir(m.host.InstancesDir, id)); err != nil {
 		return err
 	}
@@ -400,7 +446,10 @@ func (m *Manager) refreshRouterAfter(ctx context.Context) {
 // SIGHUP when the routes changed under a running router.
 func (m *Manager) RefreshRouter(ctx context.Context) error {
 	m.routerMu.Lock()
-	err := m.refreshRouter(ctx)
+	list, err := m.refreshRouter(ctx)
+	if err == nil {
+		err = m.syncRouterNetworks(ctx, list)
+	}
 	m.routerMu.Unlock()
 
 	msg := ""
@@ -422,30 +471,31 @@ func (m *Manager) RefreshRouter(ctx context.Context) error {
 	return err
 }
 
-func (m *Manager) refreshRouter(ctx context.Context) error {
+// refreshRouter returns the managed containers it built the routes from.
+func (m *Manager) refreshRouter(ctx context.Context) ([]docker.ContainerSummary, error) {
 	list, err := m.dc.List(ctx, LabelInstance)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	data, err := RenderRoutes(Routes(list))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Always write the file before the router container exists: without the watch
 	// flag a missing file is silently skipped at start.
 	if _, err := WriteRoutes(RouterDir(m.host.InstancesDir), data); err != nil {
-		return err
+		return nil, err
 	}
 	cfg, err := RouterContainer(m.host)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if m.customize != nil {
 		m.customize(RouterName, &cfg)
 	}
 	template, err := templateHash(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if cfg.Labels == nil {
 		cfg.Labels = map[string]string{}
@@ -454,12 +504,12 @@ func (m *Manager) refreshRouter(ctx context.Context) error {
 	info, err := m.dc.Inspect(ctx, RouterName)
 	switch {
 	case docker.IsNotFound(err):
-		return m.createRouter(ctx, cfg, data)
+		return list, m.createRouter(ctx, cfg, data)
 	case err != nil:
-		return err
+		return nil, err
 	}
 	if info.Config.Labels[LabelRouter] != "1" {
-		return fmt.Errorf("container %s exists but is not managed by mc-panel (label %s=1 missing); leaving it untouched",
+		return nil, fmt.Errorf("container %s exists but is not managed by mc-panel (label %s=1 missing); leaving it untouched",
 			RouterName, LabelRouter)
 	}
 	// Replace the router after an agent upgrade with a new pinned image or template.
@@ -467,33 +517,33 @@ func (m *Manager) refreshRouter(ctx context.Context) error {
 		m.log.Info("replacing router container", "old_image", info.Config.Image, "new_image", cfg.Image,
 			"old_template", info.Config.Labels[LabelRouterTemplate], "new_template", template)
 		if err := m.ensureImage(ctx, -1, cfg.Image); err != nil {
-			return err
+			return nil, err
 		}
 		if err := m.dc.Remove(ctx, RouterName, true); err != nil && !docker.IsNotFound(err) {
-			return err
+			return nil, err
 		}
-		return m.createRouter(ctx, cfg, data)
+		return list, m.createRouter(ctx, cfg, data)
 	}
 	if !info.State.Running {
 		if err := m.dc.Start(ctx, RouterName); err != nil { // a fresh start reads the current file
-			return err
+			return nil, err
 		}
 		m.lastApplied = data
-		return nil
+		return list, nil
 	}
 	// Reload until the running router has seen this content: a failed SIGHUP is
 	// retried in the next round even though the file no longer changes.
 	if !bytes.Equal(data, m.lastApplied) {
 		if err := m.dc.Kill(ctx, RouterName, "SIGHUP"); err != nil {
 			if docker.IsConflict(err) { // stopped meanwhile; the next round starts it
-				return nil
+				return list, nil
 			}
-			return err
+			return nil, err
 		}
 		m.lastApplied = data
 		m.log.Info("router reloaded", "bytes", len(data))
 	}
-	return nil
+	return list, nil
 }
 
 // createRouter creates and starts the router; data is the routes file it will read.
@@ -501,7 +551,7 @@ func (m *Manager) createRouter(ctx context.Context, cfg docker.ContainerConfig, 
 	if err := m.ensureImage(ctx, -1, cfg.Image); err != nil {
 		return err
 	}
-	if err := m.ensureNetwork(ctx); err != nil {
+	if err := m.ensureRouterNetwork(ctx); err != nil {
 		return err
 	}
 	if _, err := m.dc.CreateContainer(ctx, RouterName, cfg); err != nil {
@@ -515,14 +565,11 @@ func (m *Manager) createRouter(ctx context.Context, cfg docker.ContainerConfig, 
 	return nil
 }
 
-// networkLabels mark the mcpanel-mc network as mc-panel's own.
-func networkLabels() map[string]string { return map[string]string{LabelNetwork: "1"} }
-
-// ensureNetwork creates the mcpanel-mc network if needed and applies the egress
-// filter to it. It fails closed: no container is created on a network the filter
-// does not cover.
-func (m *Manager) ensureNetwork(ctx context.Context) error {
-	if err := m.dc.EnsureNetwork(ctx, NetworkName, networkLabels()); err != nil {
+// ensureRouterNetwork creates the router's network mcpanel-mc if needed and applies the
+// egress filter to it. It fails closed: the router is not created on a network the
+// filter does not cover.
+func (m *Manager) ensureRouterNetwork(ctx context.Context) error {
+	if err := m.dc.EnsureNetwork(ctx, RouterNetwork, routerNetworkLabels()); err != nil {
 		return err
 	}
 	if err := m.syncEgress(ctx); err != nil {
@@ -531,23 +578,24 @@ func (m *Manager) ensureNetwork(ctx context.Context) error {
 	return nil
 }
 
-// SyncEgress applies the egress filter to the existing mcpanel-mc network. The agent
+// SyncEgress applies the egress filter to the existing networks. The agent
 // runs it once before serving, so running containers are covered right after an agent
 // start, before the background loop's first (possibly slow) round. Errors are logged.
 func (m *Manager) SyncEgress(ctx context.Context) error { return m.syncEgress(ctx) }
 
-// syncEgress hands the current subnets of the mcpanel-mc network to the egress filter
-// when they differ from the last ones applied, when it has not been applied since the
-// agent started, or when the filter is no longer installed (e.g. after an external
-// "nft flush ruleset"). A missing network has nothing to filter yet.
+// syncEgress hands the current subnets of mc-panel's networks (mcpanel-mc and every
+// mcpanel-net-<id>) to the egress filter when they differ from the last ones applied,
+// when it has not been applied since the agent started, or when the filter is no longer
+// installed (e.g. after an external "nft flush ruleset"). Without any network there is
+// nothing to filter yet.
 func (m *Manager) syncEgress(ctx context.Context) error {
 	if m.egress == nil {
 		return nil
 	}
 	m.egressMu.Lock()
 	defer m.egressMu.Unlock()
-	subnets, err := m.dc.NetworkSubnets(ctx, NetworkName, networkLabels())
-	if docker.IsNotFound(err) {
+	subnets, _, err := m.managedNetworks(ctx)
+	if err == nil && len(subnets) == 0 {
 		return nil
 	}
 	current := false
@@ -563,7 +611,7 @@ func (m *Manager) syncEgress(ctx context.Context) error {
 			if m.egressApplied == nil {
 				m.egressApplied = []netip.Prefix{}
 			}
-			m.log.Info("container egress filter applied", "network", NetworkName, "subnets", fmt.Sprint(subnets))
+			m.log.Info("container egress filter applied", "subnets", fmt.Sprint(subnets))
 		}
 	}
 	msg := ""
@@ -833,8 +881,14 @@ func (m *Manager) Tick(ctx context.Context) {
 	if !m.CheckDocker(ctx) {
 		return
 	}
+	if !m.poolChecked {
+		m.poolChecked = m.CheckNetworkPool(ctx) == nil
+	}
 	// Before the router: its image pull may take minutes. Logged inside.
 	_ = m.syncEgress(ctx)
+	if err := m.reconcileNetworks(ctx); err != nil {
+		m.log.Warn("instance networks not reconciled", "err", sanitizeError(err))
+	}
 	_ = m.RefreshRouter(ctx)
 	m.SampleStats(ctx)
 }

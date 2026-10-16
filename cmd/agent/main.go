@@ -137,6 +137,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			Log:          log,
 			Egress:       fw,
 			NanoCPUs:     int64(math.Round(cfg.CPUPerInstance * 1e9)),
+			NetworkPool:  cfg.NetworkPool(),
 
 			RouterConnectionRateLimit: cfg.RouterConnectionRateLimit,
 		})

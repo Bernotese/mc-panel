@@ -73,7 +73,9 @@ cleanup() {
     # shellcheck disable=SC2086 # one container id per word
     docker rm -f $ids >/dev/null 2>&1 || true
   fi
-  docker network rm mcpanel-mc >/dev/null 2>&1 || true
+  for net in $(docker network ls -q --filter label=mcpanel.network); do
+    docker network rm "$net" >/dev/null 2>&1 || true # mcpanel-mc and every mcpanel-net-<id>
+  done
   nft delete table inet mcpanel 2>/dev/null || true # the agent's jail and egress filter
   rm -rf "$work"
 }

@@ -6,7 +6,7 @@
 //	go test -tags dockerintegration -exec sudo -count=1 -v -run Integration ./internal/agent/docker/
 //
 // TestIntegrationClientLifecycle uses its own names and runs anywhere. The manager test
-// uses the real names (mcpanel-mc-<id>, mcpanel-router, network mcpanel-mc); on a host
+// uses the real names (mcpanel-mc-<id>, mcpanel-router, networks mcpanel-mc and mcpanel-net-<id>); on a host
 // where they exist (e.g. a host with a running agent) it is skipped, with
 // MCPANEL_IT_STRICT=1 (CI) it fails instead:
 //
@@ -217,6 +217,15 @@ func TestIntegrationClientLifecycle(t *testing.T) {
 	}
 }
 
+func removeNetworks(t *testing.T, c *docker.Client, names ...string) {
+	t.Helper()
+	for _, n := range names {
+		if err := c.RemoveNetwork(context.Background(), n); err != nil {
+			t.Errorf("cleanup network %s: %v", n, err)
+		}
+	}
+}
+
 // requireCleanHost skips (or, with MCPANEL_IT_STRICT=1, fails) when mc-panel resources exist.
 func requireCleanHost(t *testing.T, c *docker.Client) {
 	t.Helper()
@@ -228,8 +237,8 @@ func requireCleanHost(t *testing.T, c *docker.Client) {
 	if _, err := c.Inspect(ctx, instances.RouterName); !docker.IsNotFound(err) {
 		dirty = append(dirty, "container "+instances.RouterName)
 	}
-	if code := rawRequest(t, http.MethodGet, "/networks/"+instances.NetworkName); code != http.StatusNotFound {
-		dirty = append(dirty, "network "+instances.NetworkName)
+	if nets, err := c.ListNetworks(ctx, instances.LabelNetwork); err != nil || len(nets) > 0 {
+		dirty = append(dirty, fmt.Sprintf("networks with %s (%d, %v)", instances.LabelNetwork, len(nets), err))
 	}
 	if len(dirty) == 0 {
 		return
@@ -247,7 +256,7 @@ func TestIntegrationManagerCycle(t *testing.T) {
 	requireCleanHost(t, c)
 	t.Cleanup(func() {
 		forceRemove(t, c, instances.ContainerName(1), instances.RouterName)
-		_ = rawRequest(t, http.MethodDelete, "/networks/"+instances.NetworkName)
+		removeNetworks(t, c, instances.RouterNetwork, instances.InstanceNetwork(1))
 	})
 
 	dir := t.TempDir()
@@ -375,7 +384,7 @@ func TestIntegrationConsole(t *testing.T) {
 	requireCleanHost(t, c)
 	t.Cleanup(func() {
 		forceRemove(t, c, instances.ContainerName(1), instances.RouterName)
-		_ = rawRequest(t, http.MethodDelete, "/networks/"+instances.NetworkName)
+		removeNetworks(t, c, instances.RouterNetwork, instances.InstanceNetwork(1))
 	})
 
 	dir := t.TempDir()

@@ -45,6 +45,8 @@ ops_doctor_healthy() {
   doc_probe_docker() { return 0; }
   doc_probe_docker_version() { echo 29.1.3; }
   doc_probe_docker_live_restore() { echo true; }
+  doc_probe_shared_servers() { printf '%s\n' mcpanel-router; }
+  doc_probe_router_net_ipv6() { echo false; }
   doc_probe_docker_root() { echo /var/lib/docker; }
   doc_probe_caddy_version() { echo 2.11.7; }
   doc_probe_caddy_from_repo() { return 0; }
@@ -107,7 +109,7 @@ test_ops_doctor_healthy_system_is_ok() {
   local out
   out="$(cat "$WORK/out")"
   assert_contains "$out" "✓ all mc-panel services are running"
-  assert_contains "$out" "30 checks: 0 failed, 0 warnings"
+  assert_contains "$out" "31 checks: 0 failed, 0 warnings"
   assert_not_contains "$out" "✗"
   assert_not_called 'systemctl'
 }
@@ -207,6 +209,22 @@ test_ops_doctor_docker_version_and_live_restore() {
   doc_probe_docker_version() { echo 29.2.0; }
   assert_exit 0 cmd_doctor
   assert_contains "$(cat "$WORK/out")" "✓ Docker live-restore is not configured"
+}
+
+test_ops_doctor_shared_network_warns() {
+  ops_doctor_healthy
+  doc_probe_shared_servers() { printf '%s\n' mcpanel-router mcpanel-mc-3 mcpanel-mc-12 'mcpanel-mc-1;x'; }
+  assert_exit 1 cmd_doctor
+  local out
+  out="$(cat "$WORK/out")"
+  assert_contains "$out" "! 2 Minecraft server(s) still share the network mcpanel-mc and can reach each other: mcpanel-mc-3 mcpanel-mc-12"
+  assert_contains "$out" "-> restart these servers once in the panel"
+  doc_probe_shared_servers() { return 1; } # no network mcpanel-mc (yet)
+  assert_exit 0 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "✓ every Minecraft server is on its own network"
+  doc_probe_router_net_ipv6() { echo true; }
+  assert_exit 1 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "! the network mcpanel-mc has IPv6 enabled"
 }
 
 test_ops_doctor_reboot_required_shows_age_and_packages() {
@@ -402,7 +420,7 @@ test_ops_doctor_json_is_valid_and_complete() {
   local id
   for id in services sockets files_process versions update_available update_state config permissions \
     caddy_config caddy_import caddy_package caddy_admin certificate dns firewall docker docker_version \
-    docker_live_restore docker_dns restic tzdata time_sync upgrades reboot_required storage_fs storage_free \
+    docker_live_restore docker_isolation docker_dns restic tzdata time_sync upgrades reboot_required storage_fs storage_free \
     backup_keys ssh_password ssh_root ssh_kbdinteractive; do
     assert_contains "$out" "\"id\":\"$id\""
   done
@@ -411,7 +429,7 @@ test_ops_doctor_json_is_valid_and_complete() {
 import json, sys
 d = json.load(sys.stdin)
 assert d["status"] == "warn"
-assert len(d["checks"]) == 30
+assert len(d["checks"]) == 31
 for c in d["checks"]:
     assert set(c) == {"id", "status", "message", "hint"}, c
     assert c["status"] in ("ok", "warn", "fail"), c
