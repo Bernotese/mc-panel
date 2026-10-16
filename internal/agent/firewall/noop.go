@@ -89,3 +89,6 @@ func (n *Noop) SetEgressSubnets(_ context.Context, subnets []netip.Prefix) error
 	n.log.Info("noop firewall: container egress filter NOT enforced", "subnets", fmt.Sprint(subnets))
 	return nil
 }
+
+// EgressInPlace is always true: there is nothing that could have been removed.
+func (n *Noop) EgressInPlace(context.Context, []netip.Prefix) (bool, error) { return true, nil }

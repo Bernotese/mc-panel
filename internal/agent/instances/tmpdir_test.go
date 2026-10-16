@@ -77,6 +77,39 @@ func TestTmpDirIsEmptiedOnRecreateAndRemovedWithTheInstance(t *testing.T) {
 	}
 }
 
+// TestPowerStartRestoresTmpDir: a start finds tmp/<id> with its owner and mode (Docker
+// would create a missing bind source as root 0755) and does not empty it.
+func TestPowerStartRestoresTmpDir(t *testing.T) {
+	e := newEnv(t)
+	e.d.AddImage(java21Pinned)
+	e.ensure(t, ensureReq(1, "survival", 1))
+	tmp := instances.TmpDir(e.dir, 1)
+	if err := os.WriteFile(filepath.Join(tmp, "keep"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e.power(t, 1, agentapi.PowerStart)
+	if got := perm(t, tmp); got != 0o700 {
+		t.Fatalf("tmp/1 = %v after start, want 0700", got)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "keep")); err != nil {
+		t.Fatalf("start emptied tmp/1: %v", err)
+	}
+
+	if err := os.RemoveAll(tmp); err != nil {
+		t.Fatal(err)
+	}
+	e.power(t, 1, agentapi.PowerRestart)
+	if uid, gid, mode := owner(t, tmp); uid != os.Getuid() || gid != os.Getgid() || mode != 0o700 {
+		t.Fatalf("tmp/1 after restart = %d:%d %v, want the container user and 0700", uid, gid, mode)
+	}
+	if s := e.status(t, 1); s.LastError != "" {
+		t.Fatalf("last_error = %q", s.LastError)
+	}
+}
+
 // TestSymlinkedTmpDirIsReplaced: a symlink in place of tmp/<id> is removed as a link (never
 // followed) and replaced by a real directory.
 func TestSymlinkedTmpDirIsReplaced(t *testing.T) {

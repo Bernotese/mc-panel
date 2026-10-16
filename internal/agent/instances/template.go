@@ -8,6 +8,7 @@ import (
 	"cmp"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strconv"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
@@ -58,12 +59,16 @@ type Host struct {
 	InstancesDir string
 	UID, GID     int
 	Images       config.Images
-	// NanoCPUs caps every instance container (cpu_per_instance); 0 = no cap.
+	// NanoCPUs caps every instance container (cpu_per_instance); 0 = no cap. Above the
+	// host's CPUs it is clamped (MaxNanoCPUs).
 	NanoCPUs int64
 	// RouterConnectionRateLimit is mc-router's -connection-rate-limit; 0 means
 	// config.DefaultRouterConnectionRateLimit.
 	RouterConnectionRateLimit int
 }
+
+// MaxNanoCPUs is the CPU cap of this host: all its CPUs.
+func MaxNanoCPUs() int64 { return int64(runtime.NumCPU()) * 1e9 }
 
 func ContainerName(id int64) string { return ContainerPrefix + strconv.FormatInt(id, 10) }
 
@@ -148,7 +153,7 @@ func InstanceContainer(h Host, req agentapi.EnsureRequest) (docker.ContainerConf
 			MemorySwap:     memory,
 			PidsLimit:      PidsLimit,
 			CPUShares:      CPUShares,
-			NanoCPUs:       h.NanoCPUs,
+			NanoCPUs:       min(h.NanoCPUs, MaxNanoCPUs()),
 			Ulimits:        []docker.Ulimit{{Name: "nofile", Soft: NofileLimit, Hard: NofileLimit}},
 			LogConfig:      logConfig(),
 		},

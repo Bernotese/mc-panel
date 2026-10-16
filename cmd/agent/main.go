@@ -150,6 +150,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// One bounded check before serving, so /v1/health is right from the first
 		// request instead of "unavailable" until the background loop has run.
 		mgr.CheckDocker(ctx)
+		// Running containers are filtered right after an agent (re)start, before the
+		// background loop's first round (whose router image pull may take minutes).
+		// Errors are logged inside; the loop retries.
+		_ = mgr.SyncEgress(ctx)
 		runCtx, stopRun := context.WithCancel(ctx)
 		runDone := make(chan struct{})
 		go func() {
