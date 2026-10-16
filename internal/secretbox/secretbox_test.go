@@ -64,6 +64,31 @@ func TestLoadOrCreateKey(t *testing.T) {
 	}
 }
 
+// A crash while creating the key can leave a truncated temp file behind; the next start must
+// still create a complete key and remove nothing but that leftover.
+func TestLoadOrCreateKeyIgnoresLeftoverTemp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret.key")
+	if err := os.WriteFile(path+".tmp", []byte("abc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	k, err := secretbox.LoadOrCreateKey(path)
+	if err != nil || len(k) != secretbox.KeySize {
+		t.Fatalf("create: len=%d err=%v", len(k), err)
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(onDisk, k) {
+		t.Fatalf("key on disk differs: %v", err)
+	}
+	if _, err := os.Stat(path + ".tmp"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("temp file still present: %v", err)
+	}
+	info, _ := os.Stat(path)
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("perm = %v", info.Mode().Perm())
+	}
+}
+
 func TestDeriveKey(t *testing.T) {
 	b1, _ := secretbox.New(bytes.Repeat([]byte{7}, secretbox.KeySize))
 	b1again, _ := secretbox.New(bytes.Repeat([]byte{7}, secretbox.KeySize))

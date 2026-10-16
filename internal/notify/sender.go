@@ -9,10 +9,14 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/Bernotese/mc-panel/internal/clock"
 )
 
 // Sender delivers one event to one target.
@@ -43,7 +47,10 @@ var errBlockedDestination = errors.New("destination address is not allowed")
 
 // blockedPrefixes are special-purpose ranges that net/netip does not classify
 // as private: CGNAT (incl. cloud metadata 100.100.100.200), "this network",
-// benchmarking, reserved/broadcast and the NAT64 prefixes.
+// benchmarking, reserved/broadcast, the NAT64 prefixes, and the IPv6 ranges that
+// embed or tunnel IPv4 addresses or are deprecated site-local: 6to4 (2002::/16,
+// e.g. 2002:7f00:1:: = 127.0.0.1), Teredo (2001::/32), fec0::/10 and the
+// IPv4-compatible ::/96.
 var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),
 	netip.MustParsePrefix("100.64.0.0/10"),
@@ -51,6 +58,10 @@ var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("240.0.0.0/4"),
 	netip.MustParsePrefix("64:ff9b::/96"),
 	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("2001::/32"),
+	netip.MustParsePrefix("fec0::/10"),
+	netip.MustParsePrefix("::/96"),
 }
 
 // blockedDestination reports addresses notifiers must never connect to
@@ -70,10 +81,13 @@ func blockedDestination(a netip.Addr) bool {
 }
 
 // NewRestrictedHTTPClient is like NewHTTPClient but refuses to connect to
-// internal destinations. The check runs on the resolved address right before
-// connecting, so it also covers DNS names and DNS rebinding. Environment
-// proxies are ignored (they would bypass the check).
-func NewRestrictedHTTPClient() *http.Client {
+// internal destinations, including every address of the host's own interfaces
+// (public ones too: that traffic would reach local services over lo). The check
+// runs on the resolved address right before connecting, so it also covers DNS
+// names and DNS rebinding. Environment proxies are ignored (they would bypass
+// the check).
+func NewRestrictedHTTPClient(clk clock.Clock) *http.Client {
+	local := newLocalAddrs(clk, net.InterfaceAddrs)
 	dialer := &net.Dialer{
 		Timeout: httpTimeout,
 		Control: func(_, address string, _ syscall.RawConn) error {
@@ -82,7 +96,7 @@ func NewRestrictedHTTPClient() *http.Client {
 				return errBlockedDestination
 			}
 			a, err := netip.ParseAddr(host)
-			if err != nil || blockedDestination(a) {
+			if err != nil || blockedDestination(a) || local.contains(a) {
 				return errBlockedDestination
 			}
 			return nil
@@ -147,10 +161,35 @@ func checkStatus(kind Kind, resp *http.Response) error {
 		return nil
 	}
 	err := fmt.Errorf("notify: %s returned status %d", kind, resp.StatusCode)
-	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+	if resp.StatusCode == http.StatusTooManyRequests {
+		if d, ok := parseRetryAfter(resp.Header.Get("Retry-After")); ok {
+			return &retryAfterError{err: err, after: d}
+		}
+		return err
+	}
+	if resp.StatusCode >= 500 {
 		return err
 	}
 	return &PermanentError{Err: err}
+}
+
+// retryAfterError is a rate-limited delivery whose target named a wait time (Discord answers
+// 429 with Retry-After in seconds, possibly fractional).
+type retryAfterError struct {
+	err   error
+	after time.Duration
+}
+
+func (e *retryAfterError) Error() string { return e.err.Error() }
+func (e *retryAfterError) Unwrap() error { return e.err }
+
+// parseRetryAfter reads a Retry-After value in (fractional) seconds. HTTP dates are ignored.
+func parseRetryAfter(v string) (time.Duration, bool) {
+	secs, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil || secs <= 0 || secs > 3600 {
+		return 0, false
+	}
+	return time.Duration(secs * float64(time.Second)), true
 }
 
 var defaultTitles = map[EventType]string{
@@ -167,6 +206,10 @@ var defaultTitles = map[EventType]string{
 	EventServerCrashLoop:    "Crash loop",
 	EventHostDiskLow:        "Low disk space on the host",
 	EventHostDiskOK:         "Disk space OK again",
+	Event2FALockout:         "Second factor locked",
+	Event2FAFailed:          "Wrong second factor after a correct password",
+	EventRecoveryCodeUsed:   "Recovery code used",
+	EventPasswordChanged:    "Password changed",
 	EventTest:               "mc-panel test notification",
 }
 
@@ -200,4 +243,48 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string([]rune(s)[:n])
+}
+
+// localAddrsTTL is how long the list of interface addresses is reused.
+const localAddrsTTL = time.Minute
+
+// localAddrs caches the host's interface addresses for the dial check.
+type localAddrs struct {
+	clock clock.Clock
+	list  func() ([]net.Addr, error)
+
+	mu      sync.Mutex
+	addrs   map[netip.Addr]struct{}
+	fetched time.Time
+}
+
+func newLocalAddrs(c clock.Clock, list func() ([]net.Addr, error)) *localAddrs {
+	return &localAddrs{clock: c, list: list}
+}
+
+// contains reports whether a is an address of a local interface. If the interfaces cannot be
+// listed, it fails closed: every address counts as local, and the next call tries again.
+func (l *localAddrs) contains(a netip.Addr) bool {
+	a = a.Unmap().WithZone("")
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.clock.Now()
+	if l.addrs == nil || now.Sub(l.fetched) >= localAddrsTTL {
+		addrs, err := l.list()
+		l.fetched = now
+		if err != nil {
+			l.addrs = nil
+			return true
+		}
+		l.addrs = make(map[netip.Addr]struct{}, len(addrs))
+		for _, na := range addrs {
+			if p, err := netip.ParsePrefix(na.String()); err == nil {
+				l.addrs[p.Addr().Unmap().WithZone("")] = struct{}{}
+			} else if ip, err := netip.ParseAddr(na.String()); err == nil {
+				l.addrs[ip.Unmap().WithZone("")] = struct{}{}
+			}
+		}
+	}
+	_, ok := l.addrs[a]
+	return ok
 }

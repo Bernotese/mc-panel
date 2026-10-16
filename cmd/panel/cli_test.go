@@ -122,3 +122,31 @@ func TestAdminCreateFailsBeforePrompt(t *testing.T) {
 		t.Fatalf("err = %v, want username-required error", err)
 	}
 }
+
+func TestJournalArg(t *testing.T) {
+	stdin := strings.NewReader("from stdin")
+	if r, done, err := journalArg(nil, stdin); err != nil || r != nil {
+		t.Fatalf("no flag: %v %v", r, err)
+	} else {
+		done()
+	}
+	if r, done, err := journalArg([]string{"-journal", "-"}, stdin); err != nil || r != stdin {
+		t.Fatalf("-journal -: %v %v", r, err)
+	} else {
+		done()
+	}
+	path := filepath.Join(t.TempDir(), "journal.txt")
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, done, err := journalArg([]string{"--journal=" + path}, stdin)
+	if err != nil || r == nil {
+		t.Fatalf("file: %v", err)
+	}
+	done()
+	for _, args := range [][]string{{"extra"}, {"-journal"}, {"-other", "x"}, {"-journal", filepath.Join(t.TempDir(), "missing")}} {
+		if _, _, err := journalArg(args, stdin); err == nil {
+			t.Errorf("journalArg(%v) must fail", args)
+		}
+	}
+}

@@ -27,6 +27,10 @@ type Sessions struct {
 	q     *store.Queries
 	clock clock.Clock
 	cfg   config.Session
+	// adminNet, if set, is checked for every API request of an admin principal (the admin
+	// allowlist applies to sessions, not only to logins). It returns defense.ErrAdminNetwork
+	// when the client IP is not allowed.
+	adminNet func(context.Context, netip.Addr) error
 }
 
 func NewSessions(q *store.Queries, c clock.Clock, cfg config.Session) *Sessions {

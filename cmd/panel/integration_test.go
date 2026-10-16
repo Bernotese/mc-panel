@@ -167,7 +167,7 @@ func loginAdminWithTOTP(e *env) (*client, string) {
 	c.must(403, "GET", "/servers", nil) // setup_2fa_required
 	setup := c.must(200, "POST", "/me/totp/setup", nil)
 	secret, _ := setup["secret"].(string)
-	rc := c.must(200, "POST", "/me/totp/enable", map[string]string{"code": totpCode(e, secret)})
+	rc := c.must(200, "POST", "/me/totp/enable", map[string]string{"code": totpCode(e, secret), "current_password": adminPW})
 	if codes, _ := rc["codes"].([]any); len(codes) != 10 {
 		e.t.Fatalf("expected 10 recovery codes, got %v", rc["codes"])
 	}

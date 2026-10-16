@@ -77,7 +77,7 @@ func TestCheckLoginJailed(t *testing.T) {
 		if err := e.svc.CheckLogin(ctx, addr(ip), "admin"); !errors.Is(err, ErrJailed) {
 			t.Fatalf("%s: err = %v, want ErrJailed", ip, err)
 		}
-		if err := e.svc.CheckSecondFactor(ctx, addr(ip), "s1"); !errors.Is(err, ErrJailed) {
+		if err := e.svc.CheckSecondFactor(ctx, addr(ip), "s1", "admin"); !errors.Is(err, ErrJailed) {
 			t.Fatalf("%s 2FA: err = %v, want ErrJailed", ip, err)
 		}
 	}
@@ -102,15 +102,15 @@ func TestCheckSecondFactorRateLimit(t *testing.T) {
 	ctx := context.Background()
 	ip := addr("203.0.113.7")
 	for i := 0; i < 5; i++ {
-		if err := e.svc.CheckSecondFactor(ctx, ip, "session-1"); err != nil {
+		if err := e.svc.CheckSecondFactor(ctx, ip, "session-1", "admin"); err != nil {
 			t.Fatalf("attempt %d: %v", i, err)
 		}
 	}
-	wantRateLimited(t, e.svc.CheckSecondFactor(ctx, ip, "session-1"), 12*time.Second)
-	if err := e.svc.CheckSecondFactor(ctx, ip, "session-2"); err != nil {
+	wantRateLimited(t, e.svc.CheckSecondFactor(ctx, ip, "session-1", "admin"), 12*time.Second)
+	if err := e.svc.CheckSecondFactor(ctx, ip, "session-2", "admin"); err != nil {
 		t.Fatalf("other session: %v", err)
 	}
-	if err := e.svc.CheckSecondFactor(ctx, addr("203.0.113.8"), "session-1"); err != nil {
+	if err := e.svc.CheckSecondFactor(ctx, addr("203.0.113.8"), "session-1", "admin"); err != nil {
 		t.Fatalf("same session from other IP has its own bucket: %v", err)
 	}
 }
@@ -156,7 +156,7 @@ func TestInvalidIPFailsClosed(t *testing.T) {
 	if err := e.svc.CheckLogin(ctx, zero, "admin"); !errors.Is(err, ErrIPBlocked) {
 		t.Fatalf("CheckLogin: err = %v, want ErrIPBlocked", err)
 	}
-	if err := e.svc.CheckSecondFactor(ctx, zero, "s1"); !errors.Is(err, ErrIPBlocked) {
+	if err := e.svc.CheckSecondFactor(ctx, zero, "s1", "admin"); !errors.Is(err, ErrIPBlocked) {
 		t.Fatalf("CheckSecondFactor: err = %v, want ErrIPBlocked", err)
 	}
 	e.saveSettings(t, store.SecuritySettings{AdminAllowlistOnly: true, AllowedCountries: []string{}})

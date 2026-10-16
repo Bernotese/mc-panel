@@ -28,7 +28,7 @@ What CI covers: auth, defense and notify unit tests, the e2e sign-in with TOTP, 
 - [ ] **Admin allowlist:** enable "Admin access only from the allowlist" with only your current network; an admin session from another address (e.g. via a phone hotspot) gets `403` on the next request and its session is gone after saving. `panel admin unlock` turns it off.
 - [ ] **Role change:** changing `helper` to admin and back ends `helper`'s open sessions.
 - [ ] **Idle timeout:** leave an open tab with polling areas (dashboard, monitoring) alone for 30 min: the session ends anyway.
-- [ ] **Audit anchors:** `journalctl -u mcpanel-panel -o cat | sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml -journal -` reports the chain intact (CLI entries as "without anchor").
+- [ ] **Audit anchors:** `sudo journalctl -u mcpanel-panel -o cat | sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml -journal -` reports the chain intact and exits 0 (CLI entries as "without anchor").
 
 ## Instances
 

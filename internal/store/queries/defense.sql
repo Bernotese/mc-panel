@@ -19,8 +19,22 @@ VALUES (?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: DefenseInsertAttempt :exec
-INSERT INTO login_attempts (ts, ip, ip_key, username, user_id, stage, success, reason, user_agent, country)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO login_attempts (ts, ip, ip_key, username, user_id, stage, success, reason, user_agent, country, net56, net48)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: DefenseKnownDevice :one
+-- A known device: ip_key completed a full login as username since the given time (SEC-09).
+SELECT count(*) FROM login_attempts a JOIN users u ON u.id = a.user_id
+WHERE u.username = sqlc.arg(username) AND a.ip_key = sqlc.arg(ip_key) AND a.success = 1
+  AND a.reason = 'complete' AND a.ts >= sqlc.arg(since);
+
+-- name: DefenseCountFailuresInNet56Since :one
+SELECT count(*) FROM login_attempts
+WHERE net56 = sqlc.arg(net) AND success = 0 AND ts >= sqlc.arg(since);
+
+-- name: DefenseCountFailuresInNet48Since :one
+SELECT count(*) FROM login_attempts
+WHERE net48 = sqlc.arg(net) AND success = 0 AND ts >= sqlc.arg(since);
 
 -- name: DefenseCountFullLoginsFrom :one
 SELECT count(*) FROM login_attempts
@@ -155,3 +169,11 @@ RETURNING *;
 
 -- name: DefenseDeleteNotifier :execrows
 DELETE FROM notifiers WHERE id = sqlc.arg(id);
+
+-- name: DefenseActiveAdminSessions :many
+SELECT s.id, s.ip FROM sessions s JOIN users u ON u.id = s.user_id
+WHERE u.role = 'admin' AND s.revoked_at IS NULL AND s.expires_at > sqlc.arg(now)
+ORDER BY s.id;
+
+-- name: DefenseRevokeSession :exec
+UPDATE sessions SET revoked_at = sqlc.arg(revoked_at) WHERE id = sqlc.arg(id) AND revoked_at IS NULL;

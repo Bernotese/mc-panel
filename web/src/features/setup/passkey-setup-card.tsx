@@ -5,15 +5,20 @@ import type { PasskeyCreated } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useMe } from '@/features/auth/me'
 import { isWebAuthnSupported, registerPasskey } from '@/features/webauthn/webauthn'
-import { errorMessage } from '@/lib/error-message'
+import { CurrentPasswordField } from './current-password-field'
+import { enrolErrorMessage, isFirstFactor } from './first-factor'
 
 export function PasskeySetupCard({ onRegistered }: { onRegistered(created: PasskeyCreated): void }) {
   const { t } = useTranslation()
   const id = useId()
   const [name, setName] = useState(() => t('passkey.default_name'))
+  const needsPassword = isFirstFactor(useMe())
+  const [password, setPassword] = useState('')
+  const [passwordMissing, setPasswordMissing] = useState(false)
   const register = useMutation({
-    mutationFn: (passkeyName: string) => registerPasskey(passkeyName),
+    mutationFn: (passkeyName: string) => registerPasskey(passkeyName, needsPassword ? password : undefined),
     onSuccess: (created) => onRegistered(created),
   })
 
@@ -27,7 +32,8 @@ export function PasskeySetupCard({ onRegistered }: { onRegistered(created: Passk
       className="space-y-4"
       onSubmit={(e) => {
         e.preventDefault()
-        if (trimmed) register.mutate(trimmed)
+        setPasswordMissing(needsPassword && password === '')
+        if (trimmed && (!needsPassword || password !== '')) register.mutate(trimmed)
       }}
     >
       <p className="text-muted-foreground text-sm">{t('passkey.intro')}</p>
@@ -35,9 +41,10 @@ export function PasskeySetupCard({ onRegistered }: { onRegistered(created: Passk
         <Label htmlFor={id}>{t('passkey.name_label')}</Label>
         <Input id={id} value={name} maxLength={64} onChange={(e) => setName(e.target.value)} />
       </div>
-      {register.error ? (
+      {needsPassword ? <CurrentPasswordField value={password} onChange={setPassword} /> : null}
+      {passwordMissing || register.error ? (
         <p role="alert" className="text-destructive text-sm">
-          {errorMessage(register.error, t)}
+          {passwordMissing ? t('first_factor.password_required') : enrolErrorMessage(register.error, t)}
         </p>
       ) : null}
       <Button type="submit" className="w-full" disabled={register.isPending || !trimmed}>

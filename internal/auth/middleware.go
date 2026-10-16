@@ -6,8 +6,10 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/Bernotese/mc-panel/internal/defense"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/store"
@@ -19,6 +21,11 @@ type presentedTokenKey struct{}
 const (
 	csrfHeader = "X-CSRF-Token"
 	loginPath  = "/api/auth/login"
+	logoutPath = "/api/auth/logout"
+	// BackgroundHeader marks requests the web app makes on its own (polling, refetch on window
+	// focus). They are served normally but do not count as activity, so an open tab does not
+	// keep an idle session alive (SEC-19). Only GET and HEAD can be background requests.
+	BackgroundHeader = "X-MCPanel-Background"
 )
 
 // Middleware loads the session from the cookie and stores the principal in the
@@ -52,9 +59,14 @@ func (s *Sessions) Middleware(next http.Handler) http.Handler {
 			httpx.Internal(w, r, err)
 			return
 		}
-		if err := s.Touch(ctx, sess); err != nil {
-			httpx.Internal(w, r, err)
+		if !s.adminNetworkAllowed(w, r, user) {
 			return
+		}
+		if !isBackground(r) {
+			if err := s.Touch(ctx, sess); err != nil {
+				httpx.Internal(w, r, err)
+				return
+			}
 		}
 		stage, err := s.effectiveStage(ctx, user, sess)
 		if err != nil {
@@ -75,6 +87,33 @@ func (s *Sessions) Middleware(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, presentedTokenKey{}, sess.TokenHash)
 		next.ServeHTTP(w, r.WithContext(principal.With(ctx, p)))
 	})
+}
+
+func isBackground(r *http.Request) bool {
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.Header.Get(BackgroundHeader) == "1"
+}
+
+// adminNetworkAllowed applies the admin allowlist to every API request of an admin session
+// (SEC-16): a stolen cookie, a session from before the setting was enabled or a user promoted
+// later must not work from any other network. It writes 403 ip_blocked and returns false when
+// the request is refused. Requests for the web app itself and the logout pass.
+func (s *Sessions) adminNetworkAllowed(w http.ResponseWriter, r *http.Request, user store.User) bool {
+	if s.adminNet == nil || principal.Role(user.Role) != principal.RoleAdmin || !strings.HasPrefix(r.URL.Path, "/api/") {
+		return true
+	}
+	if r.Method == http.MethodPost && r.URL.Path == logoutPath {
+		return true // signing out stays possible from anywhere
+	}
+	err := s.adminNet(r.Context(), httpx.ClientIP(r.Context()))
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, defense.ErrAdminNetwork):
+		httpx.WriteError(w, r, http.StatusForbidden, httpx.CodeIPBlocked, "admin access from your network is not allowed")
+	default:
+		httpx.Internal(w, r, err)
+	}
+	return false
 }
 
 // CSRF rejects state-changing cross-origin requests (Fetch Metadata / Origin)

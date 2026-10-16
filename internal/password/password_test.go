@@ -18,7 +18,13 @@ func TestValidate(t *testing.T) {
 		{"correct horse battery", "jannes", nil},
 		{"short", "jannes", password.ErrTooShort},
 		{strings.Repeat("ä", 11), "jannes", password.ErrTooShort},
-		{strings.Repeat("ä", 12), "jannes", nil},
+		{strings.Repeat("äöüß", 3), "jannes", nil},
+		{strings.Repeat("ä", 12), "jannes", password.ErrCommon},  // one distinct character
+		{strings.Repeat("abc", 5), "jannes", password.ErrCommon}, // three distinct characters
+		{strings.Repeat("abcd", 3), "jannes", nil},               // four are enough for this rule
+		{"Iloveyou1234", "jannes", password.ErrCommon},           // from the large list, any case
+		{"qwertyuiopasdfghjkl", "jannes", password.ErrCommon},    // from the large list
+		{"correct horse battery staple", "jannes", nil},
 		{strings.Repeat("a", 257), "jannes", password.ErrTooLong},
 		{"PasswordPassword", "jannes", password.ErrCommon},
 		{"my-JANNES-password", "jannes", password.ErrContainsUsername},

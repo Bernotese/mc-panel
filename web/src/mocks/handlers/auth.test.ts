@@ -40,7 +40,7 @@ describe('mock auth flow', () => {
 
     const setup = await callApi('POST', '/me/totp/setup', { csrf })
     expect(field(setup.body, 'secret')).toBe('JBSWY3DPEHPK3PXP')
-    const enable = await callApi('POST', '/me/totp/enable', { body: { code: MOCK_TOTP_CODE }, csrf })
+    const enable = await callApi('POST', '/me/totp/enable', { body: { code: MOCK_TOTP_CODE, current_password: MOCK_PASSWORD }, csrf })
     expect(field(enable.body, 'codes')).toHaveLength(10)
 
     const me = await callApi('GET', '/auth/me')
