@@ -11,7 +11,7 @@ import { useFormat } from '@/lib/format'
 import { isApiError } from '@/api/errors'
 import { installPlugin, refreshJobOnConflict, refreshPluginState, resolveQueryOptions, versionsQueryOptions } from './api'
 import { installErrorMessage, pluginErrorMessage } from './messages'
-import { canInstall, defaultVersion, externalHref, type InstallTarget } from './model'
+import { canInstall, defaultVersion, externalHref, linkHost, type InstallTarget } from './model'
 
 export interface InstallDialogProps {
   serverId: number
@@ -126,10 +126,13 @@ export function InstallDialog({ serverId, dir, target, busy, onClose, onStarted 
                   </span>
                 </label>
                 {href ? (
-                  <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary ml-6 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline">
-                    {t('plugins.install.external_link')}
-                    <ExternalLink aria-hidden="true" className="size-3" />
-                  </a>
+                  <>
+                    <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary ml-6 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline">
+                      {t('plugins.install.external_link')}
+                      <ExternalLink aria-hidden="true" className="size-3" />
+                    </a>
+                    <span className="text-muted-foreground ml-1 font-mono text-xs break-all">{linkHost(href)}</span>
+                  </>
                 ) : null}
               </li>
             )
@@ -184,6 +187,7 @@ export function InstallDialog({ serverId, dir, target, busy, onClose, onStarted 
                   ) : (
                     <span>{x.name}</span>
                   )}
+                  {href ? <span className="text-muted-foreground ml-1 font-mono text-xs break-all">{linkHost(href)}</span> : null}
                 </li>
               )
             })}

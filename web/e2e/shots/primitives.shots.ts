@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../test'
 import { shoot, signInMock } from './shoot'
 
 // Navigation only by clicking: the MSW state lives in the page (no page.goto after sign-in).

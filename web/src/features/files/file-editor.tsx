@@ -6,11 +6,13 @@ import { toast } from 'sonner'
 import { isApiError, isSudoCancelled } from '@/api/errors'
 import type { FileContent, Server } from '@/api/types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { FileName } from '@/components/file-name'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useMe } from '@/features/auth/me'
 import { errorMessage } from '@/lib/error-message'
+import { visibleName } from '@/lib/file-name'
 import { downloadUrl, fileContentKey, fileListsKey, readFile, writeFile } from './api'
 import { editorLanguage } from './format'
 import { baseName } from './path'
@@ -132,7 +134,7 @@ export function FileEditor({ server, path, onClose, onDirtyChange }: FileEditorP
           key={editorKey}
           value={file.data.content}
           language={editorLanguage(name)}
-          label={t('files.editor.label', { name })}
+          label={t('files.editor.label', { name: visibleName(name) })}
           onChange={setDraft}
           onSave={doSave}
         />
@@ -147,8 +149,8 @@ export function FileEditor({ server, path, onClose, onDirtyChange }: FileEditorP
           <ArrowLeft aria-hidden="true" />
           {t('files.editor.back')}
         </Button>
-        <p className="min-w-0 flex-1 truncate font-mono text-sm" title={path}>
-          {path}
+        <p className="min-w-0 flex-1 truncate font-mono text-sm" title={visibleName(path)}>
+          <FileName name={path} />
         </p>
         {dirty ? <Badge variant="outline">{t('files.editor.unsaved')}</Badge> : null}
         <Button type="button" size="sm" disabled={!dirty || save.isPending} onClick={doSave}>
@@ -187,7 +189,7 @@ export function FileEditor({ server, path, onClose, onDirtyChange }: FileEditorP
         open={confirmClose}
         onOpenChange={setConfirmClose}
         title={t('files.editor.discard_title')}
-        description={t('files.editor.discard_description', { name })}
+        description={t('files.editor.discard_description', { name: visibleName(name) })}
         confirmLabel={t('files.editor.discard')}
         destructive
         onConfirm={() => {

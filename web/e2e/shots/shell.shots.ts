@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../test'
 import { openServer, serverSectionLink, serverTree } from '../helpers'
 import { shoot, signInMock } from './shoot'
 

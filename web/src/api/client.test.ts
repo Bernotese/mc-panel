@@ -79,6 +79,7 @@ describe('api client', () => {
     configureApiHandlers({ requestSudo })
     await unwrapVoid(api.DELETE('/me/totp'))
     expect(requestSudo).toHaveBeenCalledTimes(1)
+    expect(requestSudo).toHaveBeenCalledWith({ method: 'DELETE', path: '/me/totp' })
     expect(findUserByName('admin')?.totpEnabled).toBe(false)
   })
 
