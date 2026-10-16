@@ -153,7 +153,7 @@ All routes through `*rbac.Router` with `rbac.Server(rbac.PermServerFiles, "id")`
 | `GET /servers/{id}/files/content?path=` | `{content, mtime, size}` |
 | `PUT /servers/{id}/files/content` | `{path, content, expected_mtime}` → `{mtime, size}` |
 | `POST /servers/{id}/files/upload?path=&overwrite=` | raw body (`application/octet-stream`), `Content-Length` required → `201` |
-| `GET /servers/{id}/files/download?path=` | Stream; `Content-Disposition: attachment; filename*=UTF-8''<name>` (folder: `<name>.zip`; now without Unicode format characters (category Cf, e.g. right-to-left overrides), SEC-38) |
+| `GET /servers/{id}/files/download?path=` | Stream; `Content-Disposition: attachment; filename*=UTF-8''<name>` (folder: `<name>.zip`; now without Unicode format characters (category Cf, e.g. right-to-left overrides), SEC-38; the UI shows them visibly as ⟨U+…⟩) |
 | `POST /servers/{id}/files/mkdir` | `{path}` |
 | `POST /servers/{id}/files/rename` | `{from, to}` |
 | `POST /servers/{id}/files/delete` | `{path}` |

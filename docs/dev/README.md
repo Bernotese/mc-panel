@@ -325,7 +325,7 @@ CI job details:
 
 `make test-vm SUITE=lint` lints the Linux-specific files (golangci-lint runs on Linux there).
 
-**Supply chain:** the self-hosted CI jobs and `scripts/vm-test.sh` install npm packages with `npm ci --ignore-scripts` (no lifecycle scripts). Dependabot opens weekly, grouped updates for Go modules and npm. `npm run build` ends with `scripts/check-dist.mjs`, which fails if `internal/webui/dist` contains the MSW worker, source maps or mock code.
+**Supply chain:** the self-hosted CI jobs, `scripts/vm-test.sh` and `Dockerfile.preview` install npm packages with `npm ci --ignore-scripts` (no lifecycle scripts). Dependabot opens weekly, grouped updates for Go modules and npm. `npm run build` ends with `scripts/check-dist.mjs`, which fails if `internal/webui/dist` contains the MSW worker, source maps or mock code; the panel never serves dotfiles from it (`404`, SEC-42).
 
 **CSP in tests:** e2e specs import `test` from `web/e2e/test.ts` (eslint enforces it); every test fails on a CSP or Trusted Types violation report. The Vite dev server (`make dev`, the e2e mock) sends the panel's CSP too.
 
