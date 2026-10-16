@@ -47,6 +47,7 @@ jobs:
       e2e: ${{ steps.diff.outputs.e2e }}
       nftables: ${{ steps.diff.outputs.nftables }}
       instances: ${{ steps.diff.outputs.instances }}
+      instances_shards: ${{ steps.diff.outputs.instances_shards }}
       release: ${{ steps.diff.outputs.release }}
       installer: ${{ steps.diff.outputs.installer }}
       installer_root: ${{ steps.diff.outputs.installer_root }}
@@ -94,8 +95,33 @@ jobs:
           out openapi '^api/|^tools/redocly/'
           out e2e "^(cmd|internal|api|web)/|${gomod}"
           out nftables "^internal/(agent|defense|auth)/|^cmd/(agent|panel)/|^scripts/ci-acceptance\.sh$|${gomod}" root
-          out instances "^(cmd|internal)/|^scripts/(ci-instances\.sh|mc-status\.py|install-restic\.sh)$|${gomod}" root
-          out release "^cmd/|^internal/webui/|^deploy/|^scripts/install/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
+          # Instance acceptance shards (scripts/ci-instances/<shard>.sh), each a matrix entry of
+          # the job instances. Shared code runs every shard: cmd/, go.mod/sum, the dispatcher and
+          # lib.sh, restic and any internal/ package that is not one shard's own (agent, config,
+          # servers, store, auth, ...). The own packages pick their shards below.
+          own='^internal/(files|plugins|monitoring|notify|backups|timescale)/'
+          shared="$(grep -E "^(cmd|internal)/|^scripts/(ci-instances\.sh|ci-instances/lib\.sh|install-restic\.sh)$|${gomod}" <<<"${files}" |
+            grep -vE "${own}" || true)"
+          shards=()
+          shard() { # shard <name> <regex of its own files>
+            if [ "${all}" = true ] || [ -n "${shared}" ] || grep -qE "$2|^scripts/ci-instances/$1\.sh$" <<<"${files}"; then
+              shards+=("$1")
+            fi
+          }
+          shard core '^internal/files/|^scripts/mc-status\.py$'
+          shard plugins '^internal/(files|plugins)/'
+          shard monitoring-metrics '^internal/(monitoring|notify|timescale)/'
+          shard monitoring-alerts '^internal/(monitoring|notify|timescale)/'
+          shard backups '^internal/(files|backups|timescale)/'
+          if [ "${main_push}" = true ]; then shards=(); fi # root job, see above
+          json="$(printf '%s\n' "${shards[@]}" | jq -Rnc '[inputs | select(. != "")]')"
+          echo "instances_shards=${json}" >> "${GITHUB_OUTPUT}"
+          echo "instances_shards=${json}"
+          instances=true
+          if [ "${json}" = '[]' ]; then instances=false; fi
+          echo "instances=${instances}" >> "${GITHUB_OUTPUT}"
+          echo "instances=${instances}"
+          out release "^cmd/|^internal/(webui|timescale)/|^deploy/|^scripts/install/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
           # The installer jobs share one filter: the lint on every run; the lifecycle (root, not on
           # pushes to main) also on any internal/ change, since it runs the real panel, agent and
           # files service (like instances).
@@ -351,12 +377,20 @@ jobs:
       - name: Acceptance check 5 (nftables)
         run: sudo scripts/ci-acceptance.sh bin/panel bin/agent
 
+  # One matrix entry per shard of scripts/ci-instances.sh (changes.instances_shards); CI OK sees
+  # the aggregated result of the matrix. The panel is built with -tags acceptance and runs with
+  # time scale 10 (internal/timescale): monitoring passes, alert windows and the backup tick are
+  # ten times faster. Release builds never carry the tag (.goreleaser.yaml checks the binary).
   instances:
-    name: Instance acceptance (Docker, root)
+    name: Instance acceptance (${{ matrix.shard }})
     needs: changes
     if: needs.changes.outputs.instances == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 70
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.changes.outputs.instances_shards) }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -370,39 +404,45 @@ jobs:
           cache: true
 
       # The panel is built without the web build (internal/webui/dist only holds .gitkeep, as in
-      # the nftables job): the acceptance uses /api only.
-      - name: Build agent, files service and panel
+      # the nftables job): the acceptance uses /api only. The pinned server (java21) and router
+      # images from internal/config are pulled meanwhile.
+      - name: Build agent, files service and panel; pull images
         run: |
+          set -euo pipefail
+          images="$(grep -oE '"itzg/(minecraft-server:[^"]*-java21|mc-router:[^"]*)@sha256:[0-9a-f]{64}"' internal/config/config.go | tr -d '"')"
+          [ "$(wc -l <<<"${images}")" = 2 ] || { echo "image refs not found: ${images}" >&2; exit 1; }
+          (for i in ${images}; do docker pull -q "${i}"; done) >"${RUNNER_TEMP}/pull.log" 2>&1 &
+          pull=$!
           go build -o bin/agent ./cmd/agent
           go build -o bin/files ./cmd/files
-          go build -o bin/panel ./cmd/panel
+          go build -tags acceptance -o bin/panel ./cmd/panel
+          wait "${pull}" || { cat "${RUNNER_TEMP}/pull.log" >&2; exit 1; }
+          cat "${RUNNER_TEMP}/pull.log"
 
       # The files service runs restic for backups (sub-project 4): the pinned release.
       - name: Install restic
         run: sudo bash scripts/install-restic.sh
 
-      # The monitoring part drops the panel's pings with an nftables rule (server.down).
+      # The agent's firewall and egress filter, and the monitoring shards' rule against the
+      # panel's pings (server.down) use nftables.
       - name: Install nftables
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends nftables
           sudo nft --version
 
-      # Real agent + Docker + itzg Paper server: routing by hostname, hardening, console
-      # (rcon, log stream, player lists, planted player files), automatic restart after a
-      # crash, removal; the files service as mcpanel-mc (peer UID, os.Root limits,
-      # redaction, upload/download, extract incl. zip slip); the plugins path: the panel
-      # in production mode (TOTP sign-in, sudo, CSRF) installs Chunky from Modrinth and
-      # ViaBackwards with its dependency ViaVersion from Hangar (real upstreams, one retry),
-      # the server loads them after a restart, a disabled jar is not loaded; and backups with
-      # a real restic: manual backup with save-off/save-on, restore with sudo, zip download,
-      # a schedule firing in the panel's time zone, pin, delete, purge with the server; and
-      # monitoring: history, live and host values, RCON noise, the alerts server.down/recovered
-      # (pings dropped by nftables; none with the switch off), server.crash_loop and
-      # host.disk_low/ok delivered to the notify dispatcher (ntfy to https://ntfy.invalid,
-      # checked in the panel log), audit.
-      - name: Instance acceptance
-        run: sudo scripts/ci-instances.sh bin/agent bin/files bin/panel
+      # Shards (each file in scripts/ci-instances/ starts with what it checks): core (real agent +
+      # Docker + itzg Paper server: routing by hostname, hardening, egress filter, console, crash
+      # restart, removal; the files service as mcpanel-mc), plugins (Chunky from Modrinth,
+      # ViaBackwards + ViaVersion from Hangar, mrpack import), monitoring-metrics (history, live
+      # and host values, RCON noise, host.disk_low/ok), monitoring-alerts (server.down/recovered
+      # via nftables, server.crash_loop, the down-alerts switch) and backups (real restic:
+      # backup, restore, download, schedule, pin, delete, purge). The panel shards run the panel
+      # in production mode with TOTP sign-in and sudo.
+      - name: Instance acceptance (${{ matrix.shard }})
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: sudo env MCPANEL_ACCEPTANCE_TIMESCALE=10 scripts/ci-instances.sh "${SHARD}" bin/agent bin/files bin/panel
 
   build:
     name: Build & release snapshot
@@ -444,6 +484,8 @@ jobs:
           file bin/panel | grep -q 'statically linked'
           go version -m bin/panel | grep -q 'CGO_ENABLED=0'
           grep -aq '/assets/index-' bin/panel
+          # The acceptance time scale (internal/timescale) only exists with -tags acceptance.
+          if grep -aq 'MCPANEL_ACCEPTANCE' bin/panel; then echo "acceptance time scale in bin/panel" >&2; exit 1; fi
 
       - name: Cross-compile linux/arm64
         run: |

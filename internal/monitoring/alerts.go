@@ -15,16 +15,19 @@ import (
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/timescale"
 )
 
 // Alert kinds (alertServerDown, alertCrashLoop, alertDiskLow), alertKey, startGrace and
 // remindEvery come from types.go (phase A).
 
+// without ping, "running that long" counts as recovered (scaled like startGrace)
+var noPingStable = timescale.D(2 * time.Minute)
+
 const (
-	noPingStable      = 2 * time.Minute // without ping, "running that long" counts as recovered
-	diskHystPoints    = 2               // percentage points above the threshold to clear host.disk_low
-	diskHystBytes     = int64(2) << 30  // and bytes above disk_min_bytes
-	maxRestartSamples = 512             // per server (120 min window / 30 s passes = 240)
+	diskHystPoints    = 2              // percentage points above the threshold to clear host.disk_low
+	diskHystBytes     = int64(2) << 30 // and bytes above disk_min_bytes
+	maxRestartSamples = 512            // per server (120 min window / 30 s passes = 240)
 )
 
 var kindEvent = map[string]notify.EventType{
@@ -191,8 +194,8 @@ func (a *alerter) settings(ctx context.Context) (alertSettings, error) {
 	}
 	return alertSettings{
 		diskMinPercent: r.DiskMinPercent, diskMinBytes: r.DiskMinBytes,
-		downAfter: time.Duration(r.DownAfterMin) * time.Minute, crashRestarts: int(r.CrashRestarts),
-		crashWindow: time.Duration(r.CrashWindowMin) * time.Minute,
+		downAfter: time.Duration(r.DownAfterMin) * alertMinute, crashRestarts: int(r.CrashRestarts),
+		crashWindow: time.Duration(r.CrashWindowMin) * alertMinute,
 	}, nil
 }
 
@@ -258,7 +261,7 @@ func (a *alerter) evalDown(ctx context.Context, now time.Time, set alertSettings
 	if _, firing := a.firing[key]; firing || now.Sub(first) < set.downAfter {
 		return
 	}
-	msg := fmt.Sprintf("%s should be running but has not been reachable for %d minutes.", srv.Name, int(set.downAfter/time.Minute))
+	msg := fmt.Sprintf("%s should be running but has not been reachable for %d minutes.", srv.Name, int(set.downAfter/alertMinute))
 	a.fireLocked(ctx, key, now, msg, notify.Event{Type: notify.EventServerDown, Title: "Server down: " + srv.Name, Message: msg})
 }
 
@@ -288,11 +291,11 @@ func (a *alerter) evalCrash(ctx context.Context, now time.Time, set alertSetting
 	_, firing := a.firing[key]
 	switch {
 	case !firing && delta >= set.crashRestarts:
-		msg := fmt.Sprintf("%s restarted %d times in the last %d minutes.", srv.Name, delta, int(set.crashWindow/time.Minute))
+		msg := fmt.Sprintf("%s restarted %d times in the last %d minutes.", srv.Name, delta, int(set.crashWindow/alertMinute))
 		a.fireLocked(ctx, key, now, msg, notify.Event{Type: notify.EventServerCrashLoop, Title: "Crash loop: " + srv.Name, Message: msg})
 	case firing && delta == 0 && !hist[0].at.After(cut):
 		a.resolveLocked(ctx, key, now, notify.Event{Type: notify.EventServerRecovered,
-			Title: "Server stable again: " + srv.Name, Message: fmt.Sprintf("%s has not restarted for %d minutes.", srv.Name, int(set.crashWindow/time.Minute))})
+			Title: "Server stable again: " + srv.Name, Message: fmt.Sprintf("%s has not restarted for %d minutes.", srv.Name, int(set.crashWindow/alertMinute))})
 	}
 }
 
