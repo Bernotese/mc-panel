@@ -303,7 +303,7 @@ test_ops_update_rollback_restores_release_record() {
 
 # signers_production: scripts/install/release-signers is what every released install.sh
 # trusts. It must hold at least one valid key line for the release namespace and no test key.
-# This test fails on purpose while the TEST-ONLY placeholder is the only key (SEC-07).
+# The release workflow runs it before every release (SEC-07).
 test_install_sig_signers_production() {
   local f n=0 line principal opts type key
   f="$(sig_src_dir)/release-signers"

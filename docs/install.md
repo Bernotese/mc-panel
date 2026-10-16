@@ -45,7 +45,7 @@ v=v0.5.0   # the release to install
 base=https://github.com/Bernotese/mc-panel/releases/download/$v
 curl -fsSL -O "$base/install.sh" -O "$base/checksums.txt" -O "$base/checksums.txt.sig"
 cat >allowed_signers <<'KEY'
-mc-panel-release namespaces="mc-panel-release" RELEASE-KEY-PLACEHOLDER
+mc-panel-release namespaces="mc-panel-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGgF0LewISkuvpg8yX9MosArblkQeyH5JVECDtEnMt8y
 KEY
 ssh-keygen -Y verify -f allowed_signers -I mc-panel-release -n mc-panel-release \
   -s checksums.txt.sig <checksums.txt                      # must say: Good "mc-panel-release" signature
@@ -53,7 +53,7 @@ sha256sum --ignore-missing -c checksums.txt               # must say: install.sh
 sudo bash install.sh install --domain panel.example.com --email you@example.com
 ```
 
-The key line above must match the one in this guide on GitHub and in `scripts/install/release-signers` of the release; its fingerprint is `RELEASE-KEY-FINGERPRINT-PLACEHOLDER`. The `install.sh` you checked this way checks everything after it.
+The key line above must match the one in this guide on GitHub and in `scripts/install/release-signers` of the release; its fingerprint is `SHA256:dG7cM49r+jg1kTjqritVZ/augtw33VlFnNgcHOeBOaY` (ED25519; `ssh-keygen -Y verify` prints it). The `install.sh` you checked this way checks everything after it.
 
 Releases before v0.5.0 have no signature. `install --version v0.4.0` or an `update` (also a downgrade) to such a release stops unless you add `--allow-unsigned`; then it warns loudly and checks only `checksums.txt` of the same release. `--allow-unsigned` never admits an unsigned release from v0.5.0 on. `doctor` shows how the installed release was checked (`release_signature`).
 
