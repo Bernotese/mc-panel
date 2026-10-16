@@ -291,3 +291,36 @@ test_install_cad_ensure_ignores_other_imports() {
   assert_file_contains "$ROOT$CADDY_DIR/Caddyfile" 'import mc-panel.caddy.bak'
   assert_eq 'import mc-panel.caddy # managed by mc-panel' "$(tail -n 1 "$ROOT$CADDY_DIR/Caddyfile")"
 }
+
+test_install_cad_ensure_site_imports_the_operator_directory() {
+  cad_fixture
+  cad_ensure >/dev/null
+  assert_file_contains "$ROOT$CADDY_DIR/mc-panel.caddy" 'import /etc/caddy/mc-panel.d/*.caddy'
+  [[ -d $ROOT/etc/caddy/mc-panel.d ]] || fail "mc-panel.d not created"
+  assert_eq 755 "$(stat -c '%a' "$ROOT/etc/caddy/mc-panel.d")"
+  assert_eq root:root "$(_owner_get /etc/caddy/mc-panel.d)"
+}
+
+test_install_cad_ensure_never_touches_the_operator_directory() {
+  cad_fixture
+  mkdir -p "$ROOT/etc/caddy/mc-panel.d"
+  chmod 0750 "$ROOT/etc/caddy/mc-panel.d"
+  printf 'basic_auth {\n\tfriend HASH\n}\n' >"$ROOT/etc/caddy/mc-panel.d/auth.caddy"
+  cp "$ROOT/etc/caddy/mc-panel.d/auth.caddy" "$WORK/auth.before"
+  cad_ensure >/dev/null
+  cad_ensure >/dev/null
+  assert_eq 750 "$(stat -c '%a' "$ROOT/etc/caddy/mc-panel.d")"
+  assert_file_eq "$ROOT/etc/caddy/mc-panel.d/auth.caddy" "$(cat "$WORK/auth.before")"
+  assert_not_called "chown -h root:root $ROOT/etc/caddy/mc-panel.d"
+}
+
+test_install_cad_admin_status_reads_imported_files() {
+  mkdir -p "$ROOT/etc/caddy/conf.d"
+  printf '{\n\tadmin unix//run/caddy/admin.sock\n}\n' >"$ROOT/etc/caddy/conf.d/global.caddy"
+  printf 'import conf.d/*.caddy\nimport mc-panel.caddy\nimport some_snippet\n' >"$ROOT/etc/caddy/Caddyfile"
+  assert_eq socket "$(cad_admin_status "$ROOT/etc/caddy/Caddyfile")"
+  printf 'import /etc/caddy/conf.d/global.caddy\n' >"$ROOT/etc/caddy/Caddyfile"
+  assert_eq socket "$(cad_admin_status "$ROOT/etc/caddy/Caddyfile")"
+  printf 'import other/*.caddy\n' >"$ROOT/etc/caddy/Caddyfile"
+  assert_eq tcp "$(cad_admin_status "$ROOT/etc/caddy/Caddyfile")"
+}
