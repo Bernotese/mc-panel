@@ -15,7 +15,7 @@ func TestRunAuditVerify(t *testing.T) {
 	db := storetest.Open(t)
 	seed(t, db, 2)
 	var out bytes.Buffer
-	if err := audit.RunAuditVerify(context.Background(), db, &out); err != nil {
+	if err := audit.RunAuditVerify(context.Background(), db, &out, nil); err != nil {
 		t.Fatalf("RunAuditVerify on valid chain: %v", err)
 	}
 	if !strings.Contains(out.String(), "audit chain OK (2 entries)") {
@@ -25,7 +25,7 @@ func TestRunAuditVerify(t *testing.T) {
 	mustExec(t, db, "DROP TRIGGER audit_log_no_update")
 	mustExec(t, db, "UPDATE audit_log SET ip = '198.51.100.1' WHERE id = 1")
 	out.Reset()
-	err := audit.RunAuditVerify(context.Background(), db, &out)
+	err := audit.RunAuditVerify(context.Background(), db, &out, nil)
 	if !errors.Is(err, audit.ErrChainBroken) {
 		t.Fatalf("err = %v, want ErrChainBroken", err)
 	}

@@ -21,6 +21,7 @@ var (
 	errNotEnabled       = errors.New("auth: method not enabled")
 	errNotFound         = errors.New("auth: not found")
 	errSudoRequired     = errors.New("auth: sudo required to add another second factor")
+	errPasswordRequired = errors.New("auth: current password required for the first second factor")
 )
 
 // pendingTOTPTTL is how long a secret from POST /me/totp/setup can be activated.
@@ -133,7 +134,11 @@ func (h *Handler) promoteSetupBestEffort(w http.ResponseWriter, r *http.Request,
 // ALL other sessions of the user are revoked: each of them was authenticated by password only, and
 // even a stored "full" session may only look harmless (the loader downgrades it to setup when 2FA
 // is mandatory), so it must not regain access without presenting a second factor.
-func (h *Handler) guardAddFactor(ctx context.Context, q *store.Queries, p principal.Principal, userID int64) error {
+//
+// passwordVerified reports whether the request presented the correct current password
+// (confirmFirstFactor). The first factor needs it; it is checked here again, inside the
+// transaction, because another method may have been removed since confirmFirstFactor looked.
+func (h *Handler) guardAddFactor(ctx context.Context, q *store.Queries, p principal.Principal, userID int64, passwordVerified bool) error {
 	// The enrolling session must still be active: a session revoked (or expired) after the loader
 	// authenticated the request must not be able to establish a permanent factor.
 	sess, err := q.AuthGetSessionByID(ctx, p.SessionID)
@@ -159,6 +164,9 @@ func (h *Handler) guardAddFactor(ctx context.Context, q *store.Queries, p princi
 			return errSudoRequired
 		}
 		return nil
+	}
+	if !passwordVerified {
+		return errPasswordRequired
 	}
 	_, err = q.AuthRevokeOtherSessions(ctx, store.AuthRevokeOtherSessionsParams{
 		RevokedAt: sql.NullInt64{Int64: h.clock.Now().UnixMilli(), Valid: true}, UserID: userID, KeepID: p.SessionID,
@@ -226,21 +234,35 @@ func (h *Handler) setupTOTP(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, totpSetupResponse{Secret: secret, OtpauthURL: url})
 }
 
+type totpEnableRequest struct {
+	Code            string `json:"code"`
+	CurrentPassword string `json:"current_password"`
+}
+
 func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 	p, user, ok := h.current(w, r)
 	if !ok {
 		return
 	}
-	code, ok := decodeCode(w, r)
-	if !ok {
+	var req totpEnableRequest
+	if !httpx.DecodeJSON(w, r, &req) {
+		return
+	}
+	code := req.Code
+	if code == "" || len(code) > maxCodeLen {
+		httpx.WriteError(w, r, http.StatusBadRequest, httpx.CodeBadRequest, "code is required")
 		return
 	}
 	if user.TotpEnabled == 1 || len(user.TotpSecretEnc) == 0 {
 		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "no TOTP setup pending")
 		return
 	}
+	pwVerified, ok := h.confirmFirstFactor(w, r, user, req.CurrentPassword)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
-	if err := h.guard.CheckSecondFactor(ctx, httpx.ClientIP(ctx), secondFactorKey(p)); err != nil {
+	if err := h.guard.CheckSecondFactor(ctx, httpx.ClientIP(ctx), secondFactorKey(p), user.Username); err != nil {
 		h.guardError(w, r, err)
 		return
 	}
@@ -266,7 +288,7 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 	now := h.clock.Now().UnixMilli()
 	var codes []string
 	err = h.withTx(ctx, func(q *store.Queries) error {
-		if err := h.guardAddFactor(ctx, q, p, user.ID); err != nil {
+		if err := h.guardAddFactor(ctx, q, p, user.ID, pwVerified); err != nil {
 			return err
 		}
 		n, err := q.AuthEnableTOTP(ctx, store.AuthEnableTOTPParams{
@@ -287,6 +309,10 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, errSudoRequired) {
 		httpx.WriteError(w, r, http.StatusForbidden, httpx.CodeSudoRequired, "re-authentication required")
+		return
+	}
+	if errors.Is(err, errPasswordRequired) {
+		passwordRequired(w, r)
 		return
 	}
 	if errors.Is(err, errNotEnabled) {
@@ -345,4 +371,9 @@ func (h *Handler) disableTOTP(w http.ResponseWriter, r *http.Request) {
 	h.auditLog(ctx, user.ID, user.Username, audit.ActionTOTPDisable, user.Username, audit.ResultSuccess, nil)
 	h.notify2FAChanged(ctx, user, "TOTP disabled")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func passwordRequired(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeInvalidCredentials,
+		"current_password is required to set up the first two-factor method")
 }

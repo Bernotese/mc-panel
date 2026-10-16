@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/defense"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
@@ -71,6 +73,10 @@ func (l *twoFALocks) reset(userID int64) {
 	delete(l.users, userID)
 }
 
+// ResetSecondFactorLockout lifts the second-factor lockout of userID. A password change does
+// that (spec §7.2); cmd/panel also calls it when an admin sets the user's password.
+func (h *Handler) ResetSecondFactorLockout(userID int64) { h.twoFA.reset(userID) }
+
 func isSecondFactorStage(s defense.AttemptStage) bool {
 	switch s {
 	case defense.StageTOTP, defense.StageWebAuthn, defense.StageRecovery, defense.StageSudo:
@@ -83,7 +89,7 @@ func isSecondFactorStage(s defense.AttemptStage) bool {
 // second factor is verified; it writes the error response itself.
 func (h *Handler) checkSecondFactor(w http.ResponseWriter, r *http.Request, p principal.Principal, u store.User) bool {
 	ctx := r.Context()
-	if err := h.guard.CheckSecondFactor(ctx, httpx.ClientIP(ctx), secondFactorKey(p)); err != nil {
+	if err := h.guard.CheckSecondFactor(ctx, httpx.ClientIP(ctx), secondFactorKey(p), u.Username); err != nil {
 		h.guardError(w, r, err)
 		return false
 	}
@@ -106,5 +112,7 @@ func (h *Handler) noteSecondFactor(ctx context.Context, username string, userID 
 			"user_id", userID, "username", username, "lockout", secondFactorLockout.String())
 		h.auditLog(ctx, userID, username, audit.ActionLogin, username, audit.ResultDenied,
 			map[string]any{"reason": "2fa_lockout"})
+		h.notifySecurity(ctx, notify.Event2FALockout, "Second factor locked",
+			fmt.Sprintf("%s: second factor locked for %s after %d failed attempts.", username, secondFactorLockout, secondFactorMaxFailures), username)
 	}
 }

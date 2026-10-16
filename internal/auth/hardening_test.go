@@ -41,7 +41,7 @@ func TestEnableTOTPAfterOtherFactorNeedsSudo(t *testing.T) {
 	}
 	secret := totpSetupSecret(t, s1)
 	e.insertPasskeyRow(uid, "enrolled elsewhere") // the real admin enrolled a factor meanwhile
-	res := s1.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)})
+	res := s1.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret), "current_password": testPassword})
 	if res.code != 403 || res.errCode() != "sudo_required" {
 		t.Fatalf("enable with foreign factor present = %d %s", res.code, res.body)
 	}
@@ -56,13 +56,13 @@ func TestPasskeyFinishAfterOtherFactorNeedsSudo(t *testing.T) {
 	uid := e.createUser("root", "admin")
 	s1 := e.newClient("203.0.113.10")
 	s1.login("root", testPassword)
-	begin := s1.do(http.MethodPost, "/api/me/passkeys/begin", nil)
+	begin := s1.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword})
 	if begin.code != 200 {
 		t.Fatalf("begin = %d %s", begin.code, begin.body)
 	}
 	e.enableTOTP(uid) // the real admin enabled TOTP meanwhile
 	a := newSoftAuthenticator(t, e.cfg.RPID(), e.cfg.Origin())
-	res := s1.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "attacker", "credential": a.register(begin.body)})
+	res := s1.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "attacker", "credential": a.register(begin.body), "current_password": testPassword})
 	if res.code != 403 || res.errCode() != "sudo_required" {
 		t.Fatalf("finish with foreign factor present = %d %s", res.code, res.body)
 	}
@@ -89,7 +89,7 @@ func TestFirstFactorRevokesOtherPendingSessions(t *testing.T) {
 				}
 			} else {
 				s2secret := totpSetupSecret(t, s2)
-				if res := s2.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(s2secret)}); res.code != 200 {
+				if res := s2.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(s2secret), "current_password": testPassword}); res.code != 200 {
 					t.Fatalf("enable = %d %s", res.code, res.body)
 				}
 			}
@@ -148,7 +148,7 @@ func TestDowngradedFullSessionIsRevokedByFirstFactor(t *testing.T) {
 					}
 				} else {
 					secret := totpSetupSecret(t, fresh)
-					if res := fresh.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)}); res.code != 200 {
+					if res := fresh.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret), "current_password": testPassword}); res.code != 200 {
 						t.Fatalf("enable = %d %s", res.code, res.body)
 					}
 				}
@@ -167,11 +167,11 @@ func TestPendingTOTPSecretExpires(t *testing.T) {
 	c.login("root", testPassword)
 	secret := totpSetupSecret(t, c)
 	e.clock.Advance(pendingTOTPTTL + time.Minute)
-	if res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)}); res.code != 409 || res.errCode() != "conflict" {
+	if res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret), "current_password": testPassword}); res.code != 409 || res.errCode() != "conflict" {
 		t.Fatalf("enable after expiry = %d %s", res.code, res.body)
 	}
 	secret = totpSetupSecret(t, c)
-	if res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)}); res.code != 200 {
+	if res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret), "current_password": testPassword}); res.code != 200 {
 		t.Fatalf("enable after fresh setup = %d %s", res.code, res.body)
 	}
 }
@@ -185,12 +185,12 @@ func TestSecondMethodNeedsSudoInsideOneSession(t *testing.T) {
 	if _, res := e.registerPasskey(c, "key"); res.code != 201 {
 		t.Fatalf("first factor = %d %s", res.code, res.body)
 	}
-	res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)})
+	res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret), "current_password": testPassword})
 	if res.code != 403 || res.errCode() != "sudo_required" {
 		t.Fatalf("second method without sudo = %d %s", res.code, res.body)
 	}
 	e.grantSudo(c)
-	if res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)}); res.code != 200 {
+	if res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret), "current_password": testPassword}); res.code != 200 {
 		t.Fatalf("second method with sudo = %d %s", res.code, res.body)
 	}
 }
@@ -243,7 +243,7 @@ func TestIPBlockedMappedEverywhere(t *testing.T) {
 		c.login("root", testPassword)
 		secret := totpSetupSecret(t, c)
 		e.guard.SecondFactorErr = defense.ErrIPBlocked
-		want(t, "enable", c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)}))
+		want(t, "enable", c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret), "current_password": testPassword}))
 	})
 }
 
@@ -340,7 +340,7 @@ func TestEnableTOTPReturnsCodesEvenIfPromotionFails(t *testing.T) {
 	c.login("root", testPassword)
 	secret := totpSetupSecret(t, c)
 	e.guard.hook = func(key string) { e.rotateSessionBehindTheLoader(key) } // promotion will lose the CAS
-	res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)})
+	res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret), "current_password": testPassword})
 	var rc recoveryCodesResponse
 	if res.code != 200 || json.Unmarshal(res.body, &rc) != nil || len(rc.Codes) != 10 {
 		t.Fatalf("enable = %d %s", res.code, res.body)
@@ -513,8 +513,8 @@ func TestDuplicateCredentialIDIsBadRequest(t *testing.T) {
 	}
 	b := newSoftAuthenticator(t, e.cfg.RPID(), e.cfg.Origin())
 	b.credID = a.credID // same credential id, different key pair
-	begin := cb.do(http.MethodPost, "/api/me/passkeys/begin", nil)
-	res = cb.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "dup", "credential": b.register(begin.body)})
+	begin := cb.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword})
+	res = cb.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "dup", "credential": b.register(begin.body), "current_password": testPassword})
 	if res.code != 400 || res.errCode() != "bad_request" {
 		t.Fatalf("duplicate credential id = %d %s", res.code, res.body)
 	}
@@ -575,7 +575,7 @@ func TestRotationBoundToPresentedToken(t *testing.T) {
 		c.login("root", testPassword)
 		secret := totpSetupSecret(t, c)
 		e.guard.hook = func(key string) { e.rotateSessionBehindTheLoader(key) }
-		res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)})
+		res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret), "current_password": testPassword})
 		if res.code != 200 {
 			t.Fatalf("enable = %d %s (codes must still be returned)", res.code, res.body)
 		}
@@ -612,7 +612,7 @@ func TestLoginStageDecisionAndInsertAreAtomicWithEnrolment(t *testing.T) {
 	enrolling := e.newClient("198.51.100.1")
 	enrolling.login("alice", testPassword)
 	a := newSoftAuthenticator(t, e.cfg.RPID(), e.cfg.Origin())
-	begin := enrolling.do(http.MethodPost, "/api/me/passkeys/begin", nil)
+	begin := enrolling.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword})
 	if begin.code != 200 {
 		t.Fatalf("begin = %d", begin.code)
 	}
@@ -622,7 +622,7 @@ func TestLoginStageDecisionAndInsertAreAtomicWithEnrolment(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if res := enrolling.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "key", "credential": cred}); res.code != 201 {
+			if res := enrolling.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "key", "credential": cred, "current_password": testPassword}); res.code != 201 {
 				t.Errorf("enrolment = %d %s", res.code, res.body)
 			}
 		}()
@@ -656,7 +656,7 @@ func TestEnrolmentRequiresActiveSession(t *testing.T) {
 				t.Error(err)
 			}
 		}
-		res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret)})
+		res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(secret), "current_password": testPassword})
 		if res.code != 401 || res.errCode() != "unauthorized" {
 			t.Fatalf("enable on revoked session = %d %s", res.code, res.body)
 		}
@@ -673,11 +673,17 @@ func TestEnrolmentRequiresActiveSession(t *testing.T) {
 		p := principal.Principal{UserID: uid, SessionID: c.sessionID(), Stage: principal.StageFull}
 		check := func() error {
 			return e.h.withTx(context.Background(), func(q *store.Queries) error {
-				return e.h.guardAddFactor(context.Background(), q, p, uid)
+				return e.h.guardAddFactor(context.Background(), q, p, uid, true)
 			})
 		}
 		if err := check(); err != nil {
 			t.Fatalf("active session: %v", err)
+		}
+		// The first factor needs the verified password, also when a method vanished meanwhile.
+		if err := e.h.withTx(context.Background(), func(q *store.Queries) error {
+			return e.h.guardAddFactor(context.Background(), q, p, uid, false)
+		}); !errors.Is(err, errPasswordRequired) {
+			t.Fatalf("first factor without password: err = %v, want errPasswordRequired", err)
 		}
 		e.clock.Advance(13 * time.Hour) // absolute lifetime over
 		if err := check(); !errors.Is(err, ErrNoSession) {

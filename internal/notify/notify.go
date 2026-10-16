@@ -17,6 +17,10 @@ const (
 	EventUserCreated        EventType = "user.created"
 	EventUserDeleted        EventType = "user.deleted"
 	Event2FAChanged         EventType = "auth.2fa_changed"
+	Event2FALockout         EventType = "auth.2fa_lockout"
+	Event2FAFailed          EventType = "auth.2fa_failed" // correct password, wrong second factor
+	EventRecoveryCodeUsed   EventType = "auth.recovery_code_used"
+	EventPasswordChanged    EventType = "auth.password_changed"
 	EventAuditChainBroken   EventType = "audit.chain_broken"
 	EventBackupFailed       EventType = "backup.failed"
 	EventServerDown         EventType = "server.down"

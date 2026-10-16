@@ -3,12 +3,14 @@ package auth
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
 
@@ -89,7 +91,8 @@ func TestTOTPLoginFlow(t *testing.T) {
 	if !hasAction(e, audit.ActionLogin) {
 		t.Fatalf("audit = %v", e.audit.Actions())
 	}
-	if got := e.notes.Types(); len(got) != 0 {
+	// the wrong code above notifies auth.2fa_failed (SEC-20); nothing else: new-device events come from stream B
+	if got := e.notes.Types(); !slices.Equal(got, []notify.EventType{notify.Event2FAFailed}) {
 		t.Fatalf("stream A must not notify on login (new-device events come from stream B): %v", got)
 	}
 	e.clock.Advance(30 * time.Second)

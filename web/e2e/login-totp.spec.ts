@@ -35,6 +35,7 @@ test('fresh admin: forced TOTP setup, recovery codes, TOTP sign-in, passkey regi
   expect(secret).toMatch(/^[A-Z2-7]+=*$/)
   let lastStep = totpStep()
   await page.getByLabel('Code aus der Authenticator-App').fill(totp(secret))
+  await page.getByLabel('Aktuelles Passwort').fill(password) // the first second factor needs it (SEC-15)
   await page.getByRole('button', { name: 'Aktivieren' }).click()
 
   await expect(page.getByRole('list', { name: 'Wiederherstellungscodes' }).getByRole('listitem')).toHaveCount(10)

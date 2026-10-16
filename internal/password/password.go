@@ -2,8 +2,8 @@
 package password
 
 import (
-	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -11,7 +11,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,7 +50,10 @@ var (
 // allocates 64 MiB and burns CPU; without a bound a login flood could exhaust memory and
 // get the OOM killer to pick a Minecraft JVM on the same host.
 type limiter struct {
-	slots        chan struct{}
+	slots chan struct{}
+	// reserved, if not nil, is an extra slot only for callers marked with WithReservedSlot
+	// (logins from known devices): a flood of other logins cannot take it (SEC-09).
+	reserved     chan struct{}
 	wait         time.Duration
 	active, peak atomic.Int64 // observability for tests
 }
@@ -57,20 +62,67 @@ func newLimiter(slots int, wait time.Duration) *limiter {
 	return &limiter{slots: make(chan struct{}, slots), wait: wait}
 }
 
+// newDefaultLimiter has max(2, NumCPU/2) slots. From three slots on, one of them is reserved
+// for known devices; with two, halving the general pool would cost more than it protects.
+func newDefaultLimiter() *limiter {
+	return newPool(max(2, runtime.NumCPU()/2), DefaultWaitBudget)
+}
+
+func newPool(total int, wait time.Duration) *limiter {
+	if total < 3 {
+		return newLimiter(total, wait)
+	}
+	l := newLimiter(total-1, wait)
+	l.reserved = make(chan struct{}, 1)
+	return l
+}
+
 // DefaultWaitBudget is how long a caller waits for a free argon2 slot before ErrBusy.
 const DefaultWaitBudget = 2 * time.Second
 
-var lim = newLimiter(max(2, runtime.NumCPU()/2), DefaultWaitBudget)
+var lim = newDefaultLimiter()
+
+type reservedSlotKey struct{}
+
+// WithReservedSlot marks ctx so that Hash/Verify may also use the reserved argon2 slot. The
+// login handler sets it for known devices (an IP key with a recent full login of the user), so
+// they can still sign in while unknown addresses saturate the general pool.
+func WithReservedSlot(ctx context.Context) context.Context {
+	return context.WithValue(ctx, reservedSlotKey{}, true)
+}
+
+func hasReservedSlot(ctx context.Context) bool {
+	v, _ := ctx.Value(reservedSlotKey{}).(bool)
+	return v
+}
 
 // acquire takes a slot, waiting at most the wait budget. The returned release must be called.
 func (l *limiter) acquire(ctx context.Context) (release func(), err error) {
-	select {
+	var reserved chan struct{} // nil (never ready in select) unless the caller may use it
+	if hasReservedSlot(ctx) {
+		reserved = l.reserved
+	}
+	var got chan struct{}
+	select { // the general pool first, so the reserved slot stays free while it has room
 	case l.slots <- struct{}{}:
+		got = l.slots
 	default:
+	}
+	if got == nil {
+		select {
+		case reserved <- struct{}{}:
+			got = reserved
+		default:
+		}
+	}
+	if got == nil {
 		t := time.NewTimer(l.wait)
 		defer t.Stop()
 		select {
 		case l.slots <- struct{}{}:
+			got = l.slots
+		case reserved <- struct{}{}:
+			got = reserved
 		case <-t.C:
 			return nil, ErrBusy
 		case <-ctx.Done():
@@ -84,22 +136,59 @@ func (l *limiter) acquire(ctx context.Context) (release func(), err error) {
 			break
 		}
 	}
-	return func() { l.active.Add(-1); <-l.slots }, nil
+	return func() { l.active.Add(-1); <-got }, nil
 }
 
-//go:embed common.txt
-var commonRaw []byte
+// commonGz is the list of common passwords that Validate rejects: every entry of at least
+// MinLength characters, lower-cased, deduplicated and sorted, one per line. Sources (SecLists,
+// https://github.com/danielmiessler/SecLists, MIT licence, see common.LICENSE):
+// Passwords/Common-Credentials/xato-net-10-million-passwords-1000000.txt and
+// 100k-most-used-passwords-NCSC.txt, plus the earlier top-100k list.
+//
+//go:embed common.txt.gz
+var commonGz []byte
 
-var common = sync.OnceValue(func() map[string]struct{} {
-	m := make(map[string]struct{}, 4096)
-	sc := bufio.NewScanner(bytes.NewReader(commonRaw))
-	for sc.Scan() {
-		if line := strings.TrimSpace(sc.Text()); line != "" {
-			m[line] = struct{}{}
+// common returns the sorted list. The decompressed text is kept as one string and the
+// entries are substrings of it, so the ~47k entries cost little more than the text itself.
+var common = sync.OnceValue(func() []string {
+	zr, err := gzip.NewReader(bytes.NewReader(commonGz))
+	if err != nil {
+		panic("password: common list: " + err.Error())
+	}
+	raw, err := io.ReadAll(zr)
+	if err != nil {
+		panic("password: common list: " + err.Error())
+	}
+	text := string(raw)
+	words := make([]string, 0, strings.Count(text, "\n"))
+	for line := range strings.SplitSeq(text, "\n") {
+		if line != "" {
+			words = append(words, line)
 		}
 	}
-	return m
+	slices.Sort(words) // already sorted; keeps the binary search correct regardless
+	return words
 })
+
+func isCommon(lower string) bool {
+	_, found := slices.BinarySearch(common(), lower)
+	return found
+}
+
+// minDistinct is the number of different characters a password needs at least: "aaaaaaaaaaaa"
+// or "abababababab" pass the length check but are guessed immediately.
+const minDistinct = 4
+
+func tooFewDistinct(pw string) bool {
+	seen := make(map[rune]struct{}, minDistinct)
+	for _, r := range pw {
+		seen[r] = struct{}{}
+		if len(seen) >= minDistinct {
+			return false
+		}
+	}
+	return true
+}
 
 func Validate(pw, username string) error {
 	n := utf8.RuneCountInString(pw)
@@ -110,7 +199,7 @@ func Validate(pw, username string) error {
 		return ErrTooLong
 	}
 	lower := strings.ToLower(pw)
-	if _, ok := common()[lower]; ok {
+	if isCommon(lower) || tooFewDistinct(lower) {
 		return ErrCommon
 	}
 	if u := strings.ToLower(username); len(u) >= 3 && strings.Contains(lower, u) {
@@ -258,12 +347,14 @@ func DummyVerifyContext(ctx context.Context, pw string) error {
 	return err
 }
 
-// BlockForTesting replaces the process-wide limiter with one whose only slot is taken and whose
-// wait budget is wait, so every Hash/Verify returns ErrBusy after wait. unblock restores the
+// BlockForTesting replaces the process-wide limiter with one whose only general slot is taken
+// and whose wait budget is wait, so every Hash/Verify returns ErrBusy after wait, except for
+// callers marked with WithReservedSlot: the reserved slot stays free. unblock restores the
 // previous limiter. Test-only: other packages' handler tests use it to exercise the 429 path.
 func BlockForTesting(wait time.Duration) (unblock func()) {
 	old := lim
 	l := newLimiter(1, wait)
+	l.reserved = make(chan struct{}, 1)
 	l.slots <- struct{}{}
 	lim = l
 	return func() { lim = old }

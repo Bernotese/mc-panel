@@ -10,6 +10,40 @@ import (
 	"database/sql"
 )
 
+const defenseActiveAdminSessions = `-- name: DefenseActiveAdminSessions :many
+SELECT s.id, s.ip FROM sessions s JOIN users u ON u.id = s.user_id
+WHERE u.role = 'admin' AND s.revoked_at IS NULL AND s.expires_at > ?1
+ORDER BY s.id
+`
+
+type DefenseActiveAdminSessionsRow struct {
+	ID int64
+	Ip string
+}
+
+func (q *Queries) DefenseActiveAdminSessions(ctx context.Context, now int64) ([]DefenseActiveAdminSessionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, defenseActiveAdminSessions, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DefenseActiveAdminSessionsRow{}
+	for rows.Next() {
+		var i DefenseActiveAdminSessionsRow
+		if err := rows.Scan(&i.ID, &i.Ip); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const defenseActiveBannedJails = `-- name: DefenseActiveBannedJails :many
 SELECT id, ip_key, reason, level, manual, created_at, expires_at, lifted_at, lifted_by, fw_banned_at, fw_unbanned_at FROM jails
 WHERE fw_banned_at IS NOT NULL AND lifted_at IS NULL AND expires_at > ?1
@@ -102,6 +136,40 @@ SELECT count(*) FROM jails WHERE lifted_at IS NULL AND expires_at > ?1
 
 func (q *Queries) DefenseCountActiveJails(ctx context.Context, now int64) (int64, error) {
 	row := q.db.QueryRowContext(ctx, defenseCountActiveJails, now)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const defenseCountFailuresInNet48Since = `-- name: DefenseCountFailuresInNet48Since :one
+SELECT count(*) FROM login_attempts
+WHERE net48 = ?1 AND success = 0 AND ts >= ?2
+`
+
+type DefenseCountFailuresInNet48SinceParams struct {
+	Net   string
+	Since int64
+}
+
+func (q *Queries) DefenseCountFailuresInNet48Since(ctx context.Context, arg DefenseCountFailuresInNet48SinceParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, defenseCountFailuresInNet48Since, arg.Net, arg.Since)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const defenseCountFailuresInNet56Since = `-- name: DefenseCountFailuresInNet56Since :one
+SELECT count(*) FROM login_attempts
+WHERE net56 = ?1 AND success = 0 AND ts >= ?2
+`
+
+type DefenseCountFailuresInNet56SinceParams struct {
+	Net   string
+	Since int64
+}
+
+func (q *Queries) DefenseCountFailuresInNet56Since(ctx context.Context, arg DefenseCountFailuresInNet56SinceParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, defenseCountFailuresInNet56Since, arg.Net, arg.Since)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -268,8 +336,8 @@ func (q *Queries) DefenseGetNotifier(ctx context.Context, id int64) (Notifier, e
 }
 
 const defenseInsertAttempt = `-- name: DefenseInsertAttempt :exec
-INSERT INTO login_attempts (ts, ip, ip_key, username, user_id, stage, success, reason, user_agent, country)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO login_attempts (ts, ip, ip_key, username, user_id, stage, success, reason, user_agent, country, net56, net48)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type DefenseInsertAttemptParams struct {
@@ -283,6 +351,8 @@ type DefenseInsertAttemptParams struct {
 	Reason    string
 	UserAgent string
 	Country   string
+	Net56     string
+	Net48     string
 }
 
 func (q *Queries) DefenseInsertAttempt(ctx context.Context, arg DefenseInsertAttemptParams) error {
@@ -297,6 +367,8 @@ func (q *Queries) DefenseInsertAttempt(ctx context.Context, arg DefenseInsertAtt
 		arg.Reason,
 		arg.UserAgent,
 		arg.Country,
+		arg.Net56,
+		arg.Net48,
 	)
 	return err
 }
@@ -498,6 +570,26 @@ func (q *Queries) DefenseJailsToUnban(ctx context.Context) ([]Jail, error) {
 	return items, nil
 }
 
+const defenseKnownDevice = `-- name: DefenseKnownDevice :one
+SELECT count(*) FROM login_attempts a JOIN users u ON u.id = a.user_id
+WHERE u.username = ?1 AND a.ip_key = ?2 AND a.success = 1
+  AND a.reason = 'complete' AND a.ts >= ?3
+`
+
+type DefenseKnownDeviceParams struct {
+	Username string
+	IpKey    string
+	Since    int64
+}
+
+// A known device: ip_key completed a full login as username since the given time (SEC-09).
+func (q *Queries) DefenseKnownDevice(ctx context.Context, arg DefenseKnownDeviceParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, defenseKnownDevice, arg.Username, arg.IpKey, arg.Since)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const defenseLastJailCreatedAt = `-- name: DefenseLastJailCreatedAt :one
 SELECT CAST(COALESCE(MAX(created_at), 0) AS INTEGER) AS last_created_at FROM jails WHERE ip_key = ?
 `
@@ -589,7 +681,7 @@ func (q *Queries) DefenseListActiveJails(ctx context.Context, now int64) ([]Jail
 }
 
 const defenseListAttempts = `-- name: DefenseListAttempts :many
-SELECT id, ts, ip, ip_key, username, user_id, stage, success, reason, user_agent, country FROM login_attempts
+SELECT id, ts, ip, ip_key, username, user_id, stage, success, reason, user_agent, country, net56, net48 FROM login_attempts
 WHERE id < ?1
   AND (?2 = 1 OR success = ?3)
   AND (?4 = 1 OR ip = ?5 OR ip_key = ?6)
@@ -636,6 +728,8 @@ func (q *Queries) DefenseListAttempts(ctx context.Context, arg DefenseListAttemp
 			&i.Reason,
 			&i.UserAgent,
 			&i.Country,
+			&i.Net56,
+			&i.Net48,
 		); err != nil {
 			return nil, err
 		}
@@ -872,6 +966,20 @@ func (q *Queries) DefenseNewDeviceLogins(ctx context.Context, since int64) ([]De
 		return nil, err
 	}
 	return items, nil
+}
+
+const defenseRevokeSession = `-- name: DefenseRevokeSession :exec
+UPDATE sessions SET revoked_at = ?1 WHERE id = ?2 AND revoked_at IS NULL
+`
+
+type DefenseRevokeSessionParams struct {
+	RevokedAt sql.NullInt64
+	ID        int64
+}
+
+func (q *Queries) DefenseRevokeSession(ctx context.Context, arg DefenseRevokeSessionParams) error {
+	_, err := q.db.ExecContext(ctx, defenseRevokeSession, arg.RevokedAt, arg.ID)
+	return err
 }
 
 const defenseTopFailingCountries = `-- name: DefenseTopFailingCountries :many

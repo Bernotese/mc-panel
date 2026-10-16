@@ -38,6 +38,10 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		h.guardError(w, r, err)
 		return
 	}
+	if h.guard.KnownDevice(ctx, ip, req.Username) {
+		// a flood of logins from other addresses cannot take this argon2 slot (SEC-09)
+		ctx = password.WithReservedSlot(ctx)
+	}
 	user, err := h.q.AuthGetUserByUsername(ctx, req.Username)
 	if errors.Is(err, sql.ErrNoRows) {
 		if errors.Is(password.DummyVerifyContext(ctx, req.Password), password.ErrBusy) {

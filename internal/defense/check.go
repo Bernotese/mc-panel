@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 func normalizeUsername(u string) string { return strings.ToLower(strings.TrimSpace(u)) }
@@ -25,7 +26,27 @@ func (s *Service) jailed(ip netip.Addr, now time.Time) bool {
 	return ok
 }
 
-func (s *Service) CheckLogin(_ context.Context, ip netip.Addr, username string) error {
+// aggregateJailed reports whether ip lies in a jailed /56 or /48 (SEC-09). These jails only
+// apply to logins and second factors (CheckLogin, CheckSecondFactor), never in the IP filter
+// or the firewall, and known devices of the user are exempt.
+func (s *Service) aggregateJailed(ip netip.Addr, now time.Time) bool {
+	snap := s.snap.Load()
+	ip = normalizeIP(ip)
+	if snap.allowed(ip, now) {
+		return false
+	}
+	_, ok := snap.aggregateJailedUntil(ip, now)
+	return ok
+}
+
+func usernameKey(username string) string {
+	return truncateRunes(normalizeUsername(username), maxUsernameLen)
+}
+
+// CheckLogin runs before a password is verified. A known device of the user (see KnownDevice)
+// passes an exhausted per-username bucket and an aggregated /56 or /48 jail: rotating addresses
+// can slow down guessing a password, but never lock the owner out (spec §7.2, SEC-09).
+func (s *Service) CheckLogin(ctx context.Context, ip netip.Addr, username string) error {
 	if !ip.IsValid() {
 		return ErrIPBlocked // fail closed
 	}
@@ -42,18 +63,48 @@ func (s *Service) CheckLogin(_ context.Context, ip netip.Addr, username string) 
 	if d := take(ipKey, now); d > 0 {
 		return &RateLimitError{RetryAfter: d}
 	}
+	// after the per-IP token, so a flood from a jailed prefix does not cost a query per request
+	if s.aggregateJailed(ip, now) && !s.knownDevice(ctx, ip, username, now) {
+		return ErrJailed
+	}
 	if allowlisted {
 		// allowlisted addresses skip the per-username bucket, so others cannot lock
 		// them out by exhausting it; the per-IP bucket keeps brute force bounded
 		return nil
 	}
-	if d := s.loginUser.take(truncateRunes(normalizeUsername(username), maxUsernameLen), now); d > 0 {
+	// The token is taken here, before the password check, so parallel requests cannot make more
+	// guesses than the bucket allows.
+	if d := s.loginUser.take(usernameKey(username), now); d > 0 {
+		if s.knownDevice(ctx, ip, username, now) {
+			return nil
+		}
 		return &RateLimitError{RetryAfter: d}
 	}
 	return nil
 }
 
-func (s *Service) CheckSecondFactor(_ context.Context, ip netip.Addr, key string) error {
+// KnownDevice reports whether ip's key completed a full login as username within
+// KnownDeviceWindow. Such logins skip the username bucket and may use the reserved argon2 slot.
+func (s *Service) KnownDevice(ctx context.Context, ip netip.Addr, username string) bool {
+	return s.knownDevice(ctx, ip, username, s.clock.Now())
+}
+
+func (s *Service) knownDevice(ctx context.Context, ip netip.Addr, username string, now time.Time) bool {
+	key := httpx.IPKey(normalizeIP(ip))
+	if !key.IsValid() || username == "" {
+		return false
+	}
+	n, err := s.q.DefenseKnownDevice(ctx, store.DefenseKnownDeviceParams{
+		Username: username, IpKey: key.String(), Since: now.Add(-KnownDeviceWindow).UnixMilli(),
+	})
+	if err != nil {
+		s.log.Error("defense: known device lookup", "err", err)
+		return false // fail closed: the bucket applies
+	}
+	return n > 0
+}
+
+func (s *Service) CheckSecondFactor(ctx context.Context, ip netip.Addr, key, username string) error {
 	if !ip.IsValid() {
 		return ErrIPBlocked // fail closed
 	}
@@ -63,6 +114,9 @@ func (s *Service) CheckSecondFactor(_ context.Context, ip netip.Addr, key string
 	}
 	if d := s.secondFactor.take(key+"|"+httpx.IPKey(normalizeIP(ip)).String(), now); d > 0 {
 		return &RateLimitError{RetryAfter: d}
+	}
+	if s.aggregateJailed(ip, now) && !s.knownDevice(ctx, ip, username, now) {
+		return ErrJailed
 	}
 	return nil
 }
