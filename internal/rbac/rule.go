@@ -23,6 +23,12 @@ var AllPermissions = []Permission{
 	PermServerView, PermServerPower, PermServerConsole, PermServerFiles, PermServerPlugins, PermServerBackups,
 }
 
+// FullTrustPermissions give a user code execution in the container or every file of a server
+// (console, files, plugins, backups). Non-admins holding one of them must use 2FA.
+var FullTrustPermissions = []Permission{
+	PermServerConsole, PermServerFiles, PermServerPlugins, PermServerBackups,
+}
+
 func (p Permission) Valid() bool { return slices.Contains(AllPermissions, p) }
 
 type ruleKind int
