@@ -18,7 +18,7 @@ brew install go node sqlc goose golangci-lint goreleaser jq shellcheck
 | GoReleaser | v2.18.2 (CI), locally ≥ v2.8 | `make release` uses the locally installed `goreleaser` |
 | sqlc | version in the header of `internal/store/db.go` | CI downloads exactly this version as a release binary; if you generate with a newer version, commit the changed header too |
 | govulncheck | v1.8.0 | `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...` |
-| Redocly CLI | 2.54.2 | `npx --yes @redocly/cli@2.54.2 lint api/openapi.yaml --extends=minimal` |
+| Redocly CLI | pinned in `tools/redocly/package-lock.json` | `(cd tools/redocly && npm ci --ignore-scripts) && tools/redocly/node_modules/.bin/redocly lint api/openapi.yaml --extends=minimal` |
 | actionlint | v1.7.12 | `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12` (uses `shellcheck` if installed) |
 
 ## Quickstart
@@ -298,7 +298,7 @@ A pull request runs only the jobs its changed files need; the first job, `change
 |---|---|---|
 | `go` | `cmd/`, `internal/`, `api/`, `deploy/`, `go.mod`/`go.sum`, `sqlc.yaml`, `.golangci.yml`, `Makefile`, `scripts/install-restic.sh` | `make test-vm SUITE=go` and `SUITE=lint`; CI only: `go mod verify && go mod tidy -diff`, sqlc freshness (release binary of the version in the header of `internal/store/db.go`), `govulncheck` |
 | `web` | `web/`, `api/` (preview image only on changes to `web/Dockerfile.preview`, `compose.preview.yaml`, `web/package*.json`, `web/vite.config.ts`) | `make test-vm SUITE=web` and `SUITE=lint`; CI only: build, `gen:api` freshness, `npm audit`, preview image |
-| `openapi` | `api/` | `npx --yes @redocly/cli@2.54.2 lint api/openapi.yaml --extends=minimal` |
+| `openapi` | `api/`, `tools/redocly/` | `(cd tools/redocly && npm ci --ignore-scripts) && tools/redocly/node_modules/.bin/redocly lint api/openapi.yaml --extends=minimal` |
 | `e2e` | `cmd/`, `internal/`, `api/`, `web/`, `go.mod`/`go.sum` | `make test-vm SUITE=e2e` |
 | `nftables` | `internal/agent/`, `internal/defense/`, `internal/auth/`, `cmd/agent/`, `cmd/panel/`, `scripts/ci-acceptance.sh`, `go.mod`/`go.sum` | CI only (see below) |
 | `instances` | `cmd/`, `internal/` (the acceptance starts agent, files service and panel including sign-in, TOTP, monitoring and audit), `scripts/ci-instances.sh`, `scripts/mc-status.py`, `scripts/install-restic.sh`, `go.mod`/`go.sum` | CI only (see below) |
@@ -313,7 +313,7 @@ CI job details:
 |---|---|
 | `go` | `go mod verify && go mod tidy -diff`, `sqlc generate && git status --porcelain internal/store`, restic via `scripts/install-restic.sh` (`MCPANEL_TEST_RESTIC`), `make test-race`, golangci-lint v2.14.0, `go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...` |
 | `web` | `cd web && npm ci && npm run lint && npm run typecheck && npm test && npm run build && npm run gen:api && git status --porcelain . && npm audit --audit-level=high`; builds the preview image (`web/Dockerfile.preview`) when its inputs changed |
-| `openapi` | `npx --yes @redocly/cli@2.54.2 lint api/openapi.yaml --extends=minimal` |
+| `openapi` | `(cd tools/redocly && npm ci --ignore-scripts) && tools/redocly/node_modules/.bin/redocly lint api/openapi.yaml --extends=minimal` |
 | `e2e` | `scripts/vm-test.sh e2e` (see "End-to-end tests (Playwright)"); on failure the dev logs and `web/test-results`/`web/playwright-report` as an artifact |
 | `nftables` | CI only (Linux, root): `go test -tags nftintegration -exec sudo ./internal/agent/...` and the acceptance test `sudo scripts/ci-acceptance.sh bin/panel bin/agent` (5 failed sign-ins → IP in the nftables jail). The script changes the host (users, network namespace, nftables) and is meant for disposable runners only. |
 | `nftables` (Docker integration) | CI only: `go test -tags dockerintegration -exec "sudo env MCPANEL_IT_STRICT=1" ./internal/agent/...` |
@@ -323,6 +323,10 @@ CI job details:
 | `installer` | CI only (GitHub runner `ubuntu-24.04`, root, `MCPANEL_INSTALL_ALLOW_UNSUPPORTED=1`): `sudo scripts/ci-installer.sh .` builds three stages in the `--from-dir` format (`0.0.1-ci`, `0.0.2-ci`, `0.0.3-ci` with a panel that exits at once), installs restic 0.19.1 (Ubuntu 24.04 ships 0.16) and runs through the lifecycle: `install` with `--tls internal`, domain `panel.ci.test` (`/etc/hosts`), firewall and `--ssh-port 22`, admin via stdin; units, sockets, firewall rules and outbound HTTPS; `doctor --json` without failures; a second `install` without `[changed]`; sign-in through Caddy (internal CA); `update` to `0.0.2-ci` with a backup under `/var/lib/mc-panel-rollback/`, DB unchanged; `update` to the broken stage → exit code 3, `0.0.2-ci` runs again, DB unchanged, `doctor` without failures; `uninstall` (units, binaries, Caddy site, tables `inet mcpanel_fw`/`inet mcpanel` and a container with label `mcpanel.instance` gone; data, configuration, users, a foreign container and a foreign table stay); a new `install` finds the admin and the data; `uninstall --purge` through a pseudo-terminal (`script`): a wrong domain aborts, the right one removes everything. Timeout 30 min |
 
 `make test-vm SUITE=lint` lints the Linux-specific files (golangci-lint runs on Linux there).
+
+**Supply chain:** the self-hosted CI jobs and `scripts/vm-test.sh` install npm packages with `npm ci --ignore-scripts` (no lifecycle scripts). Dependabot opens weekly, grouped updates for Go modules and npm. `npm run build` ends with `scripts/check-dist.mjs`, which fails if `internal/webui/dist` contains the MSW worker, source maps or mock code.
+
+**CSP in tests:** e2e specs import `test` from `web/e2e/test.ts` (eslint enforces it); every test fails on a CSP or Trusted Types violation report. The Vite dev server (`make dev`, the e2e mock) sends the panel's CSP too.
 
 ## Lint conventions
 

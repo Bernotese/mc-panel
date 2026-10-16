@@ -163,6 +163,7 @@ Sensitive actions require a 2FA confirmation that is at most 10 min old. These i
 
 - `SameSite=Strict` + check of `Sec-Fetch-Site` (only `same-origin`/`none`) or `Origin` on state-changing requests + synchronizer token (`X-CSRF-Token`, bound to the session).
 - Security headers from the panel itself (independent of Caddy): strict CSP (`default-src 'self'`, no inline script), `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, minimal `Permissions-Policy`, `frame-ancestors 'none'`.
+  (Now, security review SEC-31, SEC-43, SEC-48: no `'unsafe-inline'` for styles either; `index.html` gets a per-request style nonce. `img-src 'self'` without `data:` (the TOTP QR code is rendered as SVG). Trusted Types run report-only (`require-trusted-types-for 'script'; trusted-types 'none'`) with violation reports, to be enforced later.)
 - Request body limit (default 1 MiB), timeouts for header/read/write.
 
 ## 5. Permissions
