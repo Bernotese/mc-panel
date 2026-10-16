@@ -172,6 +172,15 @@ listen = "127.0.0.1:${E2E_PORT}"
 public_url = "http://localhost:${E2E_PORT}"
 EOF
 
+  # The stack listens on fixed ports (18080, Playwright mock 5174), so it runs under the lock: a
+  # second run would otherwise collide on the ports or test the other checkout's panel.
+  with_lock e2e_stack_and_playwright
+}
+
+# e2e_stack_and_playwright runs under the VM test lock. On failure the script exits: the EXIT
+# trap stops the stack and the lock is released with the process (the servers do not inherit
+# fd 9).
+e2e_stack_and_playwright() {
   # stack_pids is global: the EXIT trap runs after this function has returned, when a local
   # array would already be gone (and a bare "wait" would then wait for the servers forever).
   stack_pids=()
@@ -199,22 +208,16 @@ EOF
   printf '%s\n' "${password}" | .dev/bin/panel admin create -dev -config .dev/panel-vm.toml -username e2e-admin
 
   local rc=0
-  with_lock e2e_playwright "${password}" || rc=1
+  log "Playwright (real backend)"
+  (cd web && E2E_BASE_URL="http://localhost:${E2E_PORT}" E2E_ADMIN_USER=e2e-admin E2E_ADMIN_PASSWORD="${password}" npm run e2e:real) || rc=1
+  log "Playwright (mock backend)"
+  (cd web && npm run e2e) || rc=1
   if [ "${rc}" -ne 0 ]; then
     tail -n 50 .dev/agent.log .dev/files.log .dev/panel.log
   fi
   stop_stack
   trap - EXIT
   [ "${rc}" -eq 0 ] || die "e2e failed"
-}
-
-e2e_playwright() {
-  local rc=0
-  log "Playwright (real backend)"
-  (cd web && E2E_BASE_URL="http://localhost:${E2E_PORT}" E2E_ADMIN_USER=e2e-admin E2E_ADMIN_PASSWORD="$1" npm run e2e:real) || rc=1
-  log "Playwright (mock backend)"
-  (cd web && npm run e2e) || rc=1
-  return "${rc}"
 }
 
 # Screenshots of the UI against the mock backend for visual review (web/screenshots/, copied back
