@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -83,14 +84,22 @@ func RenderRoutes(mappings map[string]string) ([]byte, error) {
 // same directory, fsync, rename, fsync of the directory). It reports changed=false
 // and writes nothing when the file already has exactly this content.
 func WriteRoutes(dir string, data []byte) (changed bool, err error) {
-	// The router runs as uid 65532 and must read the directory and the file.
-	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // G301: mc-router (uid 65532) reads this directory; it holds no secrets
+	return writeReadable(dir, routesFileName, data)
+}
+
+// writeReadable atomically replaces <dir>/<name> with data, readable by everyone (0644 in
+// a 0755 directory): the containers read it through a read-only bind mount, and it holds
+// no secrets. It writes nothing when the file already has exactly this content.
+func writeReadable(dir, name string, data []byte) (changed bool, err error) {
+	// The router (uid 65532) and the instance containers (mc_user) must read the
+	// directory and the file.
+	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // G301: containers read this directory; it holds no secrets
 		return false, err
 	}
 	if err := os.Chmod(dir, 0o755); err != nil { //nolint:gosec // G302: see above, MkdirAll is subject to the umask
 		return false, err
 	}
-	path := filepath.Join(dir, routesFileName)
+	path := filepath.Join(dir, name)
 	old, err := os.ReadFile(path) //nolint:gosec // G304: fixed file name below the configured instances_dir, never request input
 	switch {
 	case err == nil && bytes.Equal(old, data):
@@ -98,7 +107,7 @@ func WriteRoutes(dir string, data []byte) (changed bool, err error) {
 	case err != nil && !errors.Is(err, fs.ErrNotExist):
 		return false, err
 	}
-	tmp, err := os.CreateTemp(dir, ".routes-*.json")
+	tmp, err := os.CreateTemp(dir, "."+strings.TrimSuffix(name, filepath.Ext(name))+"-*"+filepath.Ext(name))
 	if err != nil {
 		return false, err
 	}
@@ -126,9 +135,21 @@ func WriteRoutes(dir string, data []byte) (changed bool, err error) {
 		return false, err
 	}
 	if err = syncDir(dir); err != nil {
-		return true, fmt.Errorf("routes written, but fsync of %s failed: %w", dir, err)
+		return true, fmt.Errorf("%s written, but fsync of %s failed: %w", name, dir, err)
 	}
 	return true, nil
+}
+
+// WritePatches makes <dir> hold the itzg patch definitions of instancespec.Patches (the
+// files the instance containers see read-only at instancespec.PatchesDir).
+func WritePatches(dir string) error {
+	p := instancespec.Patches()
+	for _, name := range slices.Sorted(maps.Keys(p)) {
+		if _, err := writeReadable(dir, name, []byte(p[name])); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func syncDir(dir string) error {

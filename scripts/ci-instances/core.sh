@@ -34,6 +34,16 @@ wait_for 600 "status ping through mc-router" routed
 grep -q 'ci acceptance' "$work/status.json" || fail "status ping answered without our MOTD: $(cat "$work/status.json")"
 echo "OK: status ping via citest.mc.localhost: $(head -c 200 "$work/status.json")"
 
+# F9: every player has the router's address; two joins within 4 s must both pass Bukkit's
+# connection throttle, which the agent's patch definition switches off.
+grep -Eq '^  connection-throttle: -1$' "$work/mc/instances/9001/bukkit.yml" ||
+  fail "bukkit.yml: connection-throttle not patched: $(grep -n connection-throttle "$work/mc/instances/9001/bukkit.yml")"
+for player in CiJoinA CiJoinB; do
+  answer="$(python3 -I scripts/mc-status.py 127.0.0.1 25565 citest.mc.localhost --login "$player" 2>&1)" ||
+    fail "login $player through mc-router refused: $answer"
+done
+echo "OK: two joins in a row through mc-router ($answer), connection-throttle -1"
+
 echo "== hardening (docker inspect)"
 docker inspect mcpanel-mc-9001 | python3 -I -c '
 import json, sys
@@ -49,8 +59,9 @@ checks = {
     "memory": h["Memory"] == 2048 * 1024 * 1024 * 5 // 4 and h["MemorySwap"] == h["Memory"],
     "pids": h["PidsLimit"] == 1024,
     "restart": h["RestartPolicy"]["Name"] == "unless-stopped",
-    "only_data_and_tmp_mounts": sorted((m["Destination"], m["Source"]) for m in c["Mounts"])
-        == [("/data", sys.argv[3] + "/instances/9001"), ("/tmp", sys.argv[3] + "/tmp/9001")],
+    "only_data_tmp_and_patches_mounts": sorted((m["Destination"], m["Source"], m["RW"]) for m in c["Mounts"])
+        == [("/data", sys.argv[3] + "/instances/9001", True), ("/mcpanel-patches", sys.argv[3] + "/patches", False),
+            ("/tmp", sys.argv[3] + "/tmp/9001", True)],
     "no_ports": not h.get("PortBindings"),
     "network": list(c["NetworkSettings"]["Networks"]) == ["mcpanel-mc"],
     "label": cfg["Labels"].get("mcpanel.instance") == "9001",

@@ -30,6 +30,8 @@ func Env(name string, s Spec) ([]string, error) {
 		"OVERRIDE_SERVER_PROPERTIES=true",
 	)
 	switch s.Type {
+	case TypePaper, TypePurpur:
+		env = append(env, "PATCH_DEFINITIONS="+PatchesDir+"/"+bukkitPatchFile)
 	case TypeFabric:
 		if s.LoaderVersion != nil {
 			env = append(env, "FABRIC_LOADER_VERSION="+*s.LoaderVersion)

@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -120,4 +122,81 @@ func TestTwoFactorReasons(t *testing.T) {
 			t.Fatalf("Me = stage %s reason %s, want setup/policy", m.Stage, m.TwoFactorReason)
 		}
 	})
+}
+
+// A session that waits in setup because of a full-trust permission continues as full once the
+// permission is revoked (a password login would give a full session then, too). Enrolling the
+// first method later rotates it to a stored full session instead of falling back to setup.
+func TestRevokedFullTrustPermissionReleasesSetupSession(t *testing.T) {
+	e := newTestEnv(t)
+	uid := e.createUser("alice", "user")
+	e.grant(uid, rbac.PermServerFiles)
+	c := e.newClient("203.0.113.10")
+	if m := c.login("alice", testPassword).me(t); m.Stage != "setup" {
+		t.Fatalf("stage = %s, want setup", m.Stage)
+	}
+	e.revokeAll(uid)
+	if res := c.do(http.MethodGet, "/api/me/sessions", nil); res.code != 200 {
+		t.Fatalf("full route after revoke = %d %s", res.code, res.body)
+	}
+	if m := c.do(http.MethodGet, "/api/auth/me", nil).me(t); m.Stage != "full" || m.TwoFactorReason != reasonNone {
+		t.Fatalf("Me = stage %s reason %s, want full/none", m.Stage, m.TwoFactorReason)
+	}
+	before := c.cookie
+	if _, res := e.registerPasskey(c, "key"); res.code != 201 {
+		t.Fatalf("register = %d %s", res.code, res.body)
+	}
+	if c.cookie == before {
+		t.Fatal("the first method must rotate the stored setup session")
+	}
+	var stored string
+	if err := e.db.QueryRow(`SELECT stage FROM sessions WHERE id = ?`, c.sessionID()).Scan(&stored); err != nil || stored != "full" {
+		t.Fatalf("stored stage = %q %v, want full", stored, err)
+	}
+	if res := c.do(http.MethodGet, "/api/me/sessions", nil); res.code != 200 {
+		t.Fatalf("full route after enrolment = %d %s", res.code, res.body)
+	}
+}
+
+// A stored setup session keeps its stage while 2FA stays mandatory, and a user who already has a
+// method is not released either (the login would ask for the second factor).
+func TestSetupSessionStaysWhile2FAIsMandatory(t *testing.T) {
+	e := newTestEnv(t)
+	uid := e.createUser("alice", "user")
+	e.grant(uid, rbac.PermServerConsole)
+	c := e.newClient("203.0.113.10")
+	c.login("alice", testPassword)
+	if res := c.do(http.MethodGet, "/api/me/sessions", nil); res.code != 403 || res.errCode() != "setup_2fa_required" {
+		t.Fatalf("full route = %d %s, want 403 setup_2fa_required", res.code, res.body)
+	}
+	e.insertPasskeyRow(uid, "elsewhere")
+	e.revokeAll(uid)
+	if res := c.do(http.MethodGet, "/api/me/sessions", nil); res.code != 403 || res.errCode() != "setup_2fa_required" {
+		t.Fatalf("setup session of a user with a method = %d %s, want 403 setup_2fa_required", res.code, res.body)
+	}
+}
+
+func TestDeleteLastPasskeyRefusedForFullTrustUser(t *testing.T) {
+	e := newTestEnv(t)
+	uid := e.createUser("alice", "user")
+	c := e.newClient("203.0.113.10")
+	c.login("alice", testPassword)
+	_, res := e.registerPasskey(c, "key")
+	var created passkeyCreatedResponse
+	if res.code != 201 || json.Unmarshal(res.body, &created) != nil {
+		t.Fatalf("register = %d %s", res.code, res.body)
+	}
+	e.grant(uid, rbac.PermServerBackups)
+	if m := c.do(http.MethodGet, "/api/auth/me", nil).me(t); m.Stage != "full" || m.TwoFactorReason != reasonPermissions {
+		t.Fatalf("Me = stage %s reason %s, want full/permissions", m.Stage, m.TwoFactorReason)
+	}
+	e.grantSudo(c)
+	path := fmt.Sprintf("/api/me/passkeys/%d", created.Passkey.ID)
+	if res := c.do(http.MethodDelete, path, nil); res.code != 409 || res.errCode() != "conflict" {
+		t.Fatalf("last passkey of a full-trust user = %d %s, want 409 conflict", res.code, res.body)
+	}
+	e.revokeAll(uid)
+	if res := c.do(http.MethodDelete, path, nil); res.code != 204 {
+		t.Fatalf("after revoke = %d %s, want 204", res.code, res.body)
+	}
 }

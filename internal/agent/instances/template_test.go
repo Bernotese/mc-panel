@@ -41,6 +41,7 @@ func TestInstanceContainerGolden(t *testing.T) {
 		Env: []string{
 			"EULA=TRUE", "TYPE=PAPER", "VERSION=1.21.4", "MEMORY=4096M", "ENABLE_AUTOPAUSE=false",
 			"ENABLE_RCON=true", "OVERRIDE_SERVER_PROPERTIES=true",
+			"PATCH_DEFINITIONS=/mcpanel-patches/bukkit-connection-throttle.json",
 			"MOTD=Hallo", "DIFFICULTY=normal", "MODE=survival", "MAX_PLAYERS=20", "PVP=true", "HARDCORE=false",
 			"ALLOW_FLIGHT=false", "ENABLE_COMMAND_BLOCK=false", "ONLINE_MODE=true", "ENABLE_WHITELIST=false",
 			"VIEW_DISTANCE=10", "SIMULATION_DISTANCE=10", "SPAWN_PROTECTION=16",
@@ -55,7 +56,10 @@ func TestInstanceContainerGolden(t *testing.T) {
 		},
 		StopTimeout: 60,
 		HostConfig: docker.HostConfig{
-			Binds:          []string{"/srv/mc-panel/instances/7:/data", "/srv/mc-panel/tmp/7:/tmp"},
+			Binds: []string{
+				"/srv/mc-panel/instances/7:/data", "/srv/mc-panel/tmp/7:/tmp",
+				"/srv/mc-panel/patches:/mcpanel-patches:ro",
+			},
 			NetworkMode:    "mcpanel-mc",
 			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
 			CapDrop:        []string{"ALL"},
@@ -110,7 +114,7 @@ func TestRouterContainerGolden(t *testing.T) {
 
 // allowedEnvKeys mirrors the allowlist of instancespec.Env: the template must never add anything.
 var allowedEnvKeys = []string{
-	"EULA", "TYPE", "VERSION", "MEMORY", "ENABLE_AUTOPAUSE", "ENABLE_RCON", "OVERRIDE_SERVER_PROPERTIES",
+	"EULA", "TYPE", "VERSION", "MEMORY", "ENABLE_AUTOPAUSE", "ENABLE_RCON", "OVERRIDE_SERVER_PROPERTIES", "PATCH_DEFINITIONS",
 	"FABRIC_LOADER_VERSION", "NEOFORGE_VERSION", "MODRINTH_MODPACK", "CF_SLUG", "CF_PAGE_URL", "CF_API_KEY",
 	"MOTD", "DIFFICULTY", "MODE", "MAX_PLAYERS", "PVP", "HARDCORE", "ALLOW_FLIGHT", "ENABLE_COMMAND_BLOCK",
 	"ONLINE_MODE", "ENABLE_WHITELIST", "VIEW_DISTANCE", "SIMULATION_DISTANCE",
@@ -153,7 +157,8 @@ func TestInstanceContainerInvariants(t *testing.T) {
 			t.Fatalf("%s (%s): %v", req.Name, req.Spec.Type, err)
 		}
 		hc := c.HostConfig
-		if !slices.Equal(hc.Binds, []string{instances.DataDir("/srv/mc-panel", req.ID) + ":/data", instances.TmpDir("/srv/mc-panel", req.ID) + ":/tmp"}) {
+		if !slices.Equal(hc.Binds, []string{instances.DataDir("/srv/mc-panel", req.ID) + ":/data", instances.TmpDir("/srv/mc-panel", req.ID) + ":/tmp",
+			instances.PatchesDir("/srv/mc-panel") + ":/mcpanel-patches:ro"}) {
 			t.Errorf("%s: binds = %v", req.Name, hc.Binds)
 		}
 		if hc.PortBindings != nil || c.ExposedPorts != nil || hc.CapAdd != nil || hc.Privileged {
@@ -247,7 +252,7 @@ func TestTemplateHostLimits(t *testing.T) {
 
 func TestPaths(t *testing.T) {
 	if instances.ContainerName(12) != "mcpanel-mc-12" || instances.DataDir("/srv/mc-panel", 12) != "/srv/mc-panel/instances/12" ||
-		instances.RouterDir("/srv/mc-panel") != "/srv/mc-panel/router" || instances.DeletedDir("/srv/mc-panel") != "/srv/mc-panel/deleted" ||
+		instances.RouterDir("/srv/mc-panel") != "/srv/mc-panel/router" || instances.PatchesDir("/srv/mc-panel") != "/srv/mc-panel/patches" || instances.DeletedDir("/srv/mc-panel") != "/srv/mc-panel/deleted" ||
 		instances.TmpDir("/srv/mc-panel", 12) != "/srv/mc-panel/tmp/12" {
 		t.Fatal("paths changed")
 	}
