@@ -107,7 +107,8 @@ uni_binaries() {
 # import line of the operator (unmarked) stays; mc-panel.caddy then becomes a comment-only file,
 # so Caddy still loads. The configuration is validated as caddy before the reload. Like the
 # Caddy package, its repository and the Caddyfile, the drop-in caddy.service.d/mc-panel.conf
-# stays: a Caddyfile of the installer keeps its admin socket in /run/caddy.
+# stays: a Caddyfile of the installer keeps its admin socket in /run/caddy. So does mc-panel.d/ with
+# the operator's additions to the site.
 uni_caddy() {
   local file="$CADDY_DIR/Caddyfile" site="$CADDY_DIR/mc-panel.caddy" touched=0 mode og content foreign=0
   if [[ -f $ROOT$file && ! -L $ROOT$file ]] && grep -qxF -- "$UNI_IMPORT_LINE" "$ROOT$file"; then

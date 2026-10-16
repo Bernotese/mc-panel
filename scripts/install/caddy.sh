@@ -14,6 +14,10 @@ CAD_IMPORT_RE='^[[:space:]]*import[[:space:]]+mc-panel[.]caddy([[:space:]]|$)' #
 CAD_WAIT=120 # seconds to wait for https://<domain>/api/health
 CAD_ADMIN='admin unix//run/caddy/admin.sock'
 CAD_DROPIN=/etc/systemd/system/caddy.service.d/mc-panel.conf
+# The operator's additions to the panel site (basic_auth, an IP allowlist, …): mc-panel.caddy
+# imports $CAD_SITE_D/*.caddy inside its site block. install and update only create the directory
+# when it is missing and never touch it or its files afterwards; uninstall keeps it.
+CAD_SITE_D=/etc/caddy/mc-panel.d
 
 # cad_is_package_default FILE: 0 if FILE is Ubuntu's unmodified Caddyfile (md5 of the conffile
 # recorded by dpkg).
@@ -64,14 +68,32 @@ cad_dropin_ensure() {
   echo "$r"
 }
 
-# cad_admin_status FILE: "socket" if FILE moves the admin API off TCP (admin unix//… or admin
-# off) in its global options, else "tcp". doctor reports the TCP case of a foreign Caddyfile.
+# cad_import_files FILE prints the files FILE imports (one level; a relative path or glob is
+# relative to FILE's directory, an absolute one is prefixed with ROOT), one per line. Named
+# snippets (import name) match no file and are skipped.
+cad_import_files() {
+  local dir="${1%/*}" p f
+  while read -r p; do
+    if [[ $p == /* ]]; then p="$ROOT$p"; else p="$dir/$p"; fi
+    # shellcheck disable=SC2086 # the import path is a glob on purpose
+    for f in $p; do
+      [[ -f $f ]] && printf '%s\n' "$f"
+    done
+  done < <(awk '$1 == "import" && NF >= 2 { print $2 }' "$1" 2>/dev/null)
+}
+
+# cad_admin_status FILE: "socket" if FILE or a file it imports moves the admin API off TCP
+# (admin unix//… or admin off), else "tcp". doctor reports the TCP case of a foreign Caddyfile.
 cad_admin_status() {
-  if grep -qE '^[[:space:]]*admin[[:space:]]+(unix//|off([[:space:]]|$))' -- "$1" 2>/dev/null; then
-    echo socket
-  else
-    echo tcp
-  fi
+  local f
+  # shellcheck disable=SC2046 # one path per line, no blanks in Caddy's import paths
+  for f in "$1" $(cad_import_files "$1"); do
+    if grep -qE '^[[:space:]]*admin[[:space:]]+(unix//|off([[:space:]]|$))' -- "$f" 2>/dev/null; then
+      echo socket
+      return 0
+    fi
+  done
+  echo tcp
 }
 
 # cad_import_ok FILE: 0 if FILE has exactly one import line of ours and it is the marked one.
@@ -146,6 +168,9 @@ cad_ensure() {
     fi
   done
   drop_r="$(cad_dropin_ensure)" || return 1
+  if [[ ! -e $ROOT$CAD_SITE_D && ! -L $ROOT$CAD_SITE_D ]]; then
+    ensure_dir "$CAD_SITE_D" 0755 root root >/dev/null || return 1
+  fi
   site_r="$(write_template caddy/mc-panel.caddy "$CADDY_DIR/mc-panel.caddy" 0644 root root)" || return 1
   # An existing Caddyfile keeps its owner, group and mode (e.g. root:caddy 0640).
   local mode=0644 og=root:root
