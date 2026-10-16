@@ -50,6 +50,11 @@ jobs:
           fi
           echo "tagged commit ${GITHUB_SHA} is an ancestor of origin/main"
 
+      # install.sh trusts exactly the keys in scripts/install/release-signers (SEC-07): never
+      # release with the TEST-ONLY placeholder or without a valid key.
+      - name: Release key is not the test key
+        run: bash scripts/install/test.sh signers_production
+
       # No caches in release builds: a cache written by a PR run must never feed a release.
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -93,6 +98,9 @@ jobs:
           mkdir -p ~/.cache
           flock ~/.cache/mcpanel-vm-test.lock make test-race
 
+  # GoReleaser creates the release as a draft (.goreleaser.yaml). It is published only by
+  # make sign-release on the owner's machine, which adds checksums.txt.sig signed with the
+  # release key that never touches GitHub (docs/dev/README.md, "Release process").
   release:
     name: GoReleaser
     needs: verify

@@ -4,7 +4,8 @@
 # Caddy comes from the official Caddy repository (SEC-01: universe has no security updates for
 # it): its signing key is verified against the pinned fingerprint before apt trusts it.
 
-PKG_LIST=(caddy nftables restic tzdata sqlite3 unattended-upgrades curl ca-certificates bzip2)
+# openssh-client: ssh-keygen -Y verify checks the release signatures (lib.sh release_verify).
+PKG_LIST=(caddy nftables restic tzdata sqlite3 unattended-upgrades curl ca-certificates bzip2 openssh-client)
 PKG_DOCKER=(docker.io)
 PKG_RESTIC_MIN=0.17.0
 PKG_RESTIC_BIN=""    # set by pkg_install: path of a restic >= PKG_RESTIC_MIN (cfg_keys reads it)

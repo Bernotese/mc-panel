@@ -133,6 +133,7 @@ test_ops_update_hands_over_to_target_installer() {
   TARGET_VERSION=v1.1.0
   YES=1
   fetch() { printf '#!/bin/bash\necho child "$@"\n' >"$2"; }
+  release_verify() { echo "signed SHA256:test"; } # install_signature.sh tests the signatures
   sha256_verify() { return 0; }
   upd_exec() { echo "exec $* handoff=$MCPANEL_UPDATE_HANDOFF work=$MCPANEL_HANDOFF_WORK" >>"$WORK/calls.log"; }
   assert_exit 0 cmd_update
@@ -159,6 +160,7 @@ test_ops_update_refuses_bad_checksum_before_any_change() {
   MCPANEL_VERSION=1.0.0
   TARGET_VERSION=1.1.0
   fetch() { echo x >"$2"; }
+  release_verify() { echo "signed SHA256:test"; }
   sha256_verify() { die "checksum mismatch for $3"; }
   upd_exec() { echo "exec $*" >>"$WORK/calls.log"; }
   assert_exit 1 cmd_update

@@ -18,6 +18,13 @@ MCPANEL_VERSION=dev
   LOG_FILE=/var/log/mc-panel-install.log
   ROLLBACK_DIR=/var/lib/mc-panel-rollback # root:root 0700, outside mcpanel's data dir (overview Global Constraints)
   RELEASE_BASE=https://github.com/Bernotese/mc-panel/releases
+  # Release signatures (SEC-07): checksums.txt.sig is an SSH signature (ssh-keygen -Y sign) of
+  # checksums.txt by a key listed in release_signers. Every release from SIGNED_SINCE on is
+  # signed; older ones install only with --allow-unsigned.
+  SIGN_NAMESPACE=mc-panel-release
+  SIGN_PRINCIPAL=mc-panel-release
+  SIGNED_SINCE=0.5.0
+  RELEASE_RECORD="$ETC_PANEL/release" # how the installed release was verified (doctor)
   TEMPLATE_DELIM=__MCPANEL_TEMPLATE_EOF__
 }
 
@@ -41,6 +48,7 @@ reset_globals() {
   CHECK_ONLY=0
   FORCE=0
   JSON=0
+  ALLOW_UNSIGNED=0
   ARCH=""
   BIN_SOURCE_DIR="" # extracted release tarball (binaries.sh); its deploy/ wins in render_template
   WORK="${WORK:-}"
@@ -404,6 +412,55 @@ sha256_verify() {
   [[ $want =~ ^[0-9a-f]{64}$ ]] || die "checksums: malformed entry for $3"
   got="$(sha256sum -- "$1" | awk '{ print $1 }')"
   [[ $got == "$want" ]] || die "checksum mismatch for $3 (expected $want, got $got)"
+}
+
+# --- release signatures --------------------------------------------------------------------
+
+# sig_verify CHECKSUMS SIG VERSION: SIG is a valid signature of CHECKSUMS by one of the
+# release_signers keys (the trusted keys in allowed_signers format: assemble.sh embeds
+# scripts/install/release-signers as that function, main.sh reads the file from the source tree) in namespace SIGN_NAMESPACE, and the signed CHECKSUMS lists the tarball
+# of VERSION (an older signed checksums.txt replayed under another tag would otherwise pass for
+# install.sh, whose asset name has no version). Prints the key's fingerprint; dies otherwise.
+sig_verify() {
+  local signers="$WORK/release-signers" out fp
+  command -v ssh-keygen >/dev/null 2>&1 || die "ssh-keygen is missing; install it with: apt-get install openssh-client"
+  release_signers >"$signers" 2>/dev/null || die "this install.sh has no release keys"
+  grep -q '^[^#[:space:]]' "$signers" || die "this install.sh has no release keys"
+  [[ -s $2 ]] || die "the signature of release v$3 is empty"
+  out="$(ssh-keygen -Y verify -f "$signers" -I "$SIGN_PRINCIPAL" -n "$SIGN_NAMESPACE" -s "$2" <"$1" 2>&1)" ||
+    die "the signature of checksums.txt of release v$3 does not verify (tampered release or unknown key); nothing was changed"
+  awk -v n="mc-panel_${3}_linux_${ARCH}.tar.gz" '$2 == n || $2 == "*" n { f = 1 } END { exit !f }' "$1" ||
+    die "the signed checksums.txt does not belong to release v$3; nothing was changed"
+  fp="$(printf '%s\n' "$out" | grep -o 'SHA256:[A-Za-z0-9+/=]*' | head -n 1)" || fp=""
+  printf '%s\n' "${fp:-unknown}"
+}
+
+# release_verify BASEURL CHECKSUMS VERSION: the signature policy for release VERSION whose
+# assets are below BASEURL. From SIGNED_SINCE on, BASEURL/checksums.txt.sig must verify
+# (sig_verify), --allow-unsigned does not change that. Older releases have no signature: they
+# need --allow-unsigned and get a loud warning. Prints "signed FINGERPRINT" or "unsigned" (the
+# record doctor shows); dies otherwise. Runs before any sha256_verify against CHECKSUMS.
+release_verify() {
+  local base="$1" sums="$2" v="$3" sig="$2.sig" rc=0 fp
+  version_ge "$v" "$SIGNED_SINCE" || rc=$?
+  if [[ $rc == 0 ]]; then
+    (fetch "$base/checksums.txt.sig" "$sig") 2>/dev/null ||
+      die "cannot download the signature of release v$v (checksums.txt.sig); releases from $SIGNED_SINCE on are signed, so it is refused"
+    fp="$(sig_verify "$sums" "$sig" "$v")" || exit 1 # sig_verify has said why
+    printf 'signed %s\n' "$fp"
+    return 0
+  fi
+  [[ $rc == 1 ]] || die "cannot compare version $v with $SIGNED_SINCE"
+  [[ $ALLOW_UNSIGNED == 1 ]] ||
+    die "release v$v is older than $SIGNED_SINCE and has no signature; install it only with --allow-unsigned (checked against checksums.txt alone)"
+  {
+    warn "=================================================================================="
+    warn "release v$v is NOT signed (older than $SIGNED_SINCE). --allow-unsigned: it is"
+    warn "checked against checksums.txt of the same release only. Anyone who controls the"
+    warn "GitHub release can change both."
+    warn "=================================================================================="
+  } >&2
+  echo unsigned
 }
 
 # --- system wrappers -----------------------------------------------------------------------

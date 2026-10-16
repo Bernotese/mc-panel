@@ -145,7 +145,7 @@ suite_lint() {
   # Like the CI job installer-lint (installer plan V5).
   log "installer: assemble, shellcheck, Bash tests"
   make installer INSTALLER_VERSION=0.0.0-vm
-  shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh
+  shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh scripts/sign-release.sh
   bash scripts/install/test.sh
 }
 
