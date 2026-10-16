@@ -2,7 +2,7 @@ SHELL := /bin/bash
 GO ?= go
 export CGO_ENABLED ?= 0
 
-.PHONY: generate check test test-go test-race test-web lint dev preview preview-logs preview-down web-build build release installer deploy-testvm test-vm clean
+.PHONY: generate check test test-go test-race test-web lint dev preview preview-logs preview-down web-build build release installer sign-release verify-release-build deploy-testvm test-vm clean
 
 generate:
 	sqlc generate
@@ -17,7 +17,7 @@ check:
 	GOOS=linux $(GO) vet -tags nftintegration,dockerintegration,acceptance ./...
 	GOOS=linux GOARCH=arm64 $(GO) build ./...
 	cd web && npm run typecheck
-	@for f in scripts/install/*.sh scripts/install/tests/*.sh; do bash -n "$$f" || exit 1; done
+	@for f in scripts/install/*.sh scripts/install/tests/*.sh scripts/sign-release.sh scripts/verify-release-build.sh scripts/release-lib.sh; do bash -n "$$f" || exit 1; done
 	scripts/install/assemble.sh 0.0.0-check build/install.sh && bash -n build/install.sh
 
 test: test-go test-web
@@ -69,6 +69,19 @@ INSTALLER_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | 
 # Assembles the installer (installer spec §3) into build/install.sh.
 installer:
 	scripts/install/assemble.sh "$(INSTALLER_VERSION)" build/install.sh
+
+# Signs and publishes the draft release TAG with the owner's release key (docs/dev/README.md,
+# "Release process"); the owner runs it on their own machine. KEY defaults to
+# ~/.ssh/mc-panel-release.
+sign-release:
+	@test -n "$(TAG)" || { echo "usage: make sign-release TAG=vX.Y.Z [KEY=path] [SKIP_BUILD_CHECK=1]"; exit 2; }
+	scripts/sign-release.sh $(if $(SKIP_BUILD_CHECK),--skip-build-check) "$(TAG)" $(if $(KEY),"$(KEY)")
+
+# Rebuilds the release TAG from its tagged commit (temp dir, Node of .node-version via fnm or
+# PATH) and compares it with the draft's tarballs; sign-release runs it, too.
+verify-release-build:
+	@test -n "$(TAG)" || { echo "usage: make verify-release-build TAG=vX.Y.Z"; exit 2; }
+	scripts/verify-release-build.sh "$(TAG)"
 
 # Builds REF on the internal test VM from GitHub and (re)deploys it there (docs/dev/README.md, "Test VM").
 TESTVM ?= claude@192.168.1.117

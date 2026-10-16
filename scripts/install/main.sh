@@ -18,6 +18,9 @@ if ! declare -F log_step >/dev/null; then # running from the source tree (tests,
     . "$_f"
   done
   TEMPLATE_DIR="${TEMPLATE_DIR:-$_src_dir/../../deploy}"
+  _SIGNERS_FILE="$_src_dir/release-signers"
+  # assemble.sh embeds release-signers as this function
+  release_signers() { cat -- "$_SIGNERS_FILE"; }
   unset _f _src_dir
 fi
 
@@ -28,8 +31,12 @@ usage: install.sh <command> [options]
   install    --domain FQDN --email ADDRESS [--version vX.Y.Z | --from-dir DIR]
              [--tls letsencrypt|internal] [--ssh-port N] [--no-firewall]
              [--allow-port PORT[/tcp|/udp]]...
-             [--admin-user NAME [--admin-password-file FILE]] [--yes]
-  update     [--version vX.Y.Z | --from-dir DIR] [--check] [--force] [--yes]
+             [--admin-user NAME [--admin-password-file FILE]] [--allow-unsigned] [--yes]
+  update     [--version vX.Y.Z | --from-dir DIR] [--check] [--force] [--allow-unsigned]
+             [--yes]
+
+Releases from v0.5.0 on are signed; install and update refuse one whose signature does not
+verify. --allow-unsigned only admits the unsigned releases before v0.5.0.
   doctor     [--json]
   uninstall  [--purge] [--yes]
 
@@ -124,6 +131,7 @@ parse_args() {
       shift
       ;;
     install:--no-firewall) NO_FIREWALL=1 ;;
+    install:--allow-unsigned | update:--allow-unsigned) ALLOW_UNSIGNED=1 ;;
     update:--check) CHECK_ONLY=1 ;;
     update:--force) FORCE=1 ;;
     doctor:--json) JSON=1 ;;

@@ -136,9 +136,14 @@ changelog:
     - title: Other changes
       order: 999
 
+# A draft: the owner checks it, signs checksums.txt with the release key outside GitHub and
+# publishes it with make sign-release (docs/dev/README.md, "Release process"; SEC-07). Until
+# then it is not /releases/latest and its download URLs do not resolve.
 release:
   name_template: "mc-panel {{ .Version }}"
   prerelease: auto
-  draft: false
+  draft: true
+  header: |
+    **Updating from v0.4.x or older:** the `install.sh` of those releases does not check release signatures. Download this release's `install.sh`, verify it as described in [docs/install.md, Signed releases](https://github.com/Bernotese/mc-panel/blob/main/docs/install.md#signed-releases), and run `sudo bash install.sh update` with it, not with the old script. Later updates check the signature themselves.
   extra_files:
     - glob: ./build/install.sh

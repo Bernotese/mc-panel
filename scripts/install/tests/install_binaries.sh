@@ -2,7 +2,9 @@
 # Tests of binaries.sh (installer spec §4.4, review focus 4). Run: bash scripts/install/test.sh
 # shellcheck disable=SC2034,SC2317,SC2329
 
-# bin_fixture_release VERSION: tarball and checksums.txt in $WORK/srv, served by a fake fetch.
+# bin_fixture_release VERSION: tarball, checksums.txt and its signature (by a throwaway key
+# that release_signers trusts, install_signature.sh) in $WORK/srv, served by a fake fetch that
+# fails for a file that is not there.
 bin_fixture_release() {
   local v="$1" d="$WORK/rel-src" b
   mkdir -p "$d/deploy/systemd" "$WORK/srv"
@@ -13,9 +15,12 @@ bin_fixture_release() {
   echo tpl >"$d/deploy/systemd/x.service"
   tar -C "$d" -czf "$WORK/srv/mc-panel_${v}_linux_amd64.tar.gz" panel agent files deploy
   (cd "$WORK/srv" && sha256sum "mc-panel_${v}_linux_amd64.tar.gz" >checksums.txt)
+  [[ -f $WORK/key ]] || sig_fixture_key
+  mkdir -p "$ROOT$ETC_PANEL" # lay_ensure's; bin_install writes RELEASE_RECORD there
+  sig_sign "$WORK/srv/checksums.txt"
   fetch() {
     printf 'fetch %s\n' "$1" >>"$WORK/calls.log"
-    cp "$WORK/srv/${1##*/}" "$2"
+    cp "$WORK/srv/${1##*/}" "$2" 2>/dev/null || die "download failed: $1"
   }
   TARGET_VERSION="$v" ARCH=amd64 FROM_DIR=''
 }
@@ -23,7 +28,7 @@ bin_fixture_release() {
 # bin_fixture_build DIR: a local build like --from-dir expects it.
 bin_fixture_build() {
   local b
-  mkdir -p "$1/deploy"
+  mkdir -p "$1/deploy" "$ROOT$ETC_PANEL"
   for b in panel agent files; do
     printf '#!/bin/sh\necho "%s 0.0.0-testvm+abc"\n' "$b" >"$1/$b"
     chmod 0755 "$1/$b"
@@ -70,6 +75,7 @@ test_install_bin_install_second_run_unchanged() {
 test_install_bin_install_refuses_bad_checksum() {
   bin_fixture_release 1.2.3
   echo "0000000000000000000000000000000000000000000000000000000000000000  mc-panel_1.2.3_linux_amd64.tar.gz" >"$WORK/srv/checksums.txt"
+  sig_sign "$WORK/srv/checksums.txt" # signed but wrong: the sha256 check refuses it
   assert_fails bin_install
   assert_contains "$(cat "$WORK/out")" "checksum mismatch"
   assert_no_file "$ROOT$BIN_DIR"
@@ -78,6 +84,7 @@ test_install_bin_install_refuses_bad_checksum() {
 test_install_bin_install_refuses_missing_checksum_line() {
   bin_fixture_release 1.2.3
   echo "$(printf '%064d' 0)  install.sh" >"$WORK/srv/checksums.txt"
+  sig_sign "$WORK/srv/checksums.txt"
   assert_fails bin_install
   assert_no_file "$ROOT$BIN_DIR"
 }
@@ -125,6 +132,7 @@ test_install_bin_install_refuses_unsafe_tarball() {
   ln -s /etc "$d/deploy"
   tar -C "$d" -czf "$WORK/srv/mc-panel_1.2.3_linux_amd64.tar.gz" deploy
   (cd "$WORK/srv" && sha256sum "mc-panel_1.2.3_linux_amd64.tar.gz" >checksums.txt)
+  sig_sign "$WORK/srv/checksums.txt"
   assert_fails bin_install
   assert_contains "$(cat "$WORK/out")" "unsafe entries"
   assert_no_file "$ROOT$BIN_DIR"

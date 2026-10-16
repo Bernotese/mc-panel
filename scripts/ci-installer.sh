@@ -5,14 +5,16 @@
 # lifecycle of install.sh as root: install (tls internal, firewall on), doctor without
 # failures, a second install that changes nothing, sign-in through Caddy, update to v2,
 # update to the broken build (health check fails, automatic rollback to v2 with the same
-# database), uninstall (services, units, Caddy site, nftables tables and mc-panel containers
+# database), update to a signed release downloaded over HTTPS (a local release server with a
+# throwaway key, through the hand-over; a release whose checksums.txt was changed after signing
+# is refused), uninstall (services, units, Caddy site, nftables tables and mc-panel containers
 # gone, data and config kept, foreign container and foreign table untouched), install again
 # over the kept data (no admin prompt, old password still valid), and uninstall --purge with
 # the domain typed in (a wrong answer keeps everything).
 #
 # Usage (as root): scripts/ci-installer.sh REPO_DIR
-# Changes the host (packages, users, systemd units, Caddy, nftables, /etc/hosts, ports 80, 443
-# and 25565): disposable CI runners only.
+# Changes the host (packages, users, systemd units, Caddy, nftables, /etc/hosts, the CA store,
+# ports 80, 443, 25565 and 8443): disposable CI runners only.
 set -euo pipefail
 
 if [ "$#" -ne 1 ]; then
@@ -33,7 +35,16 @@ ca=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
 changed_re='^\[changed\]'
 export MCPANEL_INSTALL_ALLOW_UNSUPPORTED=1
 
+release_ca=/usr/local/share/ca-certificates/mc-panel-ci-release.crt
+release_port=8443
+release_pid=""
+
 cleanup() {
+  if [ -n "$release_pid" ]; then kill "$release_pid" 2>/dev/null || true; fi
+  if [ -e "$release_ca" ]; then
+    rm -f "$release_ca"
+    update-ca-certificates --fresh >/dev/null 2>&1 || true
+  fi
   docker rm -f ci-foreign ci-fake-instance >/dev/null 2>&1 || true
   nft delete table inet ci_foreign 2>/dev/null || true
   rm -rf "$work"
@@ -60,7 +71,7 @@ stage() {
   mkdir -p "$dir"
   (cd "$repo" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$version" -o "$dir/" ./cmd/agent ./cmd/files ./cmd/panel)
   cp -r "$repo/deploy" "$dir/deploy"
-  bash "$repo/scripts/install/assemble.sh" "$version" "$dir/install.sh"
+  bash "$repo/scripts/install/assemble.sh" "$version" "$dir/install.sh" # ASSEMBLE_* from stage_signed
   chmod 0755 "$dir/install.sh"
   if [ "${3:-}" = broken ]; then
     mv "$dir/panel" "$dir/panel.real"
@@ -74,6 +85,61 @@ esac
 EOF
     chmod 0755 "$dir/panel"
   fi
+}
+
+# release_server: a GitHub-like release download tree in $work/releases/download/<tag>/,
+# served over HTTPS on 127.0.0.1:$release_port with a certificate of a throwaway CA that the
+# system trusts (curl in install.sh accepts HTTPS only), and a throwaway signing key whose
+# allowed_signers line the signed staging builds embed (ASSEMBLE_SIGNERS).
+release_server() {
+  local d="$work/release-ca" _
+  mkdir -p "$d" "$work/releases/download"
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj "/CN=mc-panel CI release CA" \
+    -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign \
+    -keyout "$d/ca.key" -out "$d/ca.crt" 2>/dev/null
+  openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj "/CN=127.0.0.1" \
+    -keyout "$d/srv.key" -out "$d/srv.csr" 2>/dev/null
+  printf 'subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\n' >"$d/srv.ext"
+  openssl x509 -req -in "$d/srv.csr" -CA "$d/ca.crt" -CAkey "$d/ca.key" -CAcreateserial -days 1 \
+    -extfile "$d/srv.ext" -out "$d/srv.crt" 2>/dev/null
+  cp "$d/ca.crt" "$release_ca"
+  update-ca-certificates >/dev/null
+  python3 -I - "$work/releases" "$d/srv.crt" "$d/srv.key" "$release_port" >"$work/release-server.log" 2>&1 <<'PY' &
+import functools, http.server, ssl, sys
+root, cert, key, port = sys.argv[1:5]
+handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=root)
+srv = http.server.ThreadingHTTPServer(("127.0.0.1", int(port)), handler)
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ctx.load_cert_chain(cert, key)
+srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+srv.serve_forever()
+PY
+  release_pid=$!
+  for _ in $(seq 1 20); do
+    curl -fsS -o /dev/null "https://127.0.0.1:$release_port/" 2>/dev/null && break
+    sleep 0.5
+  done
+  curl -fsS -o /dev/null "https://127.0.0.1:$release_port/" || fail "release server: $(cat "$work/release-server.log")"
+  ssh-keygen -q -t ed25519 -N '' -C mc-panel-ci-release -f "$work/release-key" </dev/null
+  printf 'mc-panel-release namespaces="mc-panel-release" %s\n' "$(cut -d' ' -f1,2 "$work/release-key.pub")" >"$work/release-signers"
+}
+
+# publish <staging dir> <version>: the staging build as a release like goreleaser makes it
+# (tarball of the binaries and deploy/, install.sh, checksums.txt), signed with the CI key.
+publish() {
+  local dir="$1" v="$2" out="$work/releases/download/v$2" arch
+  arch="$(dpkg --print-architecture)"
+  mkdir -p "$out"
+  tar -C "$dir" -czf "$out/mc-panel_${v}_linux_${arch}.tar.gz" panel agent files deploy
+  cp "$dir/install.sh" "$out/install.sh"
+  (cd "$out" && sha256sum "mc-panel_${v}_linux_${arch}.tar.gz" install.sh >checksums.txt)
+  ssh-keygen -q -Y sign -f "$work/release-key" -n mc-panel-release "$out/checksums.txt" </dev/null 2>/dev/null
+}
+
+# stage_signed <dir> <version>: a staging build whose install.sh trusts only the CI key and
+# downloads from the local release server (assemble.sh's test-only inputs).
+stage_signed() {
+  ASSEMBLE_SIGNERS="$work/release-signers" ASSEMBLE_RELEASE_BASE="https://127.0.0.1:$release_port" stage "$@"
 }
 
 # inst <dir> <args…>: runs install.sh of a staging directory; output also in $work/last.out.
@@ -234,6 +300,42 @@ login_ok
 n="$(doctor_fails)"
 [ "$n" = 0 ] || fail "doctor reports $n failures after the rollback: $(cat "$work/doctor.json")"
 echo "OK: failed health check rolled back to 0.0.2-ci"
+
+echo "== update to a signed release over HTTPS"
+release_server
+launcher="$work/launcher" signed="$work/signed" tampered="$work/tampered"
+# launcher: 0.0.2-ci again, but trusting the CI key and the local server; it hands over to the
+# install.sh of 9.0.0-ci after checking the signature, and that one downloads the tarball.
+stage_signed "$launcher" 0.0.2-ci
+stage_signed "$signed" 9.0.0-ci
+stage_signed "$tampered" 9.0.1-ci
+publish "$signed" 9.0.0-ci
+publish "$tampered" 9.0.1-ci
+# after signing: a changed install.sh with a matching checksums.txt (an attacker with the
+# release but without the key)
+td="$work/releases/download/v9.0.1-ci"
+printf '\necho tampered\n' >>"$td/install.sh"
+(cd "$td" && sed -i '/ install.sh$/d' checksums.txt && sha256sum install.sh >>checksums.txt)
+before="$(db_fingerprint)"
+inst "$launcher" update --version 9.0.0-ci --yes </dev/null || fail "signed update: exit $?"
+grep -q 'release v9.0.0-ci: signed' "$work/last.out" || fail "the hand-over did not report the signature"
+[ "$(/usr/local/bin/panel version)" = 9.0.0-ci ] || fail "panel version after the signed update: $(/usr/local/bin/panel version)"
+[ "$(db_fingerprint)" = "$before" ] || fail "database changed by the signed update"
+grep -qx 'verified=signed' /etc/mc-panel/release || fail "release record: $(cat /etc/mc-panel/release)"
+"$signed/install.sh" doctor --json >"$work/doctor.json" 2>/dev/null || true
+python3 -I -c 'import json, sys; d = json.load(open(sys.argv[1])); c = [c for c in d["checks"] if c["id"] == "release_signature"][0]; sys.exit(0 if c["status"] == "ok" and "signature-checked" in c["message"] else 1)' "$work/doctor.json" ||
+  fail "doctor release_signature: $(cat "$work/doctor.json")"
+wait_health
+login_ok
+set +e
+inst "$launcher" update --version 9.0.1-ci --yes </dev/null
+rc=$?
+set -e
+[ "$rc" = 1 ] || fail "tampered update: exit $rc, want 1"
+grep -q 'does not verify' "$work/last.out" || fail "the tampered release was not refused for its signature"
+[ "$(/usr/local/bin/panel version)" = 9.0.0-ci ] || fail "panel version after the tampered update: $(/usr/local/bin/panel version)"
+active mcpanel-panel.service || fail "panel not active after the refused update"
+echo "OK: signed release installed through the hand-over, tampered release refused"
 
 echo "== uninstall keeps data"
 # --init: sleep as PID 1 would ignore SIGTERM, and uninstall's docker stop would wait 60 s.
