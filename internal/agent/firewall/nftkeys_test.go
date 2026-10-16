@@ -176,18 +176,26 @@ func TestEgressElements(t *testing.T) {
 	}
 }
 
-func TestEgressSubnetsFilter(t *testing.T) {
-	got := egressSubnets([]netip.Prefix{
+func TestEgressSubnets(t *testing.T) {
+	got, err := egressSubnets([]netip.Prefix{
 		netip.MustParsePrefix("172.18.0.0/16"),
-		{},                                  // invalid
-		netip.MustParsePrefix("10.0.0.1/8"), // not masked
-		netip.MustParsePrefix("::ffff:a00:0/104"), // IPv4-mapped
-		netip.MustParsePrefix("0.0.0.0/0"),        // would exempt every destination
 		netip.MustParsePrefix("fd00:1::/64"),
 		netip.MustParsePrefix("172.18.0.0/16"), // duplicate
 	})
 	want := []netip.Prefix{netip.MustParsePrefix("172.18.0.0/16"), netip.MustParsePrefix("fd00:1::/64")}
-	if !slices.Equal(got, want) {
-		t.Fatalf("egressSubnets = %v, want %v", got, want)
+	if err != nil || !slices.Equal(got, want) {
+		t.Fatalf("egressSubnets = %v, %v; want %v", got, err, want)
+	}
+	// Fail closed: one unusable subnet (or none at all) means no rule set at all.
+	for name, in := range map[string][]netip.Prefix{
+		"empty":      nil,
+		"invalid":    {netip.MustParsePrefix("172.18.0.0/16"), {}},
+		"not masked": {netip.MustParsePrefix("10.0.0.1/8")},
+		"4in6":       {netip.MustParsePrefix("::ffff:a00:0/104")},
+		"zero bits":  {netip.MustParsePrefix("0.0.0.0/0")},
+	} {
+		if got, err := egressSubnets(in); err == nil {
+			t.Errorf("%s: egressSubnets = %v, want an error", name, got)
+		}
 	}
 }

@@ -400,7 +400,7 @@ func TestNFTablesEgressFilter(t *testing.T) {
 		chain.Policy == nil || *chain.Policy != nftables.ChainPolicyAccept {
 		t.Fatalf("forward chain = %+v", chain)
 	}
-	if got, want := setKeys(t, c, firewall.EgressSet4Name), []string{"10.0.0.0", "100.64.0.0", "169.254.0.0", "172.16.0.0", "192.168.0.0"}; !slices.Equal(got, want) {
+	if got, want := setKeys(t, c, firewall.EgressSet4Name), []string{"10.0.0.0", "100.64.0.0", "168.63.129.16", "169.254.0.0", "172.16.0.0", "192.168.0.0"}; !slices.Equal(got, want) {
 		t.Fatalf("deny4 = %v, want %v", got, want)
 	}
 	if got, want := setKeys(t, c, firewall.EgressSet6Name), []string{"fc00::", "fe80::"}; !slices.Equal(got, want) {
@@ -481,5 +481,68 @@ func TestNFTablesEgressFilter(t *testing.T) {
 	newEgressBackend(t, fd, nil) // removing twice is fine
 	if jail, err := c.GetRules(mcTable, &nftables.Chain{Name: firewall.ChainName, Table: mcTable}); err != nil || len(jail) != 2 {
 		t.Fatalf("jail chain: %d rules, %v", len(jail), err)
+	}
+}
+
+// TestNFTablesEgressSelfRepair: after an external "nft flush ruleset" (or a deleted table)
+// EgressInPlace reports it, and SetEgressSubnets brings table, jail, chain, sets, elements
+// and rules back in one batch.
+func TestNFTablesEgressSelfRepair(t *testing.T) {
+	fd := newNetNS(t)
+	c := rawConn(t, fd)
+	fw := newBackend(t, fd)
+	ctx := context.Background()
+	subnets := []netip.Prefix{netip.MustParsePrefix("172.18.0.0/16")}
+	if ok, err := fw.EgressInPlace(ctx, subnets); err != nil || ok {
+		t.Fatalf("before SetEgressSubnets: in place = %v, %v; want false (no rule yet)", ok, err)
+	}
+	if err := fw.SetEgressSubnets(ctx, subnets); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := fw.EgressInPlace(ctx, subnets); err != nil || !ok {
+		t.Fatalf("after SetEgressSubnets: in place = %v, %v", ok, err)
+	}
+	if ok, _ := fw.EgressInPlace(ctx, append(subnets, netip.MustParsePrefix("fd00:1::/64"))); ok {
+		t.Fatal("a missing rule for a second subnet must count as not in place")
+	}
+
+	for name, damage := range map[string]func(){
+		"table deleted": func() { c.DelTable(mcTable) },
+		"set flushed":   func() { c.FlushSet(&nftables.Set{Table: mcTable, Name: firewall.EgressSet4Name}) },
+		"chain flushed": func() { c.FlushChain(&nftables.Chain{Table: mcTable, Name: firewall.EgressChainName}) },
+	} {
+		damage()
+		if err := c.Flush(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if ok, err := fw.EgressInPlace(ctx, subnets); err != nil || ok {
+			t.Fatalf("%s: in place = %v, %v; want false", name, ok, err)
+		}
+		if err := fw.SetEgressSubnets(ctx, subnets); err != nil {
+			t.Fatalf("%s: repair: %v", name, err)
+		}
+		if ok, err := fw.EgressInPlace(ctx, subnets); err != nil || !ok {
+			t.Fatalf("%s: after repair: in place = %v, %v", name, ok, err)
+		}
+		if rules, err := egressRules(t, c); err != nil || len(rules) != 1 {
+			t.Fatalf("%s: %d egress rules, %v", name, len(rules), err)
+		}
+		if got := setKeys(t, c, firewall.EgressSet4Name); len(got) != 6 {
+			t.Fatalf("%s: deny4 = %v", name, got)
+		}
+		if jail, err := c.GetRules(mcTable, &nftables.Chain{Name: firewall.ChainName, Table: mcTable}); err != nil || len(jail) != 2 {
+			t.Fatalf("%s: jail chain: %d rules, %v", name, len(jail), err)
+		}
+	}
+
+	// Fail closed: an unusable subnet changes nothing and is an error.
+	if err := fw.SetEgressSubnets(ctx, []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}); err == nil {
+		t.Fatal("SetEgressSubnets(0.0.0.0/0) = nil, want an error")
+	}
+	if err := fw.SetEgressSubnets(ctx, nil); err == nil {
+		t.Fatal("SetEgressSubnets(none) = nil, want an error")
+	}
+	if rules, err := egressRules(t, c); err != nil || len(rules) != 1 {
+		t.Fatalf("after refused calls: %d egress rules, %v", len(rules), err)
 	}
 }

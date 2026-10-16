@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -287,13 +286,17 @@ const (
 	maxEgressDeny           = 64
 	maxRouterConnectionRate = 100000
 	minCPUPerInstance       = 0.01 // Docker's smallest NanoCpus value
+	// maxCPUPerInstance only catches typos; the agent clamps the value to the host's CPUs,
+	// so a smaller (downsized) host never keeps it from starting.
+	maxCPUPerInstance = 1024
 )
 
 // DefaultContainerEgressDeny is the destination list the Minecraft containers may
-// not open new connections to: link-local (cloud metadata), RFC 1918, CGNAT, IPv6
+// not open new connections to: link-local (cloud metadata), RFC 1918, CGNAT, Azure's
+// WireServer (a public address that hands out VM extension and provisioning data), IPv6
 // ULA and link-local. A fresh slice on every call.
 func DefaultContainerEgressDeny() []string {
-	return []string{"169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7", "fe80::/10"}
+	return []string{"169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "168.63.129.16/32", "fc00::/7", "fe80::/10"}
 }
 
 type Agent struct {
@@ -421,8 +424,8 @@ func (a Agent) Validate() error {
 	if a.RouterConnectionRateLimit < 1 || a.RouterConnectionRateLimit > maxRouterConnectionRate {
 		errs = append(errs, fmt.Errorf("router_connection_rate_limit must be between 1 and %d, got %d", maxRouterConnectionRate, a.RouterConnectionRateLimit))
 	}
-	if c := a.CPUPerInstance; math.IsNaN(c) || c < 0 || (c > 0 && c < minCPUPerInstance) || c > float64(runtime.NumCPU()) {
-		errs = append(errs, fmt.Errorf("cpu_per_instance must be 0 (no cap) or between %g and the host's %d CPUs, got %g", minCPUPerInstance, runtime.NumCPU(), c))
+	if c := a.CPUPerInstance; math.IsNaN(c) || c < 0 || (c > 0 && c < minCPUPerInstance) || c > maxCPUPerInstance {
+		errs = append(errs, fmt.Errorf("cpu_per_instance must be 0 (no cap) or between %g and %d, got %g", minCPUPerInstance, maxCPUPerInstance, c))
 	}
 	errs = append(errs, a.Images.validate()...)
 	if len(errs) > 0 {

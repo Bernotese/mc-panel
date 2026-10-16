@@ -249,16 +249,22 @@ func egressElements(deny []netip.Prefix) (v4, v6 []rawElem) {
 	return v4, v6
 }
 
-// egressSubnets keeps the container subnets a filter rule can be built for: valid,
-// canonical, not IPv4-mapped, not /0 (that would exempt every destination) and
-// each only once.
-func egressSubnets(subnets []netip.Prefix) []netip.Prefix {
+// egressSubnets checks the container subnets a filter rule is built for: each must be
+// valid, canonical, not IPv4-mapped and not /0 (that would exempt every destination);
+// duplicates are dropped. An unusable subnet or an empty list is an error: the filter
+// must never silently cover less than the network.
+func egressSubnets(subnets []netip.Prefix) ([]netip.Prefix, error) {
+	if len(subnets) == 0 {
+		return nil, errors.New("firewall: egress filter: the container network has no subnet")
+	}
 	var out []netip.Prefix
 	for _, p := range subnets {
-		if !p.IsValid() || p != p.Masked() || p.Addr().Is4In6() || p.Bits() == 0 || slices.Contains(out, p) {
-			continue
+		if !p.IsValid() || p != p.Masked() || p.Addr().Is4In6() || p.Bits() == 0 {
+			return nil, fmt.Errorf("firewall: egress filter: unusable container subnet %s", p)
 		}
-		out = append(out, p)
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
 	}
-	return out
+	return out, nil
 }

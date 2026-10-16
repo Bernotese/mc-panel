@@ -96,6 +96,14 @@ func (n *NFTables) setup() error {
 	if err != nil {
 		return err
 	}
+	if err := n.addSetup(c); err != nil {
+		return err
+	}
+	return c.Flush()
+}
+
+// addSetup adds the setup steps to c's batch (see setup).
+func (n *NFTables) addSetup(c *nftables.Conn) error {
 	var stale []*nftables.Set
 	for _, want := range []*nftables.Set{n.set4, n.set6} {
 		// An error means the table or set does not exist yet: nothing to migrate.
@@ -126,10 +134,7 @@ func (n *NFTables) setup() error {
 	}
 	c.AddRule(&nftables.Rule{Table: n.table, Chain: chain, Exprs: dropExprs(unix.NFPROTO_IPV4, 12, 4, n.set4)})
 	c.AddRule(&nftables.Rule{Table: n.table, Chain: chain, Exprs: dropExprs(unix.NFPROTO_IPV6, 8, 16, n.set6)})
-	if err := n.setupEgress(c); err != nil {
-		return err
-	}
-	return c.Flush()
+	return n.setupEgress(c)
 }
 
 // setupEgress adds the egress filter to the setup batch. The forward chain keeps its
@@ -170,11 +175,17 @@ func (n *NFTables) setupEgress(c *nftables.Conn) error {
 	return nil
 }
 
-// SetEgressSubnets replaces the forward chain's rules with one drop rule per
-// container subnet, atomically in one batch.
+// SetEgressSubnets re-asserts the whole table (as at agent start: also after an external
+// "nft flush ruleset") and replaces the forward chain's rules with one drop rule per
+// container subnet, atomically in one batch. A subnet no rule can be built for is an
+// error, so the caller never creates a container the filter does not cover.
 func (n *NFTables) SetEgressSubnets(_ context.Context, subnets []netip.Prefix) error {
 	if len(n.egressDeny) == 0 {
 		return nil
+	}
+	valid, err := egressSubnets(subnets)
+	if err != nil {
+		return err
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -182,9 +193,12 @@ func (n *NFTables) SetEgressSubnets(_ context.Context, subnets []netip.Prefix) e
 	if err != nil {
 		return fmt.Errorf("nftables: %w", err)
 	}
+	if err := n.addSetup(c); err != nil {
+		return fmt.Errorf("nftables: %w", err)
+	}
 	chain := n.egressChain()
 	c.FlushChain(chain)
-	for _, p := range egressSubnets(subnets) {
+	for _, p := range valid {
 		set := n.egress4
 		if p.Addr().Is6() {
 			set = n.egress6
@@ -195,6 +209,52 @@ func (n *NFTables) SetEgressSubnets(_ context.Context, subnets []netip.Prefix) e
 		return fmt.Errorf("nftables: egress filter: %w", err)
 	}
 	return nil
+}
+
+// EgressInPlace reports whether the egress filter for subnets is still installed: the
+// jail chain, the forward chain with one rule per subnet and both deny sets with their
+// elements exist. Something else (e.g. "nft flush ruleset" by nftables.service) may have
+// removed them since SetEgressSubnets.
+func (n *NFTables) EgressInPlace(_ context.Context, subnets []netip.Prefix) (bool, error) {
+	if len(n.egressDeny) == 0 {
+		return true, nil
+	}
+	valid, err := egressSubnets(subnets)
+	if err != nil {
+		return false, err
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	c, err := nftables.New(n.opts...)
+	if err != nil {
+		return false, fmt.Errorf("nftables: %w", err)
+	}
+	// Errors below mean a missing table, chain or set.
+	if _, err := c.ListChain(n.table, ChainName); err != nil {
+		return false, nil
+	}
+	chain, err := c.ListChain(n.table, EgressChainName)
+	if err != nil {
+		return false, nil
+	}
+	if rules, err := c.GetRules(n.table, chain); err != nil || len(rules) != len(valid) {
+		return false, nil
+	}
+	v4, v6 := egressElements(n.egressDeny)
+	for _, e := range []struct {
+		name string
+		want int
+	}{{EgressSet4Name, len(v4)}, {EgressSet6Name, len(v6)}} {
+		set, err := c.GetSetByName(n.table, e.name)
+		if err != nil {
+			return false, nil
+		}
+		els, err := c.GetSetElements(set)
+		if err != nil || (len(els) == 0) != (e.want == 0) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // egressExprs builds "meta nfproto <proto> <ip|ip6> saddr <subnet> <ip|ip6> daddr !=

@@ -41,6 +41,9 @@ type Backend interface {
 	// subnets (the mcpanel-mc network), replacing earlier ones. With an empty deny
 	// list (container_egress_deny = []) it does nothing.
 	SetEgressSubnets(ctx context.Context, subnets []netip.Prefix) error
+	// EgressInPlace reports whether the filter set by SetEgressSubnets for these
+	// subnets is still installed (it may have been flushed from outside).
+	EgressInPlace(ctx context.Context, subnets []netip.Prefix) (bool, error)
 }
 
 // entry is a ban as seen by a backend: prefix plus remaining lifetime.

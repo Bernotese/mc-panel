@@ -145,6 +145,15 @@ func (m *Manager) resetTmpDir(id int64) error {
 	return ensureOwnedDir(dir, m.host.UID, m.host.GID, 0o700)
 }
 
+// ensureTmpDir makes sure tmp/<id> exists for the container user with 0700 without emptying
+// it (O_NOFOLLOW: a symlink in its place is refused).
+func (m *Manager) ensureTmpDir(id int64) error {
+	if err := m.ensureLayout(); err != nil {
+		return err
+	}
+	return ensureOwnedDir(TmpDir(m.host.InstancesDir, id), m.host.UID, m.host.GID, 0o700)
+}
+
 // freePath returns base, or base-2, base-3, … if base exists already.
 func freePath(base string) (string, error) {
 	p := base

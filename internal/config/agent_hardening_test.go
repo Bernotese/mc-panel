@@ -5,7 +5,6 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -27,7 +26,7 @@ func TestAgentHardeningDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7", "fe80::/10"}
+	want := []string{"169.254.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "168.63.129.16/32", "fc00::/7", "fe80::/10"}
 	if !slices.Equal(a.ContainerEgressDeny, want) || !slices.Equal(config.DefaultContainerEgressDeny(), want) {
 		t.Fatalf("container_egress_deny = %v, want %v", a.ContainerEgressDeny, want)
 	}
@@ -73,20 +72,20 @@ cpu_per_instance = 1.5
 
 func TestAgentHardeningValidation(t *testing.T) {
 	cases := map[string]func(*config.Agent){
-		"not a prefix":        func(a *config.Agent) { a.ContainerEgressDeny = []string{"10.0.0.1"} },
-		"garbage":             func(a *config.Agent) { a.ContainerEgressDeny = []string{"private"} },
-		"host bits set":       func(a *config.Agent) { a.ContainerEgressDeny = []string{"10.0.0.1/8"} },
-		"4in6":                func(a *config.Agent) { a.ContainerEgressDeny = []string{"::ffff:10.0.0.0/104"} },
-		"zone":                func(a *config.Agent) { a.ContainerEgressDeny = []string{"fe80::%eth0/10"} },
-		"overlap v4":          func(a *config.Agent) { a.ContainerEgressDeny = []string{"10.0.0.0/8", "10.1.0.0/16"} },
-		"duplicate":           func(a *config.Agent) { a.ContainerEgressDeny = []string{"fc00::/7", "fc00::/7"} },
-		"too many":            func(a *config.Agent) { a.ContainerEgressDeny = manyPrefixes(65) },
-		"rate limit 0":        func(a *config.Agent) { a.RouterConnectionRateLimit = 0 },
-		"rate limit huge":     func(a *config.Agent) { a.RouterConnectionRateLimit = 100001 },
-		"negative cpu":        func(a *config.Agent) { a.CPUPerInstance = -1 },
-		"more cpus than host": func(a *config.Agent) { a.CPUPerInstance = float64(runtime.NumCPU()) + 0.5 },
-		"NaN cpu":             func(a *config.Agent) { a.CPUPerInstance = math.NaN() },
-		"tiny cpu":            func(a *config.Agent) { a.CPUPerInstance = 0.001 },
+		"not a prefix":    func(a *config.Agent) { a.ContainerEgressDeny = []string{"10.0.0.1"} },
+		"garbage":         func(a *config.Agent) { a.ContainerEgressDeny = []string{"private"} },
+		"host bits set":   func(a *config.Agent) { a.ContainerEgressDeny = []string{"10.0.0.1/8"} },
+		"4in6":            func(a *config.Agent) { a.ContainerEgressDeny = []string{"::ffff:10.0.0.0/104"} },
+		"zone":            func(a *config.Agent) { a.ContainerEgressDeny = []string{"fe80::%eth0/10"} },
+		"overlap v4":      func(a *config.Agent) { a.ContainerEgressDeny = []string{"10.0.0.0/8", "10.1.0.0/16"} },
+		"duplicate":       func(a *config.Agent) { a.ContainerEgressDeny = []string{"fc00::/7", "fc00::/7"} },
+		"too many":        func(a *config.Agent) { a.ContainerEgressDeny = manyPrefixes(65) },
+		"rate limit 0":    func(a *config.Agent) { a.RouterConnectionRateLimit = 0 },
+		"rate limit huge": func(a *config.Agent) { a.RouterConnectionRateLimit = 100001 },
+		"negative cpu":    func(a *config.Agent) { a.CPUPerInstance = -1 },
+		"above 1024":      func(a *config.Agent) { a.CPUPerInstance = 1024.5 },
+		"NaN cpu":         func(a *config.Agent) { a.CPUPerInstance = math.NaN() },
+		"tiny cpu":        func(a *config.Agent) { a.CPUPerInstance = 0.001 },
 	}
 	for name, mod := range cases {
 		a := validProdAgent()
@@ -98,7 +97,8 @@ func TestAgentHardeningValidation(t *testing.T) {
 	ok := validProdAgent()
 	ok.ContainerEgressDeny = append(manyPrefixes(63), "fd00::/8")
 	ok.RouterConnectionRateLimit = 1
-	ok.CPUPerInstance = float64(runtime.NumCPU())
+	// More CPUs than this host has is fine (the agent clamps it): a downsized VPS must start.
+	ok.CPUPerInstance = 1024
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("valid limits: %v", err)
 	}

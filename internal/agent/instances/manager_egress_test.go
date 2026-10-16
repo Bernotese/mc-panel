@@ -13,11 +13,14 @@ import (
 	"github.com/Bernotese/mc-panel/internal/agent/instances"
 )
 
-// fakeEgress records the subnets the manager hands to the firewall.
+// fakeEgress records the subnets the manager hands to the firewall; removed simulates an
+// external "nft flush ruleset".
 type fakeEgress struct {
-	mu    sync.Mutex
-	calls [][]netip.Prefix
-	err   error
+	mu      sync.Mutex
+	calls   [][]netip.Prefix
+	checks  int
+	removed bool
+	err     error
 }
 
 func (f *fakeEgress) SetEgressSubnets(_ context.Context, subnets []netip.Prefix) error {
@@ -27,7 +30,27 @@ func (f *fakeEgress) SetEgressSubnets(_ context.Context, subnets []netip.Prefix)
 		return f.err
 	}
 	f.calls = append(f.calls, slices.Clone(subnets))
+	f.removed = false
 	return nil
+}
+
+func (f *fakeEgress) EgressInPlace(context.Context, []netip.Prefix) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.checks++
+	return !f.removed, f.err
+}
+
+func (f *fakeEgress) remove() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.removed = true
+}
+
+func (f *fakeEgress) checkCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.checks
 }
 
 func (f *fakeEgress) snapshot() [][]netip.Prefix {
@@ -76,11 +99,41 @@ func TestEnsureAppliesEgressFilterBeforeCreate(t *testing.T) {
 		t.Fatalf("instance not created: %v, %+v", e.d.Calls(), e.status(t, 1))
 	}
 
-	// Unchanged subnets: no second rule rewrite, neither from ensure nor from the loop.
+	// Unchanged subnets and the filter still in place: no rule rewrite, neither from
+	// ensure nor from the loop; both only check that it is still installed.
+	checks := fe.checkCount()
 	e.ensure(t, ensureReq(2, "creative", 1))
 	e.m.Tick(context.Background())
 	if n := len(fe.snapshot()); n != 1 {
 		t.Fatalf("egress applied %d times for an unchanged network", n)
+	}
+	if fe.checkCount() <= checks {
+		t.Fatal("ensure and the loop must check that the filter is still installed")
+	}
+}
+
+// After an external "nft flush ruleset" the cache is not trusted: the next round (or
+// the next ensure, before it creates a container) installs the filter again.
+func TestEgressFilterIsReinstalledAfterExternalFlush(t *testing.T) {
+	e, fe := newEgressEnv(t)
+	e.d.AddNetwork(instances.NetworkName, "bridge", map[string]string{instances.LabelNetwork: "1"}, "172.20.0.0/16")
+	if err := e.m.SyncEgress(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	fe.remove()
+	e.m.Tick(context.Background())
+	if calls := fe.snapshot(); len(calls) != 2 || !slices.Equal(calls[1], prefixes("172.20.0.0/16")) {
+		t.Fatalf("egress calls = %v, want a reinstall", calls)
+	}
+
+	fe.remove()
+	e.d.AddImage(java21Pinned)
+	e.ensure(t, ensureReq(1, "survival", 1))
+	if n := len(fe.snapshot()); n != 3 {
+		t.Fatalf("ensure after a flush: egress applied %d times, want 3", n)
+	}
+	if !strings.Contains(e.logs.String(), "removed from outside") {
+		t.Fatalf("no warning logged:\n%s", e.logs.String())
 	}
 }
 
@@ -89,6 +142,10 @@ func TestEnsureAppliesEgressFilterBeforeCreate(t *testing.T) {
 func TestTickAppliesEgressFilterToExistingNetwork(t *testing.T) {
 	e, fe := newEgressEnv(t)
 	e.d.AddNetwork(instances.NetworkName, "bridge", map[string]string{instances.LabelNetwork: "1"}, "172.20.0.0/16", "fd00:1::/64")
+	// cmd/agent runs SyncEgress once before serving, before the first loop round.
+	if err := e.m.SyncEgress(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	e.m.Tick(context.Background())
 	if calls := fe.snapshot(); len(calls) != 1 || !slices.Equal(calls[0], prefixes("172.20.0.0/16", "fd00:1::/64")) {
 		t.Fatalf("egress calls = %v", calls)

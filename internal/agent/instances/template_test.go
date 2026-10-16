@@ -232,6 +232,10 @@ func TestTemplateHostLimits(t *testing.T) {
 	if c.HostConfig.NanoCPUs != 1_500_000_000 {
 		t.Fatalf("NanoCpus = %d", c.HostConfig.NanoCPUs)
 	}
+	h.NanoCPUs = 1 << 50 // cpu_per_instance above this host's CPUs (e.g. a downsized VPS)
+	if c, err := instances.InstanceContainer(h, paperRequest()); err != nil || c.HostConfig.NanoCPUs != instances.MaxNanoCPUs() {
+		t.Fatalf("NanoCpus = %d, %v; want the clamp to %d", c.HostConfig.NanoCPUs, err, instances.MaxNanoCPUs())
+	}
 	r, err := instances.RouterContainer(h)
 	if err != nil {
 		t.Fatal(err)
