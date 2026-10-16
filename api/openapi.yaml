@@ -222,8 +222,12 @@ paths:
     post:
       operationId: beginPasskeyRegistration
       tags: [me]
+      description: Starts a passkey registration. The first second factor needs current_password (401 invalid_credentials without it); further methods need sudo instead.
       parameters:
         - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: '#/components/schemas/PasskeyBeginRequest' } } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/WebAuthnOptions' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -1577,6 +1581,9 @@ components:
       type: object
       required: [name, credential]
       properties: { name: { type: string, minLength: 1, maxLength: 64 }, credential: { type: object, additionalProperties: true }, current_password: { type: string, maxLength: 256, description: 'required for the first second factor' } }
+    PasskeyBeginRequest:
+      type: object
+      properties: { current_password: { type: string, maxLength: 256, description: 'required for the first second factor' } }
     TotpEnableRequest:
       type: object
       required: [code]

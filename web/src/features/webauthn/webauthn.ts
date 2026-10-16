@@ -39,10 +39,13 @@ export async function sudoWithPasskey(): Promise<number> {
   return result.sudo_until
 }
 
-/** currentPassword is required for the first second factor (SEC-15) and ignored otherwise. */
+/**
+ * currentPassword is required for the first second factor (SEC-15) and ignored otherwise. It is
+ * checked at begin already, so a wrong one never creates a credential on the authenticator.
+ */
 export async function registerPasskey(name: string, currentPassword?: string): Promise<PasskeyCreated> {
-  const options = await unwrap(api.POST('/me/passkeys/begin'))
+  const pw = currentPassword ? { current_password: currentPassword } : {}
+  const options = await unwrap(api.POST('/me/passkeys/begin', { body: pw }))
   const credential = await startRegistration({ optionsJSON: extractPublicKey<RegistrationOptionsJSON>(options) })
-  const body = { name, credential: asCredential(credential), ...(currentPassword ? { current_password: currentPassword } : {}) }
-  return unwrap(api.POST('/me/passkeys/finish', { body }))
+  return unwrap(api.POST('/me/passkeys/finish', { body: { name, credential: asCredential(credential), ...pw } }))
 }

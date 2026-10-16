@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
-	"github.com/Bernotese/mc-panel/internal/agent/banrules"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
 
@@ -18,6 +17,13 @@ import (
 func isUnavailable(err error) bool {
 	return errors.Is(err, agentapi.ErrUnavailable) ||
 		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+}
+
+// appOnly reports a /56 or /48 jail: they apply to logins in the app only and are never sent
+// to the agent (SEC-09).
+func appOnly(j store.Jail) bool {
+	p, err := netip.ParsePrefix(j.IpKey)
+	return err == nil && isAggregateKey(p)
 }
 
 // maskedByAllow reports whether an active allow rule overlaps the jail's key.
@@ -50,45 +56,10 @@ func (s *Service) SyncOnce(ctx context.Context) error {
 	if err := s.syncUnbans(ctx, now); err != nil {
 		return err
 	}
-	wider, err := s.firewallJails(ctx, now)
-	if err != nil {
+	if err := s.syncBans(ctx, now); err != nil {
 		return err
 	}
-	if err := s.syncBans(ctx, now, wider); err != nil {
-		return err
-	}
-	return s.reconcile(ctx, now, wider)
-}
-
-// firewallJails returns the prefixes of the active jails that belong in the firewall (not
-// masked by an allow rule, not rejected by the agent).
-func (s *Service) firewallJails(ctx context.Context, now time.Time) ([]netip.Prefix, error) {
-	jails, err := s.q.DefenseListActiveJails(ctx, now.UnixMilli())
-	if err != nil {
-		return nil, fmt.Errorf("defense: active jails: %w", err)
-	}
-	out := make([]netip.Prefix, 0, len(jails))
-	for _, j := range jails {
-		p, err := netip.ParsePrefix(j.IpKey)
-		if err != nil || s.isUnbannable(j.ID) || s.maskedByAllow(j, now) {
-			continue
-		}
-		out = append(out, p.Masked())
-	}
-	return out, nil
-}
-
-// coveredBy reports whether p lies inside a wider prefix of jails (a /64 inside a jailed /48).
-// Such a jail is not banned in the firewall: the wider ban covers it, and the agent refuses
-// overlapping bans.
-func coveredBy(p netip.Prefix, jails []netip.Prefix) bool {
-	p = p.Masked()
-	for _, q := range jails {
-		if q.Bits() < p.Bits() && q.Contains(p.Addr()) {
-			return true
-		}
-	}
-	return false
+	return s.reconcile(ctx, now)
 }
 
 func (s *Service) syncUnbans(ctx context.Context, now time.Time) error {
@@ -113,13 +84,13 @@ func (s *Service) syncUnbans(ctx context.Context, now time.Time) error {
 	return nil
 }
 
-func (s *Service) syncBans(ctx context.Context, now time.Time, wider []netip.Prefix) error {
+func (s *Service) syncBans(ctx context.Context, now time.Time) error {
 	jails, err := s.q.DefenseJailsToBan(ctx, now.UnixMilli())
 	if err != nil {
 		return fmt.Errorf("defense: jails to ban: %w", err)
 	}
 	for _, j := range jails {
-		if s.isUnbannable(j.ID) || s.maskedByAllow(j, now) || s.coveredJail(j, wider) {
+		if s.isUnbannable(j.ID) || s.maskedByAllow(j, now) || appOnly(j) {
 			continue
 		}
 		ok, err := s.banJail(ctx, j, now)
@@ -152,14 +123,6 @@ func (s *Service) banJail(ctx context.Context, j store.Jail, now time.Time) (boo
 		return false, nil
 	}
 	err = s.callAgent(ctx, func(c context.Context) error { return s.agent.Ban(c, p, remaining) })
-	if errors.Is(err, banrules.ErrConflict) {
-		// narrower bans inside p (the /64s before their /48 was jailed) block it: lift them
-		// from the firewall, their jails stay and are covered by p (coveredBy)
-		if err := s.unbanInside(ctx, p); err != nil {
-			return false, err
-		}
-		err = s.callAgent(ctx, func(c context.Context) error { return s.agent.Ban(c, p, remaining) })
-	}
 	if err == nil {
 		return true, nil
 	}
@@ -171,43 +134,9 @@ func (s *Service) banJail(ctx context.Context, j store.Jail, now time.Time) (boo
 	return false, nil
 }
 
-// unbanInside removes the firewall bans that lie strictly inside p.
-func (s *Service) unbanInside(ctx context.Context, p netip.Prefix) error {
-	var bans []agentapi.Ban
-	err := s.callAgent(ctx, func(c context.Context) error {
-		var e error
-		bans, e = s.agent.Bans(c)
-		return e
-	})
-	if err != nil {
-		if isUnavailable(err) {
-			return fmt.Errorf("defense: list bans: %w", err)
-		}
-		return nil // the retried ban reports the conflict
-	}
-	for _, b := range bans {
-		q, err := netip.ParsePrefix(b.Prefix)
-		if err != nil || q.Bits() <= p.Bits() || !p.Contains(q.Addr()) {
-			continue
-		}
-		if err := s.callAgent(ctx, func(c context.Context) error { return s.agent.Unban(c, q) }); err != nil {
-			if isUnavailable(err) {
-				return fmt.Errorf("defense: unban %s: %w", q, err)
-			}
-			s.log.Error("defense: agent rejected unban of a ban inside a wider jail", "prefix", q, "wider", p, "err", err)
-		}
-	}
-	return nil
-}
-
-func (s *Service) coveredJail(j store.Jail, wider []netip.Prefix) bool {
-	p, err := netip.ParsePrefix(j.IpKey)
-	return err == nil && coveredBy(p, wider)
-}
-
 // reconcile re-bans active jails whose ban is missing in the firewall
 // (agent restart, host reboot).
-func (s *Service) reconcile(ctx context.Context, now time.Time, wider []netip.Prefix) error {
+func (s *Service) reconcile(ctx context.Context, now time.Time) error {
 	jails, err := s.q.DefenseActiveBannedJails(ctx, now.UnixMilli())
 	if err != nil {
 		return fmt.Errorf("defense: banned jails: %w", err)
@@ -239,7 +168,7 @@ func (s *Service) reconcile(ctx context.Context, now time.Time, wider []netip.Pr
 	}
 	for _, j := range jails {
 		p, err := netip.ParsePrefix(j.IpKey)
-		if err != nil || s.isUnbannable(j.ID) {
+		if err != nil || s.isUnbannable(j.ID) || isAggregateKey(p) {
 			continue
 		}
 		if s.maskedByAllow(j, now) {
@@ -255,7 +184,7 @@ func (s *Service) reconcile(ctx context.Context, now time.Time, wider []netip.Pr
 			}
 			continue
 		}
-		if present[p.Masked()] || coveredBy(p, wider) {
+		if present[p.Masked()] {
 			continue
 		}
 		s.log.Warn("defense: ban missing in firewall; re-banning", "jail_id", j.ID, "prefix", p)

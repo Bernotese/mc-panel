@@ -48,9 +48,22 @@ func toPasskeyJSON(c store.WebauthnCredential) passkeyJSON {
 	return p
 }
 
+type passkeyBeginRequest struct {
+	// CurrentPassword is required for the first second factor (SEC-15). It is checked here too,
+	// so a wrong password never leaves a credential on the authenticator without a server side.
+	CurrentPassword string `json:"current_password"`
+}
+
 func (h *Handler) beginPasskeyRegistration(w http.ResponseWriter, r *http.Request) {
 	p, user, ok := h.current(w, r)
 	if !ok || !h.requireSudoIf2FA(w, r, p, user) {
+		return
+	}
+	var req passkeyBeginRequest
+	if r.ContentLength != 0 && !httpx.DecodeJSON(w, r, &req) { // the body is optional
+		return
+	}
+	if _, ok := h.confirmFirstFactor(w, r, user, req.CurrentPassword); !ok {
 		return
 	}
 	ctx := r.Context()

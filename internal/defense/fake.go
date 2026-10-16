@@ -19,7 +19,7 @@ type FakeGuard struct {
 }
 
 func (f *FakeGuard) CheckLogin(context.Context, netip.Addr, string) error { return f.LoginErr }
-func (f *FakeGuard) CheckSecondFactor(context.Context, netip.Addr, string) error {
+func (f *FakeGuard) CheckSecondFactor(context.Context, netip.Addr, string, string) error {
 	return f.SecondFactorErr
 }
 func (f *FakeGuard) CheckAdminNetwork(context.Context, netip.Addr) error  { return f.AdminNetErr }

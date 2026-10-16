@@ -32,8 +32,6 @@ func TestElementForIPv6(t *testing.T) {
 		{"2001:db8:0:ffff::/64", "2001:db8:1::"},
 		{"2001:db8:1:2:3::/80", "2001:db8:1:2:4::"},
 		{"2001:db8:ffff:ffff:ffff:ffff:ffff:ffff/128", "2001:db9::"},
-		{"2001:db8:1::/48", "2001:db8:2::"}, // aggregated jails (SEC-09)
-		{"2001:db8:1:200::/56", "2001:db8:1:300::"},
 	}
 	for _, tc := range cases {
 		p := netip.MustParsePrefix(tc.prefix)
@@ -56,7 +54,7 @@ func TestElementForRejects(t *testing.T) {
 		netip.MustParsePrefix("203.0.113.0/24"),
 		netip.MustParsePrefix("2001:db8:1:2::5/64"),
 		netip.MustParsePrefix("::ffff:203.0.113.7/128"),
-		netip.MustParsePrefix("2001:db8::/47"),
+		netip.MustParsePrefix("2001:db8::/48"),
 		{},
 	}
 	for _, p := range bad {
@@ -70,7 +68,6 @@ func TestPrefixFromRangeRoundTrip(t *testing.T) {
 	for _, s := range []string{
 		"2001:db8:1:2::/64", "2001:db8::1/128", "2001:db8:0:ffff::/64",
 		"2001:db8:1:2:3::/80", "ffff:ffff:ffff:ffff::/64", "2001:db8:1:2::/127",
-		"2001:db8:1::/48", "2001:db8:1:200::/56",
 	} {
 		want := netip.MustParsePrefix(s)
 		spec, err := elementFor(want)

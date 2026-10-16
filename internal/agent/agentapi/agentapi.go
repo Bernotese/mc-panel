@@ -66,12 +66,8 @@ type Firewall interface {
 	List(ctx context.Context) ([]Ban, error)
 }
 
-// MinBanBits6 is the widest IPv6 prefix the agent bans (a /48 site).
-const MinBanBits6 = 48
-
-// ValidateBanPrefix only allows single IPv4 hosts (/32) and IPv6 /48../128,
-// never loopback – so a compromised panel cannot firewall whole networks. /48
-// and /56 are the panel's aggregated jails against /64 rotation (SEC-09).
+// ValidateBanPrefix only allows single IPv4 hosts (/32) and IPv6 /64../128,
+// never loopback – so a compromised panel cannot firewall whole networks.
 // IPv4-mapped IPv6 addresses, unmasked prefixes, and link-local or multicast
 // addresses are refused as well.
 func ValidateBanPrefix(p netip.Prefix) error {
@@ -96,8 +92,8 @@ func ValidateBanPrefix(p netip.Prefix) error {
 	if ma.Is4() && m.Bits() != 32 {
 		return fmt.Errorf("IPv4 bans must be /32, got %s", p)
 	}
-	if ma.Is6() && m.Bits() < MinBanBits6 {
-		return fmt.Errorf("IPv6 bans must be /%d or narrower, got %s", MinBanBits6, p)
+	if ma.Is6() && m.Bits() < 64 {
+		return fmt.Errorf("IPv6 bans must be /64 or narrower, got %s", p)
 	}
 	return nil
 }

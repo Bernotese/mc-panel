@@ -84,7 +84,7 @@ func (s *Service) RecordAttempt(ctx context.Context, a Attempt) error {
 	}
 	country := s.geo.Country(ip)
 	var net56, net48 string
-	if ip.Is6() {
+	if ip.Is6() && !s.snap.Load().allowed(ip, now) { // allowlisted addresses never count towards an aggregate
 		net56, net48 = netPrefix(ip, 56).String(), netPrefix(ip, 48).String()
 	}
 	err := s.q.DefenseInsertAttempt(ctx, store.DefenseInsertAttemptParams{
@@ -103,10 +103,6 @@ func (s *Service) RecordAttempt(ctx context.Context, a Attempt) error {
 	})
 	if err != nil {
 		return fmt.Errorf("defense: record attempt: %w", err)
-	}
-	if !a.Success && a.Stage == StagePassword && !s.snap.Load().allowed(ip, now) {
-		// the per-username bucket counts failed password attempts only (see CheckLogin)
-		s.loginUser.consume(usernameKey(a.Username), now)
 	}
 	if a.Success {
 		if newDevice {
@@ -213,7 +209,9 @@ func (s *Service) jailIfOver(ctx context.Context, ip netip.Addr, l jailLevel, no
 		return false, fmt.Errorf("defense: insert jail: %w", err)
 	}
 	s.addJail(key, expires)
-	s.kickSync()
+	if !isAggregateKey(key) { // /56 and /48 jails stay in the app (login checks only)
+		s.kickSync()
+	}
 	if err := s.audit.Record(ctx, audit.Entry{
 		Action:    audit.ActionJailAuto,
 		Target:    key.String(),

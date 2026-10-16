@@ -46,7 +46,7 @@ func (s *Service) IPFilter(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if until, ok := snap.jailedFor(ip, now); ok {
+		if until, ok := snap.jailedUntil(httpx.IPKey(ip), now); ok {
 			w.Header().Set("Retry-After", strconv.Itoa(RetryAfterSeconds(until.Sub(now))))
 			httpx.WriteError(w, r, http.StatusForbidden, httpx.CodeJailed,
 				"too many failed login attempts; access is temporarily blocked")

@@ -433,3 +433,15 @@ func TestLocalAddrs(t *testing.T) {
 		t.Fatalf("after a failed listing the next call must list again (calls = %d)", calls)
 	}
 }
+
+// Account events are deduplicated per user: two users from one address both notify.
+func TestNotifyDedupAuthEventsPerUser(t *testing.T) {
+	e := newDispEnv(t, DispatcherOptions{QueueSize: 20})
+	ctx := context.Background()
+	for _, u := range []string{"alice", "bob", "alice"} {
+		e.d.Notify(ctx, Event{Type: EventPasswordChanged, IP: "203.0.113.7", Username: u})
+	}
+	if n := len(e.d.ch); n != 2 {
+		t.Fatalf("queued %d, want 2 (one per user)", n)
+	}
+}

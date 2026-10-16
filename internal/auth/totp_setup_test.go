@@ -208,9 +208,13 @@ func TestFirstFactorNeedsCurrentPassword(t *testing.T) {
 	}
 	passkeyEnrol := func(e *testEnv, c *client, pw *string) response {
 		a := newSoftAuthenticator(e.t, e.cfg.RPID(), e.cfg.Origin())
-		begin := c.do(http.MethodPost, "/api/me/passkeys/begin", nil)
+		var beginBody any // no body at all without a password
+		if pw != nil {
+			beginBody = map[string]string{"current_password": *pw}
+		}
+		begin := c.do(http.MethodPost, "/api/me/passkeys/begin", beginBody)
 		if begin.code != 200 {
-			e.t.Fatalf("passkey begin = %d %s", begin.code, begin.body)
+			return begin // refused before the authenticator creates a credential
 		}
 		body := map[string]any{"name": "key", "credential": a.register(begin.body)}
 		if pw != nil {
@@ -261,4 +265,22 @@ func (e *testEnv) totpEnabled(uid int64) int64 {
 		e.t.Fatal(err)
 	}
 	return v
+}
+
+// A passkey begin with the correct password followed by a finish with a wrong one enrols
+// nothing: finish checks the password again (inside the transaction).
+func TestPasskeyFinishChecksPasswordAgain(t *testing.T) {
+	e := newTestEnv(t)
+	e.createUser("alice", "user")
+	c := e.newClient("203.0.113.10")
+	c.login("alice", testPassword)
+	a := newSoftAuthenticator(t, e.cfg.RPID(), e.cfg.Origin())
+	begin := c.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword})
+	if begin.code != 200 {
+		t.Fatalf("begin = %d %s", begin.code, begin.body)
+	}
+	res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "k", "credential": a.register(begin.body)})
+	if res.code != 401 || res.errCode() != "invalid_credentials" {
+		t.Fatalf("finish without password = %d %s", res.code, res.body)
+	}
 }

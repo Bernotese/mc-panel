@@ -62,9 +62,17 @@ func newLimiter(slots int, wait time.Duration) *limiter {
 	return &limiter{slots: make(chan struct{}, slots), wait: wait}
 }
 
-// newDefaultLimiter splits max(2, NumCPU/2) slots into a general pool and one reserved slot.
+// newDefaultLimiter has max(2, NumCPU/2) slots. From three slots on, one of them is reserved
+// for known devices; with two, halving the general pool would cost more than it protects.
 func newDefaultLimiter() *limiter {
-	l := newLimiter(max(2, runtime.NumCPU()/2)-1, DefaultWaitBudget)
+	return newPool(max(2, runtime.NumCPU()/2), DefaultWaitBudget)
+}
+
+func newPool(total int, wait time.Duration) *limiter {
+	if total < 3 {
+		return newLimiter(total, wait)
+	}
+	l := newLimiter(total-1, wait)
 	l.reserved = make(chan struct{}, 1)
 	return l
 }

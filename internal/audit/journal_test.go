@@ -149,7 +149,27 @@ time=x level=INFO msg=audit id=4 hash=` + b + ` action=login
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(anchors.Hashes) != 2 || anchors.Hashes[1] != a || anchors.Hashes[4] != b || !slices.Equal(anchors.Conflicting, []int64{1}) {
+	if len(anchors.Hashes) != 2 || anchors.Hashes[1] != a || anchors.Hashes[4] != b || !slices.Equal(anchors.Later[1], []string{b}) {
 		t.Fatalf("anchors = %+v", anchors)
+	}
+}
+
+// A database restored from a backup writes ids again: entries that match a later anchor of
+// their id are a warning, not a failure.
+func TestVerifyJournalRestoredIsWarning(t *testing.T) {
+	ctx := context.Background()
+	db := storetest.Open(t)
+	seed(t, db, 3)
+	rows := readAll(t, db)
+	other := strings.Repeat("c", 64)
+	// the journal saw entry 3 first with another hash (written before the restore), then the current one
+	var lines [][2]any
+	lines = append(lines, [2]any{rows[0].ID, rows[0].Hash}, [2]any{rows[1].ID, rows[1].Hash}, [2]any{int64(3), other}, [2]any{rows[2].ID, rows[2].Hash})
+	var out bytes.Buffer
+	if err := audit.RunAuditVerify(ctx, db, &out, strings.NewReader(journalFor(t, lines))); err != nil {
+		t.Fatalf("restored entries must not fail: %v (%s)", err, out.String())
+	}
+	if !strings.Contains(out.String(), "warning: entries match a later anchor") || !strings.Contains(out.String(), "journal OK") {
+		t.Fatalf("output = %q", out.String())
 	}
 }

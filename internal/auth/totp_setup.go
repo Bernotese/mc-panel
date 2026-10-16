@@ -262,7 +262,7 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if err := h.guard.CheckSecondFactor(ctx, httpx.ClientIP(ctx), secondFactorKey(p)); err != nil {
+	if err := h.guard.CheckSecondFactor(ctx, httpx.ClientIP(ctx), secondFactorKey(p), user.Username); err != nil {
 		h.guardError(w, r, err)
 		return
 	}

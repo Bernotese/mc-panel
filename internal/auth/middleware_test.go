@@ -65,15 +65,17 @@ func TestSessionMiddlewareBackgroundDoesNotTouch(t *testing.T) {
 	h := s.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, ok = principal.From(r.Context())
 	}))
-	call := func(tok string, background bool) bool {
+	callReq := func(req *http.Request, tok string, background bool) bool {
 		ok = false
-		req := httptest.NewRequest(http.MethodGet, "/api/servers", nil)
 		req.AddCookie(&http.Cookie{Name: CookieName, Value: tok}) //nolint:gosec // G124: request cookie, attributes are response-only
 		if background {
 			req.Header.Set(BackgroundHeader, "1")
 		}
 		h.ServeHTTP(httptest.NewRecorder(), req)
 		return ok
+	}
+	call := func(tok string, background bool) bool {
+		return callReq(httptest.NewRequest(http.MethodGet, "/api/servers", nil), tok, background)
 	}
 
 	polled, _ := mustCreate(t, s, uid, principal.StageFull)
@@ -93,6 +95,17 @@ func TestSessionMiddlewareBackgroundDoesNotTouch(t *testing.T) {
 	}
 	if !call(active, false) {
 		t.Fatal("a normal request must extend the idle time")
+	}
+
+	// the header counts only on GET and HEAD: a POST is always activity
+	posted, _ := mustCreate(t, s, uid, principal.StageFull)
+	clk.Advance(25 * time.Minute)
+	if !callReq(httptest.NewRequest(http.MethodPost, "/api/servers/1/power", nil), posted, true) {
+		t.Fatal("POST within the idle time must be authenticated")
+	}
+	clk.Advance(25 * time.Minute)
+	if !call(posted, true) {
+		t.Fatal("a POST marked as background must still extend the idle time")
 	}
 }
 

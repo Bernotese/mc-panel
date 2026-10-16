@@ -8,9 +8,9 @@ import (
 )
 
 func TestValidateBanPrefix(t *testing.T) {
-	ok := []string{"203.0.113.7/32", "2001:db8:1:2::/64", "2001:db8::1/128", "2001:db8:1::/48", "2001:db8:1:200::/56"}
+	ok := []string{"203.0.113.7/32", "2001:db8:1:2::/64", "2001:db8::1/128"}
 	bad := []string{
-		"0.0.0.0/0", "10.0.0.0/8", "203.0.113.0/24", "2001:db8::/47", "2001:db8::/32", "::/0", "127.0.0.1/32", "::1/128",
+		"0.0.0.0/0", "10.0.0.0/8", "203.0.113.0/24", "2001:db8::/48", "::/0", "127.0.0.1/32", "::1/128",
 		// IPv4-mapped IPv6 must not bypass the IPv4 rules.
 		"::ffff:10.0.0.0/104", "::ffff:0:0/96",
 		// Covers loopback/unspecified even though the stored address is not.
