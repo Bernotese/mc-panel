@@ -21,7 +21,8 @@ const deletedTimeFormat = "20060102T150405Z"
 func BackupsDir(instancesDir string) string { return filepath.Join(instancesDir, "backups") }
 
 // ensureLayout makes sure <instances_dir> exists (0755), that instances/ is root:<mc_user gid>
-// 0750, deleted/ root:root 0700 and backups/ <mc_user>:<mc_user gid> 0700 (in production). The
+// 0750, deleted/ and tmp/ root:<agent's group> 0700 (root:mcpanel under the systemd unit; the
+// group gets no access at 0700) and backups/ <mc_user>:<mc_user gid> 0700 (in production). The
 // panel user must not read world data; the files service (running as mc_user, spec 3b §3.3)
 // may enter instances/ but never write into it and owns backups/ (spec 4 §3.1); no container
 // user may swap either directory.
@@ -33,6 +34,9 @@ func (m *Manager) ensureLayout() error {
 		return err
 	}
 	if err := ensureDir(DeletedDir(m.host.InstancesDir), os.Getegid(), 0o700); err != nil {
+		return err
+	}
+	if err := ensureDir(filepath.Join(m.host.InstancesDir, "tmp"), os.Getegid(), 0o700); err != nil {
 		return err
 	}
 	return ensureOwnedDir(BackupsDir(m.host.InstancesDir), m.host.UID, m.host.GID, 0o700)
@@ -127,6 +131,27 @@ func (m *Manager) ensureDataDir(id int64) error {
 		return fmt.Errorf("chown %s to %d:%d: %w", dir, m.host.UID, m.host.GID, err)
 	}
 	return f.Chmod(0o750)
+}
+
+// resetTmpDir gives a container that is about to be created an empty /tmp: tmp/<id> is
+// removed (os.RemoveAll never follows symlinks, a symlink in its place is removed as a link)
+// and created again for the container user with 0700. No container uses it at this point.
+// The caller has run ensureLayout.
+func (m *Manager) resetTmpDir(id int64) error {
+	dir := TmpDir(m.host.InstancesDir, id)
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("empty %s: %w", dir, err)
+	}
+	return ensureOwnedDir(dir, m.host.UID, m.host.GID, 0o700)
+}
+
+// ensureTmpDir makes sure tmp/<id> exists for the container user with 0700 without emptying
+// it (O_NOFOLLOW: a symlink in its place is refused).
+func (m *Manager) ensureTmpDir(id int64) error {
+	if err := m.ensureLayout(); err != nil {
+		return err
+	}
+	return ensureOwnedDir(TmpDir(m.host.InstancesDir, id), m.host.UID, m.host.GID, 0o700)
 }
 
 // freePath returns base, or base-2, base-3, … if base exists already.
