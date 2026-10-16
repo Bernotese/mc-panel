@@ -3,8 +3,9 @@
 # ordinary VM user in its own copy of the tree: dev mode, own sockets in .dev/, own ports (panel
 # 18080, Playwright mock 5174), so the panel deployed on the VM (127.0.0.1:8080) stays untouched.
 # Tools are set up on first use; Go and Node come from scripts/testvm-deploy.sh. Runs from all
-# copies on the VM are serialised (one lock): parallel race and Vitest runs of several teammates
-# overload the VM and make timing-sensitive tests fail.
+# copies on the VM share one lock around the timing-sensitive parts (race tests, Vitest, e2e,
+# shots): parallel runs of several teammates overload the VM and make those tests fail. Lint,
+# npm ci and builds run outside the lock.
 #
 #   bash scripts/vm-test.sh [all|go|lint|web|e2e|shots]
 set -euo pipefail
@@ -90,11 +91,39 @@ need_playwright() {
   touch "${marker}"
 }
 
+# with_lock runs "$@" while holding the VM test lock (shared with the CI jobs, which flock the
+# same file around their race and Vitest steps). Nested calls reuse a lock that is already held.
+lock_held=""
+with_lock() {
+  if [ -n "${lock_held}" ]; then
+    "$@"
+    return
+  fi
+  mkdir -p "$(dirname "${VM_LOCK}")"
+  exec 9> "${VM_LOCK}"
+  if ! flock -n 9; then
+    log "waiting for another test run on this VM"
+    flock 9
+  fi
+  lock_held=1
+  # No "|| rc=$?" here: it would turn off set -e inside "$@". A failure exits the script (which
+  # releases the lock) unless the caller checks with_lock's status itself.
+  local rc
+  "$@"
+  rc=$?
+  lock_held=""
+  exec 9>&-
+  return "${rc}"
+}
+
 suite_go() {
   need_go
   need_restic
+  # Compile the race test binaries outside the lock (-exec true builds but does not run them).
+  log "go test -race: build"
+  CGO_ENABLED=1 go test -race -count=1 -exec true ./... > /dev/null
   log "go test -race ./... (MCPANEL_TEST_RESTIC=${MCPANEL_TEST_RESTIC})"
-  CGO_ENABLED=1 go test -race -count=1 ./...
+  with_lock env CGO_ENABLED=1 go test -race -count=1 ./...
 }
 
 need_shellcheck() {
@@ -123,7 +152,7 @@ suite_lint() {
 suite_web() {
   need_node_modules
   log "vitest"
-  (cd web && npm test)
+  with_lock bash -c 'cd web && npm test'
 }
 
 # Real backend (agent, files and panel in dev mode; the panel serves the built UI itself on
@@ -143,6 +172,15 @@ listen = "127.0.0.1:${E2E_PORT}"
 public_url = "http://localhost:${E2E_PORT}"
 EOF
 
+  # The stack listens on fixed ports (18080, Playwright mock 5174), so it runs under the lock: a
+  # second run would otherwise collide on the ports or test the other checkout's panel.
+  with_lock e2e_stack_and_playwright
+}
+
+# e2e_stack_and_playwright runs under the VM test lock. On failure the script exits: the EXIT
+# trap stops the stack and the lock is released with the process (the servers do not inherit
+# fd 9).
+e2e_stack_and_playwright() {
   # stack_pids is global: the EXIT trap runs after this function has returned, when a local
   # array would already be gone (and a bare "wait" would then wait for the servers forever).
   stack_pids=()
@@ -189,7 +227,7 @@ suite_shots() {
   need_playwright
   rm -rf web/screenshots
   log "Playwright screenshots (mock backend)"
-  (cd web && npm run shots)
+  with_lock bash -c 'cd web && npm run shots'
 }
 
 # stop_stack ends the dev servers of suite_e2e and waits only for them.
@@ -209,13 +247,12 @@ stop_stack() {
   stack_pids=()
 }
 
-# One run at a time on the VM, across all copies (the lock is released when this script exits).
-mkdir -p "$(dirname "${VM_LOCK}")"
-exec 9> "${VM_LOCK}"
-if ! flock -n 9; then
-  log "waiting for another test run on this VM"
-  flock 9
-fi
+# For "all" the lock is held from the race tests to the end of e2e (one queue slot instead of three).
+suite_all_locked() {
+  suite_go
+  suite_web
+  suite_e2e
+}
 
 case "${suite}" in
   go) suite_go ;;
@@ -225,9 +262,7 @@ case "${suite}" in
   shots) suite_shots ;;
   all)
     suite_lint
-    suite_go
-    suite_web
-    suite_e2e
+    with_lock suite_all_locked
     ;;
   *) die "unknown suite ${suite} (all|go|lint|web|e2e|shots)" ;;
 esac
