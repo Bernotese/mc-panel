@@ -168,6 +168,12 @@ export const en: Messages = {
     register: 'Register passkey',
     unsupported: 'This browser does not support passkeys.',
   },
+  first_factor: {
+    password_label: 'Current password',
+    password_hint: 'Confirm the setup with your password.',
+    password_required: 'Please enter your current password.',
+    password_wrong: 'The password is incorrect.',
+  },
   recovery: {
     title: 'Recovery codes',
     description: 'Each code works exactly once if you lose access to your second factor. The codes are shown only now.',

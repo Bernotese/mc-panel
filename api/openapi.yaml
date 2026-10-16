@@ -194,11 +194,12 @@ paths:
     post:
       operationId: enableTotp
       tags: [me]
+      description: Activates the pending TOTP secret. The first second factor also needs current_password (401 invalid_credentials without it); further methods need sudo instead.
       parameters:
         - $ref: '#/components/parameters/CSRF'
       requestBody:
         required: true
-        content: { application/json: { schema: { $ref: '#/components/schemas/CodeRequest' } } }
+        content: { application/json: { schema: { $ref: '#/components/schemas/TotpEnableRequest' } } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/RecoveryCodesResponse' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -221,8 +222,12 @@ paths:
     post:
       operationId: beginPasskeyRegistration
       tags: [me]
+      description: Starts a passkey registration. The first second factor needs current_password (401 invalid_credentials without it); further methods need sudo instead.
       parameters:
         - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: '#/components/schemas/PasskeyBeginRequest' } } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/WebAuthnOptions' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -231,6 +236,7 @@ paths:
     post:
       operationId: finishPasskeyRegistration
       tags: [me]
+      description: Stores the new passkey. The first second factor also needs current_password (401 invalid_credentials without it); further methods need sudo instead.
       parameters:
         - $ref: '#/components/parameters/CSRF'
       requestBody:
@@ -240,6 +246,8 @@ paths:
         '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/PasskeyCreated' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /me/passkeys:
     get:
       operationId: listPasskeys
@@ -1486,6 +1494,7 @@ paths:
     post:
       operationId: testNotifier
       tags: [security]
+      description: Sends a test notification. A failed delivery is reported without the target's status (400); at most 6 per minute per user (429).
       parameters:
         - $ref: '#/components/parameters/IdPath'
         - $ref: '#/components/parameters/CSRF'
@@ -1494,6 +1503,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /security/agent:
     get:
       operationId: getAgentStatus
@@ -1570,7 +1580,14 @@ components:
     PasskeyRegistration:
       type: object
       required: [name, credential]
-      properties: { name: { type: string, minLength: 1, maxLength: 64 }, credential: { type: object, additionalProperties: true } }
+      properties: { name: { type: string, minLength: 1, maxLength: 64 }, credential: { type: object, additionalProperties: true }, current_password: { type: string, maxLength: 256, description: 'required for the first second factor' } }
+    PasskeyBeginRequest:
+      type: object
+      properties: { current_password: { type: string, maxLength: 256, description: 'required for the first second factor' } }
+    TotpEnableRequest:
+      type: object
+      required: [code]
+      properties: { code: { type: string, maxLength: 32 }, current_password: { type: string, maxLength: 256, description: 'required for the first second factor' } }
     SudoResponse:
       type: object
       required: [sudo_until]

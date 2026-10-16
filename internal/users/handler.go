@@ -26,12 +26,18 @@ type Handler struct {
 	clock    clock.Clock
 	rec      audit.Recorder
 	notifier notify.Notifier
+	// passwordSet is called after an admin set a user's password (see OnPasswordSet).
+	passwordSet func(userID int64)
 }
 
 // NewHandler expects db from store.Open (BEGIN IMMEDIATE transactions).
 func NewHandler(db *sql.DB, c clock.Clock, rec audit.Recorder, n notify.Notifier) *Handler {
 	return &Handler{db: db, q: store.New(db), clock: c, rec: rec, notifier: n}
 }
+
+// OnPasswordSet registers fn to run after an admin set a user's password. cmd/panel uses it to
+// reset the user's second-factor lockout, which lives in the auth handler (spec §7.2).
+func (h *Handler) OnPasswordSet(fn func(userID int64)) { h.passwordSet = fn }
 
 // Routes registers all user and permission routes (paths relative to /api).
 func (h *Handler) Routes(api *rbac.Router) {

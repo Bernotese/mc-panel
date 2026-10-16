@@ -20,6 +20,12 @@ function needsSudoForNewFactor(g: Authed): boolean {
   return g.session.stage === 'full' && hasSecondFactor(g.user) && !(g.session.sudoUntil > Date.now())
 }
 
+/** SEC-15: the first second factor needs the current password (401 invalid_credentials otherwise). */
+function firstFactorPasswordError(g: Authed, currentPassword: string | undefined): Response | null {
+  if (hasSecondFactor(g.user) || currentPassword === g.user.password) return null
+  return apiError(401, 'invalid_credentials', 'current_password is required to set up the first two-factor method')
+}
+
 function finishFirstFactor(g: Authed): string[] {
   const codes = g.user.recoveryCodes.length === 0 ? generateRecoveryCodes() : []
   if (codes.length > 0) g.user.recoveryCodes = codes
@@ -79,7 +85,9 @@ export const meOperations: MockOperation[] = [
       const g = guard(request, { stages: ['setup', 'full'] })
       if (g instanceof Response) return g
       if (!g.user.totpPending) return apiError(409, 'conflict', 'no TOTP setup pending')
-      const body = await readJson<{ code?: string }>(request)
+      const body = await readJson<{ code?: string; current_password?: string }>(request)
+      const pwError = firstFactorPasswordError(g, body?.current_password)
+      if (pwError) return pwError
       if (body?.code !== MOCK_TOTP_CODE) return apiError(401, 'invalid_code', 'invalid code')
       g.user.totpEnabled = true
       g.user.totpPending = false
@@ -107,10 +115,13 @@ export const meOperations: MockOperation[] = [
 
   op(
     'beginPasskeyRegistration',
-    http.post(`${API}/me/passkeys/begin`, ({ request }) => {
+    http.post(`${API}/me/passkeys/begin`, async ({ request }) => {
       const g = guard(request, { stages: ['setup', 'full'] })
       if (g instanceof Response) return g
       if (needsSudoForNewFactor(g)) return apiError(403, 'sudo_required', 're-authentication required')
+      const body = await readJson<{ current_password?: string }>(request)
+      const pwError = firstFactorPasswordError(g, body?.current_password)
+      if (pwError) return pwError
       return HttpResponse.json({
         publicKey: {
           challenge: WEBAUTHN_CHALLENGE,
@@ -134,10 +145,12 @@ export const meOperations: MockOperation[] = [
     http.post(`${API}/me/passkeys/finish`, async ({ request }) => {
       const g = guard(request, { stages: ['setup', 'full'] })
       if (g instanceof Response) return g
-      const body = await readJson<{ name?: string; credential?: unknown }>(request)
+      const body = await readJson<{ name?: string; credential?: unknown; current_password?: string }>(request)
       const name = body?.name?.trim() ?? ''
       if (name.length < 1 || name.length > 64) return apiError(400, 'validation_failed', 'name must be 1-64 characters')
       if (typeof body?.credential !== 'object' || body.credential === null) return apiError(400, 'bad_request', 'credential missing')
+      const pwError = firstFactorPasswordError(g, body.current_password)
+      if (pwError) return pwError
       const passkey: Passkey = { id: nextId(), name, created_at: Date.now(), last_used_at: null }
       g.user.passkeys.push(passkey)
       const codes = finishFirstFactor(g)

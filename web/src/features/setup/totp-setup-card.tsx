@@ -1,17 +1,25 @@
 import { useMutation } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { unwrap } from '@/api/errors'
 import { CodeForm } from '@/components/code-form'
 import { QrCode } from '@/components/qr-code'
 import { Button } from '@/components/ui/button'
+import { useMe } from '@/features/auth/me'
 import { errorMessage } from '@/lib/error-message'
+import { CurrentPasswordField } from './current-password-field'
+import { enrolErrorMessage, isFirstFactor } from './first-factor'
 
 export function TotpSetupCard({ onEnabled }: { onEnabled(codes: string[]): void }) {
   const { t } = useTranslation()
+  const needsPassword = isFirstFactor(useMe())
+  const [password, setPassword] = useState('')
+  const [passwordMissing, setPasswordMissing] = useState(false)
   const setup = useMutation({ mutationFn: () => unwrap(api.POST('/me/totp/setup')) })
   const enable = useMutation({
-    mutationFn: (code: string) => unwrap(api.POST('/me/totp/enable', { body: { code } })),
+    mutationFn: (code: string) =>
+      unwrap(api.POST('/me/totp/enable', { body: needsPassword ? { code, current_password: password } : { code } })),
     onSuccess: (res) => onEnabled(res.codes),
   })
 
@@ -40,13 +48,17 @@ export function TotpSetupCard({ onEnabled }: { onEnabled(codes: string[]): void 
       <code data-testid="totp-secret" className="bg-muted block rounded-md p-2 font-mono text-sm break-all">
         {setup.data.secret}
       </code>
+      {needsPassword ? <CurrentPasswordField value={password} onChange={setPassword} /> : null}
       <CodeForm
         label={t('totp_setup.code_label')}
         submitLabel={t('totp_setup.confirm')}
         numeric
         pending={enable.isPending}
-        error={enable.error ? errorMessage(enable.error, t) : null}
-        onSubmit={(code) => enable.mutate(code)}
+        error={passwordMissing ? t('first_factor.password_required') : enable.error ? enrolErrorMessage(enable.error, t) : null}
+        onSubmit={(code) => {
+          setPasswordMissing(needsPassword && password === '')
+          if (!needsPassword || password !== '') enable.mutate(code)
+        }}
       />
     </div>
   )

@@ -71,9 +71,13 @@ func newUser(ctx context.Context, q *store.Queries, now time.Time, username, pw,
 	if _, err := rand.Read(handle); err != nil {
 		return store.User{}, err
 	}
+	id, err := q.RbacNextUserID(ctx)
+	if err != nil {
+		return store.User{}, err
+	}
 	ms := now.UnixMilli()
 	u, err := q.RbacCreateUser(ctx, store.RbacCreateUserParams{
-		Username: username, PasswordHash: hash, Role: role, WebauthnHandle: handle,
+		ID: id, Username: username, PasswordHash: hash, Role: role, WebauthnHandle: handle,
 		PasswordChangedAt: ms, CreatedAt: ms, UpdatedAt: ms,
 	})
 	if store.IsUniqueViolation(err) {

@@ -167,9 +167,9 @@ func (a *softAuthenticator) assert(options []byte) json.RawMessage {
 func (e *testEnv) registerPasskey(c *client, name string) (*softAuthenticator, response) {
 	e.t.Helper()
 	a := newSoftAuthenticator(e.t, e.cfg.RPID(), e.cfg.Origin())
-	begin := c.do(http.MethodPost, "/api/me/passkeys/begin", nil)
+	begin := c.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword})
 	if begin.code != 200 {
 		e.t.Fatalf("passkey begin = %d %s", begin.code, begin.body)
 	}
-	return a, c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": name, "credential": a.register(begin.body)})
+	return a, c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": name, "credential": a.register(begin.body), "current_password": testPassword})
 }

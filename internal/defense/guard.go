@@ -46,8 +46,12 @@ func (e *RateLimitError) Error() string {
 type LoginGuard interface {
 	// CheckLogin is called before verifying a password. Returns nil, ErrJailed, ErrIPBlocked or *RateLimitError.
 	CheckLogin(ctx context.Context, ip netip.Addr, username string) error
-	// CheckSecondFactor is called before verifying a 2FA/sudo code. key identifies the session.
-	CheckSecondFactor(ctx context.Context, ip netip.Addr, key string) error
+	// CheckSecondFactor is called before verifying a 2FA/sudo code. key identifies the session,
+	// username its user (known devices are exempt from aggregated jails).
+	CheckSecondFactor(ctx context.Context, ip netip.Addr, key, username string) error
+	// KnownDevice reports whether ip recently completed a full login as username; the login
+	// handler then lets the password check use the reserved argon2 slot.
+	KnownDevice(ctx context.Context, ip netip.Addr, username string) bool
 	// CheckAdminNetwork returns ErrAdminNetwork if admin logins are restricted and ip is not allowlisted.
 	CheckAdminNetwork(ctx context.Context, ip netip.Addr) error
 	// RecordAttempt stores the attempt and jails the IP when the failure threshold is reached.

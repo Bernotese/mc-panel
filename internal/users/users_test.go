@@ -57,6 +57,27 @@ func TestCreateUser(t *testing.T) {
 	}
 }
 
+// SEC-40: the ID of a deleted user is never handed out again, so a new user cannot inherit
+// its login history or its audit actor_id.
+func TestCreateUserNeverReusesIDs(t *testing.T) {
+	e := newEnv(t)
+	admin := e.admin()
+	create := func(name string) int64 {
+		rec := e.do(http.MethodPost, "/users", map[string]string{"username": name, "password": goodPassword, "role": "user"}, &admin)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create %s: code = %d, body %s", name, rec.Code, rec.Body)
+		}
+		return decode[userResp](t, rec).ID
+	}
+	bob := create("bob")
+	if _, err := e.db.Exec(`DELETE FROM users WHERE id = ?`, bob); err != nil {
+		t.Fatal(err)
+	}
+	if carol := create("carol"); carol <= bob {
+		t.Fatalf("new user got ID %d, deleted user had %d", carol, bob)
+	}
+}
+
 func TestCreateUserValidation(t *testing.T) {
 	e := newEnv(t)
 	admin := e.admin()

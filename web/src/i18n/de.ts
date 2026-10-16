@@ -166,6 +166,12 @@ export const de = {
     register: 'Passkey registrieren',
     unsupported: 'Dieser Browser unterstützt keine Passkeys.',
   },
+  first_factor: {
+    password_label: 'Aktuelles Passwort',
+    password_hint: 'Bestätige die Einrichtung mit deinem Passwort.',
+    password_required: 'Bitte gib dein aktuelles Passwort ein.',
+    password_wrong: 'Das Passwort ist falsch.',
+  },
   recovery: {
     title: 'Wiederherstellungscodes',
     description: 'Jeder Code funktioniert genau einmal, falls du keinen Zugriff auf deinen zweiten Faktor hast. Die Codes werden nur jetzt angezeigt.',

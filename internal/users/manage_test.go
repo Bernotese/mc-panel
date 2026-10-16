@@ -300,3 +300,53 @@ func TestHandlersWithSQLRecorder(t *testing.T) {
 		t.Fatalf("actor/ip = %q/%q", actor, ip)
 	}
 }
+
+// Spec §4.3: a role change ends the target's sessions; the caller's own session stays.
+func TestChangeRoleRevokesSessions(t *testing.T) {
+	e := newEnv(t)
+	second := storetest.CreateUser(t, e.db, "second", "admin")
+	secondSess := insertSession(t, e.db, second, sql.NullInt64{})
+	rootOwn := insertSession(t, e.db, e.rootID, sql.NullInt64{})
+	rootOther := insertSession(t, e.db, e.rootID, sql.NullInt64{})
+	admin := e.admin()
+	admin.SessionID = rootOwn
+
+	rec := e.do(http.MethodPatch, fmt.Sprintf("/users/%d", e.rootID), map[string]string{"role": "user"}, &admin)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("self-demote: %d %s", rec.Code, rec.Body)
+	}
+	if sessionRevokedAt(t, e.db, rootOwn).Valid || !sessionRevokedAt(t, e.db, rootOther).Valid {
+		t.Fatal("self-demote must keep the caller's session and end the other one")
+	}
+	if got := e.rec.Entries[0].Details["revoked_sessions"]; got != int64(1) {
+		t.Fatalf("audit revoked_sessions = %v", got)
+	}
+	if sessionRevokedAt(t, e.db, secondSess).Valid {
+		t.Fatal("other users' sessions must stay")
+	}
+
+	other := principal.Principal{UserID: second, Username: "second", Role: principal.RoleAdmin, Stage: principal.StageFull, SudoUntil: t0.Add(5 * time.Minute)}
+	rec = e.do(http.MethodPatch, fmt.Sprintf("/users/%d", e.rootID), map[string]string{"role": "admin"}, &other)
+	if rec.Code != http.StatusOK || !sessionRevokedAt(t, e.db, rootOwn).Valid {
+		t.Fatalf("promote by another admin must end the target's sessions: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// Spec §7.2: an admin setting a user's password lifts that user's second-factor lockout
+// (cmd/panel wires OnPasswordSet to the auth handler).
+func TestUpdatePasswordCallsHook(t *testing.T) {
+	e := newEnv(t)
+	alice := storetest.CreateUser(t, e.db, "alice", "user")
+	var got []int64
+	e.h.OnPasswordSet(func(id int64) { got = append(got, id) })
+	admin := e.admin()
+	if rec := e.do(http.MethodPatch, fmt.Sprintf("/users/%d", alice), map[string]string{"role": "admin"}, &admin); rec.Code != http.StatusOK {
+		t.Fatalf("role change: %d", rec.Code)
+	}
+	if rec := e.do(http.MethodPatch, fmt.Sprintf("/users/%d", alice), map[string]string{"password": newPassword}, &admin); rec.Code != http.StatusOK {
+		t.Fatalf("password change: %d %s", rec.Code, rec.Body)
+	}
+	if !slices.Equal(got, []int64{alice}) {
+		t.Fatalf("hook calls = %v, want [%d]", got, alice)
+	}
+}

@@ -252,7 +252,9 @@ func TestTestNotifierEndpoint(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &created)
 	rec = e.call(t, http.MethodPost, fmt.Sprintf("/security/notifiers/%d/test", int64(created["id"].(float64))), nil)
 	expect(t, rec, http.StatusBadRequest, httpx.CodeValidation)
-	if msg := apiErr(rec).Message; !strings.Contains(msg, "status 404") || strings.Contains(msg, "secrettopicname") || strings.Contains(msg, bad.srv.URL) {
+	// the target's status stays in the log (SEC-22: no status oracle)
+	if msg := apiErr(rec).Message; !strings.Contains(msg, "rejected") || strings.Contains(msg, "404") ||
+		strings.Contains(msg, "secrettopicname") || strings.Contains(msg, bad.srv.URL) {
 		t.Fatalf("message = %q", msg)
 	}
 	expect(t, e.call(t, http.MethodPost, "/security/notifiers/999/test", nil), http.StatusNotFound, httpx.CodeNotFound)
@@ -315,5 +317,28 @@ func TestTestNotifierDatabaseErrorIsInternal(t *testing.T) {
 	expect(t, rec, http.StatusInternalServerError, "")
 	if strings.Contains(strings.ToLower(rec.Body.String()), "database") || strings.Contains(rec.Body.String(), "sql") {
 		t.Fatalf("raw error text must not reach the client: %s", rec.Body)
+	}
+}
+
+// SEC-22: test notifications are limited to 6 per minute per user.
+func TestTestNotifierRateLimit(t *testing.T) {
+	e := newAPIEnv(t, true)
+	h := newHookServer(t, http.StatusOK)
+	id := e.addNotifier(t, KindNtfy, "n", Config{URL: h.srv.URL, Topic: "alerts"}, true)
+	path := fmt.Sprintf("/security/notifiers/%d/test", id)
+	for i := range 6 {
+		if rec := e.call(t, http.MethodPost, path, nil); rec.Code != http.StatusNoContent {
+			t.Fatalf("test %d = %d %s", i, rec.Code, rec.Body)
+		}
+	}
+	rec := e.call(t, http.MethodPost, path, nil)
+	expect(t, rec, http.StatusTooManyRequests, httpx.CodeRateLimited)
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("Retry-After missing")
+	}
+	e.clk.Advance(10 * time.Second)
+	expect(t, e.call(t, http.MethodPost, path, nil), http.StatusNoContent, "")
+	if n := len(h.requests()); n != 7 {
+		t.Fatalf("requests = %d, want 7", n)
 	}
 }

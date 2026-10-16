@@ -20,7 +20,7 @@ func TestPasskeyRegistrationAndList(t *testing.T) {
 	c := e.newClient("203.0.113.10")
 	c.login("alice", testPassword)
 
-	begin := c.do(http.MethodPost, "/api/me/passkeys/begin", nil)
+	begin := c.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword})
 	if begin.code != 200 {
 		t.Fatalf("begin = %d %s", begin.code, begin.body)
 	}
@@ -37,11 +37,11 @@ func TestPasskeyRegistrationAndList(t *testing.T) {
 	if err := json.Unmarshal(begin.body, &opts); err != nil || opts.PublicKey.RP.ID != "localhost" || opts.PublicKey.User.Name != "alice" {
 		t.Fatalf("creation options = %s", begin.body)
 	}
-	if res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": " ", "credential": json.RawMessage(`{}`)}); res.code != 400 || res.errCode() != "validation_failed" {
+	if res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": " ", "credential": json.RawMessage(`{}`), "current_password": testPassword}); res.code != 400 || res.errCode() != "validation_failed" {
 		t.Fatalf("empty name = %d %s", res.code, res.body)
 	}
 	a := newSoftAuthenticator(t, e.cfg.RPID(), e.cfg.Origin())
-	res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "  YubiKey  ", "credential": a.register(begin.body)})
+	res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "  YubiKey  ", "credential": a.register(begin.body), "current_password": testPassword})
 	if res.code != 201 {
 		t.Fatalf("finish = %d %s", res.code, res.body)
 	}
@@ -58,7 +58,7 @@ func TestPasskeyRegistrationAndList(t *testing.T) {
 	if !bytes.Equal(credID, a.credID) || !strings.Contains(credJSON, "publicKey") {
 		t.Fatalf("stored credential id=%x json=%s", credID, credJSON)
 	}
-	if res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "again", "credential": a.register(begin.body)}); res.code != 400 {
+	if res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "again", "credential": a.register(begin.body), "current_password": testPassword}); res.code != 400 {
 		t.Fatalf("ceremony state must be one-shot, got %d", res.code)
 	}
 	var keys []passkeyJSON
@@ -70,16 +70,16 @@ func TestPasskeyRegistrationAndList(t *testing.T) {
 		t.Fatalf("audit=%v notes=%v", e.audit.Actions(), e.notes.Types())
 	}
 
-	if res := c.do(http.MethodPost, "/api/me/passkeys/begin", nil); res.code != 403 || res.errCode() != "sudo_required" {
+	if res := c.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword}); res.code != 403 || res.errCode() != "sudo_required" {
 		t.Fatalf("second passkey without sudo = %d %s", res.code, res.body)
 	}
 	e.grantSudo(c)
-	begin2 := c.do(http.MethodPost, "/api/me/passkeys/begin", nil)
+	begin2 := c.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword})
 	if begin2.code != 200 || !strings.Contains(string(begin2.body), b64url.EncodeToString(a.credID)) {
 		t.Fatalf("existing credential must be in excludeCredentials: %s", begin2.body)
 	}
 	b := newSoftAuthenticator(t, e.cfg.RPID(), e.cfg.Origin())
-	res = c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "Phone", "credential": b.register(begin2.body)})
+	res = c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "Phone", "credential": b.register(begin2.body), "current_password": testPassword})
 	var created2 passkeyCreatedResponse
 	if res.code != 201 || json.Unmarshal(res.body, &created2) != nil || created2.RecoveryCodes == nil || len(created2.RecoveryCodes) != 0 {
 		t.Fatalf("second passkey = %d %s (recovery_codes must be [])", res.code, res.body)
