@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"time"
@@ -175,6 +176,11 @@ type networkCreate struct {
 type networkInfo struct {
 	Driver string            `json:"Driver"`
 	Labels map[string]string `json:"Labels"`
+	IPAM   struct {
+		Config []struct {
+			Subnet string `json:"Subnet"`
+		} `json:"Config"`
+	} `json:"IPAM"`
 }
 
 // EnsureNetwork creates the bridge network name unless it exists. An existing
@@ -197,6 +203,11 @@ func (c *Client) EnsureNetwork(ctx context.Context, name string, labels map[stri
 	if err != nil {
 		return err
 	}
+	return checkNetwork(name, info, labels)
+}
+
+// checkNetwork accepts only a bridge network carrying all of labels.
+func checkNetwork(name string, info networkInfo, labels map[string]string) error {
 	if info.Driver != "bridge" {
 		return fmt.Errorf("docker: network %s exists with driver %q and is not managed by mc-panel; leaving it untouched", name, info.Driver)
 	}
@@ -206,6 +217,28 @@ func (c *Client) EnsureNetwork(ctx context.Context, name string, labels map[stri
 		}
 	}
 	return nil
+}
+
+// NetworkSubnets returns the IPv4 and IPv6 subnets (IPAM config) of the bridge
+// network name, which must carry all of labels. A missing network is an error for
+// which IsNotFound reports true.
+func (c *Client) NetworkSubnets(ctx context.Context, name string, labels map[string]string) ([]netip.Prefix, error) {
+	var info networkInfo
+	if err := c.call(ctx, c.timeout, http.MethodGet, "/networks/"+url.PathEscape(name), nil, nil, &info); err != nil {
+		return nil, err
+	}
+	if err := checkNetwork(name, info, labels); err != nil {
+		return nil, err
+	}
+	subnets := make([]netip.Prefix, 0, len(info.IPAM.Config))
+	for _, cfg := range info.IPAM.Config {
+		p, err := netip.ParsePrefix(cfg.Subnet)
+		if err != nil {
+			return nil, fmt.Errorf("docker: network %s has an invalid subnet %q", name, cfg.Subnet)
+		}
+		subnets = append(subnets, p.Masked())
+	}
+	return subnets, nil
 }
 
 // CreateContainer creates (but does not start) a container and returns its ID.
