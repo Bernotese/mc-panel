@@ -28,6 +28,7 @@ po="$work/pout"
 panel_pid=""
 psid=""       # value of the __Host-sid cookie (curl does not return Secure cookies over http)
 pcsrf=""      # csrf_token of the session
+p_totp_step=0 # last TOTP step the panel accepted (replay protection: the next must be greater)
 pcode=""      # HTTP status of the last papi call
 psrv=""       # server id of the plugins test server (assigned by the panel)
 pdata=""      # its data directory
@@ -230,13 +231,14 @@ if not eval("(" + sys.argv[3] + "\n)", {"d": d, "a": sys.argv[4:]}):
 # jobj <key> <value> […]: a JSON object of string values, encoded by Python (never by hand).
 jobj() { python3 -I -c 'import json, sys; a = sys.argv[1:]; print(json.dumps(dict(zip(a[::2], a[1::2]))))' "$@"; }
 
-# totp <base32 secret> <step offset>: RFC 6238 code (SHA-1, 6 digits, 30 s) for now + offset steps.
+# totp <base32 secret> <step>: RFC 6238 code (SHA-1, 6 digits, 30 s) of an absolute time step
+# (Unix seconds / 30).
 totp() {
   python3 -I -c '
-import base64, hashlib, hmac, struct, sys, time
+import base64, hashlib, hmac, struct, sys
 s = sys.argv[1].rstrip("=").upper()
 key = base64.b32decode(s + "=" * (-len(s) % 8))
-mac = hmac.new(key, struct.pack(">Q", int(time.time()) // 30 + int(sys.argv[2])), hashlib.sha1).digest()
+mac = hmac.new(key, struct.pack(">Q", int(sys.argv[2])), hashlib.sha1).digest()
 o = mac[-1] & 0x0F
 print("%06d" % ((struct.unpack(">I", mac[o:o + 4])[0] & 0x7FFFFFFF) % 1000000))' "$1" "$2"
 }
@@ -368,16 +370,30 @@ fputsum() {
     "http://files/v1/upload?id=$psrv&path=ci-sum.bin&$2"
 }
 
-# p_sudo: fresh sudo by TOTP before restore and delete (the window from the sign-in may have run
-# out during the plugins part). A code of an already used step is refused (replay protection),
-# so on a refusal wait for the next step once. Takes over the rotated session and CSRF token.
+# p_next_step: the next TOTP step the panel accepts: the current one, or the one after the last
+# used step (the panel accepts one step ahead of its clock); waits only when that is further.
+p_next_step() {
+  local step=$((EPOCHSECONDS / 30))
+  [ "$step" -gt "$p_totp_step" ] || step=$((p_totp_step + 1))
+  while [ "$step" -gt $((EPOCHSECONDS / 30 + 1)) ]; do sleep 1; done
+  echo "$step"
+}
+
+# p_sudo: fresh sudo by TOTP before restore, delete and settings changes (the window from the
+# sign-in may have run out). A code of an already used step is refused (replay protection), so
+# it takes the next unused step (p_next_step); on a refusal it waits for the next step once.
+# Takes over the rotated session and CSRF token.
 p_sudo() {
-  papi POST /auth/sudo/totp "$po/sudo.json" "{\"code\": \"$(totp "$psecret" 0)\"}"
+  local step
+  step="$(p_next_step)"
+  papi POST /auth/sudo/totp "$po/sudo.json" "{\"code\": \"$(totp "$psecret" "$step")\"}"
   if [ "$pcode" != 200 ]; then
     sleep 31
-    papi POST /auth/sudo/totp "$po/sudo.json" "{\"code\": \"$(totp "$psecret" 0)\"}"
+    step="$(p_next_step)"
+    papi POST /auth/sudo/totp "$po/sudo.json" "{\"code\": \"$(totp "$psecret" "$step")\"}"
   fi
   [ "$pcode" = 200 ] || fail "sudo: HTTP $pcode $(cat "$po/sudo.json")"
+  p_totp_step="$step"
   papi GET /auth/me "$po/me.json"
   [ "$pcode" = 200 ] || fail "me after sudo: HTTP $pcode $(cat "$po/me.json")"
   pcsrf="$(jget "$po/me.json" 'd["csrf_token"]')"
@@ -668,11 +684,13 @@ papi POST /me/totp/setup "$po/totp.json"
 [ "$pcode" = 200 ] || fail "totp setup: HTTP $pcode $(cat "$po/totp.json")"
 psecret="$(jget "$po/totp.json" 'd["secret"]')"
 # the first second factor needs the current password (SEC-15)
-papi POST /me/totp/enable "$po/enable.json" "$(jobj code "$(totp "$psecret" 0)" current_password "$padmin_pw")"
+p_totp_step=$((EPOCHSECONDS / 30))
+papi POST /me/totp/enable "$po/enable.json" "$(jobj code "$(totp "$psecret" "$p_totp_step")" current_password "$padmin_pw")"
 [ "$pcode" = 200 ] || fail "totp enable: HTTP $pcode $(cat "$po/enable.json")"
 # The enable code consumed the current step (replay protection). The panel accepts one step of
 # skew, so the code of the next step is valid right away.
-papi POST /auth/sudo/totp "$po/sudo.json" "{\"code\": \"$(totp "$psecret" 1)\"}"
+p_totp_step=$((p_totp_step + 1))
+papi POST /auth/sudo/totp "$po/sudo.json" "{\"code\": \"$(totp "$psecret" "$p_totp_step")\"}"
 [ "$pcode" = 200 ] || fail "sudo: HTTP $pcode $(cat "$po/sudo.json")"
 papi GET /auth/me "$po/me.json"
 [ "$pcode" = 200 ] || fail "me: HTTP $pcode $(cat "$po/me.json")"
