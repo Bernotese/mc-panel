@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/timescale"
 )
 
 // Snapshot is the result of one collector pass (V4).
@@ -98,20 +99,27 @@ const (
 )
 
 // Timings and retention (Global Constraints). Waits run on wall time; clock.Clock drives
-// timestamps and alert logic.
+// timestamps and alert logic. The cadences, the start grace, the reminder and the minute of
+// the alert settings are shortened in acceptance builds only (internal/timescale); production
+// builds keep exactly these values.
+var (
+	collectEvery = timescale.D(30 * time.Second)
+	tpsEvery     = timescale.D(time.Minute)
+	liveTPSEvery = timescale.D(5 * time.Second)
+	liveWindow   = timescale.D(30 * time.Second)
+	startGrace   = timescale.D(5 * time.Minute)
+	remindEvery  = timescale.D(24 * time.Hour)
+	// alertMinute is the unit of down_after_min and crash_window_min.
+	alertMinute = timescale.D(time.Minute)
+)
+
 const (
-	collectEvery     = 30 * time.Second
-	tpsEvery         = time.Minute
-	liveTPSEvery     = 5 * time.Second
-	liveWindow       = 30 * time.Second
 	rollupEvery      = 5 * time.Minute
 	pingTimeout      = 3 * time.Second
 	maxParallelPings = 4
 	retainRaw        = 24 * time.Hour
 	retain5m         = 7 * 24 * time.Hour
 	retain1h         = 30 * 24 * time.Hour
-	startGrace       = 5 * time.Minute
-	remindEvery      = 24 * time.Hour
 )
 
 // alertKey is the alert_state key: "<kind>:<server id>" for server alerts, "<kind>" for the
