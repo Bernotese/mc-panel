@@ -906,7 +906,6 @@ export function ipKeyOf(ip: string): string {
   return ip.includes(':') ? `${ip}/64` : `${ip}/32`
 }
 
-/** Test/dev helper: puts the "browser" into an authenticated session without HTTP. */
 /** Enables TOTP for a mock user, e.g. before a test grants a full-trust permission (SEC-10). */
 export function enableTotp(username: string): void {
   const user = findUserByName(username)
@@ -914,6 +913,7 @@ export function enableTotp(username: string): void {
   user.totpEnabled = true
 }
 
+/** Test/dev helper: puts the "browser" into an authenticated session without HTTP. */
 export function loginAs(username: string, opts: { stage?: Stage; sudo?: boolean } = {}): Me {
   const user = findUserByName(username)
   if (!user) throw new Error(`unknown mock user ${username}`)
