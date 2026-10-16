@@ -95,7 +95,8 @@ case "$subnet" in 10.213.*/28) ;; *) fail "mcpanel-net-9001 subnet $subnet is no
 nft list chain inet mcpanel forward >"$work/egress.nft" 2>&1 || fail "egress chain: $(cat "$work/egress.nft")"
 grep -q "ip saddr $subnet .*@mcpanel_egress_deny4 counter packets [0-9]* bytes [0-9]* drop" "$work/egress.nft" ||
   fail "no egress rule for $subnet: $(cat "$work/egress.nft")"
-egress_drops() { nft list chain inet mcpanel forward | sed -n 's/.*@mcpanel_egress_deny4 counter packets \([0-9]*\) .*/\1/p'; }
+# One rule per network (the router's and each server's): count the server network's rule.
+egress_drops() { nft list chain inet mcpanel forward | grep "ip saddr $subnet " | sed -n 's/.*@mcpanel_egress_deny4 counter packets \([0-9]*\) .*/\1/p'; }
 drops_before="$(egress_drops)"
 for target in 169.254.169.254 10.255.255.1 192.168.255.1; do
   if docker exec mcpanel-mc-9001 curl -sS -m 3 -o /dev/null "http://$target/" 2>"$work/egress.err"; then
