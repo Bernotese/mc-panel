@@ -127,10 +127,10 @@ active() { systemctl is-active --quiet "$1"; }
 
 echo "== prepare: hosts entry, restic, staging"
 grep -q " $domain\$" /etc/hosts || echo "127.0.0.1 $domain" >>/etc/hosts
-# GitHub's runner image leaves /usr/local/bin group/world-writable; the installer rightly refuses
-# to put root's binaries there (another user could swap them), so the runner gets the Ubuntu
-# default first.
-chmod go-w /usr/local/bin
+# GitHub's runner image leaves /usr/local/bin and /usr/share/keyrings group/world-writable; the
+# installer rightly refuses to put root's binaries or apt's Caddy key there (another user could
+# swap them), so the runner gets the Ubuntu default first.
+chmod go-w /usr/local/bin /usr/share/keyrings /etc/apt/sources.list.d
 bash "$repo/scripts/install-restic.sh"
 v1="$work/v1" v2="$work/v2" broken="$work/broken"
 stage "$v1" 0.0.1-ci
@@ -159,6 +159,21 @@ done
 curl -sS --max-time 20 -o /dev/null https://github.com/ || fail "outbound HTTPS broken by the firewall"
 echo "OK: installed, units active, sockets and firewall as specified"
 
+echo "== Caddy from its repository, admin API on a socket, sandboxed services"
+apt-cache policy caddy | awk '/^ [*][*][*] /{i=1; next} /^     [^ ]/{i=0} i' | grep -q 'dl.cloudsmith.io/public/caddy/stable' ||
+  fail "caddy does not come from the Caddy repository: $(apt-cache policy caddy)"
+cv="$(caddy version | awk '{ sub(/^v/, "", $1); print $1 }')"
+[ "$(printf '%s\n' 2.10.0 "$cv" | sort -V | head -n 1)" = 2.10.0 ] || fail "caddy $cv is older than 2.10"
+[ -S /run/caddy/admin.sock ] || fail "no Caddy admin socket"
+if runuser -u mcpanel -- curl -sS -m 2 -o /dev/null http://127.0.0.1:2019/config/ 2>/dev/null; then
+  fail "the panel user reaches Caddy's admin API on 127.0.0.1:2019"
+fi
+systemctl reload caddy.service || fail "systemctl reload caddy with the admin socket"
+for u in mcpanel-panel mcpanel-agent mcpanel-files; do
+  systemd-analyze security --no-pager "$u.service" | tail -n 1
+done
+echo "OK: caddy $cv from its repository, admin socket only, reload works"
+
 echo "== doctor"
 n="$(doctor_fails)"
 [ "$n" = 0 ] || fail "doctor reports $n failures: $(cat "$work/doctor.json")"
@@ -174,7 +189,8 @@ echo "OK: idempotent"
 echo "== sign-in through Caddy"
 wait_health
 login_ok
-echo "OK: panel reachable through Caddy, admin signs in"
+grep -q '"uri":"/api/auth/login"' /var/log/caddy/mc-panel.log || fail "the login is not in the access log /var/log/caddy/mc-panel.log"
+echo "OK: panel reachable through Caddy, admin signs in, access log written"
 
 echo "== update to 0.0.2-ci"
 before="$(db_fingerprint)"

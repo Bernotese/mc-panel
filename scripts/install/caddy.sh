@@ -3,12 +3,17 @@
 # Caddyfile only gets one marked import line. Foreign sites and global options stay untouched;
 # only an unmodified package default (Ubuntu's :80 welcome site) is replaced by a file of our
 # own. caddy validate before the reload; on failure the previous files are put back.
-# Needs the KEY_* of cfg_keys.
+# A Caddyfile of the installer moves Caddy's admin API from 127.0.0.1:2019 (any local user, the
+# panel included, could reconfigure Caddy) to a socket only caddy and root can open (SEC-14);
+# the drop-in caddy.service.d/mc-panel.conf creates its directory /run/caddy and /var/log/caddy
+# for the panel's access log. Needs the KEY_* of cfg_keys.
 
 # The exact line of the contract (overview V3); uninstall removes exactly this line.
 CAD_IMPORT='import mc-panel.caddy # managed by mc-panel'
 CAD_IMPORT_RE='^[[:space:]]*import[[:space:]]+mc-panel[.]caddy([[:space:]]|$)' # also unmarked or indented
 CAD_WAIT=120 # seconds to wait for https://<domain>/api/health
+CAD_ADMIN='admin unix//run/caddy/admin.sock'
+CAD_DROPIN=/etc/systemd/system/caddy.service.d/mc-panel.conf
 
 # cad_is_package_default FILE: 0 if FILE is Ubuntu's unmodified Caddyfile (md5 of the conffile
 # recorded by dpkg).
@@ -20,15 +25,53 @@ cad_is_package_default() {
   [[ $got == "$want" ]]
 }
 
-# cad_own_caddyfile: the Caddyfile when the installer owns it. skip_install_trust is a global
-# option, so it can only go here (overview V3): with tls internal Caddy would otherwise try to
-# add its root CA to the system trust store.
+# cad_own_caddyfile: the Caddyfile when the installer owns it. Global options can only go here
+# (overview V3): the admin socket, and with tls internal skip_install_trust (Caddy would
+# otherwise try to add its root CA to the system trust store).
 cad_own_caddyfile() {
   printf '# Created by mc-panel install.sh; add your own sites below, the import line must stay.\n'
+  printf '{\n\t%s\n' "$CAD_ADMIN"
   if [[ $TLS_MODE == internal ]]; then
-    printf '{\n\tskip_install_trust\n}\n\n'
+    printf '\tskip_install_trust\n'
   fi
-  printf '%s\n' "$CAD_IMPORT"
+  printf '}\n\n%s\n' "$CAD_IMPORT"
+}
+
+# cad_is_old_own FILE: 0 if FILE is exactly a Caddyfile that an older install.sh created (before
+# the admin socket, either TLS mode); such a file is still the installer's and gets the new one.
+cad_is_old_own() {
+  local head='# Created by mc-panel install.sh; add your own sites below, the import line must stay.' f
+  f="$(cat -- "$1")" || return 1
+  [[ $f == "$head"$'\n'"$CAD_IMPORT" || $f == "$head"$'\n{\n\tskip_install_trust\n}\n\n'"$CAD_IMPORT" ]]
+}
+
+# cad_dropin_ensure writes the drop-in for caddy.service (daemon-reload when it changed) and
+# prints changed/unchanged. Uninstall keeps it: the Caddyfile may still name the admin socket.
+cad_dropin_ensure() {
+  local r
+  if [[ ! -d $ROOT${CAD_DROPIN%/*} ]]; then
+    ensure_dir "${CAD_DROPIN%/*}" 0755 root root >/dev/null || return 1
+  fi
+  # caddy validate (as caddy) already opens the access log, before LogsDirectory= of a restart
+  # could create its directory. Not ensure_dir: /var/log is group-writable (root:syslog 0775).
+  if [[ ! -d $ROOT/var/log/caddy ]]; then
+    sys_install -d -o caddy -g caddy -m 0750 -- "$ROOT/var/log/caddy" || return 1
+  fi
+  r="$(write_template caddy/caddy-service-mc-panel.conf "$CAD_DROPIN" 0644 root root)" || return 1
+  if [[ $r == changed ]]; then
+    sys_systemctl daemon-reload </dev/null || return 1
+  fi
+  echo "$r"
+}
+
+# cad_admin_status FILE: "socket" if FILE moves the admin API off TCP (admin unix//… or admin
+# off) in its global options, else "tcp". doctor reports the TCP case of a foreign Caddyfile.
+cad_admin_status() {
+  if grep -qE '^[[:space:]]*admin[[:space:]]+(unix//|off([[:space:]]|$))' -- "$1" 2>/dev/null; then
+    echo socket
+  else
+    echo tcp
+  fi
 }
 
 # cad_import_ok FILE: 0 if FILE has exactly one import line of ours and it is the marked one.
@@ -85,7 +128,7 @@ cad_restore() {
 cad_ensure() {
   log_step "caddy"
   cfg_keys || return 1
-  local dir="$ROOT$CADDY_DIR" file="$ROOT$CADDY_DIR/Caddyfile" name site_r file_r=unchanged
+  local dir="$ROOT$CADDY_DIR" file="$ROOT$CADDY_DIR/Caddyfile" name site_r file_r=unchanged drop_r
   if [[ ! -d $dir ]]; then
     site_r="$(ensure_dir "$CADDY_DIR" 0755 root root)" || return 1
   fi
@@ -102,6 +145,7 @@ cad_ensure() {
       cp -p -- "$dir/$name" "$WORK/caddy.before/$name"
     fi
   done
+  drop_r="$(cad_dropin_ensure)" || return 1
   site_r="$(write_template caddy/mc-panel.caddy "$CADDY_DIR/mc-panel.caddy" 0644 root root)" || return 1
   # An existing Caddyfile keeps its owner, group and mode (e.g. root:caddy 0640).
   local mode=0644 og=root:root
@@ -109,7 +153,7 @@ cad_ensure() {
     mode="0$(stat -c '%a' -- "$file")"
     og="$(_owner_get "$CADDY_DIR/Caddyfile")"
   fi
-  if [[ ! -e $file ]] || cad_is_package_default "$file"; then
+  if [[ ! -e $file ]] || cad_is_package_default "$file" || cad_is_old_own "$file"; then
     file_r="$(cad_own_caddyfile | write_file "$CADDY_DIR/Caddyfile" "$mode" "${og%%:*}" "${og#*:}")" ||
       { cad_restore; return 1; }
   elif ! cad_import_ok "$file"; then
@@ -118,7 +162,7 @@ cad_ensure() {
       { cad_restore; return 1; }
   fi
   sys_systemctl enable --now caddy.service </dev/null || true
-  if [[ $site_r == unchanged && $file_r == unchanged ]]; then
+  if [[ $site_r == unchanged && $file_r == unchanged && $drop_r == unchanged ]]; then
     log_skip "site $DOMAIN unchanged"
     return 0
   fi
@@ -129,12 +173,18 @@ cad_ensure() {
     warn "caddy rejected the configuration; the previous Caddyfile and mc-panel.caddy are back in place"
     return 1
   fi
-  if ! sys_systemctl reload-or-restart caddy.service </dev/null; then
+  # caddy reload sends the new configuration to the admin address named in that configuration:
+  # when the Caddyfile (its admin line) or the drop-in (/run/caddy) changed, only a restart works.
+  local how=reload-or-restart
+  if [[ $file_r == changed || $drop_r == changed ]]; then
+    how=restart
+  fi
+  if ! sys_systemctl "$how" caddy.service </dev/null; then
     cad_restore
-    sys_systemctl reload-or-restart caddy.service </dev/null || true
-    warn "caddy did not reload (journalctl -u caddy); the previous Caddyfile and mc-panel.caddy are back in place"
+    sys_systemctl restart caddy.service </dev/null || true
+    warn "caddy did not $how (journalctl -u caddy); the previous Caddyfile and mc-panel.caddy are back in place"
     return 1
   fi
-  log_changed "site $DOMAIN ($TLS_MODE): mc-panel.caddy $site_r, Caddyfile $file_r"
+  log_changed "site $DOMAIN ($TLS_MODE): mc-panel.caddy $site_r, Caddyfile $file_r, caddy.service drop-in $drop_r"
   cad_wait
 }

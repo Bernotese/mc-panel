@@ -26,7 +26,107 @@ test_install_cad_ensure_creates_caddyfile_when_missing() {
   assert_file_contains "$ROOT$CADDY_DIR/mc-panel.caddy" 'reverse_proxy unix//run/mc-panel-web/panel.sock'
   assert_eq 644 "$(stat -c '%a' "$ROOT$CADDY_DIR/mc-panel.caddy")"
   assert_called "runuser -u caddy -- env HOME=/var/lib/caddy caddy validate --config $ROOT$CADDY_DIR/Caddyfile --adapter caddyfile"
+  # a new Caddyfile (admin socket) needs a restart: caddy reload would dial the new address
+  assert_called 'systemctl restart caddy.service'
+  assert_not_called 'reload-or-restart'
+}
+
+test_install_cad_ensure_own_caddyfile_moves_the_admin_api_to_a_socket() {
+  cad_fixture
+  cad_ensure >/dev/null
+  assert_file_eq "$ROOT$CADDY_DIR/Caddyfile" "# Created by mc-panel install.sh; add your own sites below, the import line must stay.
+{
+	admin unix//run/caddy/admin.sock
+}
+
+import mc-panel.caddy # managed by mc-panel"
+  assert_eq socket "$(cad_admin_status "$ROOT$CADDY_DIR/Caddyfile")"
+}
+
+test_install_cad_ensure_writes_the_caddy_dropin_once() {
+  cad_fixture
+  cad_ensure >/dev/null
+  local f="$ROOT/etc/systemd/system/caddy.service.d/mc-panel.conf"
+  assert_file_contains "$f" 'RuntimeDirectory=caddy'
+  assert_file_contains "$f" 'RuntimeDirectoryMode=0750'
+  assert_file_contains "$f" 'LogsDirectory=caddy'
+  assert_eq 644 "$(stat -c '%a' "$f")"
+  assert_called 'systemctl daemon-reload'
+  # validate opens the access log before a restart could create its directory
+  assert_called "install -d -o caddy -g caddy -m 0750 -- $ROOT/var/log/caddy"
+  mkdir -p "$ROOT/var/log/caddy"
+  : >"$WORK/calls.log"
+  cad_ensure >/dev/null
+  assert_not_called 'daemon-reload'
+  assert_not_called 'install -d'
+  # another version rewrites the site (reload), but the drop-in stays: no Caddy restart
+  TARGET_VERSION=1.2.4
+  : >"$WORK/calls.log"
+  cad_ensure >/dev/null
+  assert_not_called 'daemon-reload'
+  assert_not_called 'systemctl restart caddy'
+}
+
+test_install_cad_ensure_site_has_the_access_log() {
+  cad_fixture
+  cad_ensure >/dev/null
+  assert_file_contains "$ROOT$CADDY_DIR/mc-panel.caddy" 'output file /var/log/caddy/mc-panel.log {'
+  assert_file_contains "$ROOT$CADDY_DIR/mc-panel.caddy" 'roll_size 50MiB'
+  assert_file_contains "$ROOT$CADDY_DIR/mc-panel.caddy" 'roll_keep 14'
+  assert_file_contains "$ROOT$CADDY_DIR/mc-panel.caddy" 'request>headers>X-Csrf-Token delete'
+}
+
+test_install_cad_ensure_replaces_an_old_own_caddyfile() {
+  # Caddyfiles of an older install.sh (both TLS modes) get the admin socket on update
+  local head='# Created by mc-panel install.sh; add your own sites below, the import line must stay.'
+  cad_fixture
+  printf '%s\nimport mc-panel.caddy # managed by mc-panel\n' "$head" >"$ROOT$CADDY_DIR/Caddyfile"
+  cad_ensure >/dev/null
+  assert_file_contains "$ROOT$CADDY_DIR/Caddyfile" 'admin unix//run/caddy/admin.sock'
+  TLS_MODE=internal EMAIL=''
+  printf '%s\n{\n\tskip_install_trust\n}\n\nimport mc-panel.caddy # managed by mc-panel\n' "$head" >"$ROOT$CADDY_DIR/Caddyfile"
+  : >"$WORK/calls.log"
+  cad_ensure >/dev/null
+  assert_file_contains "$ROOT$CADDY_DIR/Caddyfile" 'admin unix//run/caddy/admin.sock'
+  assert_file_contains "$ROOT$CADDY_DIR/Caddyfile" 'skip_install_trust'
+  assert_called 'systemctl restart caddy.service'
+}
+
+test_install_cad_ensure_keeps_an_edited_own_caddyfile() {
+  local head='# Created by mc-panel install.sh; add your own sites below, the import line must stay.'
+  cad_fixture
+  printf '%s\nimport mc-panel.caddy # managed by mc-panel\n\nblog.example.com {\n\tfile_server\n}\n' "$head" >"$ROOT$CADDY_DIR/Caddyfile"
+  cp "$ROOT$CADDY_DIR/Caddyfile" "$WORK/before"
+  cad_ensure >/dev/null
+  assert_file_eq "$ROOT$CADDY_DIR/Caddyfile" "$(cat "$WORK/before")"
+  assert_eq tcp "$(cad_admin_status "$ROOT$CADDY_DIR/Caddyfile")"
+}
+
+test_install_cad_ensure_reloads_when_only_the_site_changed() {
+  cad_fixture
+  cad_ensure >/dev/null
+  DOMAIN=new.example.com
+  : >"$WORK/calls.log"
+  cad_ensure >/dev/null
   assert_called 'systemctl reload-or-restart caddy.service'
+  assert_not_called 'systemctl restart caddy'
+}
+
+test_install_cad_admin_status() {
+  printf '{\n\tadmin off\n}\n' >"$WORK/a"
+  assert_eq socket "$(cad_admin_status "$WORK/a")"
+  printf '{\n\tadmin localhost:2019\n}\n' >"$WORK/a"
+  assert_eq tcp "$(cad_admin_status "$WORK/a")"
+  printf '{\n\t# admin unix//run/caddy/admin.sock\n}\n' >"$WORK/a"
+  assert_eq tcp "$(cad_admin_status "$WORK/a")"
+  assert_eq tcp "$(cad_admin_status "$WORK/missing")"
+}
+
+test_install_cad_ensure_foreign_caddyfile_keeps_its_admin_setting() {
+  cad_fixture
+  cad_foreign
+  cad_ensure >/dev/null
+  assert_not_contains "$(cat "$ROOT$CADDY_DIR/Caddyfile")" 'admin'
 }
 
 test_install_cad_ensure_appends_import_once_to_foreign_caddyfile() {
@@ -100,7 +200,7 @@ test_install_cad_ensure_restores_caddyfile_when_validate_fails() {
   assert_fails cad_ensure
   assert_file_eq "$ROOT$CADDY_DIR/Caddyfile" "$(cat "$WORK/before")"
   assert_no_file "$ROOT$CADDY_DIR/mc-panel.caddy"
-  assert_not_called 'reload-or-restart caddy'
+  assert_not_called 'restart caddy'
 }
 
 test_install_cad_ensure_restores_previous_site_when_validate_fails() {
@@ -127,7 +227,7 @@ test_install_cad_ensure_second_run_does_not_reload() {
   cad_ensure >/dev/null
   : >"$WORK/calls.log"
   assert_contains "$(cad_ensure)" "[skip]"
-  assert_not_called 'reload-or-restart caddy'
+  assert_not_called 'restart caddy'
   assert_not_called 'caddy validate'
 }
 
@@ -143,19 +243,34 @@ test_install_cad_ensure_keeps_owner_and_mode_of_the_caddyfile() {
   assert_called "chown -h root:caddy $ROOT$CADDY_DIR/.mcpanel-install."
 }
 
-test_install_cad_ensure_restores_when_the_reload_fails() {
+test_install_cad_ensure_restores_when_the_restart_fails() {
   cad_fixture
   cad_foreign
   cp "$ROOT$CADDY_DIR/Caddyfile" "$WORK/before"
+  sys_systemctl() {
+    printf 'systemctl %s\n' "$*" >>"$WORK/calls.log"
+    [[ $1 != restart ]]
+  }
+  assert_fails cad_ensure
+  assert_contains "$(cat "$WORK/out")" "did not restart"
+  assert_file_eq "$ROOT$CADDY_DIR/Caddyfile" "$(cat "$WORK/before")"
+  assert_no_file "$ROOT$CADDY_DIR/mc-panel.caddy"
+  assert_eq 2 "$(grep -c 'systemctl restart caddy' "$WORK/calls.log")" # again with the old files
+}
+
+test_install_cad_ensure_restores_when_the_reload_fails() {
+  cad_fixture
+  cad_ensure >/dev/null
+  cp "$ROOT$CADDY_DIR/mc-panel.caddy" "$WORK/site.before"
+  DOMAIN=new.example.com
   sys_systemctl() {
     printf 'systemctl %s\n' "$*" >>"$WORK/calls.log"
     [[ $1 != reload-or-restart ]]
   }
   assert_fails cad_ensure
   assert_contains "$(cat "$WORK/out")" "did not reload"
-  assert_file_eq "$ROOT$CADDY_DIR/Caddyfile" "$(cat "$WORK/before")"
-  assert_no_file "$ROOT$CADDY_DIR/mc-panel.caddy"
-  assert_eq 2 "$(grep -c 'reload-or-restart caddy' "$WORK/calls.log")" # again with the old files
+  assert_file_eq "$ROOT$CADDY_DIR/mc-panel.caddy" "$(cat "$WORK/site.before")"
+  assert_called 'systemctl restart caddy.service' # with the old files
 }
 
 test_install_cad_ensure_merges_indented_and_duplicate_imports() {
