@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './test'
 import { nextTotp, totp, totpStep } from './totp'
 
 const username = process.env.E2E_ADMIN_USER ?? 'e2e-admin'

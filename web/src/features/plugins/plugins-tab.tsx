@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { usePower } from '@/features/servers/use-power'
 import { errorMessage } from '@/lib/error-message'
+import { visibleName } from '@/lib/file-name'
 import { useFormat } from '@/lib/format'
 import {
   checkUpdates,
@@ -78,7 +79,7 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
   const toggle = useMutation({
     mutationFn: ({ jar, enabled }: { jar: InstalledJar; enabled: boolean }) => togglePlugin(server.id, jar.file, enabled),
     onSuccess: (_data, { jar, enabled }) => {
-      const name = jarName(jar)
+      const name = visibleName(jarName(jar))
       toast.success(enabled ? t('plugins.installed.enabled_done', { name }) : t('plugins.installed.disabled_done', { name }))
       // Returned: the switch stays locked until the new list is there, instead of flipping back for a moment.
       return refreshInventory(queryClient, server.id)
@@ -89,7 +90,7 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
   const remove = useMutation({
     mutationFn: (jar: InstalledJar) => deletePlugin(server.id, jar.file),
     onSuccess: (_data, jar) => {
-      toast.success(t('plugins.installed.removed', { name: jarName(jar) }))
+      toast.success(t('plugins.installed.removed', { name: visibleName(jarName(jar)) }))
       setRemoving(null)
       return refreshPluginState(queryClient, server.id)
     },
@@ -238,8 +239,8 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
         <ConfirmDialog
           open
           onOpenChange={(open) => (open ? undefined : setRemoving(null))}
-          title={t('plugins.installed.remove_title', { name: jarName(removing) })}
-          description={t('plugins.installed.remove_description', { file: removing.file, dir })}
+          title={t('plugins.installed.remove_title', { name: visibleName(jarName(removing)) })}
+          description={t('plugins.installed.remove_description', { file: visibleName(removing.file), dir })}
           confirmLabel={t('plugins.installed.remove_submit')}
           destructive
           pending={remove.isPending || busy}

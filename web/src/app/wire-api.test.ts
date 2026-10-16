@@ -64,7 +64,7 @@ describe('wireApi', () => {
 
   it('routes sudo requests to the sudo store', async () => {
     wireApi(new QueryClient(), fakeNavigator('/'))
-    const answer = apiHandlers().requestSudo()
+    const answer = apiHandlers().requestSudo({ method: 'DELETE', path: '/servers/{id}' })
     expect(isSudoOpen()).toBe(true)
     settleSudo(true)
     await expect(answer).resolves.toBe(true)

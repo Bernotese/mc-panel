@@ -67,6 +67,17 @@ describe('PluginsTab – installed', () => {
     await waitFor(() => expect(within(region).queryByRole('switch', { name: 'OldTool aktiv' })).not.toBeInTheDocument())
   })
 
+  it('shows format characters in jar names, labels and the removal dialog (SEC-38)', async () => {
+    mockInventory(inventory({ jars: [jar('evil\u202Erab.jar')] }))
+    const { user, region } = await openPlugins()
+    expect(await within(region).findByText('evil⟨U+202E⟩rab.jar')).toBeInTheDocument()
+    expect(within(region).getByRole('switch', { name: 'evil⟨U+202E⟩rab.jar aktiv' })).toBeInTheDocument()
+    await user.click(within(region).getByRole('button', { name: 'Aktionen für evil⟨U+202E⟩rab.jar' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Entfernen' }))
+    const dialog = await screen.findByRole('dialog', { name: '„evil⟨U+202E⟩rab.jar“ entfernen?' })
+    expect(within(dialog).getByText(/^evil⟨U\+202E⟩rab\.jar wird aus plugins\/ gelöscht/)).toBeInTheDocument()
+  })
+
   it('opens project pages in a new window without referrer', async () => {
     mockInventory(inventory({ jars: [modrinthJar('LuckPerms-Bukkit-5.5.71.jar', 'LuckPerms', '5.5.71')] }))
     const { user, region } = await openPlugins()

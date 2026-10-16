@@ -3,6 +3,7 @@ import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { InstalledJar, PluginInventory, PluginUpdate } from '@/api/types'
 import { DataList, type Column } from '@/components/data-list'
+import { FileName } from '@/components/file-name'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
+import { visibleName } from '@/lib/file-name'
 import {
   externalHref,
   filterJars,
@@ -60,8 +62,14 @@ export function InstalledList({ inventory, updates, busy = false, pendingFile = 
       <div className="flex min-w-0 items-start gap-2">
         <PluginIcon url={jar.project?.icon_url} />
         <div className="min-w-0">
-          <p className="font-medium break-words">{name}</p>
-          {name !== jar.file ? <p className="text-muted-foreground font-mono text-xs break-all">{jar.file}</p> : null}
+          <p className="font-medium break-words">
+            <FileName name={name} />
+          </p>
+          {name !== jar.file ? (
+            <p className="text-muted-foreground font-mono text-xs break-all">
+              <FileName name={jar.file} />
+            </p>
+          ) : null}
           {jar.source === 'manual' ? <p className="text-muted-foreground text-xs">{t('plugins.installed.unmatched')}</p> : null}
         </div>
       </div>
@@ -85,7 +93,7 @@ export function InstalledList({ inventory, updates, busy = false, pendingFile = 
       <Switch
         checked={jar.enabled}
         disabled={busy || pendingFile === jar.file}
-        aria-label={t('plugins.installed.enabled_label', { name: jarName(jar) })}
+        aria-label={t('plugins.installed.enabled_label', { name: visibleName(jarName(jar)) })}
         onCheckedChange={(on) => onToggle(jar, on)}
       />
     )
@@ -98,7 +106,7 @@ export function InstalledList({ inventory, updates, busy = false, pendingFile = 
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label={t('plugins.installed.actions_label', { name })}>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label={t('plugins.installed.actions_label', { name: visibleName(name) })}>
             <MoreHorizontal aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>

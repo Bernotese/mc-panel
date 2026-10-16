@@ -9,6 +9,7 @@ import {
   iconSrc,
   isJarFilterActive,
   isJobRunning,
+  linkHost,
   jarName,
   jarVersion,
   jobProgress,
@@ -180,13 +181,20 @@ describe('URL filters', () => {
     expect(iconSrc(null)).toBeNull()
   })
 
-  it('only links http(s) URLs', () => {
+  it('only links https URLs', () => {
     expect(externalHref('https://modrinth.com/plugin/luckperms')).toBe('https://modrinth.com/plugin/luckperms')
-    expect(externalHref('http://example.org/x.jar')).toBe('http://example.org/x.jar')
+    expect(externalHref('http://example.org/x.jar')).toBeNull()
+    expect(externalHref('HTTP://example.org/x.jar')).toBeNull()
     expect(externalHref('javascript:alert(1)')).toBeNull()
     expect(externalHref('data:text/html,hi')).toBeNull()
     expect(externalHref('not a url')).toBeNull()
     expect(externalHref(null)).toBeNull()
+  })
+
+  it('names the host of a link', () => {
+    expect(linkHost('https://www.spigotmc.org/resources/vault.34315/')).toBe('www.spigotmc.org')
+    expect(linkHost('https://xn--e1afmkfd.example:8443/x')).toBe('xn--e1afmkfd.example:8443')
+    expect(linkHost('nope')).toBe('')
   })
 })
 

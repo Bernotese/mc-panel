@@ -24,4 +24,14 @@ export default defineConfig([
     files: ['src/components/ui/**', 'src/routes/**'],
     rules: { 'react-refresh/only-export-components': 'off' },
   },
+  {
+    // e2e/test.ts adds the CSP violation guard (SEC-31); a spec importing Playwright's own `test` would skip it.
+    files: ['e2e/**/*.spec.ts', 'e2e/**/*.shots.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { paths: [{ name: '@playwright/test', importNames: ['test'], message: "Import test from e2e/test.ts (CSP guard)." }] },
+      ],
+    },
+  },
 ])
