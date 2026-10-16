@@ -158,8 +158,8 @@ All routes through `*rbac.Router`, described in `api/openapi.yaml`, with an MSW 
   - Every 15 s a comment (`: ping`) as a heartbeat.
 - Start: with a `Last-Event-ID` header (valid number) the panel opens the agent stream with `since` = that value + 1 ns, otherwise with `tail` = 500. The query parameter `tail` (0–1000) overrides the default.
 - If the agent stream ends or opening it fails (`404`, `docker_unavailable`, agent gone), the panel sends `state {running: false}` once and retries with `since` = the last timestamp seen. This way the log continues across restarts and recreations of the container, without duplicate lines. After an attempt with a line or a state change the panel waits 3 s; if an attempt has neither (stopped server, agent gone or busy), the wait doubles up to at most 10 s (3 → 6 → 10 s); every line or state change resets it. A `429 busy` from the agent is logged at info level.
-- Checks during the stream (via `clock.Clock`, every 30 s): session valid (not expired, not revoked, fully signed in), user exists, permission `server.console` (or admin) still holds, server still exists. If a check fails, the panel closes the stream. The stream does not extend the session (`Touch` only on opening, as with every request).
-- At most 4 concurrent streams per user in the panel, otherwise `429 rate_limited`. On shutdown the panel closes all streams; shutdown waits at most 20 s (longer than the RCON call with 15 s).
+- Checks during the stream (via `clock.Clock`, every 30 s; now every 5 s, SEC-29): session valid (not expired, not revoked, fully signed in), user exists, permission `server.console` (or admin) still holds, server still exists. If a check fails, the panel closes the stream. The stream does not extend the session (`Touch` only on opening, as with every request).
+- At most 4 concurrent streams per user in the panel, otherwise `429 rate_limited`. (Now, SEC-24: panel-wide at most 12 log streams plus 2 slots only for admins, otherwise `429`.) On shutdown the panel closes all streams; shutdown waits at most 20 s (longer than the RCON call with 15 s).
 
 ### 6.3 Online players
 
