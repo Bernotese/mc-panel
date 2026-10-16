@@ -63,5 +63,9 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     exclude: ['e2e/**', 'node_modules/**'],
+    // The tests run on a shared VM (CI runners and make test-vm); under load the default 5 s
+    // made slow render tests flaky.
+    testTimeout: 15000,
+    hookTimeout: 15000,
   },
 })
