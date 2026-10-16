@@ -47,7 +47,7 @@ const usageText = `usage:
   panel admin create [-config path] [-dev] -username NAME   (password from stdin)
   panel admin unlock [-config path] [-dev]
   panel admin list   [-config path] [-dev]
-  panel audit verify [-config path] [-dev] [-journal file|-]   (journalctl -u mcpanel-panel -o cat)
+  panel audit verify [-config path] [-dev] [-journal file|-]   (journalctl -u mcpanel-panel -o cat [--since after-a-restore])
   panel version
 
   -config defaults to /etc/mc-panel/panel.toml unless -dev is given.`

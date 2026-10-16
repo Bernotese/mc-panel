@@ -1107,7 +1107,8 @@ pcsrf="$(jget "$po/login.json" 'd["csrf_token"]')"
 papi POST /me/totp/setup "$po/totp.json"
 [ "$pcode" = 200 ] || fail "totp setup: HTTP $pcode $(cat "$po/totp.json")"
 psecret="$(jget "$po/totp.json" 'd["secret"]')"
-papi POST /me/totp/enable "$po/enable.json" "{\"code\": \"$(totp "$psecret" 0)\"}"
+# the first second factor needs the current password (SEC-15)
+papi POST /me/totp/enable "$po/enable.json" "$(jobj code "$(totp "$psecret" 0)" current_password "$padmin_pw")"
 [ "$pcode" = 200 ] || fail "totp enable: HTTP $pcode $(cat "$po/enable.json")"
 # The enable code consumed the current step (replay protection). The panel accepts one step of
 # skew, so the code of the next step is valid right away.

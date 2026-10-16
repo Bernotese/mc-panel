@@ -21,9 +21,10 @@ type presentedTokenKey struct{}
 const (
 	csrfHeader = "X-CSRF-Token"
 	loginPath  = "/api/auth/login"
+	logoutPath = "/api/auth/logout"
 	// BackgroundHeader marks requests the web app makes on its own (polling, refetch on window
 	// focus). They are served normally but do not count as activity, so an open tab does not
-	// keep an idle session alive (SEC-19).
+	// keep an idle session alive (SEC-19). Only GET and HEAD can be background requests.
 	BackgroundHeader = "X-MCPanel-Background"
 )
 
@@ -61,7 +62,7 @@ func (s *Sessions) Middleware(next http.Handler) http.Handler {
 		if !s.adminNetworkAllowed(w, r, user) {
 			return
 		}
-		if r.Header.Get(BackgroundHeader) != "1" {
+		if !isBackground(r) {
 			if err := s.Touch(ctx, sess); err != nil {
 				httpx.Internal(w, r, err)
 				return
@@ -88,13 +89,20 @@ func (s *Sessions) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+func isBackground(r *http.Request) bool {
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.Header.Get(BackgroundHeader) == "1"
+}
+
 // adminNetworkAllowed applies the admin allowlist to every API request of an admin session
 // (SEC-16): a stolen cookie, a session from before the setting was enabled or a user promoted
 // later must not work from any other network. It writes 403 ip_blocked and returns false when
-// the request is refused. Requests for the web app itself pass, so it can show the error.
+// the request is refused. Requests for the web app itself and the logout pass.
 func (s *Sessions) adminNetworkAllowed(w http.ResponseWriter, r *http.Request, user store.User) bool {
 	if s.adminNet == nil || principal.Role(user.Role) != principal.RoleAdmin || !strings.HasPrefix(r.URL.Path, "/api/") {
 		return true
+	}
+	if r.Method == http.MethodPost && r.URL.Path == logoutPath {
+		return true // signing out stays possible from anywhere
 	}
 	err := s.adminNet(r.Context(), httpx.ClientIP(r.Context()))
 	switch {

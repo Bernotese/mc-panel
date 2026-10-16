@@ -48,11 +48,11 @@ type testGuard struct {
 	hook func(key string)
 }
 
-func (g *testGuard) CheckSecondFactor(ctx context.Context, ip netip.Addr, key string) error {
+func (g *testGuard) CheckSecondFactor(ctx context.Context, ip netip.Addr, key, username string) error {
 	if g.hook != nil {
 		g.hook(key)
 	}
-	return g.FakeGuard.CheckSecondFactor(ctx, ip, key)
+	return g.FakeGuard.CheckSecondFactor(ctx, ip, key, username)
 }
 
 func (g *testGuard) last() defense.Attempt {

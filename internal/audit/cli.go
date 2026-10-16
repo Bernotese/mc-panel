@@ -71,8 +71,8 @@ func printJournalReport(w io.Writer, r JournalReport) {
 	if r.Truncated() {
 		_, _ = fmt.Fprintf(w, "  newest entries removed: the journal knows entry %d, the database ends at %d\n", r.MaxAnchorID, r.MaxDBID)
 	}
-	if len(r.Conflicting) > 0 {
-		_, _ = fmt.Fprintf(w, "  ids logged with different hashes (rewritten, or the database was restored from a backup): %s\n", idList(r.Conflicting))
+	if len(r.Restored) > 0 {
+		_, _ = fmt.Fprintf(w, "  warning: entries match a later anchor of their id (the database was restored or rolled back; verify with `journalctl --since <restore time>`): %s\n", idList(r.Restored))
 	}
 }
 

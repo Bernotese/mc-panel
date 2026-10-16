@@ -56,7 +56,7 @@ func TestPasskeyFinishAfterOtherFactorNeedsSudo(t *testing.T) {
 	uid := e.createUser("root", "admin")
 	s1 := e.newClient("203.0.113.10")
 	s1.login("root", testPassword)
-	begin := s1.do(http.MethodPost, "/api/me/passkeys/begin", nil)
+	begin := s1.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword})
 	if begin.code != 200 {
 		t.Fatalf("begin = %d %s", begin.code, begin.body)
 	}
@@ -513,7 +513,7 @@ func TestDuplicateCredentialIDIsBadRequest(t *testing.T) {
 	}
 	b := newSoftAuthenticator(t, e.cfg.RPID(), e.cfg.Origin())
 	b.credID = a.credID // same credential id, different key pair
-	begin := cb.do(http.MethodPost, "/api/me/passkeys/begin", nil)
+	begin := cb.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword})
 	res = cb.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "dup", "credential": b.register(begin.body), "current_password": testPassword})
 	if res.code != 400 || res.errCode() != "bad_request" {
 		t.Fatalf("duplicate credential id = %d %s", res.code, res.body)
@@ -612,7 +612,7 @@ func TestLoginStageDecisionAndInsertAreAtomicWithEnrolment(t *testing.T) {
 	enrolling := e.newClient("198.51.100.1")
 	enrolling.login("alice", testPassword)
 	a := newSoftAuthenticator(t, e.cfg.RPID(), e.cfg.Origin())
-	begin := enrolling.do(http.MethodPost, "/api/me/passkeys/begin", nil)
+	begin := enrolling.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword})
 	if begin.code != 200 {
 		t.Fatalf("begin = %d", begin.code)
 	}

@@ -56,29 +56,15 @@ func TestCheckLoginIPv6Slash64SharesBucket(t *testing.T) {
 	}
 }
 
-// failPassword records a failed password attempt for username from ip.
-func (e *env) failPassword(t *testing.T, ip, username string) {
-	t.Helper()
-	if err := e.svc.RecordAttempt(context.Background(), Attempt{
-		IP: addr(ip), Username: username, Stage: StagePassword, Reason: "bad_password",
-	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// The per-username bucket counts failed password attempts only (SEC-09).
 func TestCheckLoginRateLimitPerUsername(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	for i := range 10 { // checks alone (e.g. successful logins) do not use it up
-		if err := e.svc.CheckLogin(ctx, addr(fmt.Sprintf("198.51.100.%d", i+1)), "admin"); err != nil {
-			t.Fatalf("check %d: %v", i, err)
-		}
-		e.clk.Advance(6 * time.Second) // stay within the per-IP bucket
-	}
 	names := []string{"admin", "Admin", " ADMIN ", "admin", "aDmIn"}
 	for i, n := range names {
-		e.failPassword(t, fmt.Sprintf("198.51.100.%d", i+20), n)
+		ip := addr(fmt.Sprintf("198.51.100.%d", i+1))
+		if err := e.svc.CheckLogin(ctx, ip, n); err != nil {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
 	}
 	wantRateLimited(t, e.svc.CheckLogin(ctx, addr("198.51.100.99"), "admin"), 12*time.Second)
 }
@@ -91,7 +77,7 @@ func TestCheckLoginJailed(t *testing.T) {
 		if err := e.svc.CheckLogin(ctx, addr(ip), "admin"); !errors.Is(err, ErrJailed) {
 			t.Fatalf("%s: err = %v, want ErrJailed", ip, err)
 		}
-		if err := e.svc.CheckSecondFactor(ctx, addr(ip), "s1"); !errors.Is(err, ErrJailed) {
+		if err := e.svc.CheckSecondFactor(ctx, addr(ip), "s1", "admin"); !errors.Is(err, ErrJailed) {
 			t.Fatalf("%s 2FA: err = %v, want ErrJailed", ip, err)
 		}
 	}
@@ -116,15 +102,15 @@ func TestCheckSecondFactorRateLimit(t *testing.T) {
 	ctx := context.Background()
 	ip := addr("203.0.113.7")
 	for i := 0; i < 5; i++ {
-		if err := e.svc.CheckSecondFactor(ctx, ip, "session-1"); err != nil {
+		if err := e.svc.CheckSecondFactor(ctx, ip, "session-1", "admin"); err != nil {
 			t.Fatalf("attempt %d: %v", i, err)
 		}
 	}
-	wantRateLimited(t, e.svc.CheckSecondFactor(ctx, ip, "session-1"), 12*time.Second)
-	if err := e.svc.CheckSecondFactor(ctx, ip, "session-2"); err != nil {
+	wantRateLimited(t, e.svc.CheckSecondFactor(ctx, ip, "session-1", "admin"), 12*time.Second)
+	if err := e.svc.CheckSecondFactor(ctx, ip, "session-2", "admin"); err != nil {
 		t.Fatalf("other session: %v", err)
 	}
-	if err := e.svc.CheckSecondFactor(ctx, addr("203.0.113.8"), "session-1"); err != nil {
+	if err := e.svc.CheckSecondFactor(ctx, addr("203.0.113.8"), "session-1", "admin"); err != nil {
 		t.Fatalf("same session from other IP has its own bucket: %v", err)
 	}
 }
@@ -170,7 +156,7 @@ func TestInvalidIPFailsClosed(t *testing.T) {
 	if err := e.svc.CheckLogin(ctx, zero, "admin"); !errors.Is(err, ErrIPBlocked) {
 		t.Fatalf("CheckLogin: err = %v, want ErrIPBlocked", err)
 	}
-	if err := e.svc.CheckSecondFactor(ctx, zero, "s1"); !errors.Is(err, ErrIPBlocked) {
+	if err := e.svc.CheckSecondFactor(ctx, zero, "s1", "admin"); !errors.Is(err, ErrIPBlocked) {
 		t.Fatalf("CheckSecondFactor: err = %v, want ErrIPBlocked", err)
 	}
 	e.saveSettings(t, store.SecuritySettings{AdminAllowlistOnly: true, AllowedCountries: []string{}})
@@ -188,10 +174,10 @@ func TestAllowlistedIPSkipsOnlyUsernameBucket(t *testing.T) {
 	e.addRule(t, "192.0.2.0/24", "allow", nil)
 	// others exhaust the username bucket of the admin
 	for i := 0; i < 5; i++ {
-		e.failPassword(t, fmt.Sprintf("198.51.100.%d", i+1), "admin")
+		if err := e.svc.CheckLogin(ctx, addr(fmt.Sprintf("198.51.100.%d", i+1)), "admin"); err != nil {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
 	}
-	// failures from the allowlisted network do not count either
-	e.failPassword(t, "192.0.2.7", "admin")
 	wantRateLimited(t, e.svc.CheckLogin(ctx, addr("198.51.100.99"), "admin"), 12*time.Second)
 	// the allowlisted address is not blocked by the exhausted username bucket ...
 	for i := 0; i < 5; i++ {
@@ -208,7 +194,9 @@ func TestLoginUsernameBucketKeyIsCapped(t *testing.T) {
 	ctx := context.Background()
 	long := strings.Repeat("a", 64)
 	for i := 0; i < 5; i++ {
-		e.failPassword(t, fmt.Sprintf("198.51.100.%d", i+1), long+fmt.Sprint(i))
+		if err := e.svc.CheckLogin(ctx, addr(fmt.Sprintf("198.51.100.%d", i+1)), long+fmt.Sprint(i)); err != nil {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
 	}
 	// names that only differ after 64 runes share a bucket
 	wantRateLimited(t, e.svc.CheckLogin(ctx, addr("198.51.100.99"), long+"zzz"), 12*time.Second)

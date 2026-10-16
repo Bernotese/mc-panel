@@ -270,6 +270,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Starts a passkey registration. The first second factor needs current_password (401 invalid_credentials without it); further methods need sudo instead. */
         post: operations["beginPasskeyRegistration"];
         delete?: never;
         options?: never;
@@ -1575,6 +1576,10 @@ export interface components {
             credential: {
                 [key: string]: unknown;
             };
+            /** @description required for the first second factor */
+            current_password?: string;
+        };
+        PasskeyBeginRequest: {
             /** @description required for the first second factor */
             current_password?: string;
         };
@@ -3242,7 +3247,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PasskeyBeginRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

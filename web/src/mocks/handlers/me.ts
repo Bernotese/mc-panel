@@ -115,10 +115,13 @@ export const meOperations: MockOperation[] = [
 
   op(
     'beginPasskeyRegistration',
-    http.post(`${API}/me/passkeys/begin`, ({ request }) => {
+    http.post(`${API}/me/passkeys/begin`, async ({ request }) => {
       const g = guard(request, { stages: ['setup', 'full'] })
       if (g instanceof Response) return g
       if (needsSudoForNewFactor(g)) return apiError(403, 'sudo_required', 're-authentication required')
+      const body = await readJson<{ current_password?: string }>(request)
+      const pwError = firstFactorPasswordError(g, body?.current_password)
+      if (pwError) return pwError
       return HttpResponse.json({
         publicKey: {
           challenge: WEBAUTHN_CHALLENGE,

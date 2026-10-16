@@ -89,7 +89,7 @@ func isSecondFactorStage(s defense.AttemptStage) bool {
 // second factor is verified; it writes the error response itself.
 func (h *Handler) checkSecondFactor(w http.ResponseWriter, r *http.Request, p principal.Principal, u store.User) bool {
 	ctx := r.Context()
-	if err := h.guard.CheckSecondFactor(ctx, httpx.ClientIP(ctx), secondFactorKey(p)); err != nil {
+	if err := h.guard.CheckSecondFactor(ctx, httpx.ClientIP(ctx), secondFactorKey(p), u.Username); err != nil {
 		h.guardError(w, r, err)
 		return false
 	}

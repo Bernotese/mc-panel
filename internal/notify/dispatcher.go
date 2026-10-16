@@ -144,6 +144,10 @@ func (d *Dispatcher) Notify(_ context.Context, e Event) {
 	key := ""
 	if e.IP != "" {
 		key = string(e.Type) + "|" + e.IP
+		if strings.HasPrefix(string(e.Type), "auth.") {
+			// account events: one user's event must not hide another user's from the same address
+			key += "|" + e.Username
+		}
 		if d.isDuplicate(key, now) {
 			return
 		}

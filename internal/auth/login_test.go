@@ -304,4 +304,8 @@ func TestAdminAllowlistAppliesToSessions(t *testing.T) {
 	if r := admin.do(http.MethodGet, "/api/auth/me", nil); r.code != http.StatusOK {
 		t.Fatalf("admin request from an allowed network = %d %s", r.code, r.body)
 	}
+	e.guard.AdminNetErr = defense.ErrAdminNetwork
+	if r := admin.do(http.MethodPost, "/api/auth/logout", nil); r.code/100 != 2 {
+		t.Fatalf("logout from a blocked network = %d %s, want success", r.code, r.body)
+	}
 }

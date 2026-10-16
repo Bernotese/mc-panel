@@ -20,7 +20,7 @@ func TestPasskeyRegistrationAndList(t *testing.T) {
 	c := e.newClient("203.0.113.10")
 	c.login("alice", testPassword)
 
-	begin := c.do(http.MethodPost, "/api/me/passkeys/begin", nil)
+	begin := c.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword})
 	if begin.code != 200 {
 		t.Fatalf("begin = %d %s", begin.code, begin.body)
 	}
@@ -70,11 +70,11 @@ func TestPasskeyRegistrationAndList(t *testing.T) {
 		t.Fatalf("audit=%v notes=%v", e.audit.Actions(), e.notes.Types())
 	}
 
-	if res := c.do(http.MethodPost, "/api/me/passkeys/begin", nil); res.code != 403 || res.errCode() != "sudo_required" {
+	if res := c.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword}); res.code != 403 || res.errCode() != "sudo_required" {
 		t.Fatalf("second passkey without sudo = %d %s", res.code, res.body)
 	}
 	e.grantSudo(c)
-	begin2 := c.do(http.MethodPost, "/api/me/passkeys/begin", nil)
+	begin2 := c.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword})
 	if begin2.code != 200 || !strings.Contains(string(begin2.body), b64url.EncodeToString(a.credID)) {
 		t.Fatalf("existing credential must be in excludeCredentials: %s", begin2.body)
 	}

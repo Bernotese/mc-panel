@@ -21,8 +21,14 @@ func withLimiter(t *testing.T, slots int, wait time.Duration) *limiter {
 
 func TestDefaultSlots(t *testing.T) {
 	want := max(2, runtime.NumCPU()/2)
-	if got := cap(lim.slots) + cap(lim.reserved); got != want || cap(lim.reserved) != 1 {
-		t.Fatalf("default slots = %d + %d reserved, want %d with 1 reserved", cap(lim.slots), cap(lim.reserved), want)
+	if got := cap(lim.slots) + cap(lim.reserved); got != want {
+		t.Fatalf("default slots = %d + %d reserved, want %d", cap(lim.slots), cap(lim.reserved), want)
+	}
+	for total, reserved := range map[int]int{2: 0, 3: 1, 8: 1} {
+		l := newPool(total, time.Second)
+		if cap(l.slots)+cap(l.reserved) != total || cap(l.reserved) != reserved || (reserved == 0) != (l.reserved == nil) {
+			t.Errorf("newPool(%d) = %d general + %d reserved, want %d reserved", total, cap(l.slots), cap(l.reserved), reserved)
+		}
 	}
 	if lim.wait != 2*time.Second {
 		t.Fatalf("default wait budget = %v, want 2s", lim.wait)
