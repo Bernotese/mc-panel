@@ -65,7 +65,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version-file: .node-version
 
       # No dependency lifecycle scripts in the release workflow (the release job holds a write token).
       # The build does not need any (the only one, msw's postinstall, refreshes the dev-only
@@ -142,7 +142,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version-file: .node-version
 
       # No dependency lifecycle scripts in the release workflow (the release job holds a write token).
       # The build does not need any (the only one, msw's postinstall, refreshes the dev-only

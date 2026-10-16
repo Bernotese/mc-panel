@@ -71,17 +71,25 @@ case "$*" in
 esac
 GH
   chmod +x "$WORK/bin/gh"
+  # fake verify-release-build.sh: records its call, fails when $WORK/build-differs exists
+  cat >"$WORK/bin/verify" <<'VF'
+#!/usr/bin/env bash
+printf 'verify %s\n' "$*" >>"$SR_GH/calls"
+[[ ! -f $SR_GH/../build-differs ]]
+VF
+  chmod +x "$WORK/bin/verify"
 }
 
-# sr_run [ANSWER]: runs sign-release.sh v1.2.3 in the repo with ANSWER (default y) on stdin;
-# exit code in _rc, output in $WORK/out.
+# sr_run [ANSWER [OPTION]]: runs sign-release.sh [OPTION] v1.2.3 in the repo with ANSWER
+# (default y) on stdin; exit code in _rc, output in $WORK/out.
 sr_run() {
-  local script
+  local script opts=()
   script="$(cd "$(sig_src_dir)/.." && pwd)/sign-release.sh"
+  if [[ -n ${2:-} ]]; then opts=("$2"); fi
   _rc=0
   (cd "$WORK/repo" && printf '%s\n' "${1:-y}" |
     PATH="$WORK/bin:$PATH" SR_GH="$WORK/gh" SR_REPO=example/mc-panel SIGN_RELEASE_REPO=example/mc-panel \
-      bash "$script" v1.2.3 "$WORK/sr-key") >"$WORK/out" 2>&1 || _rc=$?
+      SIGN_RELEASE_VERIFY="$WORK/bin/verify" bash "$script" "${opts[@]}" v1.2.3 "$WORK/sr-key") >"$WORK/out" 2>&1 || _rc=$?
 }
 
 assert_gh_called() {
@@ -111,6 +119,25 @@ test_sign_release_signs_and_publishes() {
     -s "$WORK/gh/assets/checksums.txt.sig" <"$WORK/gh/assets/checksums.txt" >/dev/null 2>&1 ||
     fail "the uploaded signature does not verify"
   assert_contains "$(cat "$WORK/out")" "published v1.2.3 (release 77)"
+  assert_gh_called "verify --assets "
+  assert_contains "$(cat "$WORK/out")" "tarballs identical to the rebuild"
+}
+
+test_sign_release_refuses_when_the_build_differs() {
+  sr_fixture
+  touch "$WORK/build-differs"
+  sr_run
+  sr_refused "the build check failed; do not sign"
+}
+
+test_sign_release_skip_build_check_warns_loudly() {
+  sr_fixture
+  touch "$WORK/build-differs"
+  sr_run y --skip-build-check
+  [[ $_rc == 0 ]] || fail "exit $_rc" "$(cat "$WORK/out")"
+  if grep -q '^verify' "$WORK/gh/calls"; then fail "the build check ran"; fi
+  assert_contains "$(cat "$WORK/out")" "WARNING: --skip-build-check"
+  assert_contains "$(cat "$WORK/out")" "NOT CHECKED (--skip-build-check)"
 }
 
 test_sign_release_answer_no_signs_nothing() {
