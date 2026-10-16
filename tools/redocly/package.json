@@ -3,6 +3,6 @@
   "private": true,
   "description": "Pinned @redocly/cli for the CI job openapi (installed with npm ci --ignore-scripts).",
   "dependencies": {
-    "@redocly/cli": "2.54.2"
+    "@redocly/cli": "2.63.0"
   }
 }
