@@ -20,7 +20,7 @@ test('admin creates a backup with a note, pins a scheduled snapshot and restores
   await expect(page.getByRole('region', { name: 'Backup abgeschlossen' })).toBeVisible({ timeout: 15_000 })
   await expect(list.getByText('vor dem Test')).toBeVisible()
 
-  // Pin the newest scheduled snapshot (its menu offers "Anpinnen").
+  // Pin the newest scheduled snapshot (its menu offers "Anpinnen"); pinning needs sudo.
   const menus = list.getByRole('button', { name: /^Aktionen für den Snapshot vom / })
   const count = await menus.count()
   for (let i = 0; i < count; i++) {
@@ -34,10 +34,11 @@ test('admin creates a backup with a note, pins a scheduled snapshot and restores
     }
     await page.keyboard.press('Escape')
   }
+  await confirmSudo(page)
   await expect(page.getByText('Snapshot angepinnt.')).toBeVisible()
   await expect(list.getByText('Angepinnt')).toHaveCount(2)
 
-  // Restore the manual snapshot: name confirmation, then sudo.
+  // Restore the manual snapshot: name confirmation; the sudo window of the pin is still open.
   const before = await list.getByText('Vor Restore').count()
   await list.getByRole('button', { name: /^Aktionen für den Snapshot vom / }).first().click()
   await page.getByRole('menuitem', { name: 'Wiederherstellen' }).click()
@@ -45,7 +46,7 @@ test('admin creates a backup with a note, pins a scheduled snapshot and restores
   await expect(restore.getByRole('button', { name: 'Wiederherstellen' })).toBeDisabled()
   await restore.getByLabel('Zum Bestätigen den Namen „survival“ eintippen').fill('survival')
   await restore.getByRole('button', { name: 'Wiederherstellen' }).click()
-  await confirmSudo(page)
+  await expect(page.getByRole('dialog', { name: 'Aktion bestätigen' })).toHaveCount(0)
   await expect(page.getByRole('region', { name: 'Wiederherstellung läuft …' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Wiederherstellung abgeschlossen' })).toBeVisible({ timeout: 15_000 })
   await expect(list.getByText('Vor Restore')).toHaveCount(before + 1)
@@ -60,6 +61,7 @@ test('admin changes the schedule of a server', async ({ page }) => {
   await card.getByRole('combobox', { name: 'Zeitplan' }).selectOption('interval')
   await card.getByLabel('Intervall in Stunden').fill('6')
   await card.getByRole('button', { name: 'Zeitplan speichern' }).click()
+  await confirmSudo(page)
   await expect(page.getByText('Zeitplan gespeichert.')).toBeVisible()
   await expect(card.getByText(/^Nächster Lauf: /)).toBeVisible()
 })

@@ -7,7 +7,7 @@ import (
 )
 
 // fakeTimers hands out one unbuffered channel per kind and duration (Every: 15 s heartbeat,
-// 30 s recheck; After: the reconnect delay); fire delivers exactly one tick to whichever
+// 5 s recheck; After: the reconnect delay); fire delivers exactly one tick to whichever
 // stream waits on it.
 type fakeTimers struct {
 	mu    sync.Mutex

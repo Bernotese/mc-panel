@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { BackupJob, BackupOverview, BackupSnapshot } from '@/api/types'
 import type { LiveMetrics, MetricsSeries, MonitoringOverview, MonitoringSettings } from '@/api/types'
 import type { PluginInventory, PluginJob, PluginResolution, PluginSearchResult, PluginUpdates, PluginVersionList } from '@/api/types'
+import type { Server } from '@/api/types'
 import { callApi, field } from '@/test/call-api'
 import { db, defaultMonitoring, loginAs } from './db'
 import { operations } from './handlers'
@@ -251,6 +252,16 @@ describe('mock behaviour', () => {
     expect((await callApi('GET', '/servers/3')).status).toBe(403)
   })
 
+  it('shows the seed only to admins and users with server.files', async () => {
+    loginAs('alice')
+    const list = (await callApi('GET', '/servers')).body as Server[]
+    expect(list[0].permissions).not.toContain('server.files')
+    expect(list[0].instance?.properties).not.toHaveProperty('seed')
+    expect(((await callApi('GET', '/servers/1')).body as Server).instance?.properties).not.toHaveProperty('seed')
+    loginAs('admin')
+    expect(((await callApi('GET', '/servers/1')).body as Server).instance?.properties).toHaveProperty('seed')
+  })
+
   it('creates users only with sudo and rejects duplicate names', async () => {
     const me = loginAs('admin')
     const body = { username: 'carol', password: 'long-enough-password', role: 'user' }
@@ -478,16 +489,24 @@ describe('mock behaviour', () => {
     const after = (await callApi('GET', '/servers/1/backups')).body as BackupOverview
     expect(after.snapshots[0]).toMatchObject({ kind: 'manual', note: 'vor dem Umbau', id: job.snapshot })
     expect(db.audit.at(-1)).toMatchObject({ action: 'backup.create', target: 'server:1', details: { note: 'vor dem Umbau', snapshot: job.snapshot } })
+    const again = await create({})
+    expect(again.status).toBe(429)
+    expect(field(again.body, 'error')).toBe('rate_limited')
 
     expect(field((await create({ note: 'a\nb' })).body, 'error')).toBe('validation_failed')
     expect(field((await create({ note: 'x'.repeat(65) })).body, 'error')).toBe('validation_failed')
     expect(field((await create({ extra: 1 })).body, 'error')).toBe('bad_request')
   })
 
-  it('pins scheduled snapshots only and restores or deletes with sudo', async () => {
+  it('pins scheduled snapshots only and pins, restores or deletes with sudo', async () => {
     let me = loginAs('admin')
     const list = async () => ((await callApi('GET', '/servers/1/backups')).body as BackupOverview).snapshots
     const [scheduled, manual] = await list()
+    const pinNoSudo = await callApi('POST', `/servers/1/backups/${scheduled.id}/pin`, { body: { pinned: true }, csrf: me.csrf_token })
+    expect(field(pinNoSudo.body, 'error')).toBe('sudo_required')
+    const restore = (id: string) => callApi('POST', `/servers/1/backups/${id}/restore`, { csrf: me.csrf_token })
+    expect(field((await restore(manual.id)).body, 'error')).toBe('sudo_required')
+    me = loginAs('admin', { sudo: true })
     const pin = await callApi('POST', `/servers/1/backups/${scheduled.id}/pin`, { body: { pinned: true }, csrf: me.csrf_token })
     const pinned = field(pin.body, 'snapshot') as BackupSnapshot
     expect(pinned.pinned).toBe(true)
@@ -500,9 +519,6 @@ describe('mock behaviour', () => {
     expect((await callApi('POST', `/servers/1/backups/${'0'.repeat(64)}/pin`, { body: { pinned: true }, csrf: me.csrf_token })).status).toBe(404)
     expect((await callApi('POST', '/servers/1/backups/nope/pin', { body: { pinned: true }, csrf: me.csrf_token })).status).toBe(400)
 
-    const restore = (id: string) => callApi('POST', `/servers/1/backups/${id}/restore`, { csrf: me.csrf_token })
-    expect(field((await restore(manual.id)).body, 'error')).toBe('sudo_required')
-    me = loginAs('admin', { sudo: true })
     const started = await restore(manual.id)
     expect(started.status).toBe(202)
     expect(field(started.body, 'job')).toMatchObject({ kind: 'restore', snapshot: manual.id })
@@ -519,9 +535,11 @@ describe('mock behaviour', () => {
   })
 
   it('validates schedules, reports unavailable backups and downloads a zip', async () => {
-    const me = loginAs('admin')
+    let me = loginAs('admin')
     const put = (id: number, body: unknown) => callApi('PUT', `/servers/${id}/backups/schedule`, { body, csrf: me.csrf_token })
     const weekly = { mode: 'weekly', interval_hours: 24, time_of_day: 600, weekday: 6, keep_last: 0, keep_daily: 0, keep_weekly: 8, keep_monthly: 0 }
+    expect(field((await put(2, weekly)).body, 'error')).toBe('sudo_required')
+    me = loginAs('admin', { sudo: true })
     const ok = await put(2, weekly)
     expect(ok.status).toBe(200)
     const schedule = field(ok.body, 'schedule') as BackupOverview['schedule']

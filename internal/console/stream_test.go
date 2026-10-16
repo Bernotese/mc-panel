@@ -378,7 +378,8 @@ func TestStreamHeartbeat(t *testing.T) {
 	}
 }
 
-// Review Focus #3: permission revoked, session ended.
+// Review Focus #3: permission revoked, session ended. SEC-29: the recheck runs every 5 s (the
+// fake timers are keyed by interval), so a revoke closes the stream within 5 s.
 func TestStreamRecheckClosesStream(t *testing.T) {
 	e := newEnv(t)
 	id := createInstance(t, e.db, "survival")
@@ -386,13 +387,13 @@ func TestStreamRecheckClosesStream(t *testing.T) {
 	s := e.agent.prepare()
 	c := e.openStream(srv, e.admin(), id, "", "")
 	expectState(t, c.next(), true)
-	e.timers.fire(t, 30*time.Second) // allowed: stays open
+	e.timers.fire(t, 5*time.Second) // allowed: stays open
 	e.timers.fire(t, 15*time.Second)
 	if ev := c.next(); ev.Comment != "ping" {
 		t.Fatalf("event = %+v", ev)
 	}
 	e.access.set(console.ErrAccessRevoked)
-	e.timers.fire(t, 30*time.Second)
+	e.timers.fire(t, 5*time.Second)
 	c.expectClosed()
 	s.waitClosed(t)
 	e.access.mu.Lock()
@@ -410,7 +411,7 @@ func TestStreamClosesOnDeletedServer(t *testing.T) {
 	c := e.openStream(srv, e.admin(), id, "", "")
 	expectState(t, c.next(), false)
 	mustExec(t, e.db, `DELETE FROM servers WHERE id = ?`, id)
-	e.timers.fire(t, 30*time.Second) // while waiting to reconnect
+	e.timers.fire(t, 5*time.Second) // while waiting to reconnect
 	c.expectClosed()
 }
 
@@ -454,6 +455,54 @@ func TestStreamLimitPerUser(t *testing.T) {
 	open[0].close()
 	waitFor(t, "a free slot after closing a stream", func() bool {
 		c := e.openStream(srv, opP, id, "", "")
+		defer c.close()
+		return c.resp.StatusCode == http.StatusOK
+	})
+}
+
+// SEC-24: at most 12 streams panel-wide (the agent allows 16); admins have 2 more slots, so an
+// admin can still open a console while users hold all the others.
+func TestStreamLimitPanelWide(t *testing.T) {
+	e := newEnv(t)
+	id := createInstance(t, e.db, "survival")
+	srv := e.streamServer(nil)
+	user := func(name string) principal.Principal {
+		uid := storetest.CreateUser(t, e.db, name, "user")
+		grant(t, e.db, uid, id, "server.view", "server.console")
+		return userP(uid, name)
+	}
+	var open []*sseConn
+	for _, name := range []string{"u1", "u2", "u3"} {
+		p := user(name)
+		for range 4 {
+			c := e.openStream(srv, p, id, "", "")
+			if c.resp.StatusCode != http.StatusOK {
+				t.Fatalf("%s: stream %d: %d", name, len(open)+1, c.resp.StatusCode)
+			}
+			open = append(open, c)
+		}
+	}
+	if c := e.openStream(srv, user("u4"), id, "", ""); c.resp.StatusCode != http.StatusTooManyRequests || c.errCode() != httpx.CodeRateLimited {
+		t.Fatalf("13th stream of a user: %d %s", c.resp.StatusCode, c.body)
+	}
+	var admin []*sseConn
+	for i := range 2 {
+		c := e.openStream(srv, e.admin(), id, "", "")
+		if c.resp.StatusCode != http.StatusOK {
+			t.Fatalf("admin stream %d beyond the user cap: %d", i+1, c.resp.StatusCode)
+		}
+		admin = append(admin, c)
+	}
+	if c := e.openStream(srv, e.admin(), id, "", ""); c.resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("15th stream: %d", c.resp.StatusCode)
+	}
+	// 14 open: users get a slot only when the total drops below 12 again.
+	for _, c := range append(admin, open[0]) {
+		c.close()
+	}
+	u5 := user("u5")
+	waitFor(t, "a free slot after closing a stream", func() bool {
+		c := e.openStream(srv, u5, id, "", "")
 		defer c.close()
 		return c.resp.StatusCode == http.StatusOK
 	})
