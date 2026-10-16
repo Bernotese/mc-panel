@@ -31,6 +31,7 @@ ops_uninstall_system() {
   uni_probe_mountpoint() { return 1; }
   uni_probe_has_router() { return 0; }
   uni_probe_has_network() { return 0; }
+  uni_probe_instance_networks() { printf '%s\n' mcpanel-mc mcpanel-net-1 'mcpanel-net-2;x' mcpanel-net-12; }
   uni_probe_has_table() { return 0; }
   uni_probe_user_exists() { return 0; }
 }
@@ -59,6 +60,7 @@ test_ops_uninstall_removes_program_and_keeps_data() {
   assert_called "docker rm -f $OPS_C1 $OPS_C2"
   assert_called 'docker rm -f mcpanel-router'
   assert_called 'docker network rm mcpanel-mc'
+  assert_called 'docker network rm mcpanel-net-1 mcpanel-net-12'
   assert_called 'systemctl reload caddy'
   assert_no_file "$ROOT/run/mc-panel-web"
   # data, configuration, rollback copies and users stay
@@ -151,6 +153,7 @@ test_ops_uninstall_leaves_unlabelled_router_and_network() {
   ops_uninstall_system
   uni_probe_has_router() { return 1; }
   uni_probe_has_network() { return 1; }
+  uni_probe_instance_networks() { :; }
   YES=1
   assert_exit 0 cmd_uninstall
   assert_not_called 'docker rm -f mcpanel-router'
@@ -184,6 +187,7 @@ test_ops_uninstall_is_idempotent() {
   uni_probe_running_containers() { :; }
   uni_probe_has_router() { return 1; }
   uni_probe_has_network() { return 1; }
+  uni_probe_instance_networks() { :; }
   uni_probe_has_table() { return 1; }
   : >"$WORK/calls.log"
   assert_exit 0 cmd_uninstall
@@ -199,6 +203,7 @@ test_ops_uninstall_without_docker_and_nft() {
   uni_probe_running_containers() { return 127; }
   uni_probe_has_router() { return 127; }
   uni_probe_has_network() { return 127; }
+  uni_probe_instance_networks() { return 127; }
   uni_probe_has_table() { return 127; }
   YES=1
   assert_exit 0 cmd_uninstall

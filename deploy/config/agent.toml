@@ -6,4 +6,5 @@ instances_dir = "{{INSTANCES_DIR}}"
 mc_user = "mcpanel-mc"
 # Optional keys (docs/install.md): container_egress_deny (default: link-local, RFC 1918, CGNAT,
 # IPv6 ULA and link-local; [] turns the filter off), router_connection_rate_limit (default 50),
-# cpu_per_instance (default 0 = no cap).
+# cpu_per_instance (default 0 = no cap), instance_network_pool (default "10.213.0.0/16", one /28 per
+# server network).

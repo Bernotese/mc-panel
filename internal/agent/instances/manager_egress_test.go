@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/agent/docker/dockertest"
 	"github.com/Bernotese/mc-panel/internal/agent/instances"
 )
 
@@ -79,24 +80,37 @@ func prefixes(s ...string) []netip.Prefix {
 	return out
 }
 
-// The filter is in place before the first container is created on a fresh network.
+// The filter covers a server's own network before its container is created there, and
+// the router's network before the router is created.
 func TestEnsureAppliesEgressFilterBeforeCreate(t *testing.T) {
 	e, fe := newEgressEnv(t)
 	e.d.AddImage(java21Pinned)
 	e.d.AddImage(routerPinned)
-	e.ensure(t, ensureReq(1, "survival", 1))
-	calls := fe.snapshot()
-	if len(calls) != 1 || !slices.Equal(calls[0], prefixes("172.18.0.0/16")) {
+	hold, release := e.d.Hold(dockertest.OpCreate)
+	if err := e.m.Ensure(context.Background(), ensureReq(1, "survival", 1)); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-hold; got != instances.ContainerName(1) {
+		t.Fatalf("first create = %q", got)
+	}
+	if calls := fe.snapshot(); len(calls) != 1 || !slices.Equal(calls[0], prefixes("10.213.0.0/28")) {
+		t.Fatalf("egress calls before the instance is created = %v", calls)
+	}
+	release()
+	e.m.Wait()
+	if e.status(t, 1).LastError != "" {
+		t.Fatalf("status = %+v", e.status(t, 1))
+	}
+	// The router's network came next, before the router was created on it.
+	if calls := fe.snapshot(); len(calls) != 2 || !slices.Equal(calls[1], prefixes("10.213.0.0/28", "172.19.0.0/16")) {
 		t.Fatalf("egress calls = %v", calls)
 	}
-	created := false
-	for _, c := range e.d.Calls() {
-		if c == "create "+instances.ContainerName(1) {
-			created = true
-		}
-	}
-	if !created || e.status(t, 1).LastError != "" {
-		t.Fatalf("instance not created: %v, %+v", e.d.Calls(), e.status(t, 1))
+
+	// A second server: its own subnet is added.
+	e.ensure(t, ensureReq(2, "creative", 1))
+	calls := fe.snapshot()
+	if len(calls) != 3 || !slices.Equal(calls[2], prefixes("10.213.0.0/28", "10.213.0.16/28", "172.19.0.0/16")) {
+		t.Fatalf("egress calls = %v", calls)
 	}
 
 	// Unchanged subnets and the filter still in place: no rule rewrite, neither from
@@ -104,8 +118,8 @@ func TestEnsureAppliesEgressFilterBeforeCreate(t *testing.T) {
 	checks := fe.checkCount()
 	e.ensure(t, ensureReq(2, "creative", 1))
 	e.m.Tick(context.Background())
-	if n := len(fe.snapshot()); n != 1 {
-		t.Fatalf("egress applied %d times for an unchanged network", n)
+	if n := len(fe.snapshot()); n != 3 {
+		t.Fatalf("egress applied %d times for unchanged networks", n)
 	}
 	if fe.checkCount() <= checks {
 		t.Fatal("ensure and the loop must check that the filter is still installed")
@@ -116,7 +130,7 @@ func TestEnsureAppliesEgressFilterBeforeCreate(t *testing.T) {
 // the next ensure, before it creates a container) installs the filter again.
 func TestEgressFilterIsReinstalledAfterExternalFlush(t *testing.T) {
 	e, fe := newEgressEnv(t)
-	e.d.AddNetwork(instances.NetworkName, "bridge", map[string]string{instances.LabelNetwork: "1"}, "172.20.0.0/16")
+	e.d.AddNetwork(instances.RouterNetwork, "bridge", map[string]string{instances.LabelNetwork: "1"}, "172.20.0.0/16")
 	if err := e.m.SyncEgress(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +155,7 @@ func TestEgressFilterIsReinstalledAfterExternalFlush(t *testing.T) {
 // applies the filter without recreating any container.
 func TestTickAppliesEgressFilterToExistingNetwork(t *testing.T) {
 	e, fe := newEgressEnv(t)
-	e.d.AddNetwork(instances.NetworkName, "bridge", map[string]string{instances.LabelNetwork: "1"}, "172.20.0.0/16", "fd00:1::/64")
+	e.d.AddNetwork(instances.RouterNetwork, "bridge", map[string]string{instances.LabelNetwork: "1"}, "172.20.0.0/16", "fd00:1::/64")
 	// cmd/agent runs SyncEgress once before serving, before the first loop round.
 	if err := e.m.SyncEgress(context.Background()); err != nil {
 		t.Fatal(err)
@@ -151,7 +165,7 @@ func TestTickAppliesEgressFilterToExistingNetwork(t *testing.T) {
 		t.Fatalf("egress calls = %v", calls)
 	}
 	// The network was recreated with another subnet (e.g. by an operator): re-applied.
-	e.d.SetNetworkSubnets(instances.NetworkName, "172.21.0.0/16")
+	e.d.SetNetworkSubnets(instances.RouterNetwork, "172.21.0.0/16")
 	e.m.Tick(context.Background())
 	if calls := fe.snapshot(); len(calls) != 2 || !slices.Equal(calls[1], prefixes("172.21.0.0/16")) {
 		t.Fatalf("egress calls = %v", calls)
@@ -170,7 +184,7 @@ func TestTickWithoutNetworkSkipsEgress(t *testing.T) {
 // A foreign network that only shares the name is never filtered (nor adopted).
 func TestEgressIgnoresForeignNetwork(t *testing.T) {
 	e, fe := newEgressEnv(t)
-	e.d.AddNetwork(instances.NetworkName, "bridge", map[string]string{"com.example": "x"}, "10.99.0.0/16")
+	e.d.AddNetwork(instances.RouterNetwork, "bridge", map[string]string{"com.example": "x"}, "10.99.0.0/16")
 	e.m.Tick(context.Background())
 	if calls := fe.snapshot(); len(calls) != 0 {
 		t.Fatalf("egress calls = %v", calls)
@@ -198,7 +212,7 @@ func TestEnsureFailsWhenEgressFilterFails(t *testing.T) {
 	if st := e.status(t, 1); st.LastError != "" || st.State == agentapi.StateMissing {
 		t.Fatalf("status after recovery = %+v", st)
 	}
-	if n := len(fe.snapshot()); n != 1 {
-		t.Fatalf("egress applied %d times", n)
+	if calls := fe.snapshot(); len(calls) == 0 || !slices.Equal(calls[0], prefixes("10.213.0.0/28")) {
+		t.Fatalf("egress calls = %v", calls)
 	}
 }

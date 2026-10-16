@@ -18,7 +18,9 @@ import (
 )
 
 const (
-	NetworkName     = "mcpanel-mc"
+	// RouterNetwork is mc-router's home network (its published port); since SEC-03 no
+	// instance container stays on it.
+	RouterNetwork   = "mcpanel-mc"
 	RouterName      = "mcpanel-router"
 	ContainerPrefix = "mcpanel-mc-"
 
@@ -90,6 +92,11 @@ func TmpDir(instancesDir string, id int64) string {
 	return filepath.Join(instancesDir, "tmp", strconv.FormatInt(id, 10))
 }
 
+// PatchesDir holds the itzg patch definitions (instancespec.Patches), root-owned and mounted
+// read-only at instancespec.PatchesDir in every instance container. The agent writes it,
+// never a data directory.
+func PatchesDir(instancesDir string) string { return filepath.Join(instancesDir, "patches") }
+
 // DeletedDir receives the data of removed instances.
 func DeletedDir(instancesDir string) string { return filepath.Join(instancesDir, "deleted") }
 
@@ -97,8 +104,8 @@ func logConfig() docker.LogConfig {
 	return docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}}
 }
 
-func network() docker.NetworkingConfig {
-	return docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{NetworkName: {}}}
+func network(name string) docker.NetworkingConfig {
+	return docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{name: {}}}
 }
 
 func pinnedImage(ref string) (string, error) {
@@ -142,8 +149,12 @@ func InstanceContainer(h Host, req agentapi.EnsureRequest) (docker.ContainerConf
 		},
 		StopTimeout: StopTimeoutSeconds,
 		HostConfig: docker.HostConfig{
-			Binds:          []string{DataDir(h.InstancesDir, req.ID) + ":/data", TmpDir(h.InstancesDir, req.ID) + ":/tmp"},
-			NetworkMode:    NetworkName,
+			Binds: []string{
+				DataDir(h.InstancesDir, req.ID) + ":/data",
+				TmpDir(h.InstancesDir, req.ID) + ":/tmp",
+				PatchesDir(h.InstancesDir) + ":" + instancespec.PatchesDir + ":ro",
+			},
+			NetworkMode:    InstanceNetwork(req.ID),
 			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
 			CapDrop:        []string{"ALL"},
 			SecurityOpt:    []string{"no-new-privileges:true"},
@@ -157,7 +168,7 @@ func InstanceContainer(h Host, req agentapi.EnsureRequest) (docker.ContainerConf
 			Ulimits:        []docker.Ulimit{{Name: "nofile", Soft: NofileLimit, Hard: NofileLimit}},
 			LogConfig:      logConfig(),
 		},
-		NetworkingConfig: network(),
+		NetworkingConfig: network(InstanceNetwork(req.ID)),
 	}, nil
 }
 
@@ -180,7 +191,7 @@ func RouterContainer(h Host) (docker.ContainerConfig, error) {
 		HostConfig: docker.HostConfig{
 			// Directory, not file: an atomic rename of routes.json stays visible.
 			Binds:          []string{RouterDir(h.InstancesDir) + ":" + routerConfigDir + ":ro"},
-			NetworkMode:    NetworkName,
+			NetworkMode:    RouterNetwork,
 			PortBindings:   map[string][]docker.PortBinding{routerPort: {{HostPort: strconv.Itoa(MinecraftPort)}}},
 			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
 			CapDrop:        []string{"ALL"},
@@ -191,6 +202,6 @@ func RouterContainer(h Host) (docker.ContainerConfig, error) {
 			PidsLimit:      RouterPidsLimit,
 			LogConfig:      logConfig(),
 		},
-		NetworkingConfig: network(),
+		NetworkingConfig: network(RouterNetwork),
 	}, nil
 }

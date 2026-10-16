@@ -14,7 +14,7 @@ import (
 // (JVM_OPTS, GENERIC_PACK, MODS, PLUGINS, OPS, WHITELIST, ...) would let the panel smuggle in
 // code or override what the server itself manages (ops and whitelist, spec 3a §3.1).
 var allowedKeys = []string{
-	"EULA", "TYPE", "VERSION", "MEMORY", "ENABLE_AUTOPAUSE", "ENABLE_RCON", "OVERRIDE_SERVER_PROPERTIES",
+	"EULA", "TYPE", "VERSION", "MEMORY", "ENABLE_AUTOPAUSE", "ENABLE_RCON", "OVERRIDE_SERVER_PROPERTIES", "PATCH_DEFINITIONS",
 	"FABRIC_LOADER_VERSION", "NEOFORGE_VERSION", "MODRINTH_MODPACK", "CF_SLUG", "CF_PAGE_URL", "CF_API_KEY",
 	"MOTD", "DIFFICULTY", "MODE", "MAX_PLAYERS", "PVP", "HARDCORE", "ALLOW_FLIGHT", "ENABLE_COMMAND_BLOCK",
 	"ONLINE_MODE", "ENABLE_WHITELIST", "VIEW_DISTANCE", "SIMULATION_DISTANCE",
@@ -31,6 +31,7 @@ func TestEnvPaper(t *testing.T) {
 	want := []string{
 		"EULA=TRUE", "TYPE=PAPER", "VERSION=1.21.4", "MEMORY=4096M", "ENABLE_AUTOPAUSE=false",
 		"ENABLE_RCON=true", "OVERRIDE_SERVER_PROPERTIES=true",
+		"PATCH_DEFINITIONS=/mcpanel-patches/bukkit-connection-throttle.json",
 		"MOTD=Hallo", "DIFFICULTY=normal", "MODE=survival", "MAX_PLAYERS=20", "PVP=true", "HARDCORE=false",
 		"ALLOW_FLIGHT=false", "ENABLE_COMMAND_BLOCK=false", "ONLINE_MODE=true", "ENABLE_WHITELIST=true",
 		"VIEW_DISTANCE=10", "SIMULATION_DISTANCE=10", "SPAWN_PROTECTION=16",
@@ -50,15 +51,21 @@ func TestEnvPerType(t *testing.T) {
 		{
 			spec: instancespec.Spec{Type: instancespec.TypeFabric, Version: "26.3", LoaderVersion: ptr("0.19.5"), Java: instancespec.Java25, MemoryMiB: 2048},
 			has:  []string{"TYPE=FABRIC", "VERSION=26.3", "FABRIC_LOADER_VERSION=0.19.5", "MEMORY=2048M"},
+			not:  []string{"PATCH_DEFINITIONS"},
+		},
+		{
+			spec: instancespec.Spec{Type: instancespec.TypePurpur, Version: "1.21.4", Java: instancespec.Java21, MemoryMiB: 2048},
+			has:  []string{"TYPE=PURPUR", "PATCH_DEFINITIONS=/mcpanel-patches/bukkit-connection-throttle.json"},
 		},
 		{
 			spec: instancespec.Spec{Type: instancespec.TypeNeoForge, Version: "1.21.4", LoaderVersion: ptr("21.4.140"), Java: instancespec.Java21, MemoryMiB: 6144},
 			has:  []string{"TYPE=NEOFORGE", "NEOFORGE_VERSION=21.4.140"},
+			not:  []string{"PATCH_DEFINITIONS"},
 		},
 		{
 			spec: instancespec.Spec{Type: instancespec.TypeModrinth, Modpack: ptr("cobblemon-fabric"), Java: instancespec.Java21, MemoryMiB: 6144},
 			has:  []string{"TYPE=MODRINTH", "MODRINTH_MODPACK=cobblemon-fabric"},
-			not:  []string{"VERSION"},
+			not:  []string{"VERSION", "PATCH_DEFINITIONS"},
 		},
 		{
 			spec: instancespec.Spec{Type: instancespec.TypeCurseForge, Modpack: ptr("atm10"), CurseForgeAPIKey: ptr("$2a$10$k"), Java: instancespec.Java21, MemoryMiB: 8192},
@@ -74,7 +81,7 @@ func TestEnvPerType(t *testing.T) {
 			spec: instancespec.Spec{Type: instancespec.TypeVanilla, Version: "LATEST", Java: instancespec.Java25, MemoryMiB: 1024,
 				Properties: instancespec.Properties{Seed: ptr("42"), LevelType: ptr("amplified")}},
 			has: []string{"TYPE=VANILLA", "VERSION=LATEST", "SEED=42", "LEVEL_TYPE=minecraft:amplified"},
-			not: []string{"WHITELIST", "OPS", "EXISTING_OPS_FILE", "EXISTING_WHITELIST_FILE"},
+			not: []string{"WHITELIST", "OPS", "EXISTING_OPS_FILE", "EXISTING_WHITELIST_FILE", "PATCH_DEFINITIONS"},
 		},
 	}
 	for _, c := range cases {

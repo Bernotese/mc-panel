@@ -226,11 +226,11 @@ func TestRouterImageNormalisationKeepsRouter(t *testing.T) {
 	}
 }
 
-// TestForeignNetworkIsNeverAdopted: a network called mcpanel-mc without mc-panel's
-// label is not used; ensure fails with last_error.
+// TestForeignNetworkIsNeverAdopted: a network called mcpanel-net-<id> without mc-panel's
+// labels is not used; ensure fails with last_error.
 func TestForeignNetworkIsNeverAdopted(t *testing.T) {
 	e := newEnv(t)
-	e.d.AddNetwork("mcpanel-mc", "bridge", map[string]string{"com.example": "other"})
+	e.d.AddNetwork("mcpanel-net-1", "bridge", map[string]string{"com.example": "other"}, "10.99.0.0/28")
 	e.ensure(t, ensureReq(1, "survival", 1))
 	if s := e.status(t, 1); s.State != agentapi.StateMissing || !strings.Contains(s.LastError, "not managed") {
 		t.Fatalf("status = %+v", s)

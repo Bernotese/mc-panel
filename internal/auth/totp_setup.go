@@ -96,14 +96,13 @@ func (h *Handler) issueRecoveryCodesIfNone(ctx context.Context, q *store.Queries
 	return h.replaceRecoveryCodes(ctx, q, userID, now)
 }
 
-// promoteSetup upgrades a setup-stage session to full once a 2FA method exists.
+// promoteSetup upgrades a stored setup-stage session to full once a 2FA method exists.
 // The token rotates; the CSRF token is kept (the response is not a Me object).
 // A session whose stored stage is already full (downgraded to setup only by the loader because
-// 2FA became mandatory) needs no rotation.
+// 2FA became mandatory) needs no rotation. The stored stage decides, not p.Stage: a stored setup
+// session runs as full while 2FA is optional (effectiveStage) and would otherwise fall back to
+// setup once its first method exists.
 func (h *Handler) promoteSetup(w http.ResponseWriter, r *http.Request, p principal.Principal) error {
-	if p.Stage != principal.StageSetup {
-		return nil
-	}
 	ctx := r.Context()
 	sess, err := h.presentedSession(ctx, p)
 	if err != nil {
