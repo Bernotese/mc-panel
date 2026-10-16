@@ -105,7 +105,7 @@ export function UserPermissionsPage({ userId }: { userId: number }) {
           </>
         }
       />
-      {targetIsAdmin ? <p className="text-muted-foreground mb-4 text-sm">{t('permissions.admin_note')}</p> : null}
+      <p className="text-muted-foreground mb-4 text-sm">{targetIsAdmin ? t('permissions.admin_note') : t('permissions.two_factor_note')}</p>
       {dirty ? (
         <Badge variant="outline" className="mb-4">
           {t('permissions.unsaved')}
