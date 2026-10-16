@@ -6,6 +6,8 @@
 # panel log), the per-server switch (no down alert while it is off) and the audit log.
 
 setup_agent_files
+# shellcheck disable=SC2034 # read by setup_panel_server (lib.sh)
+mon_boot_margin=1 # no server.down from a slow first boot (setup_panel_server)
 setup_panel_server
 
 mon_notifier
