@@ -523,6 +523,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.installer == 'true'
     runs-on: [self-hosted, mcpanel-vm]
+    # ~3 min on an idle VM; the Bash tests run outside the test lock and slow down next to the race tests.
     timeout-minutes: 20
     steps:
       - name: Checkout
