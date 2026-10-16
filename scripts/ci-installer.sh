@@ -46,6 +46,9 @@ fail() {
   tail -n 80 /var/log/mc-panel-install.log >&2 2>/dev/null || true
   echo "--- units" >&2
   systemctl --no-pager --lines=30 status 'mcpanel-*' caddy >&2 2>/dev/null || true
+  # status only shows loaded units; after a failed rollback they are stopped
+  echo "--- journal of the mc-panel units (last 150 lines)" >&2
+  journalctl --no-pager -o short-iso -u 'mcpanel-*' -n 150 >&2 2>/dev/null || true
   exit 1
 }
 

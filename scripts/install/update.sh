@@ -29,6 +29,7 @@ UPD_FROM=""    # installed version before the swap
 UPD_SIGNALED=0 # INT/TERM/HUP arrived
 UPD_SWAP_RC=0  # exit code of the swap subshell
 UPD_APPLY_OK=0 # 1 when the target version is installed and healthy
+UPD_HEALTH_REASON="" # why the last upd_healthy failed (versions, a unit, an endpoint)
 
 # --- probes (tests redefine these) ---------------------------------------------------------
 
@@ -42,14 +43,43 @@ upd_fetch_latest_json() {
 # upd_probe_health: 0 when panel, agent and files answer on their sockets (the agent and the
 # files service accept root). The panel rejects a socket request without X-Forwarded-For
 # (fail closed, 403 ip_blocked); Caddy always sets it.
+# On failure it prints which endpoint did not answer and curl's error.
 upd_probe_health() {
-  curl -fsS --max-time 5 -H "X-Forwarded-For: 127.0.0.1" --unix-socket /run/mc-panel-web/panel.sock http://panel/api/health >/dev/null 2>&1 </dev/null &&
-    curl -fsS --max-time 5 --unix-socket /run/mc-panel/agent.sock http://agent/v1/health 2>/dev/null </dev/null | grep -q '"status":"ok"' &&
-    curl -fsS --max-time 5 --unix-socket /run/mc-panel-files/files.sock http://files/v1/health 2>/dev/null </dev/null | grep -q '"status":"ok"'
+  local out
+  if ! out="$(curl -fsS --max-time 5 -H "X-Forwarded-For: 127.0.0.1" --unix-socket /run/mc-panel-web/panel.sock http://panel/api/health 2>&1 </dev/null)"; then
+    printf 'panel: %s\n' "${out:-no answer}"
+    return 1
+  fi
+  if ! out="$(curl -fsS --max-time 5 --unix-socket /run/mc-panel/agent.sock http://agent/v1/health 2>&1 </dev/null)" || [[ $out != *'"status":"ok"'* ]]; then
+    printf 'agent: %s\n' "${out:-no answer}"
+    return 1
+  fi
+  if ! out="$(curl -fsS --max-time 5 --unix-socket /run/mc-panel-files/files.sock http://files/v1/health 2>&1 </dev/null)" || [[ $out != *'"status":"ok"'* ]]; then
+    printf 'files: %s\n' "${out:-no answer}"
+    return 1
+  fi
 }
 
 # upd_probe_restarts UNIT: how often systemd restarted UNIT on its own since the last start.
 upd_probe_restarts() { systemctl show -p NRestarts --value "$1" 2>/dev/null </dev/null; }
+
+# upd_probe_unit_state UNIT: "ActiveState/SubState (Result)" of UNIT, for messages.
+upd_probe_unit_state() {
+  local a b c
+  a="$(systemctl show -p ActiveState,SubState,Result --value "$1" 2>/dev/null </dev/null | paste -sd' ' -)" || a=""
+  read -r a b c <<<"$a"
+  printf '%s/%s (%s)\n' "${a:-?}" "${b:-?}" "${c:-?}"
+}
+
+# upd_probe_unit_report SINCE: status and journal of the mc-panel units since SINCE (epoch
+# seconds), for the install log when an update or a rollback is not healthy.
+upd_probe_unit_report() {
+  local u
+  for u in "${UPD_RESTART[@]}"; do
+    systemctl status --no-pager --lines=0 "$u" 2>&1 </dev/null || true
+  done
+  journalctl --no-pager -o short-iso --since "@$1" -u 'mcpanel-*' 2>&1 </dev/null | tail -n 150 || true
+}
 
 # upd_db_backup DEST: consistent copy of the running panel's DB (sqlite online backup) into DEST
 # in the root-only rollback dir. Everything below DATA_DIR runs as mcpanel (the copy, reading it,
@@ -333,31 +363,65 @@ upd_restart_all() {
   return "$rc"
 }
 
-# upd_units_active: services and sockets active, and no automatic restart of a service since
-# the restart (a crashing service looks active for a moment; as units.sh of B1 checks).
-upd_units_active() {
-  local u n
+# upd_health_reason VERSION prints why the system is not healthy yet, nothing when it is: all
+# three binaries report VERSION, services and sockets are active, no service was restarted by
+# systemd on its own since the restart (a crashing service looks active for a moment; as
+# units.sh of B1 checks) and the health endpoints answer.
+upd_health_reason() {
+  local ver="$1" v u n out
+  v="$(upd_binary_versions)"
+  if [[ $v != "$ver $ver $ver" ]]; then
+    echo "versions $v"
+    return 0
+  fi
   for u in "${UPD_RESTART[@]}"; do
-    systemd_wait_active "$u" 1 || return 1
+    if ! systemd_wait_active "$u" 1; then
+      echo "$u is $(upd_probe_unit_state "$u")"
+      return 0
+    fi
   done
   for u in "${UPD_SERVICES[@]}"; do
     n="$(upd_probe_restarts "$u")" || n=""
-    [[ ${n:-0} == 0 ]] || return 1
+    if [[ ${n:-0} != 0 ]]; then
+      echo "systemd restarted $u $n times"
+      return 0
+    fi
+  done
+  if ! out="$(upd_probe_health)"; then
+    echo "health check failed: ${out:-no answer}" | head -n 1
+  fi
+}
+
+# upd_healthy VERSION: within UPD_HEALTH_SECS the system becomes healthy (upd_health_reason,
+# spec §5 step 5); otherwise 1 with the last reason in UPD_HEALTH_REASON and the units' status
+# and journal in the install log.
+upd_healthy() {
+  local ver="$1" start deadline
+  start="$(date +%s)"
+  deadline=$((start + UPD_HEALTH_SECS))
+  while :; do
+    UPD_HEALTH_REASON="$(upd_health_reason "$ver")"
+    if [[ -z $UPD_HEALTH_REASON ]]; then
+      return 0
+    fi
+    if (($(date +%s) >= deadline)); then
+      _log "not healthy after ${UPD_HEALTH_SECS}s: $UPD_HEALTH_REASON"
+      upd_log_report "$start"
+      return 1
+    fi
+    sleep 2
   done
 }
 
-# upd_healthy VERSION: within UPD_HEALTH_SECS all three binaries report VERSION, the units are
-# active and the health endpoints answer (spec §5 step 5).
-upd_healthy() {
-  local ver="$1" deadline
-  deadline=$(($(date +%s) + UPD_HEALTH_SECS))
-  while :; do
-    if [[ $(upd_binary_versions) == "$ver $ver $ver" ]] && upd_units_active && upd_probe_health; then
-      return 0
-    fi
-    (($(date +%s) < deadline)) || return 1
-    sleep 2
-  done
+# upd_log_report SINCE appends the units' status and journal since SINCE to the install log.
+upd_log_report() {
+  local f="$ROOT$LOG_FILE"
+  [[ -f $f && ! -L $f ]] || return 0
+  {
+    echo "--- units and journal since $(date -u -d "@$1" +%H:%M:%SZ 2>/dev/null || echo "$1")"
+    upd_probe_unit_report "$1"
+    echo "---"
+  } >>"$f" 2>/dev/null || true
 }
 
 upd_stop_all() {
@@ -415,10 +479,16 @@ upd_rollback() {
     warn "could not put the database back"
     ok=0
   fi
-  if [[ $ok == 1 ]] && upd_restart_all && upd_healthy "$from"; then
-    upd_state_set_phase "$dir" rolled_back || true
-    upd_trap_signals
-    return 0
+  if [[ $ok == 1 ]]; then
+    if ! upd_restart_all; then
+      warn "restarting the services of $from failed"
+    elif upd_healthy "$from"; then
+      upd_state_set_phase "$dir" rolled_back || true
+      upd_trap_signals
+      return 0
+    else
+      warn "$from is not healthy after ${UPD_HEALTH_SECS}s: $UPD_HEALTH_REASON"
+    fi
   fi
   upd_stop_all
   upd_state_set_phase "$dir" rollback_failed || true
@@ -460,7 +530,7 @@ upd_apply() {
     elif [[ $UPD_SIGNALED == 0 ]] && upd_healthy "$target"; then
       UPD_APPLY_OK=1
     elif [[ $UPD_SIGNALED == 0 ]]; then
-      warn "$target is not healthy after ${UPD_HEALTH_SECS}s (versions: $(upd_binary_versions))"
+      warn "$target is not healthy after ${UPD_HEALTH_SECS}s: $UPD_HEALTH_REASON"
     fi
   fi
   if [[ $UPD_SIGNALED == 1 ]]; then
