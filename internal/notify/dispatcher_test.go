@@ -276,7 +276,9 @@ func TestCriticalEventsAreNotStarvedByFullQueue(t *testing.T) {
 	}
 	rctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	go e.d.Run(rctx)
+	// one worker: with Run's two workers the two critical events are sent concurrently and
+	// may arrive in either order
+	go e.d.work(rctx, e.d.ch)
 	deadline := time.Now().Add(2 * time.Second)
 	for len(h.requests()) < 3 {
 		if time.Now().After(deadline) {
@@ -284,8 +286,8 @@ func TestCriticalEventsAreNotStarvedByFullQueue(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if first := h.requests()[0]; first.title != "chain" {
-		t.Fatalf("critical events are delivered first, got %q", first.title)
+	if r := h.requests(); r[0].title != "chain" || r[1].title != "test" {
+		t.Fatalf("critical events are delivered first, got %q, %q", r[0].title, r[1].title)
 	}
 }
 
