@@ -20,10 +20,18 @@ MCPANEL_VERSION=dev
   RELEASE_BASE=https://github.com/Bernotese/mc-panel/releases
   # Release signatures (SEC-07): checksums.txt.sig is an SSH signature (ssh-keygen -Y sign) of
   # checksums.txt by a key listed in release_signers. Every release from SIGNED_SINCE on is
-  # signed; older ones install only with --allow-unsigned.
+  # signed, its pre-releases included (compared as SIGNED_SINCE-0). The only unsigned releases
+  # are the closed set in UNSIGNED_RELEASES (version and SHA-256 of its checksums.txt, taken
+  # from the published releases when signing began); --allow-unsigned admits exactly those.
   SIGN_NAMESPACE=mc-panel-release
   SIGN_PRINCIPAL=mc-panel-release
   SIGNED_SINCE=0.5.0
+  UNSIGNED_RELEASES=(
+    "0.1.0 94047685dbefa6747463848508d9ab5c67553225f0d5967b0b69fccf1108f5c5"
+    "0.2.0 85a74bb3bf1ce8a92516abff367875f9d8682f0bb64f89cb4f20e3c309f70450"
+    "0.3.0 cd0342eda6295d30f7d7f602d737fa5411559e326483e3aabcb6352adcf1c67c"
+    "0.4.0 5f84b72969fc7d288bd4fb0317daf8a8fadd6201e7e20d8f9e62ab69017b1b56"
+  )
   RELEASE_RECORD="$ETC_PANEL/release" # how the installed release was verified (doctor)
   TEMPLATE_DELIM=__MCPANEL_TEMPLATE_EOF__
 }
@@ -435,14 +443,29 @@ sig_verify() {
   printf '%s\n' "${fp:-unknown}"
 }
 
+# unsigned_pin VERSION prints the pinned SHA-256 of checksums.txt of the unsigned release
+# VERSION; 1 if VERSION is not one of UNSIGNED_RELEASES.
+unsigned_pin() {
+  local e
+  for e in "${UNSIGNED_RELEASES[@]}"; do
+    if [[ ${e%% *} == "$1" ]]; then
+      printf '%s\n' "${e#* }"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # release_verify BASEURL CHECKSUMS VERSION: the signature policy for release VERSION whose
-# assets are below BASEURL. From SIGNED_SINCE on, BASEURL/checksums.txt.sig must verify
-# (sig_verify), --allow-unsigned does not change that. Older releases have no signature: they
-# need --allow-unsigned and get a loud warning. Prints "signed FINGERPRINT" or "unsigned" (the
-# record doctor shows); dies otherwise. Runs before any sha256_verify against CHECKSUMS.
+# assets are below BASEURL. From SIGNED_SINCE on (pre-releases included), BASEURL/checksums.txt.sig
+# must verify (sig_verify); --allow-unsigned does not change that. Older releases have no
+# signature: only the ones in UNSIGNED_RELEASES, only with --allow-unsigned, and only with
+# exactly the checksums.txt published back then; they get a loud warning. Prints "signed
+# FINGERPRINT" or "unsigned" (the record doctor shows); dies otherwise. Runs before any
+# sha256_verify against CHECKSUMS.
 release_verify() {
-  local base="$1" sums="$2" v="$3" sig="$2.sig" rc=0 fp
-  version_ge "$v" "$SIGNED_SINCE" || rc=$?
+  local base="$1" sums="$2" v="$3" sig="$2.sig" rc=0 fp pin got
+  version_ge "$v" "$SIGNED_SINCE-0" || rc=$?
   if [[ $rc == 0 ]]; then
     (fetch "$base/checksums.txt.sig" "$sig") 2>/dev/null ||
       die "cannot download the signature of release v$v (checksums.txt.sig); releases from $SIGNED_SINCE on are signed, so it is refused"
@@ -451,13 +474,18 @@ release_verify() {
     return 0
   fi
   [[ $rc == 1 ]] || die "cannot compare version $v with $SIGNED_SINCE"
+  pin="$(unsigned_pin "$v")" ||
+    die "release v$v is older than $SIGNED_SINCE but not one of the known unsigned releases (${UNSIGNED_RELEASES[*]%% *}); refused"
   [[ $ALLOW_UNSIGNED == 1 ]] ||
-    die "release v$v is older than $SIGNED_SINCE and has no signature; install it only with --allow-unsigned (checked against checksums.txt alone)"
+    die "release v$v is older than $SIGNED_SINCE and has no signature; install it only with --allow-unsigned (checked against the checksums.txt published back then)"
+  got="$(sha256sum -- "$sums" | awk '{ print $1 }')"
+  [[ $got == "$pin" ]] ||
+    die "checksums.txt of release v$v is not the one published (expected SHA-256 $pin, got $got); refused"
   {
     warn "=================================================================================="
-    warn "release v$v is NOT signed (older than $SIGNED_SINCE). --allow-unsigned: it is"
-    warn "checked against checksums.txt of the same release only. Anyone who controls the"
-    warn "GitHub release can change both."
+    warn "release v$v is NOT signed (older than $SIGNED_SINCE). --allow-unsigned: its"
+    warn "checksums.txt matches the one published back then, but its install.sh does not"
+    warn "check signatures, and v$v lacks the fixes of later releases."
     warn "=================================================================================="
   } >&2
   echo unsigned

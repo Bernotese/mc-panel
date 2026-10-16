@@ -30,6 +30,12 @@ sig_src_dir() {
   (cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 }
 
+# sig_pin_unsigned VERSION: the fixture's checksums.txt becomes the pinned one of the unsigned
+# release VERSION (instead of the real 0.1.0-0.4.0 in lib.sh).
+sig_pin_unsigned() {
+  UNSIGNED_RELEASES=("$1 $(sha256sum "$WORK/srv/checksums.txt" | awk '{ print $1 }')")
+}
+
 sig_fingerprint() {
   ssh-keygen -l -f "$1" | awk '{ print $2 }'
 }
@@ -145,6 +151,7 @@ test_install_sig_old_release_needs_allow_unsigned() {
 test_install_sig_old_release_with_allow_unsigned_warns() {
   bin_fixture_release 0.4.0
   rm -f -- "$WORK/srv/checksums.txt.sig"
+  sig_pin_unsigned 0.4.0
   ALLOW_UNSIGNED=1
   bin_install >"$WORK/install.out" 2>&1
   assert_file_contains "$WORK/install.out" "release v0.4.0 is NOT signed"
@@ -156,27 +163,60 @@ test_install_sig_old_release_with_allow_unsigned_warns() {
 test_install_sig_old_release_still_checks_checksums() {
   bin_fixture_release 0.4.0
   printf '%064d  mc-panel_0.4.0_linux_amd64.tar.gz\n' 0 >"$WORK/srv/checksums.txt"
+  sig_pin_unsigned 0.4.0
   ALLOW_UNSIGNED=1
   assert_fails bin_install
   assert_contains "$(cat "$WORK/out")" "checksum mismatch"
 }
 
+test_install_sig_old_release_needs_the_published_checksums() {
+  # an attacker replaces checksums.txt (and the tarball) of an old, unsigned release
+  bin_fixture_release 0.4.0
+  sig_pin_unsigned 0.4.0
+  printf '%064d  install.sh\n' 7 >>"$WORK/srv/checksums.txt"
+  ALLOW_UNSIGNED=1
+  assert_fails bin_install
+  assert_contains "$(cat "$WORK/out")" "checksums.txt of release v0.4.0 is not the one published"
+  assert_no_file "$ROOT$BIN_DIR"
+}
+
+test_install_sig_unknown_old_release_is_refused() {
+  # only the closed set of unsigned releases; nothing else before SIGNED_SINCE
+  bin_fixture_release 0.4.1
+  rm -f -- "$WORK/srv/checksums.txt.sig"
+  ALLOW_UNSIGNED=1
+  assert_fails bin_install
+  assert_contains "$(cat "$WORK/out")" "not one of the known unsigned releases (0.1.0 0.2.0 0.3.0 0.4.0)"
+  assert_no_file "$ROOT$BIN_DIR"
+}
+
+test_install_sig_pinned_unsigned_releases() {
+  # the closed set, fixed when signing began (SHA-256 of each release's checksums.txt)
+  assert_eq 4 "${#UNSIGNED_RELEASES[@]}"
+  assert_eq 5f84b72969fc7d288bd4fb0317daf8a8fadd6201e7e20d8f9e62ab69017b1b56 "$(unsigned_pin 0.4.0)"
+  assert_eq 94047685dbefa6747463848508d9ab5c67553225f0d5967b0b69fccf1108f5c5 "$(unsigned_pin 0.1.0)"
+  assert_exit 1 unsigned_pin 0.5.0
+}
+
 test_install_sig_allow_unsigned_does_not_cover_signed_releases() {
   local v
   ALLOW_UNSIGNED=1
-  for v in "$SIGNED_SINCE" 0.5.1-rc.1 1.0.0; do
+  for v in "$SIGNED_SINCE" 0.5.0-0 0.5.1-rc.1 1.0.0; do
     sig_reset_release
     bin_fixture_release "$v"
     rm -f -- "$WORK/srv/checksums.txt.sig"
     assert_fails bin_install
     assert_contains "$(cat "$WORK/out")" "cannot download the signature of release v$v"
   done
-  # a pre-release of the first signed version is older than it
+  # the pre-releases of the first signed version must be signed, too
   sig_reset_release
   bin_fixture_release 0.5.0-rc.1
   rm -f -- "$WORK/srv/checksums.txt.sig"
-  bin_install >/dev/null 2>&1
-  assert_file_contains "$ROOT$RELEASE_RECORD" "verified=unsigned"
+  assert_fails bin_install
+  assert_contains "$(cat "$WORK/out")" "cannot download the signature of release v0.5.0-rc.1"
+  sig_sign "$WORK/srv/checksums.txt"
+  bin_install >/dev/null
+  assert_file_contains "$ROOT$RELEASE_RECORD" "verified=signed"
 }
 
 test_install_sig_from_dir_records_local_build() {
@@ -271,6 +311,7 @@ test_ops_update_handover_refuses_replayed_signature() {
 test_ops_update_handover_to_unsigned_release() {
   sig_handover_fixture 0.4.0
   rm -f -- "$WORK/srv/checksums.txt.sig"
+  sig_pin_unsigned 0.4.0
   assert_exit 1 cmd_update
   assert_contains "$(cat "$WORK/out")" "--allow-unsigned"
   assert_not_called "exec"
@@ -280,6 +321,16 @@ test_ops_update_handover_to_unsigned_release() {
   # 0.4.0 does not know --allow-unsigned: it is not passed on
   assert_called "exec bash $WORK/install.sh update --version v0.4.0 --yes"
   assert_not_called "--allow-unsigned"
+}
+
+test_ops_update_handover_to_tampered_unsigned_release() {
+  sig_handover_fixture 0.4.0
+  rm -f -- "$WORK/srv/checksums.txt.sig"
+  UNSIGNED_RELEASES=("0.4.0 $(printf '%064d' 0)")
+  ALLOW_UNSIGNED=1
+  assert_exit 1 cmd_update
+  assert_contains "$(cat "$WORK/out")" "is not the one published"
+  assert_not_called "exec"
 }
 
 test_ops_update_rollback_restores_release_record() {
@@ -301,26 +352,97 @@ test_ops_update_rollback_restores_release_record() {
 
 # --- the production key ----------------------------------------------------------------------
 
-# signers_production: scripts/install/release-signers is what every released install.sh
-# trusts. It must hold at least one valid key line for the release namespace and no test key.
-# The release workflow runs it before every release (SEC-07).
-test_install_sig_signers_production() {
-  local f n=0 line principal opts type key
-  f="$(sig_src_dir)/release-signers"
-  [[ -f $f ]] || fail "missing $f"
+# sig_check_signers FILE: 0 when FILE is fit to ship as release-signers, otherwise 1 with the
+# reason on stderr: at least one key; every key line is principal SIGN_PRINCIPAL, options
+# exactly namespaces="SIGN_NAMESPACE" plus at most valid-after/valid-before (no cert-authority
+# or other options), an ed25519 key (plain or FIDO) that ssh-keygen accepts; no TEST-ONLY key.
+sig_check_signers() {
+  local f="$1" n=0 line principal opts type key opt ns
   if grep -q 'TEST-ONLY' "$f"; then
-    fail "scripts/install/release-signers still holds the TEST-ONLY placeholder key; add the owner's release key (docs/dev/README.md, Release signing)"
+    echo "$f holds a TEST-ONLY key; put the owner's release key there (docs/dev/README.md, Release signing)" >&2
+    return 1
   fi
   while IFS= read -r line; do
     [[ -n $line && $line != \#* ]] || continue
     read -r principal opts type key _ <<<"$line"
-    [[ $principal == "$SIGN_PRINCIPAL" ]] || fail "unexpected principal: $line"
-    [[ $opts == *"namespaces=\"$SIGN_NAMESPACE\""* ]] || fail "key without namespaces=\"$SIGN_NAMESPACE\": $line"
+    if [[ $principal != "$SIGN_PRINCIPAL" ]]; then
+      echo "unexpected principal: $line" >&2
+      return 1
+    fi
+    ns=0
+    while IFS= read -r opt; do
+      case "$opt" in
+      "namespaces=\"$SIGN_NAMESPACE\"") ns=$((ns + 1)) ;;
+      valid-after=\"[0-9]*\" | valid-before=\"[0-9]*\")
+        [[ $opt =~ ^valid-(after|before)=\"[0-9]{8}([0-9]{4}([0-9]{2})?)?Z?\"$ ]] || {
+          echo "malformed option $opt: $line" >&2
+          return 1
+        }
+        ;;
+      *)
+        echo "option not allowed ($opt): $line" >&2
+        return 1
+        ;;
+      esac
+    done < <(tr ',' '\n' <<<"$opts")
+    if [[ $ns != 1 ]]; then
+      echo "key needs exactly namespaces=\"$SIGN_NAMESPACE\": $line" >&2
+      return 1
+    fi
+    case "$type" in
+    ssh-ed25519 | sk-ssh-ed25519@openssh.com) ;;
+    *)
+      echo "key type $type not allowed (ed25519 only): $line" >&2
+      return 1
+      ;;
+    esac
     printf '%s %s\n' "$type" "$key" >"$WORK/k.pub"
-    ssh-keygen -l -f "$WORK/k.pub" >/dev/null 2>&1 || fail "not a valid public key: $line"
+    if ! ssh-keygen -l -f "$WORK/k.pub" >/dev/null 2>&1; then
+      echo "not a valid public key: $line" >&2
+      return 1
+    fi
     n=$((n + 1))
   done <"$f"
-  ((n > 0)) || fail "no key in $f"
+  if ((n == 0)); then
+    echo "no key in $f" >&2
+    return 1
+  fi
+}
+
+# signers_production: scripts/install/release-signers is what every released install.sh
+# trusts. The release workflow runs this test before every release (SEC-07).
+test_install_sig_signers_production() {
+  local f
+  f="$(sig_src_dir)/release-signers"
+  [[ -f $f ]] || fail "missing $f"
+  sig_check_signers "$f" || fail "release-signers is not fit to ship"
+}
+
+test_install_sig_check_signers_rejects_bad_files() {
+  local key good
+  ssh-keygen -q -t ed25519 -N '' -C t -f "$WORK/k1" </dev/null
+  key="$(cut -d' ' -f1,2 "$WORK/k1.pub")"
+  good="$SIGN_PRINCIPAL namespaces=\"$SIGN_NAMESPACE\" $key owner"
+  printf '# comment\n%s\n' "$good" >"$WORK/s"
+  sig_check_signers "$WORK/s" || fail "a good file was refused"
+  printf '%s\n' "$SIGN_PRINCIPAL valid-after=\"20261101\",namespaces=\"$SIGN_NAMESPACE\",valid-before=\"202712310000Z\" $key" >"$WORK/s"
+  sig_check_signers "$WORK/s" || fail "valid-after/valid-before were refused"
+  local bad
+  for bad in \
+    "$SIGN_PRINCIPAL cert-authority,namespaces=\"$SIGN_NAMESPACE\" $key" \
+    "$SIGN_PRINCIPAL namespaces=\"$SIGN_NAMESPACE\",namespaces=\"git\" $key" \
+    "$SIGN_PRINCIPAL namespaces=\"$SIGN_NAMESPACE,git\" $key" \
+    "$SIGN_PRINCIPAL namespaces=\"git\" $key" \
+    "$SIGN_PRINCIPAL valid-after=\"yesterday\",namespaces=\"$SIGN_NAMESPACE\" $key" \
+    "* namespaces=\"$SIGN_NAMESPACE\" $key" \
+    "$SIGN_PRINCIPAL namespaces=\"$SIGN_NAMESPACE\" ssh-rsa AAAAB3NzaC1yc2E" \
+    "$SIGN_PRINCIPAL namespaces=\"$SIGN_NAMESPACE\" ssh-ed25519 AAAAnotakey" \
+    "$good TEST-ONLY"; do
+    printf '%s\n' "$bad" >"$WORK/s"
+    if sig_check_signers "$WORK/s" 2>/dev/null; then fail "accepted: $bad"; fi
+  done
+  printf '# only comments\n' >"$WORK/s"
+  if sig_check_signers "$WORK/s" 2>/dev/null; then fail "accepted a file without keys"; fi
 }
 
 test_install_sig_assembled_script_embeds_signers() {
@@ -338,4 +460,29 @@ test_install_sig_assembled_script_embeds_signers() {
   printf '# nothing\n' >"$WORK/empty"
   assert_exit 1 env ASSEMBLE_SIGNERS="$WORK/empty" "$repo/scripts/install/assemble.sh" 1.2.3 "$WORK/x.sh"
   assert_exit 1 env ASSEMBLE_RELEASE_BASE=http://example.com "$repo/scripts/install/assemble.sh" 1.2.3 "$WORK/x.sh"
+}
+
+# --- no downgrade through "latest" -----------------------------------------------------------
+
+test_ops_update_refuses_a_latest_release_older_than_installed() {
+  # whoever controls the GitHub release points "latest" at an old signed release
+  ops_fake_install 1.2.0
+  ops_probes
+  upd_latest_tag() { echo v1.1.0; }
+  upd_exec() { echo "exec $*" >>"$WORK/calls.log"; }
+  assert_exit 1 cmd_update
+  assert_contains "$(cat "$WORK/out")" "the latest release (1.1.0) is older than the installed 1.2.0; not downgrading"
+  assert_not_called "exec"
+  assert_no_file "$ROOT$ROLLBACK_DIR"
+  CHECK_ONLY=1
+  assert_exit 0 cmd_update
+  assert_contains "$(cat "$WORK/out")" "update will not downgrade"
+}
+
+test_ops_update_downgrades_only_with_version() {
+  sig_handover_fixture 1.1.0
+  ops_fake_install 1.2.0
+  TARGET_VERSION=1.1.0
+  assert_exit 0 cmd_update
+  assert_called "exec bash $WORK/install.sh update --version v1.1.0 --yes"
 }

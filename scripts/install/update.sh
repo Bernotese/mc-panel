@@ -30,6 +30,7 @@ UPD_FROM=""    # installed version before the swap
 UPD_SIGNALED=0 # INT/TERM/HUP arrived
 UPD_SWAP_RC=0  # exit code of the swap subshell
 UPD_APPLY_OK=0 # 1 when the target version is installed and healthy
+UPD_TARGET_IS_LATEST=0 # 1 when the target came from the GitHub API, not from --version
 
 # --- probes (tests redefine these) ---------------------------------------------------------
 
@@ -636,8 +637,10 @@ cmd_update() {
   fi
 
   # With --from-dir, validate_args already took the build's version (no network).
+  UPD_TARGET_IS_LATEST=0
   if [[ -z $TARGET_VERSION ]]; then
     TARGET_VERSION="$(upd_latest_tag)" || die "cannot reach the GitHub API to find the latest release; pass --version"
+    UPD_TARGET_IS_LATEST=1
   fi
   target="$(upd_strip_v "$TARGET_VERSION")"
   TARGET_VERSION="$target"
@@ -645,12 +648,22 @@ cmd_update() {
   if [[ $CHECK_ONLY == 1 ]]; then
     if [[ $installed == "$target" ]]; then
       log_ok "up to date ($installed)"
+    elif [[ $UPD_TARGET_IS_LATEST == 1 && $installed != none ]] && version_ge "$installed" "$target"; then
+      warn "the latest release ($target) is older than the installed $installed; update will not downgrade"
     else
       log_ok "installed $installed, available $target (install.sh update)"
     fi
     return 0
   fi
   [[ $installed != none ]] || die "mc-panel is not installed ($BIN_DIR/panel is missing); use install.sh install"
+  # Without --version the target is GitHub's "latest" release. A latest release older than the
+  # installed version is never followed: whoever controls the GitHub release could point
+  # "latest" at an old signed release with known holes (a rollback attack). A downgrade needs
+  # an explicit --version.
+  if [[ $UPD_TARGET_IS_LATEST == 1 && $installed != "$target" ]] && version_ge "$installed" "$target"; then
+    warn "the latest release ($target) is older than the installed $installed; not downgrading (pass --version $target to downgrade on purpose)"
+    return 1
+  fi
   if [[ $installed == "$target" && $FORCE != 1 ]]; then
     log_skip "already at $installed (--force reinstalls it)"
     return 0
