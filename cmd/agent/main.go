@@ -1,7 +1,8 @@
 // Command agent is the privileged mc-panel helper. It serves a small, strictly
 // validated JSON API on a Unix socket that only the panel user (and root) may
 // connect to, manages the nftables jail sets and is the only Docker client
-// (Minecraft containers and mc-router).
+// (Minecraft containers and mc-router), whose new connections into private
+// networks it filters (container_egress_deny).
 package main
 
 import (
@@ -134,6 +135,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			Images:       cfg.Images,
 			Clock:        clock.Real{},
 			Log:          log,
+			Egress:       fw,
+			NanoCPUs:     int64(math.Round(cfg.CPUPerInstance * 1e9)),
+
+			RouterConnectionRateLimit: cfg.RouterConnectionRateLimit,
 		})
 		// The layout of instances_dir (instances/ root:<mc gid> 0750 for the files service)
 		// is enforced before serving, also when Docker is down and no Ensure follows.
@@ -145,6 +150,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// One bounded check before serving, so /v1/health is right from the first
 		// request instead of "unavailable" until the background loop has run.
 		mgr.CheckDocker(ctx)
+		// Running containers are filtered right after an agent (re)start, before the
+		// background loop's first round (whose router image pull may take minutes).
+		// Errors are logged inside; the loop retries.
+		_ = mgr.SyncEgress(ctx)
 		runCtx, stopRun := context.WithCancel(ctx)
 		runDone := make(chan struct{})
 		go func() {

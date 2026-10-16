@@ -10,6 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
+	"os"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -55,6 +58,20 @@ type Config struct {
 	RconCommand string
 	// RconTimeout bounds one console command; 0 means RconTimeout.
 	RconTimeout time.Duration
+	// Egress is the container egress filter, given the subnets of the mcpanel-mc
+	// network whenever they change; nil = none (tests).
+	Egress EgressFilter
+	// NanoCPUs caps every instance container (cpu_per_instance); 0 = no cap.
+	NanoCPUs int64
+	// RouterConnectionRateLimit is mc-router's -connection-rate-limit; 0 = default.
+	RouterConnectionRateLimit int
+}
+
+// EgressFilter is the firewall part that filters the containers' new connections
+// (firewall.Backend).
+type EgressFilter interface {
+	SetEgressSubnets(ctx context.Context, subnets []netip.Prefix) error
+	EgressInPlace(ctx context.Context, subnets []netip.Prefix) (bool, error)
 }
 
 type sample struct {
@@ -81,6 +98,13 @@ type Manager struct {
 	rconTimeout   time.Duration
 	console       consoleState
 
+	egress   EgressFilter
+	egressMu sync.Mutex // serialises egress syncs
+	// egressApplied are the subnets the filter was last given (nil: not yet since the
+	// agent started). Guarded by egressMu.
+	egressApplied []netip.Prefix
+	egressErr     string // last sync error, logged on change; guarded by egressMu
+
 	routerMu sync.Mutex // serialises routes file + router container changes
 	// lastApplied is the routes file content the running router has loaded (nil:
 	// unknown, e.g. after an agent restart). Guarded by routerMu.
@@ -100,8 +124,10 @@ type Manager struct {
 func New(cfg Config) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{
-		dc:            cfg.Docker,
-		host:          Host{InstancesDir: cfg.InstancesDir, UID: cfg.UID, GID: cfg.GID, Images: cfg.Images},
+		dc: cfg.Docker,
+		host: Host{InstancesDir: cfg.InstancesDir, UID: cfg.UID, GID: cfg.GID, Images: cfg.Images,
+			NanoCPUs: cfg.NanoCPUs, RouterConnectionRateLimit: cfg.RouterConnectionRateLimit},
+		egress:        cfg.Egress,
 		clock:         cfg.Clock,
 		log:           cfg.Log,
 		customize:     cfg.Customize,
@@ -114,6 +140,10 @@ func New(cfg Config) *Manager {
 		stats:         map[int64]sample{},
 	}
 	m.idle = sync.NewCond(&m.mu)
+	if m.host.NanoCPUs > MaxNanoCPUs() {
+		m.log.Warn("cpu_per_instance is above the host's CPUs; using all CPUs as the cap",
+			"cpu_per_instance", float64(m.host.NanoCPUs)/1e9, "cpus", runtime.NumCPU())
+	}
 	return m
 }
 
@@ -224,7 +254,7 @@ func (m *Manager) ensure(ctx context.Context, req agentapi.EnsureRequest) error 
 	if err := m.ensureDataDir(req.ID); err != nil {
 		return err
 	}
-	if err := m.dc.EnsureNetwork(ctx, NetworkName, map[string]string{LabelNetwork: "1"}); err != nil {
+	if err := m.ensureNetwork(ctx); err != nil {
 		return err
 	}
 	wasRunning := false
@@ -240,6 +270,9 @@ func (m *Manager) ensure(ctx context.Context, req agentapi.EnsureRequest) error 
 		}
 	}
 	m.setOp(req.ID, agentapi.OpCreating)
+	if err := m.resetTmpDir(req.ID); err != nil {
+		return err
+	}
 	if _, err := m.dc.CreateContainer(ctx, name, cfg); err != nil {
 		return err
 	}
@@ -279,6 +312,13 @@ func (m *Manager) power(ctx context.Context, id int64, action agentapi.PowerActi
 	}
 	if err := checkOwner(info, id, m.expectedName(id)); err != nil {
 		return err
+	}
+	// The /tmp bind source must exist with its owner and mode before a start; Docker
+	// would create a missing one as root 0755. Its content stays.
+	if action != agentapi.PowerStop {
+		if err := m.ensureTmpDir(id); err != nil {
+			return err
+		}
 	}
 	switch action {
 	case agentapi.PowerStart:
@@ -332,6 +372,9 @@ func (m *Manager) remove(ctx context.Context, id int64) error {
 		}
 	}
 	m.setOp(id, agentapi.OpRemoving)
+	if err := os.RemoveAll(TmpDir(m.host.InstancesDir, id)); err != nil {
+		return err
+	}
 	if err := m.archiveData(id, instName); err != nil {
 		return err
 	}
@@ -451,7 +494,7 @@ func (m *Manager) createRouter(ctx context.Context, cfg docker.ContainerConfig, 
 	if err := m.ensureImage(ctx, -1, cfg.Image); err != nil {
 		return err
 	}
-	if err := m.dc.EnsureNetwork(ctx, NetworkName, map[string]string{LabelNetwork: "1"}); err != nil {
+	if err := m.ensureNetwork(ctx); err != nil {
 		return err
 	}
 	if _, err := m.dc.CreateContainer(ctx, RouterName, cfg); err != nil {
@@ -463,6 +506,68 @@ func (m *Manager) createRouter(ctx context.Context, cfg docker.ContainerConfig, 
 	}
 	m.lastApplied = data
 	return nil
+}
+
+// networkLabels mark the mcpanel-mc network as mc-panel's own.
+func networkLabels() map[string]string { return map[string]string{LabelNetwork: "1"} }
+
+// ensureNetwork creates the mcpanel-mc network if needed and applies the egress
+// filter to it. It fails closed: no container is created on a network the filter
+// does not cover.
+func (m *Manager) ensureNetwork(ctx context.Context) error {
+	if err := m.dc.EnsureNetwork(ctx, NetworkName, networkLabels()); err != nil {
+		return err
+	}
+	if err := m.syncEgress(ctx); err != nil {
+		return fmt.Errorf("container egress filter: %w", err)
+	}
+	return nil
+}
+
+// SyncEgress applies the egress filter to the existing mcpanel-mc network. The agent
+// runs it once before serving, so running containers are covered right after an agent
+// start, before the background loop's first (possibly slow) round. Errors are logged.
+func (m *Manager) SyncEgress(ctx context.Context) error { return m.syncEgress(ctx) }
+
+// syncEgress hands the current subnets of the mcpanel-mc network to the egress filter
+// when they differ from the last ones applied, when it has not been applied since the
+// agent started, or when the filter is no longer installed (e.g. after an external
+// "nft flush ruleset"). A missing network has nothing to filter yet.
+func (m *Manager) syncEgress(ctx context.Context) error {
+	if m.egress == nil {
+		return nil
+	}
+	m.egressMu.Lock()
+	defer m.egressMu.Unlock()
+	subnets, err := m.dc.NetworkSubnets(ctx, NetworkName, networkLabels())
+	if docker.IsNotFound(err) {
+		return nil
+	}
+	current := false
+	if err == nil && m.egressApplied != nil && slices.Equal(subnets, m.egressApplied) {
+		current, err = m.egress.EgressInPlace(ctx, subnets)
+		if err == nil && !current {
+			m.log.Warn("container egress filter was removed from outside; reinstalling it")
+		}
+	}
+	if err == nil && !current {
+		if err = m.egress.SetEgressSubnets(ctx, subnets); err == nil {
+			m.egressApplied = slices.Clone(subnets)
+			if m.egressApplied == nil {
+				m.egressApplied = []netip.Prefix{}
+			}
+			m.log.Info("container egress filter applied", "network", NetworkName, "subnets", fmt.Sprint(subnets))
+		}
+	}
+	msg := ""
+	if err != nil {
+		msg = sanitizeError(err)
+	}
+	if msg != m.egressErr && msg != "" {
+		m.log.Warn("container egress filter not applied", "err", msg)
+	}
+	m.egressErr = msg
+	return err
 }
 
 // templateHash is the SHA-256 of the router template's canonical JSON
@@ -721,6 +826,8 @@ func (m *Manager) Tick(ctx context.Context) {
 	if !m.CheckDocker(ctx) {
 		return
 	}
+	// Before the router: its image pull may take minutes. Logged inside.
+	_ = m.syncEgress(ctx)
 	_ = m.RefreshRouter(ctx)
 	m.SampleStats(ctx)
 }

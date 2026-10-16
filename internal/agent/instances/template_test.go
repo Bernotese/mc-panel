@@ -55,16 +55,18 @@ func TestInstanceContainerGolden(t *testing.T) {
 		},
 		StopTimeout: 60,
 		HostConfig: docker.HostConfig{
-			Binds:         []string{"/srv/mc-panel/instances/7:/data"},
-			NetworkMode:   "mcpanel-mc",
-			RestartPolicy: docker.RestartPolicy{Name: "unless-stopped"},
-			CapDrop:       []string{"ALL"},
-			SecurityOpt:   []string{"no-new-privileges:true"},
-			Memory:        5120 << 20, // 4096 MiB × 1.25
-			MemorySwap:    5120 << 20,
-			PidsLimit:     1024,
-			CPUShares:     256, // cgroup v2 weight ≈ 10: a busy server never starves panel, agent or router
-			LogConfig:     docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
+			Binds:          []string{"/srv/mc-panel/instances/7:/data", "/srv/mc-panel/tmp/7:/tmp"},
+			NetworkMode:    "mcpanel-mc",
+			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
+			CapDrop:        []string{"ALL"},
+			SecurityOpt:    []string{"no-new-privileges:true"},
+			ReadonlyRootfs: true,       // the image only writes /data and /tmp
+			Memory:         5120 << 20, // 4096 MiB × 1.25
+			MemorySwap:     5120 << 20,
+			PidsLimit:      1024,
+			CPUShares:      256, // cgroup v2 weight ≈ 10: a busy server never starves panel, agent or router
+			Ulimits:        []docker.Ulimit{{Name: "nofile", Soft: 65536, Hard: 65536}},
+			LogConfig:      docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
 		},
 		NetworkingConfig: docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{"mcpanel-mc": {}}},
 	}
@@ -80,20 +82,21 @@ func TestRouterContainerGolden(t *testing.T) {
 	}
 	want := docker.ContainerConfig{
 		Image:        "itzg/mc-router@sha256:64ae69eaa7a6800a79bbf962f027f4020878efa25183359115bc7f6ee569c36e",
-		Cmd:          []string{"-routes-config", "/config/routes.json"},
+		Cmd:          []string{"-routes-config", "/config/routes.json", "-connection-rate-limit", "50"},
 		Labels:       map[string]string{"mcpanel.router": "1"},
 		ExposedPorts: map[string]struct{}{"25565/tcp": {}},
 		HostConfig: docker.HostConfig{
-			Binds:         []string{"/srv/mc-panel/router:/config:ro"},
-			NetworkMode:   "mcpanel-mc",
-			PortBindings:  map[string][]docker.PortBinding{"25565/tcp": {{HostPort: "25565"}}},
-			RestartPolicy: docker.RestartPolicy{Name: "unless-stopped"},
-			CapDrop:       []string{"ALL"},
-			SecurityOpt:   []string{"no-new-privileges:true"},
-			Memory:        256 << 20,
-			MemorySwap:    256 << 20,
-			PidsLimit:     1024,
-			LogConfig:     docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
+			Binds:          []string{"/srv/mc-panel/router:/config:ro"},
+			NetworkMode:    "mcpanel-mc",
+			PortBindings:   map[string][]docker.PortBinding{"25565/tcp": {{HostPort: "25565"}}},
+			RestartPolicy:  docker.RestartPolicy{Name: "unless-stopped"},
+			CapDrop:        []string{"ALL"},
+			SecurityOpt:    []string{"no-new-privileges:true"},
+			ReadonlyRootfs: true,
+			Memory:         256 << 20,
+			MemorySwap:     256 << 20,
+			PidsLimit:      128,
+			LogConfig:      docker.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
 		},
 		NetworkingConfig: docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{"mcpanel-mc": {}}},
 	}
@@ -150,11 +153,15 @@ func TestInstanceContainerInvariants(t *testing.T) {
 			t.Fatalf("%s (%s): %v", req.Name, req.Spec.Type, err)
 		}
 		hc := c.HostConfig
-		if len(hc.Binds) != 1 || hc.Binds[0] != instances.DataDir("/srv/mc-panel", req.ID)+":/data" {
+		if !slices.Equal(hc.Binds, []string{instances.DataDir("/srv/mc-panel", req.ID) + ":/data", instances.TmpDir("/srv/mc-panel", req.ID) + ":/tmp"}) {
 			t.Errorf("%s: binds = %v", req.Name, hc.Binds)
 		}
-		if hc.PortBindings != nil || c.ExposedPorts != nil || hc.CapAdd != nil || hc.Privileged || hc.ReadonlyRootfs {
+		if hc.PortBindings != nil || c.ExposedPorts != nil || hc.CapAdd != nil || hc.Privileged {
 			t.Errorf("%s: ports/caps/privileges must stay unset: %+v", req.Name, hc)
+		}
+		if !hc.ReadonlyRootfs || hc.NanoCPUs != 0 ||
+			!slices.Equal(hc.Ulimits, []docker.Ulimit{{Name: "nofile", Soft: 65536, Hard: 65536}}) {
+			t.Errorf("%s: rootfs/tmpfs/limits changed: %+v", req.Name, hc)
 		}
 		if !slices.Equal(hc.CapDrop, []string{"ALL"}) || !slices.Equal(hc.SecurityOpt, []string{"no-new-privileges:true"}) ||
 			hc.NetworkMode != "mcpanel-mc" || hc.PidsLimit != 1024 || hc.RestartPolicy.Name != "unless-stopped" {
@@ -212,9 +219,36 @@ func TestInstanceContainerRejectsInvalidRequests(t *testing.T) {
 	}
 }
 
+// TestTemplateHostLimits: cpu_per_instance and router_connection_rate_limit come from
+// the agent config (Host), never from the panel.
+func TestTemplateHostLimits(t *testing.T) {
+	h := testHost()
+	h.NanoCPUs = 1_500_000_000
+	h.RouterConnectionRateLimit = 200
+	c, err := instances.InstanceContainer(h, paperRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.HostConfig.NanoCPUs != 1_500_000_000 {
+		t.Fatalf("NanoCpus = %d", c.HostConfig.NanoCPUs)
+	}
+	h.NanoCPUs = 1 << 50 // cpu_per_instance above this host's CPUs (e.g. a downsized VPS)
+	if c, err := instances.InstanceContainer(h, paperRequest()); err != nil || c.HostConfig.NanoCPUs != instances.MaxNanoCPUs() {
+		t.Fatalf("NanoCpus = %d, %v; want the clamp to %d", c.HostConfig.NanoCPUs, err, instances.MaxNanoCPUs())
+	}
+	r, err := instances.RouterContainer(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.Cmd, []string{"-routes-config", "/config/routes.json", "-connection-rate-limit", "200"}) || r.HostConfig.NanoCPUs != 0 {
+		t.Fatalf("router = %v, NanoCpus %d", r.Cmd, r.HostConfig.NanoCPUs)
+	}
+}
+
 func TestPaths(t *testing.T) {
 	if instances.ContainerName(12) != "mcpanel-mc-12" || instances.DataDir("/srv/mc-panel", 12) != "/srv/mc-panel/instances/12" ||
-		instances.RouterDir("/srv/mc-panel") != "/srv/mc-panel/router" || instances.DeletedDir("/srv/mc-panel") != "/srv/mc-panel/deleted" {
+		instances.RouterDir("/srv/mc-panel") != "/srv/mc-panel/router" || instances.DeletedDir("/srv/mc-panel") != "/srv/mc-panel/deleted" ||
+		instances.TmpDir("/srv/mc-panel", 12) != "/srv/mc-panel/tmp/12" {
 		t.Fatal("paths changed")
 	}
 }
