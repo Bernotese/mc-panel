@@ -1,0 +1,11 @@
+# release-signers - the keys install.sh trusts for release signatures (SEC-07), in ssh-keygen
+# allowed_signers format: principal, options, key. assemble.sh embeds this file into install.sh.
+#
+# Every line: principal mc-panel-release, namespaces="mc-panel-release". A key line may carry
+# valid-after="YYYYMMDD" / valid-before="YYYYMMDD" (rotation, docs/dev/README.md "Release
+# signing"). Removing a line revokes the key for every install.sh released after that. Test keys
+# belong in the tests and CI fixtures only; the release workflow, make sign-release and the test
+# signers_production refuse this file while it holds a key marked as a test key.
+#
+# Owner's release key, fingerprint SHA256:dG7cM49r+jg1kTjqritVZ/augtw33VlFnNgcHOeBOaY (ED25519).
+mc-panel-release namespaces="mc-panel-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGgF0LewISkuvpg8yX9MosArblkQeyH5JVECDtEnMt8y mc-panel-release

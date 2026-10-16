@@ -18,6 +18,21 @@ MCPANEL_VERSION=dev
   LOG_FILE=/var/log/mc-panel-install.log
   ROLLBACK_DIR=/var/lib/mc-panel-rollback # root:root 0700, outside mcpanel's data dir (overview Global Constraints)
   RELEASE_BASE=https://github.com/Bernotese/mc-panel/releases
+  # Release signatures (SEC-07): checksums.txt.sig is an SSH signature (ssh-keygen -Y sign) of
+  # checksums.txt by a key listed in release_signers. Every release from SIGNED_SINCE on is
+  # signed, its pre-releases included (compared as SIGNED_SINCE-0). The only unsigned releases
+  # are the closed set in UNSIGNED_RELEASES (version and SHA-256 of its checksums.txt, taken
+  # from the published releases when signing began); --allow-unsigned admits exactly those.
+  SIGN_NAMESPACE=mc-panel-release
+  SIGN_PRINCIPAL=mc-panel-release
+  SIGNED_SINCE=0.5.0
+  UNSIGNED_RELEASES=(
+    "0.1.0 94047685dbefa6747463848508d9ab5c67553225f0d5967b0b69fccf1108f5c5"
+    "0.2.0 85a74bb3bf1ce8a92516abff367875f9d8682f0bb64f89cb4f20e3c309f70450"
+    "0.3.0 cd0342eda6295d30f7d7f602d737fa5411559e326483e3aabcb6352adcf1c67c"
+    "0.4.0 5f84b72969fc7d288bd4fb0317daf8a8fadd6201e7e20d8f9e62ab69017b1b56"
+  )
+  RELEASE_RECORD="$ETC_PANEL/release" # how the installed release was verified (doctor)
   TEMPLATE_DELIM=__MCPANEL_TEMPLATE_EOF__
 }
 
@@ -41,6 +56,7 @@ reset_globals() {
   CHECK_ONLY=0
   FORCE=0
   JSON=0
+  ALLOW_UNSIGNED=0
   ARCH=""
   BIN_SOURCE_DIR="" # extracted release tarball (binaries.sh); its deploy/ wins in render_template
   WORK="${WORK:-}"
@@ -404,6 +420,75 @@ sha256_verify() {
   [[ $want =~ ^[0-9a-f]{64}$ ]] || die "checksums: malformed entry for $3"
   got="$(sha256sum -- "$1" | awk '{ print $1 }')"
   [[ $got == "$want" ]] || die "checksum mismatch for $3 (expected $want, got $got)"
+}
+
+# --- release signatures --------------------------------------------------------------------
+
+# sig_verify CHECKSUMS SIG VERSION: SIG is a valid signature of CHECKSUMS by one of the
+# release_signers keys (the trusted keys in allowed_signers format: assemble.sh embeds
+# scripts/install/release-signers as that function, main.sh reads the file from the source tree) in namespace SIGN_NAMESPACE, and the signed CHECKSUMS lists the tarball
+# of VERSION (an older signed checksums.txt replayed under another tag would otherwise pass for
+# install.sh, whose asset name has no version). Prints the key's fingerprint; dies otherwise.
+sig_verify() {
+  local signers="$WORK/release-signers" out fp
+  command -v ssh-keygen >/dev/null 2>&1 || die "ssh-keygen is missing; install it with: apt-get install openssh-client"
+  release_signers >"$signers" 2>/dev/null || die "this install.sh has no release keys"
+  grep -q '^[^#[:space:]]' "$signers" || die "this install.sh has no release keys"
+  [[ -s $2 ]] || die "the signature of release v$3 is empty"
+  out="$(ssh-keygen -Y verify -f "$signers" -I "$SIGN_PRINCIPAL" -n "$SIGN_NAMESPACE" -s "$2" <"$1" 2>&1)" ||
+    die "the signature of checksums.txt of release v$3 does not verify (tampered release or unknown key); nothing was changed"
+  awk -v n="mc-panel_${3}_linux_${ARCH}.tar.gz" '$2 == n || $2 == "*" n { f = 1 } END { exit !f }' "$1" ||
+    die "the signed checksums.txt does not belong to release v$3; nothing was changed"
+  fp="$(printf '%s\n' "$out" | grep -o 'SHA256:[A-Za-z0-9+/=]*' | head -n 1)" || fp=""
+  printf '%s\n' "${fp:-unknown}"
+}
+
+# unsigned_pin VERSION prints the pinned SHA-256 of checksums.txt of the unsigned release
+# VERSION; 1 if VERSION is not one of UNSIGNED_RELEASES.
+unsigned_pin() {
+  local e
+  for e in "${UNSIGNED_RELEASES[@]}"; do
+    if [[ ${e%% *} == "$1" ]]; then
+      printf '%s\n' "${e#* }"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# release_verify BASEURL CHECKSUMS VERSION: the signature policy for release VERSION whose
+# assets are below BASEURL. From SIGNED_SINCE on (pre-releases included), BASEURL/checksums.txt.sig
+# must verify (sig_verify); --allow-unsigned does not change that. Older releases have no
+# signature: only the ones in UNSIGNED_RELEASES, only with --allow-unsigned, and only with
+# exactly the checksums.txt published back then; they get a loud warning. Prints "signed
+# FINGERPRINT" or "unsigned" (the record doctor shows); dies otherwise. Runs before any
+# sha256_verify against CHECKSUMS.
+release_verify() {
+  local base="$1" sums="$2" v="$3" sig="$2.sig" rc=0 fp pin got
+  version_ge "$v" "$SIGNED_SINCE-0" || rc=$?
+  if [[ $rc == 0 ]]; then
+    (fetch "$base/checksums.txt.sig" "$sig") 2>/dev/null ||
+      die "cannot download the signature of release v$v (checksums.txt.sig); releases from $SIGNED_SINCE on are signed, so it is refused"
+    fp="$(sig_verify "$sums" "$sig" "$v")" || exit 1 # sig_verify has said why
+    printf 'signed %s\n' "$fp"
+    return 0
+  fi
+  [[ $rc == 1 ]] || die "cannot compare version $v with $SIGNED_SINCE"
+  pin="$(unsigned_pin "$v")" ||
+    die "release v$v is older than $SIGNED_SINCE but not one of the known unsigned releases (${UNSIGNED_RELEASES[*]%% *}); refused"
+  [[ $ALLOW_UNSIGNED == 1 ]] ||
+    die "release v$v is older than $SIGNED_SINCE and has no signature; install it only with --allow-unsigned (checked against the checksums.txt published back then)"
+  got="$(sha256sum -- "$sums" | awk '{ print $1 }')"
+  [[ $got == "$pin" ]] ||
+    die "checksums.txt of release v$v is not the one published (expected SHA-256 $pin, got $got); refused"
+  {
+    warn "=================================================================================="
+    warn "release v$v is NOT signed (older than $SIGNED_SINCE). --allow-unsigned: its"
+    warn "checksums.txt matches the one published back then, but its install.sh does not"
+    warn "check signatures, and v$v lacks the fixes of later releases."
+    warn "=================================================================================="
+  } >&2
+  echo unsigned
 }
 
 # --- system wrappers -----------------------------------------------------------------------

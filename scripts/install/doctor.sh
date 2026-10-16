@@ -6,7 +6,7 @@
 # DOC_SUMMARY=1 (install's summary) prints only what is not ok. Without root, the checks that
 # need root report "warn: skipped".
 #
-# Check ids (stable): services sockets files_process versions update_available update_state
+# Check ids (stable): services sockets files_process versions update_available release_signature update_state
 # config permissions caddy_config caddy_import caddy_package caddy_admin certificate dns firewall
 # docker docker_version docker_live_restore docker_isolation docker_dns restic tzdata time_sync upgrades reboot_required
 # storage_fs storage_free backup_keys ssh_password ssh_root ssh_kbdinteractive
@@ -307,6 +307,30 @@ doc_chk_versions() {
   0) doc_result ok update_available "no newer release (latest ${latest#v})" ;;
   1) doc_result warn update_available "release ${latest#v} is available (installed $p)" "install.sh update" ;;
   *) doc_result warn update_available "installed version $p cannot be compared with release ${latest#v}" "install.sh update --version ${latest#v}" ;;
+  esac
+}
+
+# doc_chk_release_signature: how the installed release was verified (RELEASE_RECORD, written
+# by bin_install). A record of another version (installed before signed releases, or an update
+# rolled back across it) says nothing about the installed binaries.
+doc_chk_release_signature() {
+  doc_need_root release_signature || return 0 # RELEASE_RECORD is below /etc/mc-panel (0750)
+  local f="$ROOT$RELEASE_RECORD" p v how key
+  read -r p _ _ <<<"$(upd_binary_versions)"
+  v="$(awk -F= '$1 == "version" { print $2; exit }' "$f" 2>/dev/null)" || v=""
+  how="$(awk -F= '$1 == "verified" { print $2; exit }' "$f" 2>/dev/null)" || how=""
+  key="$(awk -F= '$1 == "key" { print $2; exit }' "$f" 2>/dev/null)" || key=""
+  if [[ -z $v || $v != "$p" ]]; then
+    # The install.sh of those releases checks no signature: the step to v$SIGNED_SINCE starts
+    # from a downloaded and verified install.sh (docs/install.md, "Signed releases").
+    doc_result warn release_signature "no signature record for $p (installed before signed releases)" "download and verify install.sh of v$SIGNED_SINCE or later (docs/install.md, Signed releases), then run its update"
+    return 0
+  fi
+  case "$how" in
+  signed) doc_result ok release_signature "$p was signature-checked (key $key)" ;;
+  from-dir) doc_result ok release_signature "$p is a local build (--from-dir), no signature check" ;;
+  unsigned) doc_result warn release_signature "$p was installed without a signature (--allow-unsigned)" "install.sh update to a signed release (v$SIGNED_SINCE or later)" ;;
+  *) doc_result warn release_signature "$RELEASE_RECORD is unreadable" "install.sh update --force" ;;
   esac
 }
 
@@ -709,6 +733,7 @@ cmd_doctor() {
   doc_chk_sockets
   doc_chk_files_process
   doc_chk_versions
+  doc_chk_release_signature
   doc_chk_update_state
   doc_chk_config
   doc_chk_permissions

@@ -33,6 +33,7 @@ What mc-panel trusts, and what it does not protect against:
 - **Downloads at run time.** The Minecraft image is pinned by digest, but inside the container it downloads server jars, loaders and modpacks from their upstreams at start (Mojang, PaperMC, Fabric, NeoForge, Modrinth, CurseForge). The panel cannot verify those.
 - **Checksums while a server runs.** A plugin or mod jar is checked against the upstream checksum before it is moved into place. The temporary file sits in a folder the server's container can write to, so a running server could change it in between: "verified" is no integrity guarantee against the server itself.
 - **Browser:** a strict Content Security Policy without `'unsafe-inline'` (styles of `index.html` carry a per-request nonce; images only from the panel, the TOTP QR code is SVG) and Trusted Types in report-only mode, to be enforced later. Background polling (`GET`) sends `X-MCPanel-Background: 1` and does not keep an idle session alive.
+- **Signed releases.** From v0.5.0 on, `checksums.txt` of every release is signed with the maintainer's release key, which is kept outside GitHub; `install.sh` embeds the public key and refuses an unsigned or wrongly signed release on `install` and `update`. A stolen GitHub account therefore cannot ship code to existing installations. The first `install.sh` you download is the exception: `curl … | sudo bash` trusts GitHub at that moment; [docs/install.md](docs/install.md#signed-releases) shows how to verify it before running it.
 - **Backups live on the same host** under the user the containers run as; see [docs/install.md](docs/install.md#backups-of-keys-and-data) for the residual risk and off-host copies.
 
 ## Requirements
@@ -48,7 +49,7 @@ curl -fsSL https://github.com/Bernotese/mc-panel/releases/latest/download/instal
   | sudo bash -s -- install --domain panel.example.com --email you@example.com
 ```
 
-The installer asks for the first admin's name and password and checks everything with `doctor` at the end. Then:
+To verify the installer before running it, follow [Signed releases](docs/install.md#signed-releases). The installer asks for the first admin's name and password and checks everything with `doctor` at the end. Then:
 
 1. Open `https://panel.example.com/`, log in and set up the second factor.
 2. Settings: enter the base domain of the Minecraft servers (`mc.example.com`).
@@ -71,4 +72,4 @@ All installer options, updates, rollback, `doctor`, uninstalling and troubleshoo
 
 ## Releases
 
-Each `v*` tag on `main` publishes a GitHub release with `mc-panel_<version>_linux_{amd64,arm64}.tar.gz` (`panel`, `agent`, `files` and the installer templates in `deploy/`), `install.sh` and `checksums.txt` (SHA-256 of all assets).
+Each `v*` tag on `main` publishes a GitHub release with `mc-panel_<version>_linux_{amd64,arm64}.tar.gz` (`panel`, `agent`, `files` and the installer templates in `deploy/`), `install.sh`, `checksums.txt` (SHA-256 of all assets) and, from v0.5.0 on, `checksums.txt.sig` (SSH signature of `checksums.txt` by the release key). The workflow creates a draft; the maintainer signs and publishes it with `make sign-release`.
