@@ -1,11 +1,17 @@
 // web/src/api/handlers.ts
 import type { Me } from './types'
 
+/** The request that answered 403 sudo_required (method and OpenAPI path template); names the action in the dialog. */
+export interface SudoRequest {
+  method: string
+  path: string
+}
+
 export interface ApiHandlers {
   onUnauthorized(): void
   /** May be async: the middleware waits for it before handing the 403 back to the caller. */
   onSetupRequired(): void | Promise<void>
-  requestSudo(): Promise<boolean>
+  requestSudo(request: SudoRequest): Promise<boolean>
   onMe(me: Me): void
 }
 
