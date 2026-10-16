@@ -7,8 +7,9 @@
 # need root report "warn: skipped".
 #
 # Check ids (stable): services sockets files_process versions update_available update_state
-# config permissions caddy_config caddy_import certificate dns firewall docker restic tzdata
-# time_sync upgrades storage_fs storage_free backup_keys ssh_password ssh_root
+# config permissions caddy_config caddy_import caddy_package caddy_admin certificate dns firewall
+# docker docker_version docker_live_restore docker_dns restic tzdata time_sync upgrades reboot_required
+# storage_fs storage_free backup_keys ssh_password ssh_root ssh_kbdinteractive
 
 DOC_IDS=()
 DOC_STATUS=()
@@ -18,6 +19,11 @@ DOC_UNITS=(mcpanel-agent.service mcpanel-files.socket mcpanel-files.service mcpa
   mcpanel-panel.service caddy.service)
 DOC_IMPORT_LINE='import mc-panel.caddy # managed by mc-panel'
 DOC_CERT_WARN_DAYS=14
+# Docker of Ubuntu 26.04's -security pocket (docker.io 29.1.3-0ubuntu4.1); older ones lack its fixes.
+DOC_DOCKER_MIN=29.1.3
+DOC_DOCKER_ROOT=/var/lib/docker # when docker info cannot tell
+# The agent's default container_egress_deny (section A, SEC-02); agent.toml may override it.
+DOC_EGRESS_DENY_DEFAULT="169.254.0.0/16 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7 fe80::/10"
 
 # Required top-level keys: the same lists install adds (config.sh CFG_REQUIRED_*; a test compares
 # them).
@@ -89,10 +95,19 @@ doc_probe_nft_table() { nft list table inet mcpanel_fw 2>/dev/null; }
 # firewall step (fw_config_ports, B1: listenaddress ports win over Port).
 doc_probe_ssh_port() { fw_config_ports; }
 doc_probe_docker() { timeout 20 docker info >/dev/null 2>&1; }
+doc_probe_docker_version() { timeout 20 docker version --format '{{.Server.Version}}' 2>/dev/null; }
+doc_probe_docker_live_restore() { timeout 20 docker info --format '{{.LiveRestoreEnabled}}' 2>/dev/null; }
+doc_probe_docker_root() { timeout 20 docker info --format '{{.DockerRootDir}}' 2>/dev/null; }
+doc_probe_caddy_version() { pkg_caddy_version; }
+doc_probe_caddy_from_repo() { pkg_caddy_from_repo; }
+# doc_probe_mtime FILE: modification time of FILE in Unix seconds.
+doc_probe_mtime() { stat -c %Y -- "$1" 2>/dev/null; }
+doc_probe_now() { date +%s; }
 doc_probe_restic_version() { restic version 2>/dev/null | awk '{ print $2; exit }'; }
 doc_probe_pkg() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'; }
 doc_probe_ntp() { timedatectl show -p NTPSynchronized --value 2>/dev/null; }
-doc_probe_mountpoint() { findmnt -n -o TARGET --target "$INSTANCES_DIR" 2>/dev/null; }
+# doc_probe_mountpoint PATH: the mount point of the file system PATH is on.
+doc_probe_mountpoint() { findmnt -n -o TARGET --target "$1" 2>/dev/null; }
 # doc_probe_free_percent: free space on INSTANCES_DIR in percent (df reports the used share).
 doc_probe_free_percent() {
   local used
@@ -103,6 +118,67 @@ doc_probe_free_percent() {
 doc_probe_sshd() { sshd -T 2>/dev/null; }
 
 # --- helpers -------------------------------------------------------------------------------
+
+# doc_ip6_hex ADDR prints the 32 hex digits of an IPv6 address ("" if it is none).
+doc_ip6_hex() {
+  local a="${1%%%*}" head tail g n out="" i
+  local -a hg tg
+  [[ $a == *:* && $a =~ ^[0-9A-Fa-f:]+$ ]] || return 0
+  if [[ $a == *::* ]]; then
+    head="${a%%::*}"
+    tail="${a#*::}"
+  else
+    head="$a"
+    tail=""
+  fi
+  IFS=: read -r -a hg <<<"$head"
+  IFS=: read -r -a tg <<<"$tail"
+  n=$((8 - ${#hg[@]} - ${#tg[@]}))
+  if [[ $a != *::* ]]; then n=0; fi
+  ((n >= 0 && ${#hg[@]} + ${#tg[@]} + n == 8)) || return 0
+  for g in "${hg[@]}"; do out+="$(printf '%04x' "0x${g:-0}")"; done
+  for ((i = 0; i < n; i++)); do out+='0000'; done
+  for g in "${tg[@]}"; do out+="$(printf '%04x' "0x${g:-0}")"; done
+  [[ ${#out} == 32 ]] && printf '%s\n' "$out"
+}
+
+# doc_ip_in_cidr IP CIDR: 0 if IP (IPv4 or IPv6) lies in CIDR.
+doc_ip_in_cidr() {
+  local ip="$1" net="${2%/*}" bits="${2#*/}" a b o1 o2 o3 o4 i
+  [[ $2 == */* && $bits =~ ^[0-9]+$ ]] || return 1
+  if [[ $ip =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    a=$(((BASH_REMATCH[1] << 24) | (BASH_REMATCH[2] << 16) | (BASH_REMATCH[3] << 8) | BASH_REMATCH[4]))
+    IFS=. read -r o1 o2 o3 o4 <<<"$net"
+    [[ $o4 =~ ^[0-9]+$ ]] || return 1
+    b=$(((o1 << 24) | (o2 << 16) | (o3 << 8) | o4))
+    ((bits <= 32)) || return 1
+    (((a >> (32 - bits)) == (b >> (32 - bits)) || bits == 0))
+    return
+  fi
+  a="$(doc_ip6_hex "$ip")"
+  b="$(doc_ip6_hex "$net")"
+  [[ -n $a && -n $b ]] && ((bits <= 128)) || return 1
+  # whole hex digits first, then the remaining bits of the next digit
+  i=$((bits / 4))
+  [[ ${a:0:i} == "${b:0:i}" ]] || return 1
+  ((bits % 4 == 0)) && return 0
+  ((((0x${a:i:1} ^ 0x${b:i:1}) >> (4 - bits % 4)) == 0))
+}
+
+# doc_egress_deny prints the egress deny ranges of the agent, one per line: container_egress_deny
+# from agent.toml (a TOML array of strings, also over several lines), else the defaults.
+doc_egress_deny() {
+  local f="$ROOT$ETC_PANEL/agent.toml" v
+  if [[ -r $f ]] && doc_toml_has_key "$f" container_egress_deny; then
+    v="$(awk '/^[[:space:]]*\[/ && !inarr { exit }
+      !inarr && /^[[:space:]]*container_egress_deny[[:space:]]*=/ { inarr = 1; sub(/^[^=]*=/, "") }
+      inarr { line = $0; sub(/#.*/, "", line); out = out " " line; if (line ~ /\]/) { print out; exit } }' "$f")"
+    grep -oE '"[^"]+"' <<<"$v" | tr -d '"'
+    return 0
+  fi
+  # shellcheck disable=SC2086 # the default list is blank-separated on purpose
+  printf '%s\n' $DOC_EGRESS_DENY_DEFAULT
+}
 
 # doc_is_root: 0 when doctor runs as root.
 doc_is_root() { [[ $(doc_probe_euid) == 0 ]]; }
@@ -302,6 +378,15 @@ doc_chk_caddy() {
   else
     doc_result fail caddy_import "the panel site is not imported in $CADDY_DIR/Caddyfile" "install.sh install with your --domain/--email"
   fi
+  doc_chk_caddy_package
+  if [[ -e $ROOT$CADDY_DIR/Caddyfile && ! -r $ROOT$CADDY_DIR/Caddyfile ]] && ! doc_is_root; then
+    doc_result warn caddy_admin "caddy_admin: skipped ($CADDY_DIR/Caddyfile is not readable)" "sudo bash install.sh doctor"
+  elif [[ $(cad_admin_status "$ROOT$CADDY_DIR/Caddyfile") == socket ]]; then
+    doc_result ok caddy_admin "Caddy's admin API is off TCP (only caddy and root can use it)"
+  else
+    doc_result warn caddy_admin "Caddy's admin API listens on TCP (127.0.0.1:2019 by default): any local user, the panel included, can reconfigure Caddy" \
+      "add \"$CAD_ADMIN\" to the global options in $CADDY_DIR/Caddyfile, then systemctl restart caddy (install.sh creates /run/caddy via $CAD_DROPIN)"
+  fi
   doc_need_root certificate dns || return 0
   local domain days
   domain="$(doc_domain)" || domain=""
@@ -337,6 +422,68 @@ doc_chk_caddy() {
   fi
 }
 
+# doc_chk_caddy_package: Caddy from its own repository and not older than PKG_CADDY_MIN (SEC-01:
+# Ubuntu's universe package gets no security updates).
+doc_chk_caddy_package() {
+  local v hint="install.sh update --force (switches Caddy to its repository)"
+  v="$(doc_probe_caddy_version)" || v=""
+  if [[ -z $v ]]; then
+    doc_result warn caddy_package "cannot determine the Caddy version" "caddy version"
+  elif ! version_ge "$v" "$PKG_CADDY_MIN"; then
+    doc_result warn caddy_package "Caddy $v is older than ${PKG_CADDY_MIN%.0} (known vulnerabilities in its HTTP/2 and TLS stack)" "$hint"
+  elif ! doc_probe_caddy_from_repo; then
+    doc_result warn caddy_package "Caddy $v does not come from the Caddy repository (no automatic security updates)" "$hint"
+  else
+    doc_result ok caddy_package "Caddy $v from the Caddy repository"
+  fi
+}
+
+# doc_chk_docker_dns: the egress filter (section A) drops container connections to private
+# ranges, so container DNS breaks when Docker forwards to a resolver there: /etc/resolv.conf
+# without the systemd-resolved stub (127.0.0.53, which Docker uses from the host's namespace)
+# naming such a nameserver, or "dns" in /etc/docker/daemon.json.
+doc_chk_docker_dns() {
+  local deny ns stub=0 bad=() src=() d n
+  deny="$(doc_egress_deny)"
+  if [[ -z $deny ]]; then
+    doc_result ok docker_dns "container DNS: the egress filter is off (container_egress_deny = [])"
+    return 0
+  fi
+  ns="$(awk '$1 == "nameserver" { print $2 }' "$ROOT/etc/resolv.conf" 2>/dev/null)" || ns=""
+  if grep -qx '127.0.0.53' <<<"$ns"; then stub=1; fi
+  if [[ $stub == 0 ]]; then
+    for n in $ns; do src+=("$n|/etc/resolv.conf"); done
+  fi
+  for n in $(grep -oE '"dns"[[:space:]]*:[[:space:]]*\[[^]]*\]' "$ROOT/etc/docker/daemon.json" 2>/dev/null | grep -oE '"[0-9A-Fa-f.:]+"' | tr -d '"'); do
+    src+=("$n|/etc/docker/daemon.json")
+  done
+  for n in "${src[@]}"; do
+    for d in $deny; do
+      if doc_ip_in_cidr "${n%%|*}" "$d"; then
+        bad+=("${n%%|*} (${n#*|}, in $d)")
+        break
+      fi
+    done
+  done
+  if ((${#bad[@]} == 0)); then
+    doc_result ok docker_dns "container DNS is not blocked by the egress filter"
+  else
+    doc_result warn docker_dns "container DNS would be blocked by the egress filter: ${bad[*]}" \
+      "use the systemd-resolved stub (nameserver 127.0.0.53 in /etc/resolv.conf, no \"dns\" in /etc/docker/daemon.json) or remove the range from container_egress_deny in $ETC_PANEL/agent.toml"
+  fi
+}
+
+# doc_age SECONDS: a duration as "3 h" or "5 days".
+doc_age() {
+  if (($1 < 7200)); then
+    echo "$(($1 / 60)) min"
+  elif (($1 < 172800)); then
+    echo "$(($1 / 3600)) h"
+  else
+    echo "$(($1 / 86400)) days"
+  fi
+}
+
 doc_chk_firewall() {
   doc_need_root firewall || return 0
   local table ports p blocked=()
@@ -358,13 +505,32 @@ doc_chk_firewall() {
 }
 
 doc_chk_system() {
-  if doc_need_root docker; then
+  if doc_need_root docker docker_version docker_live_restore; then
     if doc_probe_docker; then
       doc_result ok docker "Docker is reachable"
     else
       doc_result fail docker "Docker is not reachable" "systemctl status docker"
     fi
+    local dv lr
+    dv="$(doc_probe_docker_version)" || dv=""
+    if [[ -z $dv ]]; then
+      doc_result warn docker_version "cannot determine the Docker version" "docker version"
+    elif version_ge "$dv" "$DOC_DOCKER_MIN"; then
+      doc_result ok docker_version "Docker $dv"
+    else
+      doc_result warn docker_version "Docker $dv is older than $DOC_DOCKER_MIN (Ubuntu 26.04's security update)" "apt-get install --only-upgrade docker.io (or docker-ce)"
+    fi
+    lr="$(doc_probe_docker_live_restore)" || lr=""
+    if [[ $lr == true ]]; then
+      doc_result ok docker_live_restore "Docker live-restore is active (a Docker restart keeps the servers running)"
+    elif grep -qE '"live-restore"[[:space:]]*:[[:space:]]*true' -- "$ROOT/etc/docker/daemon.json" 2>/dev/null; then
+      doc_result warn docker_live_restore "live-restore is set in /etc/docker/daemon.json but not active: the next Docker restart (a package update) stops every server" \
+        "systemctl reload docker (dockerd reloads live-restore; the servers keep running)"
+    else
+      doc_result ok docker_live_restore "Docker live-restore is not configured (/etc/docker/daemon.json)"
+    fi
   fi
+  doc_chk_docker_dns
   local rv
   rv="$(doc_probe_restic_version)" || rv=""
   if [[ -n $rv ]] && version_ge "$rv" 0.17.0; then
@@ -387,15 +553,37 @@ doc_chk_system() {
   else
     doc_result warn upgrades "unattended-upgrades is not enabled" "install.sh install with your --domain/--email"
   fi
+  local rr="$ROOT/run/reboot-required" t now pkgs
+  if [[ -e $rr ]]; then
+    t="$(doc_probe_mtime "$rr")" || t=""
+    now="$(doc_probe_now)"
+    pkgs="$(sort -u -- "$rr.pkgs" 2>/dev/null | head -n 5 | paste -sd' ' -)" || pkgs=""
+    doc_result warn reboot_required "a reboot is pending${t:+ since $(doc_age $((now - t)))}${pkgs:+ ($pkgs)}: kernel and library fixes are not active yet" \
+      "plan a reboot (the Minecraft servers stop meanwhile); unattended-upgrades never reboots on its own"
+  else
+    doc_result ok reboot_required "no reboot pending"
+  fi
 }
 
+# doc_chk_storage: a full $INSTANCES_DIR must not take the panel's database or Docker (container
+# layers, logs) down with it (SEC-04): it needs a file system of its own.
 doc_chk_storage() {
-  local mp free
-  mp="$(doc_probe_mountpoint)" || mp=""
-  if [[ $mp == "$INSTANCES_DIR" ]]; then
-    doc_result ok storage_fs "$INSTANCES_DIR is its own file system"
+  local mp free docker_root shared=() d
+  mp="$(doc_probe_mountpoint "$INSTANCES_DIR")" || mp=""
+  docker_root=""
+  if doc_is_root; then
+    docker_root="$(doc_probe_docker_root)" || docker_root=""
+  fi
+  for d in "$DATA_DIR" "${docker_root:-$DOC_DOCKER_ROOT}"; do
+    if [[ -z $mp || "$(doc_probe_mountpoint "$d")" == "$mp" ]]; then
+      shared+=("$d")
+    fi
+  done
+  if ((${#shared[@]} == 0)); then
+    doc_result ok storage_fs "$INSTANCES_DIR is on its own file system ($mp)"
   else
-    doc_result warn storage_fs "$INSTANCES_DIR is not its own file system (shared with ${mp:-?})" "a full Minecraft server can then fill the disk of the panel; see the instances spec §3.3"
+    doc_result warn storage_fs "$INSTANCES_DIR shares a file system (${mp:-?}) with ${shared[*]}" \
+      "a server that fills $INSTANCES_DIR then also stops the panel's database or Docker; give $INSTANCES_DIR its own file system (docs/install.md)"
   fi
   free="$(doc_probe_free_percent)" || free=""
   if ! [[ $free =~ ^[0-9]+$ ]]; then
@@ -415,7 +603,7 @@ doc_chk_storage() {
 }
 
 doc_chk_ssh() {
-  doc_need_root ssh_password ssh_root || return 0
+  doc_need_root ssh_password ssh_root ssh_kbdinteractive || return 0
   local cfg
   cfg="$(doc_probe_sshd)" || cfg=""
   if grep -qiE '^passwordauthentication[[:space:]]+yes' <<<"$cfg"; then
@@ -427,6 +615,13 @@ doc_chk_ssh() {
     doc_result warn ssh_root "SSH allows root logins with a password (PermitRootLogin yes)" "set PermitRootLogin prohibit-password or no"
   else
     doc_result ok ssh_root "SSH root login with a password is off"
+  fi
+  # keyboard-interactive through PAM asks for the password, too (ChallengeResponse before OpenSSH 8.7)
+  if grep -qiE '^(kbdinteractive|challengeresponse)authentication[[:space:]]+yes' <<<"$cfg" &&
+    grep -qiE '^usepam[[:space:]]+yes' <<<"$cfg"; then
+    doc_result warn ssh_kbdinteractive "SSH allows password logins through PAM (KbdInteractiveAuthentication yes with UsePAM yes)" "set KbdInteractiveAuthentication no"
+  else
+    doc_result ok ssh_kbdinteractive "SSH keyboard-interactive (PAM password) logins are off"
   fi
 }
 

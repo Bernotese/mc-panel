@@ -2,7 +2,9 @@
 # upgrades.sh - installer spec §4.9: security updates daily, never an automatic reboot (a reboot
 # would stop the Minecraft servers). The allowed origins stay those of Ubuntu's
 # 50unattended-upgrades (the release and its -security pocket, ESM security; -updates is off):
-# apt appends list entries, so a file of ours could only widen them, never narrow them.
+# apt appends list entries, so a file of ours could only widen them, never narrow them. It
+# widens them by exactly one: the Caddy repository (packages.sh, SEC-01), whose origin and suite
+# are those of its Release file ("apt-cache policy" shows o=cloudsmith/caddy/stable,a=any-version).
 
 UPG_PERIODIC=/etc/apt/apt.conf.d/21mc-panel-auto-upgrades # after the package's 20auto-upgrades
 UPG_OPTIONS=/etc/apt/apt.conf.d/52mc-panel-unattended-upgrades
@@ -19,6 +21,10 @@ upg_options() {
   cat <<'EOF'
 // Managed by mc-panel install.sh: never reboot on its own; Minecraft servers would stop.
 Unattended-Upgrade::Automatic-Reboot "false";
+// Caddy from its official repository (the panel's public entry point) gets every release.
+Unattended-Upgrade::Origins-Pattern {
+	"origin=cloudsmith/caddy/stable,archive=any-version";
+};
 EOF
 }
 
@@ -35,7 +41,7 @@ upg_ensure() {
     return 1
   }
   if [[ $a == changed || $b == changed ]]; then
-    log_changed "unattended-upgrades: security updates daily, no automatic reboot"
+    log_changed "unattended-upgrades: security updates and Caddy daily, no automatic reboot"
   else
     log_ok "unattended-upgrades unchanged"
   fi
