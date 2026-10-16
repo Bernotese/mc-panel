@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"runtime"
 
-	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/config"
 )
@@ -15,7 +14,7 @@ import (
 var ErrUnsupported = errors.New("firewall backend not supported on this platform")
 
 // New returns the backend selected by cfg.Firewall for the running OS.
-func New(cfg config.Agent, clk clock.Clock, log *slog.Logger) (agentapi.Firewall, error) {
+func New(cfg config.Agent, clk clock.Clock, log *slog.Logger) (Backend, error) {
 	backend, err := choose(cfg.Firewall, runtime.GOOS)
 	if err != nil {
 		return nil, err
@@ -26,7 +25,7 @@ func New(cfg config.Agent, clk clock.Clock, log *slog.Logger) (agentapi.Firewall
 		}
 		return NewNoop(clk, log), nil
 	}
-	return newNFTables(log)
+	return newNFTables(log, cfg.EgressDenyPrefixes())
 }
 
 func choose(name, goos string) (string, error) {
