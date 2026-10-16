@@ -5,6 +5,8 @@
 # https://ntfy.invalid: every event ends in one "delivery failed" line of the panel log), audit.
 
 setup_agent_files
+# shellcheck disable=SC2034 # read by setup_panel_server (lib.sh)
+mon_boot_margin=1 # no server.down from a slow first boot (setup_panel_server)
 setup_panel_server
 
 echo "== monitoring: history, live values and host values"
