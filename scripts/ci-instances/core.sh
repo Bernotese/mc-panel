@@ -5,7 +5,7 @@
 # socket, waits until it answers a status ping routed by hostname through mc-router, checks the
 # container hardening (read-only rootfs with a disk-backed /tmp, limits, the egress filter
 # against metadata and private addresses, replies to a client in a private network through the
-# router), the console endpoints and the files service (credentials, peer UID, upload, redaction,
+# router, a network per server that a second server cannot cross), the console endpoints and the files service (credentials, peer UID, upload, redaction,
 # editing, symlinks, directory zip), crashes it, waits for Docker's restart, checks the console
 # on the stopped server, planted player files and archive extraction (incl. zip slip), and
 # removes it. No panel.
@@ -52,7 +52,7 @@ checks = {
     "only_data_and_tmp_mounts": sorted((m["Destination"], m["Source"]) for m in c["Mounts"])
         == [("/data", sys.argv[3] + "/instances/9001"), ("/tmp", sys.argv[3] + "/tmp/9001")],
     "no_ports": not h.get("PortBindings"),
-    "network": list(c["NetworkSettings"]["Networks"]) == ["mcpanel-mc"],
+    "own_network_only": list(c["NetworkSettings"]["Networks"]) == ["mcpanel-net-9001"],
     "label": cfg["Labels"].get("mcpanel.instance") == "9001",
     "readonly_rootfs": h["ReadonlyRootfs"] is True,
     "no_tmpfs": not h.get("Tmpfs"),
@@ -88,8 +88,10 @@ print("OK: router hardening", sorted(checks))' || fail "router hardening"
 echo "== container egress filter (SEC-02)"
 # The Paper download at the first start already went through the filter (public egress and DNS
 # work). New connections to the metadata address and private networks must be dropped by the
-# agent's forward rule for the network's subnet: its counter has to grow.
-subnet="$(docker network inspect -f '{{(index .IPAM.Config 0).Subnet}}' mcpanel-mc)"
+# agent's forward rule for the server network's subnet (a /28 of instance_network_pool, SEC-03):
+# its counter has to grow.
+subnet="$(docker network inspect -f '{{(index .IPAM.Config 0).Subnet}}' mcpanel-net-9001)"
+case "$subnet" in 10.213.*/28) ;; *) fail "mcpanel-net-9001 subnet $subnet is not a /28 of 10.213.0.0/16" ;; esac
 nft list chain inet mcpanel forward >"$work/egress.nft" 2>&1 || fail "egress chain: $(cat "$work/egress.nft")"
 grep -q "ip saddr $subnet .*@mcpanel_egress_deny4 counter packets [0-9]* bytes [0-9]* drop" "$work/egress.nft" ||
   fail "no egress rule for $subnet: $(cat "$work/egress.nft")"
@@ -120,6 +122,48 @@ ip netns del mcpcitest
 ip link del mcpcit0 2>/dev/null || true
 egress_ns=""
 echo "OK: a client in a private network reaches the server through the router"
+echo "== network per server (SEC-03)"
+# A second server on its own network: it reaches neither the RCON nor the game port of the
+# first one, by address or by name, while mc-router (on both networks) still routes joins.
+# The container is only needed while it runs; the Minecraft server inside never has to start.
+agent -X POST http://agent/v1/instances/ensure -d '{
+  "id": 9002, "name": "citest2", "fqdn": "citest2.mc.localhost", "revision": 1, "recreate": false,
+  "spec": {"type": "paper", "version": "1.21.11", "loader_version": null, "modpack": null,
+           "java": "java21", "memory_mib": 1024, "properties": {}, "curseforge_api_key": null}}'
+created2() { [ "$(inst_field 9002 'i["state"]')" = created ] && [ -z "$(inst_field 9002 'i["operation"]')" ]; }
+wait_for 300 "second container created" created2
+agent -X POST http://agent/v1/instances/power -d '{"id": 9002, "action": "start"}'
+running2() { [ "$(inst_field 9002 'i["state"]')" = running ]; }
+wait_for 120 "second container running" running2
+networks() { docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$1"; }
+[ "$(networks mcpanel-mc-9002)" = "mcpanel-net-9002 " ] || fail "mcpanel-mc-9002 networks: $(networks mcpanel-mc-9002)"
+router_on_both() { [ "$(networks mcpanel-router)" = "mcpanel-mc mcpanel-net-9001 mcpanel-net-9002 " ]; }
+wait_for 30 "router on both server networks" router_on_both
+ip9001="$(docker inspect -f '{{(index .NetworkSettings.Networks "mcpanel-net-9001").IPAddress}}' mcpanel-mc-9001)"
+[ -n "$ip9001" ] || fail "no address of mcpanel-mc-9001 on mcpanel-net-9001"
+tcp_open() { # tcp_open <container> <host> <port>: a TCP connect from inside the container
+  # shellcheck disable=SC2016 # $1 and $2 belong to the inner bash
+  docker exec "$1" timeout 5 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$2" "$3" >/dev/null 2>&1
+}
+# Positive control: the probe does see the open ports (from the server itself).
+tcp_open mcpanel-mc-9001 "$ip9001" 25575 || fail "probe cannot reach the own RCON port $ip9001:25575"
+tcp_open mcpanel-mc-9001 "$ip9001" 25565 || fail "probe cannot reach the own game port $ip9001:25565"
+for target in "$ip9001" mcpanel-mc-9001; do
+  for port in 25575 25565; do
+    if tcp_open mcpanel-mc-9002 "$target" "$port"; then
+      fail "mcpanel-mc-9002 reaches $target:$port of the other server"
+    fi
+  done
+done
+answer="$(python3 -I scripts/mc-status.py 127.0.0.1 25565 citest.mc.localhost 2>&1)" ||
+  fail "status ping through mc-router with two server networks: $answer"
+echo "OK: server 9002 cannot reach 9001 ($ip9001, by name) on 25575/25565; mc-router routes to 9001"
+agent -X POST http://agent/v1/instances/remove -d '{"id": 9002}'
+gone2() { [ "$(inst_field 9002 i)" = absent ] && ! docker network inspect mcpanel-net-9002 >/dev/null 2>&1; }
+wait_for 180 "second server and its network removed" gone2
+[ "$(networks mcpanel-router)" = "mcpanel-mc mcpanel-net-9001 " ] || fail "router networks after remove: $(networks mcpanel-router)"
+echo "OK: server 9002 removed with its network; the router left it"
+
 [ "$(stat -c '%U:%G %a' "$work/mc/instances/9001")" = "mcpanel-mc:mcpanel-mc 750" ] || fail "data dir owner/mode: $(stat -c '%U:%G %a' "$work/mc/instances/9001")"
 echo "OK: data dir owned by mcpanel-mc (0750)"
 if setpriv --reuid=mcpanel --regid=mcpanel --init-groups test -r "$work/mc/instances/9001"; then

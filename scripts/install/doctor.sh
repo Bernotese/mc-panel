@@ -8,7 +8,7 @@
 #
 # Check ids (stable): services sockets files_process versions update_available update_state
 # config permissions caddy_config caddy_import caddy_package caddy_admin certificate dns firewall
-# docker docker_version docker_live_restore docker_dns restic tzdata time_sync upgrades reboot_required
+# docker docker_version docker_live_restore docker_isolation docker_dns restic tzdata time_sync upgrades reboot_required
 # storage_fs storage_free backup_keys ssh_password ssh_root ssh_kbdinteractive
 
 DOC_IDS=()
@@ -97,6 +97,8 @@ doc_probe_ssh_port() { fw_config_ports; }
 doc_probe_docker() { timeout 20 docker info >/dev/null 2>&1; }
 doc_probe_docker_version() { timeout 20 docker version --format '{{.Server.Version}}' 2>/dev/null; }
 doc_probe_docker_live_restore() { timeout 20 docker info --format '{{.LiveRestoreEnabled}}' 2>/dev/null; }
+# doc_probe_shared_servers: the containers on the router's network mcpanel-mc, one per line.
+doc_probe_shared_servers() { timeout 20 docker network inspect -f '{{range .Containers}}{{.Name}}{{"\n"}}{{end}}' mcpanel-mc 2>/dev/null </dev/null; }
 doc_probe_docker_root() { timeout 20 docker info --format '{{.DockerRootDir}}' 2>/dev/null; }
 doc_probe_caddy_version() { pkg_caddy_version; }
 doc_probe_caddy_from_repo() { pkg_caddy_from_repo; }
@@ -505,7 +507,7 @@ doc_chk_firewall() {
 }
 
 doc_chk_system() {
-  if doc_need_root docker docker_version docker_live_restore; then
+  if doc_need_root docker docker_version docker_live_restore docker_isolation; then
     if doc_probe_docker; then
       doc_result ok docker "Docker is reachable"
     else
@@ -528,6 +530,18 @@ doc_chk_system() {
         "systemctl reload docker (dockerd reloads live-restore; the servers keep running)"
     else
       doc_result ok docker_live_restore "Docker live-restore is not configured (/etc/docker/daemon.json)"
+    fi
+    # SEC-03: every server has its own network; one of an older version leaves the shared
+    # mcpanel-mc only at its next stop.
+    local shared=() n
+    while IFS= read -r n; do
+      if [[ $n =~ ^mcpanel-mc-[0-9]+$ ]]; then shared+=("$n"); fi
+    done < <(doc_probe_shared_servers || true)
+    if ((${#shared[@]} == 0)); then
+      doc_result ok docker_isolation "every Minecraft server is on its own network"
+    else
+      doc_result warn docker_isolation "${#shared[@]} Minecraft server(s) still share the network mcpanel-mc and can reach each other: ${shared[*]}" \
+        "restart these servers once in the panel (they move to their own network at the next stop)"
     fi
   fi
   doc_chk_docker_dns

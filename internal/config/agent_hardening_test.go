@@ -40,6 +40,9 @@ func TestAgentHardeningDefaults(t *testing.T) {
 	if a.RouterConnectionRateLimit != 50 || a.CPUPerInstance != 0 {
 		t.Fatalf("router_connection_rate_limit = %d, cpu_per_instance = %v", a.RouterConnectionRateLimit, a.CPUPerInstance)
 	}
+	if a.NetworkPool() != netip.MustParsePrefix("10.213.0.0/16") || config.InstanceNetworkBits != 28 {
+		t.Fatalf("instance_network_pool = %v", a.NetworkPool())
+	}
 	// The default must not be shared: changing one agent's list must not change the next default.
 	a.ContainerEgressDeny[0] = "x"
 	if config.DefaultContainerEgressDeny()[0] != "169.254.0.0/16" {
@@ -51,12 +54,13 @@ func TestLoadAgentHardeningKeys(t *testing.T) {
 	a, err := config.LoadAgent(writeAgentConfig(t, `container_egress_deny = ["10.0.0.0/8", "2001:db8::/32"]
 router_connection_rate_limit = 200
 cpu_per_instance = 1.5
+instance_network_pool = "172.30.4.0/22"
 `), false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(a.EgressDenyPrefixes(), []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("2001:db8::/32")}) ||
-		a.RouterConnectionRateLimit != 200 || a.CPUPerInstance != 1.5 {
+		a.RouterConnectionRateLimit != 200 || a.CPUPerInstance != 1.5 || a.NetworkPool() != netip.MustParsePrefix("172.30.4.0/22") {
 		t.Fatalf("agent = %+v", a)
 	}
 
@@ -86,6 +90,12 @@ func TestAgentHardeningValidation(t *testing.T) {
 		"above 1024":      func(a *config.Agent) { a.CPUPerInstance = 1024.5 },
 		"NaN cpu":         func(a *config.Agent) { a.CPUPerInstance = math.NaN() },
 		"tiny cpu":        func(a *config.Agent) { a.CPUPerInstance = 0.001 },
+		"pool empty":      func(a *config.Agent) { a.InstanceNetworkPool = "" },
+		"pool ipv6":       func(a *config.Agent) { a.InstanceNetworkPool = "fd00::/48" },
+		"pool host bits":  func(a *config.Agent) { a.InstanceNetworkPool = "10.213.0.1/16" },
+		"pool too small":  func(a *config.Agent) { a.InstanceNetworkPool = "10.213.0.0/25" },
+		"pool too large":  func(a *config.Agent) { a.InstanceNetworkPool = "10.0.0.0/7" },
+		"pool garbage":    func(a *config.Agent) { a.InstanceNetworkPool = "private" },
 	}
 	for name, mod := range cases {
 		a := validProdAgent()
