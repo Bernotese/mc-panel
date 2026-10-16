@@ -12,6 +12,34 @@ RuntimeDirectoryMode=0750
 ExecStart=/usr/local/bin/agent -config /etc/mc-panel/agent.toml
 Restart=on-failure
 RestartSec=2
+# Sandbox (SEC-12). The agent stays root for Docker (/run/docker.sock, root-equivalent anyway)
+# and nftables (netlink, CAP_NET_ADMIN); it creates and chowns the data directories below
+# instances_dir (CAP_CHOWN, CAP_FOWNER), reads the player lists in them (CAP_DAC_READ_SEARCH)
+# and writes the router config there (CAP_DAC_OVERRIDE). It opens no TCP or UDP socket.
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_NET_ADMIN
+ProtectSystem=strict
+ReadWritePaths={{INSTANCES_DIR}}
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+IPAddressDeny=any
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=multi-user.target
