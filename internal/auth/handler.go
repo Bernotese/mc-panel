@@ -71,6 +71,8 @@ type Handler struct {
 	// recoveryKey is the HMAC key for recovery codes (derived from the secretbox key).
 	recoveryKey []byte
 	twoFA       *twoFALocks
+	// failedNotes deduplicates auth.2fa_failed notifications per user and IP key.
+	failedNotes *noteDedup
 
 	// afterStageDecision is a test seam (nil in production): it runs in the login flow after the
 	// session stage was decided and before the session row is inserted.
@@ -97,10 +99,13 @@ func New(d Deps) (*Handler, error) {
 		return nil, fmt.Errorf("auth: webauthn: %w", err)
 	}
 	q := store.New(d.DB)
+	sessions := NewSessions(q, d.Clock, d.Config.Session)
+	sessions.adminNet = d.Guard.CheckAdminNetwork
 	return &Handler{
 		db: d.DB, q: q, cfg: d.Config, clock: d.Clock, box: d.Box, guard: d.Guard, geo: d.Geo,
-		audit: d.Audit, notifier: d.Notifier, sessions: NewSessions(q, d.Clock, d.Config.Session), wa: wa,
+		audit: d.Audit, notifier: d.Notifier, sessions: sessions, wa: wa,
 		recoveryKey: d.Box.DeriveKey(recoveryKeyPurpose), twoFA: newTwoFALocks(),
+		failedNotes: newNoteDedup(failedSecondFactorNoteWindow),
 	}, nil
 }
 
@@ -275,6 +280,9 @@ func (h *Handler) recordAttempt(r *http.Request, username string, userID int64, 
 	}
 	if userID > 0 && isSecondFactorStage(stage) {
 		h.noteSecondFactor(r.Context(), username, userID, success)
+	}
+	if userID > 0 && !success && isLoginSecondFactorStage(stage) {
+		h.notifySecondFactorFailed(r.Context(), username, userID)
 	}
 }
 

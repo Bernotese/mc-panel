@@ -1,7 +1,7 @@
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { loginAs, MOCK_TOTP_CODE, MOCK_TOTP_SECRET } from '@/mocks/db'
+import { loginAs, MOCK_PASSWORD, MOCK_TOTP_CODE, MOCK_TOTP_SECRET } from '@/mocks/db'
 import { renderWithProviders } from '@/test/render'
 import { TotpSetupCard } from './totp-setup-card'
 
@@ -19,6 +19,15 @@ describe('TotpSetupCard', () => {
     const input = screen.getByLabelText('Code aus der Authenticator-App')
     await user.type(input, '000000')
     await user.click(screen.getByRole('button', { name: 'Aktivieren' }))
+    // the first second factor needs the current password (SEC-15)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Bitte gib dein aktuelles Passwort ein.')
+    const password = screen.getByLabelText('Aktuelles Passwort')
+    await user.type(password, 'not the password')
+    await user.click(screen.getByRole('button', { name: 'Aktivieren' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Das Passwort ist falsch.')
+    await user.clear(password)
+    await user.type(password, MOCK_PASSWORD)
+    await user.click(screen.getByRole('button', { name: 'Aktivieren' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Der Code ist ungültig.')
 
     await user.clear(input)
@@ -26,6 +35,14 @@ describe('TotpSetupCard', () => {
     await user.click(screen.getByRole('button', { name: 'Aktivieren' }))
     await vi.waitFor(() => expect(onEnabled).toHaveBeenCalledTimes(1))
     expect(onEnabled.mock.calls[0][0]).toHaveLength(10)
+  })
+
+  it('asks for no password when a second factor already exists', async () => {
+    const user = userEvent.setup()
+    await renderWithProviders(<TotpSetupCard onEnabled={() => undefined} />, { me: loginAs('admin', { stage: 'full', sudo: true }) })
+    await user.click(screen.getByRole('button', { name: 'Einrichtung starten' }))
+    await screen.findByRole('alert')
+    expect(screen.queryByLabelText('Aktuelles Passwort')).not.toBeInTheDocument()
   })
 
   it('shows the 409 conflict when TOTP is already enabled', async () => {

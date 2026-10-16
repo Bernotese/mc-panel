@@ -9,6 +9,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/defense"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
@@ -114,6 +115,8 @@ func (h *Handler) verifyRecovery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.auditLog(ctx, user.ID, user.Username, audit.ActionRecoveryUsed, user.Username, audit.ResultSuccess, nil)
+	h.notifySecurity(ctx, notify.EventRecoveryCodeUsed, "Recovery code used",
+		user.Username+" signed in with a recovery code"+h.fromWhere(ctx)+".", user.Username)
 	h.completeSecondFactor(w, r, p, user, defense.StageRecovery, "recovery")
 }
 

@@ -41,6 +41,16 @@ const (
 	AgentStatusTimeout     = 2 * time.Second
 )
 
+// Login DoS resistance (SEC-09).
+const (
+	// IPv6 failures are also counted per /56 and /48 within FailureWindow: an attacker with a
+	// whole prefix rotates /64s, each of which stays below FailureThreshold.
+	Net56FailureThreshold = 20
+	Net48FailureThreshold = 50
+	// KnownDeviceWindow: an ip_key with a full login of the user this recent is a known device.
+	KnownDeviceWindow = 30 * 24 * time.Hour
+)
+
 // Deps are the collaborators of the defense service. Agent may be nil
 // (firewall sync is then disabled and the agent is reported unreachable).
 type Deps struct {

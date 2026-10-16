@@ -19,6 +19,13 @@ func isUnavailable(err error) bool {
 		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }
 
+// appOnly reports a /56 or /48 jail: they apply to logins in the app only and are never sent
+// to the agent (SEC-09).
+func appOnly(j store.Jail) bool {
+	p, err := netip.ParsePrefix(j.IpKey)
+	return err == nil && isAggregateKey(p)
+}
+
 // maskedByAllow reports whether an active allow rule overlaps the jail's key.
 // Such jails are enforced in the app only, never in the firewall.
 func (s *Service) maskedByAllow(j store.Jail, now time.Time) bool {
@@ -83,7 +90,7 @@ func (s *Service) syncBans(ctx context.Context, now time.Time) error {
 		return fmt.Errorf("defense: jails to ban: %w", err)
 	}
 	for _, j := range jails {
-		if s.isUnbannable(j.ID) || s.maskedByAllow(j, now) {
+		if s.isUnbannable(j.ID) || s.maskedByAllow(j, now) || appOnly(j) {
 			continue
 		}
 		ok, err := s.banJail(ctx, j, now)
@@ -161,7 +168,7 @@ func (s *Service) reconcile(ctx context.Context, now time.Time) error {
 	}
 	for _, j := range jails {
 		p, err := netip.ParsePrefix(j.IpKey)
-		if err != nil || s.isUnbannable(j.ID) {
+		if err != nil || s.isUnbannable(j.ID) || isAggregateKey(p) {
 			continue
 		}
 		if s.maskedByAllow(j, now) {

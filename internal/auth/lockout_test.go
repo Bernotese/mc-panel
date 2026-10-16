@@ -95,3 +95,25 @@ func TestSecondFactorSuccessResetsCounter(t *testing.T) {
 		t.Fatalf("after 10 sudo failures = %d, want 429", code)
 	}
 }
+
+// Spec §7.2: changing the password lifts the user's second-factor lockout.
+func TestPasswordChangeLiftsSecondFactorLockout(t *testing.T) {
+	e := newTestEnv(t)
+	c, _, secret := e.fullClient("alice", "user", "203.0.113.10")
+	for i := 0; i < 10; i++ {
+		_ = c.do(http.MethodPost, "/api/auth/sudo/totp", map[string]string{"code": "000000"})
+	}
+	e.clock.Advance(30 * time.Second)
+	if res := c.do(http.MethodPost, "/api/auth/sudo/totp", map[string]string{"code": e.code(secret)}); res.code != http.StatusTooManyRequests {
+		t.Fatalf("locked: got %d %s", res.code, res.body)
+	}
+	if res := c.do(http.MethodPost, "/api/me/password", map[string]string{
+		"current_password": testPassword, "new_password": "a brand new passphrase",
+	}); res.code != http.StatusNoContent {
+		t.Fatalf("change password = %d %s", res.code, res.body)
+	}
+	e.clock.Advance(30 * time.Second)
+	if res := c.do(http.MethodPost, "/api/auth/sudo/totp", map[string]string{"code": e.code(secret)}); res.code != http.StatusOK {
+		t.Fatalf("after password change = %d %s, want 200", res.code, res.body)
+	}
+}

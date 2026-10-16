@@ -126,6 +126,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		return nil, fmt.Errorf("auth: %w", err)
 	}
 	usersH := users.NewHandler(db, d.Clock, auditRec, disp)
+	usersH.OnPasswordSet(authH.ResetSecondFactorLockout)
 	// The files handler is one of the servers handler's data gates: no start while an archive
 	// is extracted into a server (files spec §5.1).
 	filesH := serverfiles.NewHandler(serverfiles.Deps{
@@ -213,8 +214,9 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 
 	run := func(ctx context.Context) {
 		var wg sync.WaitGroup
-		wg.Add(7)
+		wg.Add(8)
 		go func() { defer wg.Done(); disp.Run(ctx) }()
+		go func() { defer wg.Done(); auditH.Run(ctx, auditRec.LastWritten) }()
 		go func() { defer wg.Done(); svc.Run(ctx) }()
 		go func() { defer wg.Done(); serversH.Run(ctx) }()
 		go func() { defer wg.Done(); pluginsH.Run(ctx) }()

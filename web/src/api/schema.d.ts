@@ -237,6 +237,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Activates the pending TOTP secret. The first second factor also needs current_password (401 invalid_credentials without it); further methods need sudo instead. */
         post: operations["enableTotp"];
         delete?: never;
         options?: never;
@@ -269,6 +270,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Starts a passkey registration. The first second factor needs current_password (401 invalid_credentials without it); further methods need sudo instead. */
         post: operations["beginPasskeyRegistration"];
         delete?: never;
         options?: never;
@@ -285,6 +287,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Stores the new passkey. The first second factor also needs current_password (401 invalid_credentials without it); further methods need sudo instead. */
         post: operations["finishPasskeyRegistration"];
         delete?: never;
         options?: never;
@@ -1489,6 +1492,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Sends a test notification. A failed delivery is reported without the target's status (400); at most 6 per minute per user (429). */
         post: operations["testNotifier"];
         delete?: never;
         options?: never;
@@ -1572,6 +1576,17 @@ export interface components {
             credential: {
                 [key: string]: unknown;
             };
+            /** @description required for the first second factor */
+            current_password?: string;
+        };
+        PasskeyBeginRequest: {
+            /** @description required for the first second factor */
+            current_password?: string;
+        };
+        TotpEnableRequest: {
+            code: string;
+            /** @description required for the first second factor */
+            current_password?: string;
         };
         SudoResponse: {
             /** Format: int64 */
@@ -3180,7 +3195,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CodeRequest"];
+                "application/json": components["schemas"]["TotpEnableRequest"];
             };
         };
         responses: {
@@ -3232,7 +3247,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PasskeyBeginRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -3273,6 +3292,8 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     listPasskeys: {
@@ -6152,6 +6173,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     getAgentStatus: {

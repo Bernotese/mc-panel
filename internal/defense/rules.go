@@ -67,6 +67,33 @@ func (s *snapshot) jailedUntil(key netip.Prefix, now time.Time) (time.Time, bool
 	return until, true
 }
 
+// aggregateJailedUntil returns the latest expiry of the active /56 and /48 jails covering an
+// IPv6 address (SEC-09).
+func (s *snapshot) aggregateJailedUntil(ip netip.Addr, now time.Time) (time.Time, bool) {
+	ip = normalizeIP(ip)
+	if !ip.Is6() {
+		return time.Time{}, false
+	}
+	var (
+		until  time.Time
+		jailed bool
+	)
+	for _, key := range []netip.Prefix{netPrefix(ip, 56), netPrefix(ip, 48)} {
+		if u, ok := s.jailedUntil(key, now); ok && (!jailed || u.After(until)) {
+			until, jailed = u, true
+		}
+	}
+	return until, jailed
+}
+
+// isAggregateKey reports a /56 or /48 jail (app-level only, never sent to the firewall).
+func isAggregateKey(p netip.Prefix) bool { return p.Addr().Is6() && p.Bits() < 64 }
+
+func netPrefix(ip netip.Addr, bits int) netip.Prefix {
+	p, _ := ip.Prefix(bits)
+	return p
+}
+
 func (s *snapshot) clone() *snapshot {
 	c := &snapshot{
 		allow:    slices.Clone(s.allow),

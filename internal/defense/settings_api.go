@@ -1,11 +1,16 @@
 package defense
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
+	"net/netip"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
 
@@ -102,9 +107,45 @@ func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.s.reloadOrLog(ctx)
-	h.record(ctx, audit.Entry{
-		Action: audit.ActionSettingsUpdate, Target: "security",
-		Details: map[string]any{"before": settingsDetails(before), "after": settingsDetails(st)},
-	})
+	details := map[string]any{"before": settingsDetails(before), "after": settingsDetails(st)}
+	if st.AdminAllowlistOnly {
+		n, err := h.s.revokeOffAllowlistAdminSessions(ctx, now)
+		if err != nil {
+			h.s.log.Error("defense: revoke admin sessions outside the allowlist", "err", err)
+		}
+		details["revoked_admin_sessions"] = n
+	}
+	h.record(ctx, audit.Entry{Action: audit.ActionSettingsUpdate, Target: "security", Details: details})
 	httpx.WriteJSON(w, http.StatusOK, h.toSettingsResponse(st))
+}
+
+// revokeOffAllowlistAdminSessions revokes the admin sessions that were created from an address
+// outside the admin allowlist (SEC-16), except the caller's own session. Requests are refused
+// per request anyway (auth middleware); revoking also ends such sessions for good and closes
+// their console streams.
+func (s *Service) revokeOffAllowlistAdminSessions(ctx context.Context, now time.Time) (int, error) {
+	own := int64(0)
+	if p, ok := principal.From(ctx); ok {
+		own = p.SessionID
+	}
+	sessions, err := s.q.DefenseActiveAdminSessions(ctx, now.UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, sess := range sessions {
+		if sess.ID == own {
+			continue
+		}
+		if ip, err := netip.ParseAddr(sess.Ip); err == nil && s.CheckAdminNetwork(ctx, ip) == nil {
+			continue
+		}
+		if err := s.q.DefenseRevokeSession(ctx, store.DefenseRevokeSessionParams{
+			RevokedAt: sql.NullInt64{Int64: now.UnixMilli(), Valid: true}, ID: sess.ID,
+		}); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }

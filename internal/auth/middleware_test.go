@@ -57,6 +57,58 @@ func TestSessionMiddleware(t *testing.T) {
 	}
 }
 
+// SEC-19: requests marked as background (polling) are served but do not extend the idle
+// timeout; a normal request does.
+func TestSessionMiddlewareBackgroundDoesNotTouch(t *testing.T) {
+	s, _, clk, uid := newTestSessions(t)
+	var ok bool
+	h := s.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, ok = principal.From(r.Context())
+	}))
+	callReq := func(req *http.Request, tok string, background bool) bool {
+		ok = false
+		req.AddCookie(&http.Cookie{Name: CookieName, Value: tok}) //nolint:gosec // G124: request cookie, attributes are response-only
+		if background {
+			req.Header.Set(BackgroundHeader, "1")
+		}
+		h.ServeHTTP(httptest.NewRecorder(), req)
+		return ok
+	}
+	call := func(tok string, background bool) bool {
+		return callReq(httptest.NewRequest(http.MethodGet, "/api/servers", nil), tok, background)
+	}
+
+	polled, _ := mustCreate(t, s, uid, principal.StageFull)
+	active, _ := mustCreate(t, s, uid, principal.StageFull)
+	for range 5 { // 25 minutes of polling only
+		clk.Advance(5 * time.Minute)
+		if !call(polled, true) {
+			t.Fatal("background request within the idle time must be served with the session")
+		}
+	}
+	if !call(active, false) {
+		t.Fatal("normal request within the idle time must be authenticated")
+	}
+	clk.Advance(6 * time.Minute) // 31 minutes after the last real activity of polled
+	if call(polled, true) {
+		t.Fatal("a session kept alive only by background requests must expire after the idle time")
+	}
+	if !call(active, false) {
+		t.Fatal("a normal request must extend the idle time")
+	}
+
+	// the header counts only on GET and HEAD: a POST is always activity
+	posted, _ := mustCreate(t, s, uid, principal.StageFull)
+	clk.Advance(25 * time.Minute)
+	if !callReq(httptest.NewRequest(http.MethodPost, "/api/servers/1/power", nil), posted, true) {
+		t.Fatal("POST within the idle time must be authenticated")
+	}
+	clk.Advance(25 * time.Minute)
+	if !call(posted, true) {
+		t.Fatal("a POST marked as background must still extend the idle time")
+	}
+}
+
 func TestCSRF(t *testing.T) {
 	const origin = "http://localhost:5173"
 	const token = "tok-123"

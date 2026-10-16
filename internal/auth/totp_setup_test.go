@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/notify"
@@ -57,10 +58,10 @@ func TestAdminSetupFlowWithTOTP(t *testing.T) {
 		t.Fatal("pending secret must be stored encrypted with totp_enabled = 0")
 	}
 
-	if res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": wrongCode(e.code(s.Secret))}); res.code != 401 || res.errCode() != "invalid_code" {
+	if res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": wrongCode(e.code(s.Secret)), "current_password": testPassword}); res.code != 401 || res.errCode() != "invalid_code" {
 		t.Fatalf("wrong code = %d %s", res.code, res.body)
 	}
-	res = c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(s.Secret)})
+	res = c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": e.code(s.Secret), "current_password": testPassword})
 	if res.code != 200 {
 		t.Fatalf("enable = %d %s", res.code, res.body)
 	}
@@ -98,7 +99,7 @@ func TestEnableWithoutSetup(t *testing.T) {
 	e.createUser("alice", "user")
 	c := e.newClient("203.0.113.10")
 	c.login("alice", testPassword)
-	if res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": "123456"}); res.code != 409 || res.errCode() != "conflict" {
+	if res := c.do(http.MethodPost, "/api/me/totp/enable", map[string]string{"code": "123456", "current_password": testPassword}); res.code != 409 || res.errCode() != "conflict" {
 		t.Fatalf("enable without setup = %d %s", res.code, res.body)
 	}
 }
@@ -189,5 +190,97 @@ func TestDisableTOTPEnforcedUser(t *testing.T) {
 				t.Fatalf("secret must be removed, got %v %v", enc, err)
 			}
 		})
+	}
+}
+
+// SEC-15: the first second factor needs the current password. A missing or wrong password gets
+// 401 and enrols nothing (a wrong one counts as a failed password attempt); the correct one
+// enrols. Once a factor exists, the sudo path applies instead (TestSecondMethodNeedsSudoInsideOneSession).
+func TestFirstFactorNeedsCurrentPassword(t *testing.T) {
+	type enrol func(e *testEnv, c *client, pw *string) response
+	totpEnrol := func(e *testEnv, c *client, pw *string) response {
+		secret := totpSetupSecret(e.t, c)
+		body := map[string]string{"code": e.code(secret)}
+		if pw != nil {
+			body["current_password"] = *pw
+		}
+		return c.do(http.MethodPost, "/api/me/totp/enable", body)
+	}
+	passkeyEnrol := func(e *testEnv, c *client, pw *string) response {
+		a := newSoftAuthenticator(e.t, e.cfg.RPID(), e.cfg.Origin())
+		var beginBody any // no body at all without a password
+		if pw != nil {
+			beginBody = map[string]string{"current_password": *pw}
+		}
+		begin := c.do(http.MethodPost, "/api/me/passkeys/begin", beginBody)
+		if begin.code != 200 {
+			return begin // refused before the authenticator creates a credential
+		}
+		body := map[string]any{"name": "key", "credential": a.register(begin.body)}
+		if pw != nil {
+			body["current_password"] = *pw
+		}
+		return c.do(http.MethodPost, "/api/me/passkeys/finish", body)
+	}
+	wrong, right := "not the password!", testPassword
+	for name, do := range map[string]enrol{"totp": totpEnrol, "passkey": passkeyEnrol} {
+		t.Run(name, func(t *testing.T) {
+			e := newTestEnv(t)
+			uid := e.createUser("alice", "user")
+			c := e.newClient("203.0.113.10")
+			c.login("alice", testPassword)
+			other := e.newClient("203.0.113.11")
+			other.login("alice", testPassword)
+			hasFactor := func() bool {
+				f, err := e.h.factors(context.Background(), e.q, store.User{ID: uid, TotpEnabled: e.totpEnabled(uid)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return f.has2FA()
+			}
+			if res := do(e, c, nil); res.code != 401 || res.errCode() != "invalid_credentials" || hasFactor() {
+				t.Fatalf("without password = %d %s", res.code, res.body)
+			}
+			if res := do(e, c, &wrong); res.code != 401 || res.errCode() != "invalid_credentials" || hasFactor() {
+				t.Fatalf("wrong password = %d %s", res.code, res.body)
+			}
+			if a := e.guard.last(); a.Success || a.Reason != reasonBadCurrentPassword {
+				t.Fatalf("wrong password must be recorded as a failed attempt: %+v", a)
+			}
+			if res := other.do(http.MethodGet, "/api/auth/me", nil); res.code != 200 {
+				t.Fatalf("a refused enrolment must not end other sessions: %d", res.code)
+			}
+			e.clock.Advance(30 * time.Second)
+			if res := do(e, c, &right); res.code/100 != 2 || !hasFactor() {
+				t.Fatalf("correct password = %d %s", res.code, res.body)
+			}
+		})
+	}
+}
+
+func (e *testEnv) totpEnabled(uid int64) int64 {
+	e.t.Helper()
+	var v int64
+	if err := e.db.QueryRow(`SELECT totp_enabled FROM users WHERE id = ?`, uid).Scan(&v); err != nil {
+		e.t.Fatal(err)
+	}
+	return v
+}
+
+// A passkey begin with the correct password followed by a finish with a wrong one enrols
+// nothing: finish checks the password again (inside the transaction).
+func TestPasskeyFinishChecksPasswordAgain(t *testing.T) {
+	e := newTestEnv(t)
+	e.createUser("alice", "user")
+	c := e.newClient("203.0.113.10")
+	c.login("alice", testPassword)
+	a := newSoftAuthenticator(t, e.cfg.RPID(), e.cfg.Origin())
+	begin := c.do(http.MethodPost, "/api/me/passkeys/begin", map[string]string{"current_password": testPassword})
+	if begin.code != 200 {
+		t.Fatalf("begin = %d %s", begin.code, begin.body)
+	}
+	res := c.do(http.MethodPost, "/api/me/passkeys/finish", map[string]any{"name": "k", "credential": a.register(begin.body)})
+	if res.code != 401 || res.errCode() != "invalid_credentials" {
+		t.Fatalf("finish without password = %d %s", res.code, res.body)
 	}
 }

@@ -5,9 +5,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -83,14 +86,14 @@ func TestNotifyDedup(t *testing.T) {
 	e.d.Notify(ctx, Event{Type: EventNewDeviceLogin, IP: "203.0.113.7/32"})
 	e.clk.Advance(DedupWindow)
 	e.d.Notify(ctx, jailed("203.0.113.7/32"))
-	if n := len(e.d.ch); n != 4 {
+	if n := len(e.d.ch) + len(e.d.ops); n != 4 { // login.new_device uses the operational queue
 		t.Fatalf("queued %d, want 4", n)
 	}
 	e.d.Notify(ctx, Event{Type: EventUserCreated, Username: "a"})
 	e.d.Notify(ctx, Event{Type: EventUserCreated, Username: "b"})
 	e.d.Notify(ctx, Event{Type: EventTest, IP: "x"})
 	e.d.Notify(ctx, Event{Type: EventTest, IP: "x"})
-	if n := len(e.d.ch) + len(e.d.prio); n != 8 { // test events use the reserved queue
+	if n := len(e.d.ch) + len(e.d.ops) + len(e.d.prio); n != 8 { // test events use the reserved queue
 		t.Fatalf("events without IP and test events are never deduplicated, queued %d", n)
 	}
 }
@@ -248,6 +251,9 @@ func TestBlockedDestinations(t *testing.T) {
 		"64:ff9b::7f00:1": true, "64:ff9b::a00:1": true, "64:ff9b:1::1": true,
 		"100.63.255.255": false, "100.128.0.1": false, "198.17.255.255": false, "198.20.0.1": false,
 		"64:ff9b::808:808": true, "203.0.113.7": false, "2001:db8::1": false, "8.8.8.8": false,
+		// SEC-22: 6to4 (here 127.0.0.1), Teredo, site-local and IPv4-compatible addresses
+		"2002:7f00:1::1": true, "2002:cb00:7107::1": true, "2001:0:4136:e378::1": true, "fec0::1": true,
+		"::7f00:1": true, "::a00:1": true, "2001:4860:4860::8888": false, "2003::1": false,
 	} {
 		if got := blockedDestination(netip.MustParseAddr(ip)); got != blocked {
 			t.Errorf("blockedDestination(%s) = %v, want %v", ip, got, blocked)
@@ -270,7 +276,9 @@ func TestCriticalEventsAreNotStarvedByFullQueue(t *testing.T) {
 	}
 	rctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	go e.d.Run(rctx)
+	// one worker: with Run's two workers the two critical events are sent concurrently and
+	// may arrive in either order
+	go e.d.work(rctx, e.d.ch)
 	deadline := time.Now().Add(2 * time.Second)
 	for len(h.requests()) < 3 {
 		if time.Now().After(deadline) {
@@ -278,8 +286,8 @@ func TestCriticalEventsAreNotStarvedByFullQueue(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if first := h.requests()[0]; first.title != "chain" {
-		t.Fatalf("critical events are delivered first, got %q", first.title)
+	if r := h.requests(); r[0].title != "chain" || r[1].title != "test" {
+		t.Fatalf("critical events are delivered first, got %q, %q", r[0].title, r[1].title)
 	}
 }
 
@@ -292,5 +300,152 @@ func TestDedupRecordedOnlyWhenQueued(t *testing.T) {
 	e.d.Notify(ctx, Event{Type: EventJailed, IP: "203.0.113.7/32"}) // must not be suppressed by the dropped one
 	if n := len(e.d.ch); n != 1 {
 		t.Fatalf("event dropped on a full queue must not count for deduplication, queued %d", n)
+	}
+}
+
+// SEC-21: a flood of jails cannot crowd out operational events. Jails are limited to JailBurst
+// per window plus one summary, and server.* has its own queue and worker.
+func TestJailFloodDoesNotDropOperationalEvents(t *testing.T) {
+	e := newDispEnv(t, DispatcherOptions{QueueSize: 3})
+	h := newHookServer(t, http.StatusOK)
+	e.addNotifier(t, KindNtfy, "n", Config{URL: h.srv.URL, Topic: "alerts"}, true)
+	ctx := context.Background()
+	for i := range 500 {
+		e.d.Notify(ctx, Event{Type: EventJailed, Title: "IP jailed", IP: netip.AddrFrom4([4]byte{203, 0, byte(i / 256), byte(i)}).String() + "/32"})
+	}
+	e.d.Notify(ctx, Event{Type: EventServerDown, Title: "server down"})
+	if n := len(e.d.ops); n != 1 {
+		t.Fatalf("operational queue holds %d events, want 1", n)
+	}
+	rctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go e.d.Run(rctx)
+	deadline := time.Now().Add(2 * time.Second)
+	for !slicesContainsTitle(h.requests(), "server down") {
+		if time.Now().After(deadline) {
+			t.Fatal("server.down was not delivered")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func slicesContainsTitle(reqs []capturedReq, title string) bool {
+	for _, r := range reqs {
+		if r.title == title {
+			return true
+		}
+	}
+	return false
+}
+
+func TestJailAggregation(t *testing.T) {
+	e := newDispEnv(t, DispatcherOptions{QueueSize: 1000})
+	ctx := context.Background()
+	jail := func(i int) {
+		e.d.Notify(ctx, Event{Type: EventJailed, IP: netip.AddrFrom4([4]byte{198, 51, byte(i / 256), byte(i)}).String() + "/32"})
+	}
+	for i := range 500 {
+		jail(i)
+	}
+	if n := len(e.d.ch); n != JailBurst {
+		t.Fatalf("queued %d jail events, want %d", n, JailBurst)
+	}
+	e.d.flushJailSummary() // window not over yet
+	if n := len(e.d.ch); n != JailBurst {
+		t.Fatalf("summary before the window ended: queued %d", n)
+	}
+	e.clk.Advance(JailWindow)
+	e.d.flushJailSummary()
+	if n := len(e.d.ch); n != JailBurst+1 {
+		t.Fatalf("queued %d, want the burst plus one summary", n)
+	}
+	for range JailBurst {
+		<-e.d.ch
+	}
+	if s := <-e.d.ch; !strings.Contains(s.Message, "495 more addresses") {
+		t.Fatalf("summary = %+v", s)
+	}
+	e.d.flushJailSummary()
+	if n := len(e.d.ch); n != 0 {
+		t.Fatalf("a second summary without new jails: queued %d", n)
+	}
+	jail(1000) // a new window starts after the summary
+	if n := len(e.d.ch); n != 1 {
+		t.Fatalf("jail after the summary: queued %d, want 1", n)
+	}
+}
+
+func TestDeliverHonoursRetryAfter(t *testing.T) {
+	e := newDispEnv(t, DispatcherOptions{})
+	var waits []time.Duration
+	e.d.sleep = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		switch calls.Add(1) {
+		case 1:
+			w.Header().Set("Retry-After", "2.5")
+			w.WriteHeader(http.StatusTooManyRequests)
+		case 2:
+			w.Header().Set("Retry-After", "600")
+			w.WriteHeader(http.StatusTooManyRequests)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	e.addNotifier(t, KindDiscord, "d", Config{URL: srv.URL + "/api/webhooks/1/tok"}, true)
+	e.d.deliver(context.Background(), Event{Type: EventServerDown})
+	if calls.Load() != 3 || len(waits) != 2 || waits[0] != 2500*time.Millisecond || waits[1] != MaxRetryAfter {
+		t.Fatalf("calls = %d, waits = %v; want Retry-After 2.5s, then capped at %s", calls.Load(), waits, MaxRetryAfter)
+	}
+}
+
+func TestLocalAddrs(t *testing.T) {
+	clk := clock.NewFake(dT0)
+	calls := 0
+	var fail bool
+	list := func() ([]net.Addr, error) {
+		calls++
+		if fail {
+			return nil, errors.New("no interfaces")
+		}
+		return []net.Addr{
+			&net.IPNet{IP: net.ParseIP("203.0.113.5"), Mask: net.CIDRMask(24, 32)},
+			&net.IPNet{IP: net.ParseIP("2001:db8::5"), Mask: net.CIDRMask(64, 128)},
+		}, nil
+	}
+	l := newLocalAddrs(clk, list)
+	for ip, local := range map[string]bool{
+		"203.0.113.5": true, "::ffff:203.0.113.5": true, "2001:db8::5": true, "203.0.113.6": false, "2001:db8::6": false,
+	} {
+		if got := l.contains(netip.MustParseAddr(ip)); got != local {
+			t.Errorf("contains(%s) = %v, want %v", ip, got, local)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("interfaces listed %d times, want 1 (cached)", calls)
+	}
+	fail = true
+	clk.Advance(localAddrsTTL)
+	if !l.contains(netip.MustParseAddr("8.8.8.8")) {
+		t.Fatal("without an interface list every address must count as local (fail closed)")
+	}
+	fail = false
+	if l.contains(netip.MustParseAddr("8.8.8.8")) || calls != 3 {
+		t.Fatalf("after a failed listing the next call must list again (calls = %d)", calls)
+	}
+}
+
+// Account events are deduplicated per user: two users from one address both notify.
+func TestNotifyDedupAuthEventsPerUser(t *testing.T) {
+	e := newDispEnv(t, DispatcherOptions{QueueSize: 20})
+	ctx := context.Background()
+	for _, typ := range []EventType{EventPasswordChanged, EventUserCreated, EventUserDeleted, EventPermissionsChanged, EventNewDeviceLogin} {
+		for _, u := range []string{"alice", "bob", "alice"} {
+			e.d.Notify(ctx, Event{Type: typ, IP: "203.0.113.7", Username: u})
+		}
+	}
+	if n := len(e.d.ch) + len(e.d.ops); n != 10 {
+		t.Fatalf("queued %d, want 10 (one per type and user)", n)
 	}
 }

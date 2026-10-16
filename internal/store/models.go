@@ -109,6 +109,8 @@ type LoginAttempt struct {
 	Reason    string
 	UserAgent string
 	Country   string
+	Net56     string
+	Net48     string
 }
 
 type Metrics1h struct {
@@ -238,6 +240,11 @@ type User struct {
 	PasswordChangedAt int64
 	CreatedAt         int64
 	UpdatedAt         int64
+}
+
+type UserID struct {
+	ID     int64
+	LastID int64
 }
 
 type WebauthnCredential struct {
