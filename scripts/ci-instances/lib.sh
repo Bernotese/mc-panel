@@ -640,7 +640,8 @@ echo "OK: files service runs restic $(python3 -I -c 'import json, sys; print(jso
 }
 
 # setup_panel_server: the panel in production mode as mcpanel on TCP, the admin ci-admin signed
-# in with TOTP and sudo, and the Paper server ciplugins ($psrv) running with RCON ready.
+# in with TOTP and sudo, and the Paper server ciplugins ($psrv) running with RCON ready. With
+# mon_boot_margin set, down_after_min is 60 while the server boots (the monitoring shards).
 setup_panel_server() {
 echo "== panel (production mode, user mcpanel) on the agent and the files service"
 install -m 0755 "$panel_bin" "$work/bin/panel"
@@ -697,6 +698,16 @@ papi GET /auth/me "$po/me.json"
 jcheck "$po/me.json" "session after TOTP setup and sudo" 'd["stage"] == "full" and d["totp_enabled"] and d["sudo_until"] > 0'
 pcsrf="$(jget "$po/me.json" 'd["csrf_token"]')"
 echo "OK: signed in as ci-admin with TOTP, sudo active"
+
+if [ -n "${mon_boot_margin:-}" ]; then
+  # The monitoring shards later assert that no server alert fired. The start grace (5 min) and
+  # down_after_min are scaled, so a first Paper boot slower than both together (30 s + 18 s at
+  # factor 10; a cold runner takes about 60 s) would already raise server.down. Until the server
+  # is up, down_after_min is the maximum (60 alert minutes); mon_notifier lowers it to 1.
+  install -d -m 0755 "$mo"
+  mon_settings '{"disk_min_percent": 1, "disk_min_bytes": 1073741824, "down_after_min": 60, "crash_restarts": 3, "crash_window_min": 120}'
+  echo "OK: down_after_min 60 while the server boots"
+fi
 
 echo "== panel: Paper server created and started through the panel"
 papi PUT /servers/settings "$po/settings.json" '{"base_domain": "mc.localhost"}'
