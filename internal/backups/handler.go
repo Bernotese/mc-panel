@@ -25,6 +25,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/timescale"
 )
 
 type Deps struct {
@@ -112,7 +113,7 @@ func NewHandler(d Deps) *Handler {
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, notifier: n, files: d.Files, inst: d.Instances,
 		console: con, reconcile: rf, log: log, queue: newQueue(d.Clock), alerts: newAlerts(), downloads: newUserSlots(maxDownloadsPerUser),
 		manual:    newCooldowns(),
-		tickEvery: tickEvery, pollEvery: pollEvery, rconTimeout: rconTimeout, stopTimeout: stopTimeout,
+		tickEvery: timescale.D(tickEvery), pollEvery: pollEvery, rconTimeout: rconTimeout, stopTimeout: stopTimeout,
 		shutdownWait: shutdownWait, ioTimeout: ioTimeout, ioClock: clock.Real{},
 	}
 	h.maxBackup = d.MaxDuration

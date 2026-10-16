@@ -27,6 +27,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/password"
 	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/timescale"
 	"github.com/Bernotese/mc-panel/internal/unixsock"
 	"github.com/Bernotese/mc-panel/internal/users"
 )
@@ -266,6 +267,12 @@ func serve(args []string) error {
 		return fmt.Errorf("unexpected arguments: %v", rest)
 	}
 	setupLogging(cfg.Dev)
+	if err := timescale.Err(); err != nil {
+		return err
+	}
+	if f := timescale.Factor(); f > 1 {
+		slog.Warn("acceptance build: background waits shortened", "time_scale", f)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
