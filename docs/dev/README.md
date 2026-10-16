@@ -51,7 +51,7 @@ Other CLI commands (they act directly on the database; the panel may be running 
 |---|---|
 | `.dev/bin/panel admin unlock -dev` | Emergency exit after a lockout: lifts all active jails, turns off "Admin access only from the allowlist" and clears the country filter (audited) |
 | `.dev/bin/panel admin list -dev` | Lists the admins; opens the database read-only (no migration, no new files) and prints nothing if there is no database yet |
-| `.dev/bin/panel audit verify -dev` | Checks the hash chain of the audit log and reports the first broken entry (exit code 1) |
+| `.dev/bin/panel audit verify -dev [-journal file\|-]` | Checks the hash chain of the audit log and reports the first broken entry (exit code 1); with `-journal` (output of `journalctl -u mcpanel-panel -o cat`) it also compares every entry with its journal anchor. Entries that match only a later anchor (restored or rolled back database, or forged anchors) exit with 3: re-run with the journal since the restore (`--since`) |
 
 Without `-dev`, all commands read `/etc/mc-panel/panel.toml` (or `-config <path>`).
 
