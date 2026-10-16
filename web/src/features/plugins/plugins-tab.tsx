@@ -240,7 +240,7 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
           open
           onOpenChange={(open) => (open ? undefined : setRemoving(null))}
           title={t('plugins.installed.remove_title', { name: visibleName(jarName(removing)) })}
-          description={t('plugins.installed.remove_description', { file: removing.file, dir })}
+          description={t('plugins.installed.remove_description', { file: visibleName(removing.file), dir })}
           confirmLabel={t('plugins.installed.remove_submit')}
           destructive
           pending={remove.isPending || busy}

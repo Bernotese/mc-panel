@@ -80,17 +80,27 @@ function devCsp(nonce: string): Plugin {
 /**
  * sonner 2 inserts its stylesheet as an inline <style> without a nonce when the module loads. main.tsx imports
  * the same stylesheet from sonner/dist/styles.css instead, so this turns the insertion into a no-op. Fails the
- * build if sonner changes the function, rather than shipping a CSP violation.
+ * build if sonner changes the function or its file, rather than shipping a CSP violation.
  */
 function sonnerStaticStyles(): Plugin {
   const fn = 'function __insertCSS(code) {'
+  let build = false
+  let patched = false
   return {
     name: 'mcpanel-sonner-static-styles',
     enforce: 'pre',
+    configResolved(config) {
+      build = config.command === 'build'
+    },
+    // In a build, sonner is always bundled (main.tsx imports it); if no module matched, its dist file moved.
+    buildEnd(error) {
+      if (build && !error && !patched) this.error('sonner was bundled without the style-injection patch; check its dist file name')
+    },
     transform(code, id) {
       // The dev server imports it with a ?v=<hash> query.
       if (!/[\\/]node_modules[\\/]sonner[\\/]dist[\\/]index\.m?js(\?|$)/.test(id)) return null
       if (!code.includes(fn)) this.error(`sonner no longer defines "${fn}"; check how it injects its styles (CSP style-src)`)
+      patched = true
       return { code: code.replace(fn, `${fn} return;`), map: null }
     },
   }

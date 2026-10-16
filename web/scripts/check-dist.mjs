@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const TEXT = /\.(?:html|js|mjs|css|json|txt|svg)$/
-const MARKERS = [/sourceMappingURL=/, /setupWorker/, /mockServiceWorker/, /\bmsw\b/]
+const MARKERS = [/sourceMappingURL=/, /setupWorker/, /mockServiceWorker/, /msw\//]
 
 /** Lists the problems in dir; an empty list means the build is clean. */
 export function findDevArtifacts(dir) {
