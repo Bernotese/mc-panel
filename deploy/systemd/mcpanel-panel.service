@@ -13,10 +13,41 @@ StateDirectoryMode=0700
 ExecStart=/usr/local/bin/panel serve -config /etc/mc-panel/panel.toml
 Restart=on-failure
 RestartSec=2
+# Sandbox (SEC-12). The panel writes only its StateDirectory, talks to the agent and the files
+# service over Unix sockets and to upstreams and notifiers over TCP; the notifier client lists
+# the host's own addresses (net.InterfaceAddrs, netlink) to refuse them, and fails closed
+# without them. Not ProcSubset=pid: the host values come from /proc/meminfo and /proc/stat.
 NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# Link-local addresses (cloud metadata services) are never an upstream or a notifier.
+IPAddressDeny=169.254.0.0/16 fe80::/10
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+# Go raises its file limit at start (setrlimit, in @resources): refused, not killed.
+SystemCallErrorNumber=EPERM
+UMask=0077
+MemoryMax=1G
+TasksMax=512
 
 [Install]
 WantedBy=multi-user.target

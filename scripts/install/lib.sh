@@ -422,6 +422,7 @@ _sys() {
   "$@"
 }
 sys_apt() { _sys env DEBIAN_FRONTEND=noninteractive apt-get -y -q "$@"; }
+sys_apt_mark() { _sys apt-mark "$@"; }
 sys_systemctl() { _sys systemctl "$@"; }
 sys_useradd() { _sys useradd "$@"; }
 sys_userdel() { _sys userdel "$@"; }
@@ -429,6 +430,7 @@ sys_nft() { _sys nft "$@"; }
 sys_docker() { _sys docker "$@"; }
 sys_caddy() { _sys caddy "$@"; }
 sys_chown() { _sys chown "$@"; }
+sys_install() { _sys install "$@"; }
 sys_runuser() {
   local user="$1"
   shift
