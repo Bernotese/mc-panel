@@ -62,6 +62,7 @@ ops_doctor_healthy() {
   doc_probe_free_percent() { echo 40; }
   doc_probe_sshd() { printf 'port 22\npasswordauthentication no\npermitrootlogin prohibit-password\nkbdinteractiveauthentication no\nusepam yes\n'; }
   mkdir -p "$ROOT$ETC_PANEL" "$ROOT$ETC_FILES" "$ROOT$INSTANCES_DIR/backups/keys" "$ROOT$CADDY_DIR"
+  printf 'nameserver 127.0.0.53\noptions edns0 trust-ad\n' >"$ROOT/etc/resolv.conf"
   printf '%s\n' 'listen = "unix:/run/mc-panel-web/panel.sock"' 'public_url = "https://panel.example.com"' \
     'data_dir = "/var/lib/mc-panel"' 'agent_socket = "/run/mc-panel/agent.sock"' \
     'files_socket = "/run/mc-panel-files/files.sock"' 'trusted_proxies = ["127.0.0.1/32", "::1/128"]' \
@@ -106,7 +107,7 @@ test_ops_doctor_healthy_system_is_ok() {
   local out
   out="$(cat "$WORK/out")"
   assert_contains "$out" "✓ all mc-panel services are running"
-  assert_contains "$out" "29 checks: 0 failed, 0 warnings"
+  assert_contains "$out" "30 checks: 0 failed, 0 warnings"
   assert_not_contains "$out" "✗"
   assert_not_called 'systemctl'
 }
@@ -401,7 +402,7 @@ test_ops_doctor_json_is_valid_and_complete() {
   local id
   for id in services sockets files_process versions update_available update_state config permissions \
     caddy_config caddy_import caddy_package caddy_admin certificate dns firewall docker docker_version \
-    docker_live_restore restic tzdata time_sync upgrades reboot_required storage_fs storage_free \
+    docker_live_restore docker_dns restic tzdata time_sync upgrades reboot_required storage_fs storage_free \
     backup_keys ssh_password ssh_root ssh_kbdinteractive; do
     assert_contains "$out" "\"id\":\"$id\""
   done
@@ -410,7 +411,7 @@ test_ops_doctor_json_is_valid_and_complete() {
 import json, sys
 d = json.load(sys.stdin)
 assert d["status"] == "warn"
-assert len(d["checks"]) == 29
+assert len(d["checks"]) == 30
 for c in d["checks"]:
     assert set(c) == {"id", "status", "message", "hint"}, c
     assert c["status"] in ("ok", "warn", "fail"), c
@@ -461,4 +462,55 @@ test_ops_doctor_ssh_ports_come_from_the_firewall_logic() {
   fw_config_ports() { printf '22\n2222\n'; }
   assert_exit 2 cmd_doctor
   assert_contains "$(cat "$WORK/out")" "SSH port 2222"
+}
+
+test_ops_doctor_ip_in_cidr() {
+  doc_ip_in_cidr 192.168.1.1 192.168.0.0/16 || fail "192.168.1.1"
+  doc_ip_in_cidr 10.255.255.1 10.0.0.0/8 || fail "10.255.255.1"
+  doc_ip_in_cidr 100.100.1.1 100.64.0.0/10 || fail "100.100.1.1"
+  doc_ip_in_cidr 1.1.1.1 0.0.0.0/0 || fail "/0"
+  if doc_ip_in_cidr 172.32.0.1 172.16.0.0/12; then fail "172.32.0.1 is outside 172.16/12"; fi
+  if doc_ip_in_cidr 8.8.8.8 10.0.0.0/8; then fail "8.8.8.8"; fi
+  doc_ip_in_cidr fd00::1 fc00::/7 || fail "fd00::1"
+  doc_ip_in_cidr fe80::1%eth0 fe80::/10 || fail "fe80::1"
+  if doc_ip_in_cidr 2001:4860:4860::8888 fc00::/7; then fail "2001:4860:4860::8888"; fi
+  if doc_ip_in_cidr fec0::1 fe80::/10; then fail "fec0::1 is outside fe80::/10"; fi
+  if doc_ip_in_cidr 1.2.3.4 fc00::/7; then fail "IPv4 against IPv6"; fi
+  assert_eq 20010db8000000000000000000000001 "$(doc_ip6_hex 2001:db8::1)"
+}
+
+test_ops_doctor_docker_dns_private_resolver_without_stub_warns() {
+  ops_doctor_healthy
+  printf 'nameserver 192.168.1.1\n' >"$ROOT/etc/resolv.conf"
+  assert_exit 1 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "! container DNS would be blocked by the egress filter: 192.168.1.1 (/etc/resolv.conf, in 192.168.0.0/16)"
+  assert_contains "$(cat "$WORK/out")" "-> use the systemd-resolved stub"
+  # the stub forwards from the host's namespace, whatever its upstream is
+  printf 'nameserver 127.0.0.53\nnameserver 192.168.1.1\n' >"$ROOT/etc/resolv.conf"
+  assert_exit 0 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "✓ container DNS is not blocked by the egress filter"
+}
+
+test_ops_doctor_docker_dns_daemon_json() {
+  ops_doctor_healthy
+  mkdir -p "$ROOT/etc/docker"
+  printf '{\n  "dns": ["9.9.9.9", "fd12::53"],\n  "live-restore": true\n}\n' >"$ROOT/etc/docker/daemon.json"
+  assert_exit 1 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "blocked by the egress filter: fd12::53 (/etc/docker/daemon.json, in fc00::/7)"
+  assert_not_contains "$(cat "$WORK/out")" "9.9.9.9"
+}
+
+test_ops_doctor_docker_dns_follows_container_egress_deny() {
+  ops_doctor_healthy
+  printf 'nameserver 192.168.1.1\n' >"$ROOT/etc/resolv.conf"
+  printf 'container_egress_deny = [\n  "169.254.0.0/16", # metadata\n  "10.0.0.0/8",\n]\n[images]\n' >>"$ROOT$ETC_PANEL/agent.toml"
+  assert_eq "169.254.0.0/16 10.0.0.0/8" "$(doc_egress_deny | xargs)"
+  assert_exit 0 cmd_doctor
+  printf 'nameserver 10.0.0.2\n' >"$ROOT/etc/resolv.conf"
+  assert_exit 1 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "10.0.0.2 (/etc/resolv.conf, in 10.0.0.0/8)"
+  sed -i 's/^container_egress_deny = \[$/container_egress_deny = []/; /^  "/d; /^]$/d' "$ROOT$ETC_PANEL/agent.toml"
+  assert_eq "" "$(doc_egress_deny)"
+  assert_exit 0 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "the egress filter is off"
 }
