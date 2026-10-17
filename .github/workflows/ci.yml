@@ -88,10 +88,10 @@ jobs:
           }
           gomod='^go\.(mod|sum)$'
           out go "^(cmd|internal|api|deploy)/|${gomod}|^sqlc\.yaml$|^\.golangci\.yml$|^Makefile$|^scripts/install-(restic|golangci-lint)\.sh$"
-          out web '^web/|^api/'
+          out web '^web/|^api/|^\.node-version$'
           out preview '^web/Dockerfile\.preview$|^compose\.preview\.yaml$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$'
-          out openapi '^api/|^tools/redocly/'
-          out e2e "^(cmd|internal|api|web)/|${gomod}"
+          out openapi '^api/|^tools/redocly/|^\.node-version$'
+          out e2e "^(cmd|internal|api|web)/|^scripts/vm-test\.sh$|^\.node-version$|${gomod}"
           out nftables "^internal/(agent|defense|auth)/|^cmd/(agent|panel)/|^scripts/ci-acceptance\.sh$|${gomod}" root
           # Instance acceptance shards (scripts/ci-instances/<shard>.sh), each a matrix entry of
           # the job instances. Shared code runs every shard: cmd/, go.mod/sum, the dispatcher and
@@ -119,11 +119,11 @@ jobs:
           if [ "${json}" = '[]' ]; then instances=false; fi
           echo "instances=${instances}" >> "${GITHUB_OUTPUT}"
           echo "instances=${instances}"
-          out release "^cmd/|^internal/(webui|timescale)/|^deploy/|^scripts/install/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
+          out release "^cmd/|^internal/(webui|timescale)/|^deploy/|^scripts/install/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|^\.node-version$|${gomod}"
           # The installer jobs share one filter: the lint on every run; the lifecycle (root, not on
           # pushes to main) also on any internal/ change, since it runs the real panel, agent and
           # files service (like instances).
-          installer="^scripts/install/|^deploy/|^scripts/(ci-installer|install-restic|testvm-deploy|sign-release|verify-release-build|release-lib)\.sh$|^\.node-version$|^cmd/|^internal/(config|unixsock)/|^\.goreleaser\.yaml$|^Makefile$|${gomod}"
+          installer="^scripts/install/|^deploy/|^scripts/(ci-installer|install-restic|install-golangci-lint|testvm-deploy|sign-release|verify-release-build|release-lib)\.sh$|^\.node-version$|^cmd/|^internal/(config|unixsock)/|^\.goreleaser\.yaml$|^Makefile$|${gomod}"
           out installer "${installer}"
           out installer_root "${installer}|^internal/" root
 
@@ -194,6 +194,17 @@ jobs:
         run: |
           umask 022
           make test-race
+
+      # golangci-lint's analysis cache, like the Go caches of setup-go. A pull request's cache is
+      # scoped to its own ref and never read by main.
+      - name: Cache golangci-lint
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml', 'scripts/install-golangci-lint.sh') }}-${{ github.sha }}
+          restore-keys: |
+            golangci-lint-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml', 'scripts/install-golangci-lint.sh') }}-
+            golangci-lint-${{ runner.os }}-
 
       # The pinned release binary with its SHA-256 (the same script as on the test VM).
       - name: golangci-lint (incl. gosec, gofmt, goimports)
@@ -590,7 +601,7 @@ jobs:
 
       # shellcheck comes with the runner image.
       - name: shellcheck
-        run: shellcheck --version && shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh scripts/ci-installer.sh scripts/testvm-deploy.sh scripts/sign-release.sh scripts/verify-release-build.sh scripts/release-lib.sh
+        run: shellcheck --version && shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh scripts/ci-installer.sh scripts/install-golangci-lint.sh scripts/testvm-deploy.sh scripts/sign-release.sh scripts/verify-release-build.sh scripts/release-lib.sh
 
       - name: Bash tests
         run: bash scripts/install/test.sh
