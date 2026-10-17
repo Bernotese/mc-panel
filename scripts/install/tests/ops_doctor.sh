@@ -63,6 +63,10 @@ ops_doctor_healthy() {
   }
   doc_probe_free_percent() { echo 40; }
   doc_probe_sshd() { printf 'port 22\npasswordauthentication no\npermitrootlogin prohibit-password\nkbdinteractiveauthentication no\nusepam yes\n'; }
+  doc_probe_web_container() { :; } # no web port published
+  doc_probe_web_ports() { :; }
+  doc_probe_web_table() { return 1; }
+  doc_probe_web_catchall() { echo 000; } # TLS handshake fails: no certificate
   mkdir -p "$ROOT$ETC_PANEL" "$ROOT$ETC_FILES" "$ROOT$INSTANCES_DIR/backups/keys" "$ROOT$CADDY_DIR"
   printf 'nameserver 127.0.0.53\noptions edns0 trust-ad\n' >"$ROOT/etc/resolv.conf"
   printf '%s\n' 'listen = "unix:/run/mc-panel-web/panel.sock"' 'public_url = "https://panel.example.com"' \
@@ -70,12 +74,13 @@ ops_doctor_healthy() {
     'files_socket = "/run/mc-panel-files/files.sock"' 'trusted_proxies = ["127.0.0.1/32", "::1/128"]' \
     'monitoring_ping_addr = "127.0.0.1:25565"' 'instances_dir = "/srv/mc-panel"' >"$ROOT$ETC_PANEL/panel.toml"
   printf '%s\n' 'socket = "/run/mc-panel/agent.sock"' 'panel_uid = 998' 'firewall = "nftables"' \
-    'instances_dir = "/srv/mc-panel"' 'mc_user = "mcpanel-mc"' >"$ROOT$ETC_PANEL/agent.toml"
+    'instances_dir = "/srv/mc-panel"' 'mc_user = "mcpanel-mc"' 'web_proxy_port = 18100' 'web_ask_port = 18101' >"$ROOT$ETC_PANEL/agent.toml"
   printf '%s\n' 'socket = "/run/mc-panel-files/files.sock"' 'panel_uid = 998' 'instances_dir = "/srv/mc-panel"' \
     'restic_binary = "/usr/bin/restic"' >"$ROOT$ETC_FILES/files.toml"
   printf 'panel.example.com {\n\ttls you@example.com\n}\n' >"$ROOT$CADDY_DIR/mc-panel.caddy"
   printf 'version=1.2.0\nverified=signed\nkey=SHA256:abc\n' >"$ROOT$RELEASE_RECORD"
-  printf '{\n\tadmin unix//run/caddy/admin.sock\n}\n:80 {\n}\nimport mc-panel.caddy # managed by mc-panel\n' >"$ROOT$CADDY_DIR/Caddyfile"
+  printf '{\n\tadmin unix//run/caddy/admin.sock\n\ton_demand_tls {\n\t\task http://127.0.0.1:18101/\n\t}\n}\n:80 {\n}\nimport mc-panel.caddy # managed by mc-panel\nimport mc-panel-web.caddy # managed by mc-panel\n' >"$ROOT$CADDY_DIR/Caddyfile"
+  printf 'https:// {\n\treverse_proxy 127.0.0.1:18100\n}\n' >"$ROOT$CADDY_DIR/mc-panel-web.caddy"
 }
 
 test_ops_doctor_required_keys_match_install() {
@@ -110,7 +115,7 @@ test_ops_doctor_healthy_system_is_ok() {
   local out
   out="$(cat "$WORK/out")"
   assert_contains "$out" "✓ all mc-panel services are running"
-  assert_contains "$out" "32 checks: 0 failed, 0 warnings"
+  assert_contains "$out" "34 checks: 0 failed, 0 warnings"
   assert_not_contains "$out" "✗"
   assert_not_called 'systemctl'
 }
@@ -404,6 +409,7 @@ test_ops_doctor_without_root_skips_root_checks() {
   assert_contains "$out" "! files_process: skipped (needs root)"
   assert_contains "$out" "! ssh_root: skipped (needs root)"
   assert_contains "$out" "! docker_version: skipped (needs root)"
+  assert_contains "$out" "! web_router: skipped (needs root)"
   assert_contains "$out" "✓ all mc-panel services are running"
   assert_not_contains "$out" "✗"
 }
@@ -422,7 +428,7 @@ test_ops_doctor_json_is_valid_and_complete() {
   for id in services sockets files_process versions update_available release_signature update_state config permissions \
     caddy_config caddy_import caddy_package caddy_admin certificate dns firewall docker docker_version \
     docker_live_restore docker_isolation docker_dns restic tzdata time_sync upgrades reboot_required storage_fs storage_free \
-    backup_keys ssh_password ssh_root ssh_kbdinteractive; do
+    backup_keys ssh_password ssh_root ssh_kbdinteractive web_router web_catchall; do
     assert_contains "$out" "\"id\":\"$id\""
   done
   if command -v python3 >/dev/null; then
@@ -430,7 +436,7 @@ test_ops_doctor_json_is_valid_and_complete() {
 import json, sys
 d = json.load(sys.stdin)
 assert d["status"] == "warn"
-assert len(d["checks"]) == 32
+assert len(d["checks"]) == 34
 for c in d["checks"]:
     assert set(c) == {"id", "status", "message", "hint"}, c
     assert c["status"] in ("ok", "warn", "fail"), c
@@ -561,4 +567,96 @@ test_ops_doctor_release_signature_needs_root() {
   JSON=1
   cmd_doctor >"$WORK/out" 2>&1 || true
   assert_contains "$(cat "$WORK/out")" '{"id":"release_signature","status":"warn","message":"release_signature: skipped (needs root)"'
+}
+
+# --- web interfaces (web ports spec §5) ------------------------------------------------------
+
+# ops_doctor_web_running: mcpanel-web runs with the agent's label, published on 127.0.0.1 only.
+ops_doctor_web_running() {
+  doc_probe_web_container() { echo 'true 1'; }
+  doc_probe_web_ports() { printf '8080/tcp -> 127.0.0.1:18100\n8081/tcp -> 127.0.0.1:18101\n'; }
+  doc_probe_web_table() { return 0; }
+}
+
+test_ops_doctor_web_router_without_routes_is_ok() {
+  ops_doctor_healthy
+  assert_exit 0 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "✓ no web ports published (no container mcpanel-web)"
+}
+
+test_ops_doctor_web_router_running_is_ok() {
+  ops_doctor_healthy
+  ops_doctor_web_running
+  assert_exit 0 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "✓ mcpanel-web is running, published on 127.0.0.1 only, port restriction in place"
+}
+
+test_ops_doctor_web_router_fails_on_a_public_binding() {
+  ops_doctor_healthy
+  ops_doctor_web_running
+  doc_probe_web_ports() { printf '8080/tcp -> 0.0.0.0:18100\n8080/tcp -> [::]:18100\n8081/tcp -> 127.0.0.1:18101\n'; }
+  assert_exit 2 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "✗ mcpanel-web publishes on 0.0.0.0:18100 [::]:18100 (only 127.0.0.1 is expected)"
+}
+
+test_ops_doctor_web_router_fails_without_the_bridge_table() {
+  ops_doctor_healthy
+  ops_doctor_web_running
+  doc_probe_web_table() { return 1; }
+  assert_exit 2 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "✗ the port restriction of mcpanel-web (table bridge mcpanel_web) is missing"
+}
+
+test_ops_doctor_web_router_fails_when_stopped() {
+  ops_doctor_healthy
+  ops_doctor_web_running
+  doc_probe_web_container() { echo 'false 1'; }
+  doc_probe_web_ports() { :; }
+  assert_exit 2 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "✗ mcpanel-web is not running"
+}
+
+test_ops_doctor_web_router_warns_about_a_foreign_container() {
+  ops_doctor_healthy
+  doc_probe_web_container() { echo 'true '; }
+  doc_probe_web_ports() { printf '80/tcp -> 0.0.0.0:8080\n'; }
+  assert_exit 1 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "! a container mcpanel-web exists that mc-panel did not create"
+}
+
+test_ops_doctor_web_catchall_fails_when_an_unknown_name_gets_200() {
+  ops_doctor_healthy
+  doc_probe_web_catchall() { echo 200; }
+  assert_exit 2 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "✗ Caddy answers an unknown host name with 200"
+}
+
+test_ops_doctor_web_catchall_accepts_other_answers() {
+  ops_doctor_healthy
+  doc_probe_web_catchall() { echo 404; }
+  assert_exit 0 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "✓ unknown host names get no page (HTTP 404; on_demand_tls ask on 127.0.0.1:18101)"
+}
+
+test_ops_doctor_web_catchall_warns_when_not_imported() {
+  ops_doctor_healthy
+  printf '{\n\tadmin unix//run/caddy/admin.sock\n}\nimport mc-panel.caddy # managed by mc-panel\n' >"$ROOT$CADDY_DIR/Caddyfile"
+  doc_probe_web_catchall() { fail "no request without the site"; }
+  assert_exit 1 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "! the web interfaces of the servers are not served: $CADDY_DIR/Caddyfile does not import mc-panel-web.caddy"
+  assert_contains "$(cat "$WORK/out")" "ask http://127.0.0.1:18101/"
+}
+
+test_ops_doctor_web_catchall_fails_without_the_ask() {
+  ops_doctor_healthy
+  printf '{\n\tadmin unix//run/caddy/admin.sock\n}\nimport mc-panel.caddy # managed by mc-panel\nimport mc-panel-web.caddy\n' >"$ROOT$CADDY_DIR/Caddyfile"
+  assert_exit 2 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" "✗ certificates on demand without the ask of mcpanel-web (ask http://127.0.0.1:18101/)"
+  # the ask in an imported file counts, with the port of agent.toml
+  sed -i 's/^web_ask_port = .*/web_ask_port = 18301/' "$ROOT$ETC_PANEL/agent.toml"
+  mkdir -p "$ROOT$CADDY_DIR/conf.d"
+  printf '{\n\ton_demand_tls {\n\t\task http://127.0.0.1:18301/\n\t}\n}\n' >"$ROOT$CADDY_DIR/conf.d/global.caddy"
+  printf 'import conf.d/*.caddy\nimport mc-panel.caddy # managed by mc-panel\nimport mc-panel-web.caddy\n' >"$ROOT$CADDY_DIR/Caddyfile"
+  assert_exit 1 cmd_doctor # caddy_admin: TCP
+  assert_contains "$(cat "$WORK/out")" "✓ unknown host names get no certificate (on_demand_tls ask on 127.0.0.1:18301)"
 }

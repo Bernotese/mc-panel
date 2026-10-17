@@ -19,7 +19,7 @@ Create these records before you install, all pointing to the VPS:
 | Record | Example | Purpose |
 |---|---|---|
 | `A` (and `AAAA` if the VPS has IPv6) | `panel.example.com` | the panel; Let's Encrypt needs it to resolve to this host |
-| wildcard `A`/`AAAA` | `*.mc.example.com` | the Minecraft servers |
+| wildcard `A`/`AAAA` | `*.mc.example.com` | the Minecraft servers and their [web interfaces](#web-interfaces) |
 
 Every Minecraft server is reachable as `<server name>.<base domain>` on the shared port 25565; mc-router forwards each connection by hostname. After the installation, enter the base domain (here `mc.example.com`) in the panel under Settings. Players then connect to e.g. `survival.mc.example.com` without a port.
 
@@ -128,6 +128,7 @@ Further options in `agent.toml`:
 | `router_connection_rate_limit` | `50` | new connections per second through mc-router (port 25565), all clients together |
 | `cpu_per_instance` | `0` (no cap) | CPUs per Minecraft server, e.g. `2` or `1.5` (at most the host's CPU count) |
 | `instance_network_pool` | `10.213.0.0/16` | IPv4 range (`/8` to `/24`) for the per-server networks, one `/28` each |
+| `web_proxy_port`, `web_ask_port` | `18100`, `18101` | ports of `mcpanel-web` on 127.0.0.1 (see [Web interfaces](#web-interfaces)); the installer writes them into `agent.toml` and the Caddy files |
 
 After an update the egress filter and the router's new settings apply at once. An existing server gets the hardened container (read-only root, `/tmp`, file limit, CPU cap) only at its next recreate, e.g. after a change of its settings.
 
@@ -142,6 +143,40 @@ After an update the egress filter and the router's new settings apply at once. A
 **Behind a CDN or another proxy.** The panel takes the client address from `X-Forwarded-For` as Caddy passes it. Behind a CDN (or another proxy in front of Caddy) every request then seems to come from the CDN: jails, rate limits and bans hit the CDN's addresses, i.e. all users at once. Add the CDN's address ranges to Caddy (global option `servers { trusted_proxies static <ranges> }`, so Caddy keeps the client entry) **and** to `trusted_proxies` in `/etc/mc-panel/panel.toml` (so the panel skips them), then restart Caddy and `mcpanel-panel`. The host jail cannot block clients behind a CDN; only the in-app jail applies.
 
 **Optional: hide the panel.** The login page and the app bundle are public (as for any web app), so anyone can see that an mc-panel runs at the address. To hide it, put Caddy's `basic_auth` or an IP allowlist into a file of your own in `/etc/caddy/mc-panel.d/` (e.g. `allow.caddy` with `@out not remote_ip 203.0.113.0/24` and `respond @out 403`), then `systemctl reload caddy`. The panel site imports `/etc/caddy/mc-panel.d/*.caddy`; `install` and `update` rewrite `mc-panel.caddy` but never touch that directory. Check sign-in with passkeys and the live console afterwards.
+
+## Web interfaces
+
+An admin can publish one HTTP port of a Minecraft server, e.g. the web map of BlueMap, under the server's own name: `https://survival.mc.example.com` then serves the plugin's web page, while `survival.mc.example.com:25565` stays the Minecraft server. The switch is in the server's settings (section "Web interface", admins only, with sudo); the port is 1024 to 65535 except 25565 and 25575, and the form suggests 8100 (BlueMap's default).
+
+**DNS.** The wildcard record of the base domain (`*.mc.example.com`, see [DNS and base domain](#dns-and-base-domain)) must point to the host as `A` (and `AAAA` with IPv6) record; ports 80 and 443 are open already. No further record is needed.
+
+**Certificates on demand.** There is no wildcard certificate. Caddy requests a Let's Encrypt certificate for a name at the first request to it, so the first page load after publishing takes a few seconds. Before it requests one, Caddy asks the agent's container `mcpanel-web` (`on_demand_tls ask` in the Caddyfile's global options); only names that an admin published are allowed, so nobody can make the host request certificates for invented names and use up Let's Encrypt's limits (50 certificates per registered domain and week). Certificates are cached in `/var/lib/caddy` like the panel's.
+
+**Public by design.** A published web page is open to everyone with the link; the panel puts no login in front of it, and the plugin is responsible for its own security. `mcpanel-web` reaches only the published port of each server (nftables table `bridge mcpanel_web`, kept by the agent), and servers still cannot reach each other.
+
+**BlueMap.**
+
+1. Install BlueMap through the plugins area and start the server once, so that it writes its configuration.
+2. In `plugins/BlueMap/core.conf` set `accept-download: true` (BlueMap downloads Minecraft's client resources only with it) and keep the web server enabled (`plugins/BlueMap/webserver.conf`, `enabled: true`, `port: 8100`).
+3. Restart the server, then publish port 8100 in its settings. The status turns "active" and the header shows "Open web map".
+
+A published port whose plugin is not listening (server stopped, plugin not running, other port) answers `502` with a short notice; it works again by itself once the plugin listens.
+
+**How it is wired.** Caddy serves the catch-all site `/etc/caddy/mc-panel-web.caddy` (rewritten by `install` and `update`) next to the panel site; the panel's own name always wins over it. It forwards to `mcpanel-web` on `127.0.0.1:18100`, which routes each name to the server's container; Caddy's ask goes to `127.0.0.1:18101`. Both ports listen on 127.0.0.1 only and are `web_proxy_port` and `web_ask_port` in `/etc/mc-panel/agent.toml`; after changing one, run `install.sh update --force`, which writes the same values into the Caddy files and restarts the agent. The agent creates `mcpanel-web` (and its network `mcpanel-web`) with the first published port and removes both when none is left. Requests are logged to `/var/log/caddy/mc-panel-web.log` (JSON, rotated like the panel's log). Additions for all web interfaces go into files of your own in `/etc/caddy/mc-panel-web.d/` (never touched by the installer), e.g. `robots.caddy` with `header X-Robots-Tag "noindex"` to keep search engines off the maps, or a `basic_auth` block; then `systemctl reload caddy`.
+
+**Your own Caddyfile.** In a Caddyfile of the installer (also one you added sites to), `install` and `update` add the global option and the import line themselves. They never add them to a Caddyfile of your own, because the import without the ask would let Caddy request a certificate for every name pointing at the host. The installer prints both snippets instead; add them yourself and reload Caddy:
+
+```caddy
+{
+	on_demand_tls {
+		ask http://127.0.0.1:18101/
+	}
+}
+
+import mc-panel-web.caddy # managed by mc-panel
+```
+
+`doctor` checks both sides (`web_router`, `web_catchall`). Certificate problems show only in Caddy's log: `journalctl -u caddy` (DNS of the name, port 80/443, Let's Encrypt rate limits).
 
 ## Service sandboxing
 
@@ -205,7 +240,7 @@ sudo bash install.sh doctor          # human-readable: ✓ ok, ! warning, ✗ fa
 sudo bash install.sh doctor --json   # {"status": "ok|warn|fail", "checks": [{"id", "status", "message", "hint"}]}
 ```
 
-Exit code 0 means all ok, 1 warnings, 2 failures. Without root the checks that need root report "skipped". The checks: `services`, `sockets`, `files_process`, `versions`, `update_available`, `release_signature`, `update_state`, `config`, `permissions`, `caddy_config`, `caddy_import`, `caddy_package`, `caddy_admin`, `certificate`, `dns`, `firewall`, `docker`, `docker_version`, `docker_live_restore`, `docker_isolation`, `docker_dns`, `restic`, `tzdata`, `time_sync`, `upgrades`, `reboot_required`, `storage_fs`, `storage_free`, `backup_keys`, `ssh_password`, `ssh_root`, `ssh_kbdinteractive`.
+Exit code 0 means all ok, 1 warnings, 2 failures. Without root the checks that need root report "skipped". The checks: `services`, `sockets`, `files_process`, `versions`, `update_available`, `release_signature`, `update_state`, `config`, `permissions`, `caddy_config`, `caddy_import`, `caddy_package`, `caddy_admin`, `certificate`, `dns`, `firewall`, `docker`, `docker_version`, `docker_live_restore`, `docker_isolation`, `docker_dns`, `restic`, `tzdata`, `time_sync`, `upgrades`, `reboot_required`, `storage_fs`, `storage_free`, `backup_keys`, `ssh_password`, `ssh_root`, `ssh_kbdinteractive`, `web_router`, `web_catchall`.
 
 Common warnings:
 
@@ -221,6 +256,8 @@ Common warnings:
 | `docker_isolation` | Servers of an older version still share the network `mcpanel-mc` with each other (see [Containers and their network](#containers-and-their-network)); restart them once in the panel. Or `mcpanel-mc` has IPv6 enabled (from the daemon's defaults when an older version created it): the hint recreates it IPv4-only. |
 | `reboot_required` | A kernel or library update waits for a reboot (with its age and the packages). `unattended-upgrades` never reboots on its own, because the Minecraft servers would stop; plan a reboot. |
 | `update_available` | A newer release is available. |
+| `web_router` | The container `mcpanel-web` of the [web interfaces](#web-interfaces) is not running, publishes on another address than 127.0.0.1, or its port restriction (table `bridge mcpanel_web`) is missing; without published web ports there is no container and the check is ok. A container `mcpanel-web` without the agent's label is someone else's: the agent leaves it alone, and web ports cannot work until it is renamed or removed. |
+| `web_catchall` | The Caddyfile does not import `mc-panel-web.caddy` (a Caddyfile of your own; add the two snippets from [Web interfaces](#web-interfaces)), imports it without the ask of `mcpanel-web` (Caddy would request certificates for any name), or Caddy answers a name nobody published with 200. |
 | `ssh_password`, `ssh_root`, `ssh_kbdinteractive` | SSH allows password logins, root logins with a password, or password logins through PAM (`KbdInteractiveAuthentication yes` with `UsePAM yes`). The installer never changes SSH. |
 
 ## Uninstall
@@ -230,7 +267,7 @@ sudo bash install.sh uninstall           # asks once; --yes answers
 sudo bash install.sh uninstall --purge   # deletes everything after you type the panel domain
 ```
 
-`uninstall` stops and removes the units, the binaries and the license text, the Caddy site (`/etc/caddy/mc-panel.caddy` and the marked import line), the nftables tables `inet mcpanel_fw` and `inet mcpanel`, the Minecraft containers, mc-router, its network and the servers' networks `mcpanel-net-<id>`, and the sockets. It keeps worlds and backups (`/srv/mc-panel`), the database (`/var/lib/mc-panel`), the rollback copies, the configuration (`/etc/mc-panel*`) and the users, so a later `install` picks everything up again. Other Caddy sites, all packages, the Caddy repository and the drop-in `caddy.service.d/mc-panel.conf` stay (a Caddyfile of the installer still uses the admin socket in `/run/caddy`).
+`uninstall` stops and removes the units, the binaries and the license text, the Caddy sites (`/etc/caddy/mc-panel.caddy`, `/etc/caddy/mc-panel-web.caddy` and their marked import lines), the nftables tables `inet mcpanel_fw`, `inet mcpanel` and `bridge mcpanel_web`, the Minecraft containers, mc-router, `mcpanel-web`, their networks and the servers' networks `mcpanel-net-<id>`, and the sockets. It keeps worlds and backups (`/srv/mc-panel`), the database (`/var/lib/mc-panel`), the rollback copies, the configuration (`/etc/mc-panel*`) and the users, so a later `install` picks everything up again. Other Caddy sites, the Caddyfile's global options (admin socket, `on_demand_tls`), your directories `mc-panel.d/` and `mc-panel-web.d/`, all packages, the Caddy repository and the drop-in `caddy.service.d/mc-panel.conf` stay (a Caddyfile of the installer still uses the admin socket in `/run/caddy`).
 
 `--purge` also deletes all worlds, backups, backup keys, the database, the rollback copies, the configuration and the users `mcpanel` and `mcpanel-mc`. It needs the panel domain typed on the terminal; `--yes` does not replace that.
 
@@ -278,8 +315,11 @@ How to restore a snapshot without the panel is described in [`docs/dev/README.md
 | `/var/log/mc-panel-install.log` | installer log |
 | `/etc/caddy/mc-panel.caddy` | the panel's Caddy site (rewritten by `install` and `update`) |
 | `/etc/caddy/mc-panel.d/*.caddy` | your additions to the panel site (imported inside it; never touched by the installer) |
+| `/etc/caddy/mc-panel-web.caddy` | the catch-all site of the servers' web interfaces (rewritten by `install` and `update`, see [Web interfaces](#web-interfaces)) |
+| `/etc/caddy/mc-panel-web.d/*.caddy` | your additions to the web interfaces site (never touched by the installer) |
 | `/etc/systemd/system/caddy.service.d/mc-panel.conf` | drop-in for Caddy: creates `/run/caddy` (admin socket) and `/var/log/caddy` |
 | `/var/log/caddy/mc-panel.log` | HTTP access log of the panel (see [Caddy](#caddy)) |
+| `/var/log/caddy/mc-panel-web.log` | HTTP access log of the servers' web interfaces |
 | `/etc/apt/sources.list.d/caddy-stable.list`, `/usr/share/keyrings/caddy-stable-archive-keyring.gpg` | the Caddy repository and its signing key |
 
 Services: `mcpanel-panel.service` (+ `.socket`), `mcpanel-agent.service`, `mcpanel-files.service` (+ `.socket`), `mcpanel-fw.service`, and Caddy. Logs: `journalctl -u mcpanel-panel -u mcpanel-agent -u mcpanel-files -f`.
@@ -290,6 +330,7 @@ Services: `mcpanel-panel.service` (+ `.socket`), `mcpanel-agent.service`, `mcpan
 
 - **First stop:** `sudo bash install.sh doctor`. Every failure comes with a hint.
 - **The panel does not answer / certificate errors:** check DNS (`dig +short panel.example.com`), that ports 80 and 443 are reachable from outside, and `journalctl -u caddy`. The installer prints the last Caddy log lines when the panel does not answer within its wait time.
+- **A web interface does not load:** a certificate error or a long wait at the first request points to DNS (`dig +short survival.mc.example.com` must give this host) or Let's Encrypt (`journalctl -u caddy`); a short "not reachable" notice (`502`) means the plugin does not listen on the published port (check the plugin's config and that the server runs); "Not found" (`404`) means the name is not published (yet). The status in the server's settings shows the agent's reason for an error; `doctor` checks `mcpanel-web` and the Caddy side.
 - **Health check by hand:** the panel only accepts requests with `X-Forwarded-For` on its socket: `curl --unix-socket /run/mc-panel-web/panel.sock -H 'X-Forwarded-For: 127.0.0.1' http://panel/api/health`.
 - **A service fails:** `journalctl -u mcpanel-panel` (or `-agent`, `-files`). If the agent is down, the panel answers `503 agent_unavailable` for server actions; logins and in-app jails keep working.
 - **Locked out** (jail, admin-login allowlist, country filter): `sudo runuser -u mcpanel -- panel admin unlock -config /etc/mc-panel/panel.toml` lifts all active jails, turns off "Admin access only from the allowlist" and clears the country filter (audited). A 2FA lockout (10 wrong codes in 15 minutes) ends after 15 minutes or with a panel restart.
