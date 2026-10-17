@@ -393,7 +393,14 @@ describe('mock behaviour', () => {
     const noDomain = await callApi('PATCH', '/servers/2', { body: { web_port: 8100 }, csrf: admin.csrf_token })
     expect(noDomain.status).toBe(409)
     expect(noDomain.body).toMatchObject({ error: 'conflict', message: 'base domain required' })
-    expect(field((await callApi('GET', '/servers/1')).body, 'web_status')).toBe('off')
+    // admins still see the stored port while the base domain is missing
+    expect((await callApi('GET', '/servers/1')).body).toMatchObject({ web_status: 'off', web_port: 8100 })
+    expect((await callApi('GET', '/servers/1')).body).not.toHaveProperty('web_url')
+    // a new base domain changes the route list: pending first, active after the agent confirmed
+    await callApi('PUT', '/servers/settings', { body: { base_domain: 'play.example.org' }, csrf: admin.csrf_token })
+    const after = (await callApi('PATCH', '/servers/1', { body: {}, csrf: admin.csrf_token })).body
+    expect(after).toMatchObject({ web_status: 'pending', web_url: 'https://survival.play.example.org' })
+    expect((await callApi('GET', '/servers/1')).body).toMatchObject({ web_status: 'active' })
   })
 
   it('applies power actions to the mock state', async () => {
