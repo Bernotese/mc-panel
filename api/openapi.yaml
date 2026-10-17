@@ -1753,7 +1753,7 @@ components:
           type: string
           enum: ['off', pending, active, error]
           description: 'off: no web port (or no base domain); pending: not yet applied by the agent; active: the route is live (the plugin itself may still answer 502); error: see web_error'
-        web_port: { type: integer, minimum: 1024, maximum: 65535, description: 'Published web port inside the container; admins only, absent when off' }
+        web_port: { type: integer, minimum: 1024, maximum: 65535, description: 'Stored web port inside the container; admins only, absent when none is stored (also shown while web_status is off for lack of a base domain)' }
         web_error: { type: string, description: "The agent's reason for web_status error, sanitized like last_error; admins only, absent when there is none" }
     CreateServerRequest:
       type: object
