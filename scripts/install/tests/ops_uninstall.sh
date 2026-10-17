@@ -73,6 +73,27 @@ test_ops_uninstall_removes_program_and_keeps_data() {
   assert_contains "$(cat "$WORK/out")" "kept: /srv/mc-panel"
 }
 
+test_ops_uninstall_removes_the_license_text() {
+  ops_uninstall_system
+  mkdir -p "$ROOT$DOC_DIR"
+  echo license >"$ROOT$DOC_DIR/LICENSE"
+  YES=1
+  assert_exit 0 cmd_uninstall
+  assert_no_file "$ROOT$DOC_DIR"
+  assert_contains "$(cat "$WORK/out")" "removed $DOC_DIR/LICENSE"
+}
+
+test_ops_uninstall_keeps_a_foreign_file_in_the_doc_dir() {
+  ops_uninstall_system
+  mkdir -p "$ROOT$DOC_DIR"
+  echo license >"$ROOT$DOC_DIR/LICENSE"
+  echo notes >"$ROOT$DOC_DIR/notes.txt"
+  YES=1
+  assert_exit 0 cmd_uninstall
+  assert_no_file "$ROOT$DOC_DIR/LICENSE"
+  assert_file "$ROOT$DOC_DIR/notes.txt"
+}
+
 test_ops_uninstall_stops_the_agent_before_removing_containers() {
   ops_uninstall_system
   YES=1

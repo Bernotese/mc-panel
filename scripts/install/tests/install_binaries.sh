@@ -4,16 +4,21 @@
 
 # bin_fixture_release VERSION: tarball, checksums.txt and its signature (by a throwaway key
 # that release_signers trusts, install_signature.sh) in $WORK/srv, served by a fake fetch that
-# fails for a file that is not there.
+# fails for a file that is not there. BIN_FIXTURE_LICENSE=1 adds LICENSE at the tarball root
+# (releases from the AGPL license on).
 bin_fixture_release() {
-  local v="$1" d="$WORK/rel-src" b
+  local v="$1" d="$WORK/rel-src" b extra=()
   mkdir -p "$d/deploy/systemd" "$WORK/srv"
   for b in panel agent files; do
     printf '#!/bin/sh\necho "%s %s"\n' "$b" "$v" >"$d/$b"
     chmod 0755 "$d/$b"
   done
   echo tpl >"$d/deploy/systemd/x.service"
-  tar -C "$d" -czf "$WORK/srv/mc-panel_${v}_linux_amd64.tar.gz" panel agent files deploy
+  if [[ ${BIN_FIXTURE_LICENSE:-0} == 1 ]]; then
+    printf 'GNU AFFERO GENERAL PUBLIC LICENSE\n' >"$d/LICENSE"
+    extra=(LICENSE)
+  fi
+  tar -C "$d" -czf "$WORK/srv/mc-panel_${v}_linux_amd64.tar.gz" panel agent files deploy "${extra[@]}"
   (cd "$WORK/srv" && sha256sum "mc-panel_${v}_linux_amd64.tar.gz" >checksums.txt)
   [[ -f $WORK/key ]] || sig_fixture_key
   mkdir -p "$ROOT$ETC_PANEL" # lay_ensure's; bin_install writes RELEASE_RECORD there
@@ -70,6 +75,33 @@ test_install_bin_install_second_run_unchanged() {
   assert_contains "$(bin_install)" "unchanged"
   bin_install >/dev/null
   assert_eq 0 "$BIN_CHANGED"
+}
+
+test_install_bin_install_installs_the_license() {
+  BIN_FIXTURE_LICENSE=1
+  bin_fixture_release 1.2.3
+  bin_tar_safe "$WORK/srv/mc-panel_1.2.3_linux_amd64.tar.gz"
+  assert_contains "$(bin_install)" "[changed] license text in $DOC_DIR"
+  assert_file_contains "$ROOT$DOC_DIR/LICENSE" 'GNU AFFERO GENERAL PUBLIC LICENSE'
+  assert_eq 644 "$(stat -c '%a' "$ROOT$DOC_DIR/LICENSE")"
+  assert_eq root:root "$(_owner_get "$DOC_DIR/LICENSE")"
+  assert_eq 755 "$(stat -c '%a' "$ROOT$DOC_DIR")"
+  assert_no_file "$ROOT$BIN_DIR/LICENSE"
+  assert_not_contains "$(bin_install)" "license text"
+}
+
+test_install_bin_install_release_without_license() {
+  bin_fixture_release 1.2.3
+  bin_install >/dev/null
+  assert_no_file "$ROOT$DOC_DIR"
+}
+
+test_install_bin_install_from_dir_without_license() {
+  bin_fixture_build "$WORK/build"
+  FROM_DIR="$WORK/build"
+  bin_install >/dev/null
+  assert_file "$ROOT$BIN_DIR/panel"
+  assert_no_file "$ROOT$DOC_DIR"
 }
 
 test_install_bin_install_refuses_bad_checksum() {

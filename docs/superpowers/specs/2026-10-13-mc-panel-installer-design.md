@@ -109,7 +109,7 @@ As in the specs and `testvm-deploy.sh` at the time: system users `mcpanel` and `
 
 ### 4.4 Binaries
 
-Download the tarball `mc-panel_<version>_linux_<arch>.tar.gz` and `checksums.txt` of the same release (`curl --proto =https --tlsv1.2 -fsSL`, 3 retries), compare the SHA-256, unpack into a temporary directory, install `panel`, `agent`, `files` to `/usr/local/bin` (0755, atomically via `install` + `mv`). `--from-dir` skips the download and only checks that the three binaries and `deploy/` exist and that `panel version` answers.
+Download the tarball `mc-panel_<version>_linux_<arch>.tar.gz` and `checksums.txt` of the same release (`curl --proto =https --tlsv1.2 -fsSL`, 3 retries), compare the SHA-256, unpack into a temporary directory, install `panel`, `agent`, `files` to `/usr/local/bin` (0755, atomically via `install` + `mv`) and the tarball's `LICENSE`, if it has one, to `/usr/local/share/doc/mc-panel/LICENSE` (0644; removed by `uninstall`). `--from-dir` skips the download and only checks that the three binaries and `deploy/` exist and that `panel version` answers.
 
 ### 4.5 Configuration
 

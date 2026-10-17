@@ -103,6 +103,13 @@ uni_binaries() {
   if ((${#removed[@]} > 0)); then
     log_changed "removed ${removed[*]} from $BIN_DIR"
   fi
+  # The license text (binaries.sh); DOC_DIR only as a real directory, and only when empty.
+  [[ -d $ROOT$DOC_DIR && ! -L $ROOT$DOC_DIR ]] || return 0
+  if [[ -e $ROOT$DOC_DIR/LICENSE || -L $ROOT$DOC_DIR/LICENSE ]]; then
+    rm -f -- "$ROOT$DOC_DIR/LICENSE"
+    log_changed "removed $DOC_DIR/LICENSE"
+  fi
+  rmdir -- "$ROOT$DOC_DIR" 2>/dev/null || true
 }
 
 # uni_caddy removes exactly the marked import line (other sites stay) and mc-panel.caddy. An
