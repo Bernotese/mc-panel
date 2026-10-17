@@ -82,6 +82,9 @@ type appDeps struct {
 	// real services). Tests inject httptest servers.
 	Upstream *upstream.Client
 	Version  string // panel version, sent in the User-Agent of catalog and plugin requests
+	// HostMemory returns the host's installed memory in bytes; nil means hostinfo.MemTotal.
+	// Tests fix it so the per-server memory limit does not depend on the machine.
+	HostMemory func() (uint64, error)
 }
 
 type app struct {
@@ -107,6 +110,9 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 	}
 	geo, geoOK, closeGeo := defense.LoadGeo(cfg.GeoIPPath, slog.Default())
 
+	if d.HostMemory == nil {
+		d.HostMemory = hostinfo.MemTotal
+	}
 	auditRec := audit.NewSQLRecorder(db, d.Clock)
 	disp := notify.NewDispatcher(db, box, d.Clock, notify.DispatcherOptions{Dev: cfg.Dev})
 	svc, err := defense.NewService(ctx, defense.Deps{
@@ -150,7 +156,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		Gate:    servers.AnyGate(backupsH, filesH),
 		Backups: backupsH,
 		// The per-server memory limit follows the host's installed memory (issue #79).
-		HostMemory: hostinfo.MemTotal,
+		HostMemory: d.HostMemory,
 	})
 	// Monitoring reads the agent status, pings through mc-router and asks RCON for TPS; the
 	// data gates keep down alerts quiet while an extract or a restore holds the server.

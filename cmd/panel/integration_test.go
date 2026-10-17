@@ -69,7 +69,8 @@ func newEnv(t *testing.T) *env {
 	fb := newFakeBackups()
 	up := newFakeUpstream(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clk, Agent: fa, Instances: fi, Console: fc, Files: ff, Backups: fb, Upstream: up.client(clk), Version: "test"})
+	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clk, Agent: fa, Instances: fi, Console: fc, Files: ff, Backups: fb, Upstream: up.client(clk), Version: "test",
+		HostMemory: func() (uint64, error) { return 16 << 30, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
