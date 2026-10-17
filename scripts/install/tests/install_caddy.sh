@@ -37,9 +37,13 @@ test_install_cad_ensure_own_caddyfile_moves_the_admin_api_to_a_socket() {
   assert_file_eq "$ROOT$CADDY_DIR/Caddyfile" "# Created by mc-panel install.sh; add your own sites below, the import line must stay.
 {
 	admin unix//run/caddy/admin.sock
+	on_demand_tls {
+		ask http://127.0.0.1:18101/
+	}
 }
 
-import mc-panel.caddy # managed by mc-panel"
+import mc-panel.caddy # managed by mc-panel
+import mc-panel-web.caddy # managed by mc-panel"
   assert_eq socket "$(cad_admin_status "$ROOT$CADDY_DIR/Caddyfile")"
 }
 
@@ -93,13 +97,31 @@ test_install_cad_ensure_replaces_an_old_own_caddyfile() {
 }
 
 test_install_cad_ensure_keeps_an_edited_own_caddyfile() {
+  # an own Caddyfile with the operator's sites keeps them and its admin setting; it only gets
+  # the global on_demand_tls block and the import of the web interfaces site
   local head='# Created by mc-panel install.sh; add your own sites below, the import line must stay.'
   cad_fixture
   printf '%s\nimport mc-panel.caddy # managed by mc-panel\n\nblog.example.com {\n\tfile_server\n}\n' "$head" >"$ROOT$CADDY_DIR/Caddyfile"
+  cad_ensure >/dev/null
+  assert_file_eq "$ROOT$CADDY_DIR/Caddyfile" "$head
+{
+	on_demand_tls {
+		ask http://127.0.0.1:18101/
+	}
+}
+
+import mc-panel.caddy # managed by mc-panel
+import mc-panel-web.caddy # managed by mc-panel
+
+blog.example.com {
+	file_server
+}"
+  assert_eq tcp "$(cad_admin_status "$ROOT$CADDY_DIR/Caddyfile")"
   cp "$ROOT$CADDY_DIR/Caddyfile" "$WORK/before"
+  : >"$WORK/calls.log"
   cad_ensure >/dev/null
   assert_file_eq "$ROOT$CADDY_DIR/Caddyfile" "$(cat "$WORK/before")"
-  assert_eq tcp "$(cad_admin_status "$ROOT$CADDY_DIR/Caddyfile")"
+  assert_not_called 'caddy validate'
 }
 
 test_install_cad_ensure_reloads_when_only_the_site_changed() {
@@ -323,4 +345,167 @@ test_install_cad_admin_status_reads_imported_files() {
   assert_eq socket "$(cad_admin_status "$ROOT/etc/caddy/Caddyfile")"
   printf 'import other/*.caddy\n' >"$ROOT/etc/caddy/Caddyfile"
   assert_eq tcp "$(cad_admin_status "$ROOT/etc/caddy/Caddyfile")"
+}
+
+# --- web interfaces of the servers (mc-panel-web.caddy, web ports spec §5) -------------------
+
+test_install_cad_ensure_writes_the_web_site() {
+  cad_fixture
+  cad_ensure >/dev/null
+  local f="$ROOT$CADDY_DIR/mc-panel-web.caddy"
+  assert_file_contains "$f" '# Managed by mc-panel install.sh 1.2.3'
+  assert_file_contains "$f" 'https:// {'
+  assert_file_contains "$f" 'reverse_proxy 127.0.0.1:18100'
+  assert_file_contains "$f" 'output file /var/log/caddy/mc-panel-web.log {'
+  assert_file_contains "$f" '# header X-Robots-Tag "noindex"'
+  # Caddy rejects "{ on_demand }" on one line: the block spans three lines
+  assert_eq "$(printf '\ttls a@example.com {\n\t\ton_demand\n\t}')" "$(grep -A2 '^[[:space:]]*tls' "$f")"
+  assert_eq 644 "$(stat -c '%a' "$f")"
+  assert_eq root:root "$(_owner_get "$CADDY_DIR/mc-panel-web.caddy")"
+}
+
+test_install_cad_ensure_web_site_with_internal_tls() {
+  cad_fixture
+  TLS_MODE=internal EMAIL=''
+  cad_ensure >/dev/null
+  local f="$ROOT$CADDY_DIR/mc-panel-web.caddy"
+  assert_eq "$(printf '\ttls internal {\n\t\ton_demand\n\t}')" "$(grep -A2 '^[[:space:]]*tls' "$f")"
+  assert_file_contains "$ROOT$CADDY_DIR/Caddyfile" 'skip_install_trust'
+  assert_file_contains "$ROOT$CADDY_DIR/Caddyfile" 'ask http://127.0.0.1:18101/'
+}
+
+test_install_cad_ensure_takes_the_web_ports_from_agent_toml() {
+  cad_fixture
+  mkdir -p "$ROOT$ETC_PANEL"
+  printf 'socket = "/run/mc-panel/agent.sock"\nweb_proxy_port = 18200 # moved\nweb_ask_port = 18201\n' >"$ROOT$ETC_PANEL/agent.toml"
+  cad_ensure >/dev/null
+  assert_file_contains "$ROOT$CADDY_DIR/mc-panel-web.caddy" 'reverse_proxy 127.0.0.1:18200'
+  assert_file_contains "$ROOT$CADDY_DIR/Caddyfile" 'ask http://127.0.0.1:18201/'
+  # a later change of the ask port rewrites the ask line of the installer's Caddyfile
+  sed -i 's/^web_ask_port = .*/web_ask_port = 18301/' "$ROOT$ETC_PANEL/agent.toml"
+  cad_ensure >/dev/null
+  assert_file_contains "$ROOT$CADDY_DIR/Caddyfile" 'ask http://127.0.0.1:18301/'
+  assert_eq 1 "$(grep -c 'ask http' "$ROOT$CADDY_DIR/Caddyfile")"
+}
+
+test_install_cad_ensure_upgrades_the_caddyfile_of_the_previous_release() {
+  # the own Caddyfile before web ports (admin socket, either TLS mode) gets the new global
+  # block and import; a restart, as for every change of the Caddyfile
+  local head='# Created by mc-panel install.sh; add your own sites below, the import line must stay.'
+  cad_fixture
+  printf '%s\n{\n\tadmin unix//run/caddy/admin.sock\n}\n\nimport mc-panel.caddy # managed by mc-panel\n' "$head" >"$ROOT$CADDY_DIR/Caddyfile"
+  cad_ensure >/dev/null
+  assert_file_eq "$ROOT$CADDY_DIR/Caddyfile" "$(cad_own_caddyfile)"
+  assert_called 'systemctl restart caddy.service'
+  TLS_MODE=internal EMAIL=''
+  printf '%s\n{\n\tadmin unix//run/caddy/admin.sock\n\tskip_install_trust\n}\n\nimport mc-panel.caddy # managed by mc-panel\n' "$head" >"$ROOT$CADDY_DIR/Caddyfile"
+  cad_ensure >/dev/null
+  assert_file_eq "$ROOT$CADDY_DIR/Caddyfile" "$(cad_own_caddyfile)"
+  assert_file_contains "$ROOT$CADDY_DIR/Caddyfile" 'skip_install_trust'
+}
+
+test_install_cad_ensure_edited_own_caddyfile_keeps_its_global_options() {
+  local head='# Created by mc-panel install.sh; add your own sites below, the import line must stay.'
+  cad_fixture
+  printf '%s\n{\n\tadmin unix//run/caddy/admin.sock\n\temail ops@example.com\n\tservers {\n\t\tprotocols h1 h2\n\t}\n}\n\nimport mc-panel.caddy # managed by mc-panel\n\nblog.example.com {\n\tfile_server\n}\n' \
+    "$head" >"$ROOT$CADDY_DIR/Caddyfile"
+  cad_ensure >/dev/null
+  assert_file_eq "$ROOT$CADDY_DIR/Caddyfile" "$head
+{
+	admin unix//run/caddy/admin.sock
+	email ops@example.com
+	servers {
+		protocols h1 h2
+	}
+	on_demand_tls {
+		ask http://127.0.0.1:18101/
+	}
+}
+
+import mc-panel.caddy # managed by mc-panel
+import mc-panel-web.caddy # managed by mc-panel
+
+blog.example.com {
+	file_server
+}"
+}
+
+test_install_cad_ensure_keeps_an_own_on_demand_block_of_the_operator() {
+  # the operator's own on_demand_tls settings stay; only our ask line follows the port
+  local head='# Created by mc-panel install.sh; add your own sites below, the import line must stay.'
+  cad_fixture
+  printf '%s\n{\n\ton_demand_tls {\n\t\task http://127.0.0.1:9999/\n\t\tinterval 2m\n\t}\n}\n\nimport mc-panel.caddy # managed by mc-panel\nimport mc-panel-web.caddy\n' \
+    "$head" >"$ROOT$CADDY_DIR/Caddyfile"
+  cad_ensure >/dev/null
+  assert_file_eq "$ROOT$CADDY_DIR/Caddyfile" "$head
+{
+	on_demand_tls {
+		ask http://127.0.0.1:18101/
+		interval 2m
+	}
+}
+
+import mc-panel.caddy # managed by mc-panel
+import mc-panel-web.caddy # managed by mc-panel"
+}
+
+test_install_cad_ensure_foreign_caddyfile_gets_a_web_hint_only() {
+  cad_fixture
+  cad_foreign
+  local out
+  out="$(cad_ensure)"
+  # without the global ask, Caddy would request certificates for any name: never imported
+  # into a Caddyfile the installer does not own
+  assert_not_contains "$(cat "$ROOT$CADDY_DIR/Caddyfile")" 'mc-panel-web.caddy'
+  assert_not_contains "$(cat "$ROOT$CADDY_DIR/Caddyfile")" 'on_demand_tls'
+  assert_file "$ROOT$CADDY_DIR/mc-panel-web.caddy"
+  assert_contains "$out" '[warn]'
+  assert_contains "$out" 'ask http://127.0.0.1:18101/'
+  assert_contains "$out" 'import mc-panel-web.caddy # managed by mc-panel'
+}
+
+test_install_cad_ensure_foreign_caddyfile_with_the_web_import_has_no_hint() {
+  cad_fixture
+  printf '{\n\ton_demand_tls {\n\t\task http://127.0.0.1:18101/\n\t}\n}\nblog.example.com {\n\tfile_server\n}\nimport mc-panel-web.caddy # managed by mc-panel\n' >"$ROOT$CADDY_DIR/Caddyfile"
+  local out
+  out="$(cad_ensure)"
+  assert_not_contains "$out" '[warn]'
+  assert_eq 1 "$(grep -c 'mc-panel-web.caddy' "$ROOT$CADDY_DIR/Caddyfile")"
+}
+
+test_install_cad_ensure_restores_the_web_site_when_validate_fails() {
+  cad_fixture
+  cad_ensure >/dev/null
+  cp "$ROOT$CADDY_DIR/mc-panel-web.caddy" "$WORK/web.before"
+  TARGET_VERSION=1.2.4
+  run_as() { return 1; } # caddy validate fails
+  assert_fails cad_ensure
+  assert_file_eq "$ROOT$CADDY_DIR/mc-panel-web.caddy" "$(cat "$WORK/web.before")"
+  rm -f "$ROOT$CADDY_DIR/mc-panel-web.caddy" "$ROOT$CADDY_DIR/mc-panel.caddy" "$ROOT$CADDY_DIR/Caddyfile"
+  assert_fails cad_ensure
+  assert_no_file "$ROOT$CADDY_DIR/mc-panel-web.caddy"
+}
+
+test_install_cad_ensure_refuses_a_symlinked_web_site() {
+  cad_fixture
+  echo keep >"$WORK/real"
+  ln -s "$WORK/real" "$ROOT$CADDY_DIR/mc-panel-web.caddy"
+  assert_fails cad_ensure
+  assert_file_eq "$WORK/real" keep
+}
+
+test_install_cad_ensure_web_site_imports_the_operator_directory() {
+  cad_fixture
+  cad_ensure >/dev/null
+  assert_file_contains "$ROOT$CADDY_DIR/mc-panel-web.caddy" 'import /etc/caddy/mc-panel-web.d/*.caddy'
+  [[ -d $ROOT/etc/caddy/mc-panel-web.d ]] || fail "mc-panel-web.d not created"
+  assert_eq 755 "$(stat -c '%a' "$ROOT/etc/caddy/mc-panel-web.d")"
+  assert_eq root:root "$(_owner_get /etc/caddy/mc-panel-web.d)"
+  chmod 0750 "$ROOT/etc/caddy/mc-panel-web.d"
+  printf 'header X-Robots-Tag "noindex"\n' >"$ROOT/etc/caddy/mc-panel-web.d/robots.caddy"
+  : >"$WORK/calls.log"
+  cad_ensure >/dev/null
+  assert_eq 750 "$(stat -c '%a' "$ROOT/etc/caddy/mc-panel-web.d")"
+  assert_file_eq "$ROOT/etc/caddy/mc-panel-web.d/robots.caddy" 'header X-Robots-Tag "noindex"'
+  assert_not_called "chown -h root:root $ROOT/etc/caddy/mc-panel-web.d"
 }
