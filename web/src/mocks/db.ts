@@ -120,6 +120,11 @@ export interface MockServer {
   revision: number // desired revision
   runningRevision: number // revision of the "running container"
   players: MockPlayers
+  /** Published web port (web ports spec §3); absent or null = off. */
+  webPort?: number | null
+  /** The agent's answer for the route: pending until the next GET, like the reconcile after a change. */
+  webState?: 'pending' | 'active' | 'error'
+  webError?: string
 }
 
 const MIB = 1024 * 1024
@@ -600,6 +605,8 @@ function seed(now: number): MockDb {
         status: runningStatus(4096, now - 2 * HOUR, Math.round(2.1 * GIB), 12.5),
         revision: 1,
         runningRevision: 1,
+        webPort: 8100,
+        webState: 'active',
         players: {
           online: [
             { name: 'Alex', uuid: ALEX_UUID },
