@@ -79,15 +79,24 @@ jobs:
           bash scripts/install-golangci-lint.sh "${RUNNER_TEMP}/bin"
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
 
+      # restic for the backup integration tests of the files service (pinned, SHA-256 checked);
+      # without MCPANEL_TEST_RESTIC they skip.
+      - name: Install restic
+        run: sudo bash scripts/install-restic.sh
+
       - name: Lint
         run: make lint
 
       - name: Tests
+        env:
+          MCPANEL_TEST_RESTIC: /usr/local/bin/restic
         run: |
           umask 022
           make test
 
       - name: Race tests
+        env:
+          MCPANEL_TEST_RESTIC: /usr/local/bin/restic
         run: |
           umask 022
           make test-race
