@@ -16,7 +16,13 @@ const NO_TRANSITIONS = '*, *::before, *::after { transition: none !important; an
 
 /** Screenshots of the current page in both themes and both viewports (web/screenshots/, not committed). */
 export async function shoot(page: Page, name: string) {
-  await page.addStyleTag({ content: NO_TRANSITIONS })
+  // With the page's style nonce (SEC-31): addStyleTag would be blocked by the CSP and trip the violation guard.
+  await page.evaluate((css) => {
+    const style = document.createElement('style')
+    style.nonce = document.querySelector<HTMLMetaElement>('meta[property="csp-nonce"]')?.nonce ?? ''
+    style.textContent = css
+    document.head.append(style)
+  }, NO_TRANSITIONS)
   for (const [vp, size] of Object.entries(VIEWPORTS)) {
     await page.setViewportSize(size)
     for (const theme of ['dark', 'light'] as const) {

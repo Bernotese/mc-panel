@@ -67,6 +67,9 @@ type Host struct {
 	// RouterConnectionRateLimit is mc-router's -connection-rate-limit; 0 means
 	// config.DefaultRouterConnectionRateLimit.
 	RouterConnectionRateLimit int
+	// WebProxyPort and WebAskPort are the 127.0.0.1 host ports of mcpanel-web; 0 means
+	// config.DefaultWebProxyPort / config.DefaultWebAskPort.
+	WebProxyPort, WebAskPort int
 }
 
 // MaxNanoCPUs is the CPU cap of this host: all its CPUs.

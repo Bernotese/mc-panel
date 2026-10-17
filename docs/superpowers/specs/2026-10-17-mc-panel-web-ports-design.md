@@ -49,7 +49,7 @@ Components:
 
 1. **`mcpanel-web`** is a container managed by the agent.
    - Caddy image, pinned by digest like the other images.
-   - Runs as a non-root UID with a read-only rootfs (small tmpfs for Caddy's data/config dirs), `CapDrop ALL`, `no-new-privileges`, and memory and PIDs limits. It gets no Docker socket.
+   - Runs as a non-root UID (65532) with a read-only rootfs (small tmpfs for Caddy's data/config dirs, owned by that UID with mode 0700, because Caddy creates `/data/caddy` at start), `CapDrop ALL`, `CapAdd NET_BIND_SERVICE` (the image's caddy binary carries that file capability, and the kernel refuses to exec it without it in the bounding set; it only allows ports < 1024 in the container's own netns), `no-new-privileges`, and memory and PIDs limits. It gets no Docker socket.
    - Sits on its own network `mcpanel-web` (labelled, IPv4 only, subnet from the instance network pool or its own fixed /28). It is also attached to the network `mcpanel-net-<id>` of **every server with an active web port, and only those**.
    - Publishes exactly two ports, both on `127.0.0.1` only:
      - the proxy port (default 18100), carrying the web traffic;
@@ -129,12 +129,11 @@ Applying the list is idempotent and serialised with the instance network mutex:
 
 ### 4.2 Port restriction
 
-`mcpanel-web` must reach only the published port of each attached server. The agent manages the table `bridge mcpanel_web` (the bridge family sees traffic inside a Docker bridge without relying on `br_netfilter`). For each attached server network:
-- allow TCP from the IP of `mcpanel-web` on that network to the server's IP on `dport <web_port>`;
-- allow established/related replies;
-- drop every other new connection from `mcpanel-web` to the server.
+`mcpanel-web` must reach only the published port of each attached server. The agent manages the table `bridge mcpanel_web` (the bridge family sees traffic inside a Docker bridge without relying on `br_netfilter`). `mcpanel-web` gets a fixed address on each attached server network (the last usable host of its /28), so the rules can be written before the connect. For each attached server network:
+- allow TCP from that address of `mcpanel-web` to the server network's subnet on `dport <web_port>`. The rule targets the subnet, not the server's IP: the only other member, mc-router, listens on 25565 only, and the server's IP is not known before its container runs;
+- drop everything else from that address.
 
-Rules are rebuilt idempotently on every apply and every tick, like the egress filter: self-repairing, and fail-closed, meaning no network connect before the rules exist. The egress filter (F1) covers the `mcpanel-web` network like every other managed network.
+The rules are stateless: replies come from the server's side and are not matched, and a connection from `mcpanel-web` is only possible to the published port. They are rebuilt idempotently on every apply and every tick, like the egress filter: self-repairing, and fail-closed. `mcpanel-web` is never on a server network without its rule: it is disconnected before a rule goes, connected only after the rule exists, and disconnected from every server network when the rules cannot be applied. The egress filter (F1) covers the `mcpanel-web` network like every other managed network.
 
 ### 4.3 Certificates
 

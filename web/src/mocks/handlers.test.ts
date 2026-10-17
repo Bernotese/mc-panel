@@ -373,6 +373,36 @@ describe('mock behaviour', () => {
     expect((await callApi('PATCH', '/servers/3', { body: { memory_mib: 2048 }, csrf: me.csrf_token })).status).toBe(409)
   })
 
+  it('publishes a web port like the panel: pending, then active; admin-only fields; 409 without base domain', async () => {
+    const me = loginAs('admin', { sudo: true })
+    const patch = (body: unknown) => callApi('PATCH', '/servers/2', { body, csrf: me.csrf_token })
+    expect(field((await patch({ web_port: 25565 })).body, 'error')).toBe('validation_failed')
+    expect((await patch({ web_port: 1023 })).status).toBe(400)
+    const published = await patch({ web_port: 8100 })
+    expect(published.body).toMatchObject({ web_status: 'pending', web_port: 8100, web_url: 'https://creative.mc.example.com', status: { restart_required: false } })
+    expect((await callApi('GET', '/servers/2')).body).toMatchObject({ web_status: 'active', web_port: 8100 })
+    loginAs('alice')
+    const viewer = (await callApi('GET', '/servers/2')).body as Record<string, unknown>
+    expect(viewer).toMatchObject({ web_status: 'active', web_url: 'https://creative.mc.example.com' })
+    expect(viewer).not.toHaveProperty('web_port')
+    const admin = loginAs('admin', { sudo: true })
+    const off = await callApi('PATCH', '/servers/2', { body: { web_port: null }, csrf: admin.csrf_token })
+    expect(off.body).toMatchObject({ web_status: 'off' })
+    expect(off.body).not.toHaveProperty('web_url')
+    db.serverSettings.base_domain = null
+    const noDomain = await callApi('PATCH', '/servers/2', { body: { web_port: 8100 }, csrf: admin.csrf_token })
+    expect(noDomain.status).toBe(409)
+    expect(noDomain.body).toMatchObject({ error: 'conflict', message: 'base domain required' })
+    // admins still see the stored port while the base domain is missing
+    expect((await callApi('GET', '/servers/1')).body).toMatchObject({ web_status: 'off', web_port: 8100 })
+    expect((await callApi('GET', '/servers/1')).body).not.toHaveProperty('web_url')
+    // a new base domain changes the route list: pending first, active after the agent confirmed
+    await callApi('PUT', '/servers/settings', { body: { base_domain: 'play.example.org' }, csrf: admin.csrf_token })
+    const after = (await callApi('PATCH', '/servers/1', { body: {}, csrf: admin.csrf_token })).body
+    expect(after).toMatchObject({ web_status: 'pending', web_url: 'https://survival.play.example.org' })
+    expect((await callApi('GET', '/servers/1')).body).toMatchObject({ web_status: 'active' })
+  })
+
   it('applies power actions to the mock state', async () => {
     const me = loginAs('admin', { sudo: true })
     const power = (id: number, action: string) => callApi('POST', `/servers/${id}/power`, { body: { action }, csrf: me.csrf_token })

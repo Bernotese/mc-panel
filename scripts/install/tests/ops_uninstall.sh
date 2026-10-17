@@ -18,9 +18,10 @@ ops_uninstall_system() {
   ops_fake_bin "$ROOT$BIN_DIR/other-tool" "echo other"
   for u in "${UPD_UNITS[@]}"; do echo "# $u" >"$ROOT$UNIT_DIR/$u"; done
   echo "# foreign" >"$ROOT$UNIT_DIR/nginx.service"
-  printf 'other.example.org {\n\trespond "hi"\n}\nimport mc-panel.caddy # managed by mc-panel\n' >"$ROOT$CADDY_DIR/Caddyfile"
+  printf 'other.example.org {\n\trespond "hi"\n}\nimport mc-panel.caddy # managed by mc-panel\nimport mc-panel-web.caddy # managed by mc-panel\n' >"$ROOT$CADDY_DIR/Caddyfile"
   chmod 0644 "$ROOT$CADDY_DIR/Caddyfile"
   printf 'panel.example.com {\n}\n' >"$ROOT$CADDY_DIR/mc-panel.caddy"
+  printf 'https:// {\n}\n' >"$ROOT$CADDY_DIR/mc-panel-web.caddy"
   printf 'public_url = "https://panel.example.com"\n' >"$ROOT$ETC_PANEL/panel.toml"
   echo world >"$ROOT$INSTANCES_DIR/instances/1/level.dat"
   echo key >"$ROOT$INSTANCES_DIR/backups/keys/1.key"
@@ -33,6 +34,9 @@ ops_uninstall_system() {
   uni_probe_has_network() { return 0; }
   uni_probe_instance_networks() { printf '%s\n' mcpanel-mc mcpanel-net-1 'mcpanel-net-2;x' mcpanel-net-12; }
   uni_probe_has_table() { return 0; }
+  uni_probe_has_web() { return 0; }
+  uni_probe_has_web_network() { return 0; }
+  uni_probe_has_web_table() { return 0; }
   uni_probe_user_exists() { return 0; }
 }
 
@@ -51,7 +55,9 @@ test_ops_uninstall_removes_program_and_keeps_data() {
   assert_no_file "$ROOT$UNIT_DIR/mcpanel-panel.service"
   assert_no_file "$ROOT$UNIT_DIR/mcpanel-fw.service"
   assert_no_file "$ROOT$CADDY_DIR/mc-panel.caddy"
+  assert_no_file "$ROOT$CADDY_DIR/mc-panel-web.caddy"
   assert_not_contains "$(cat "$ROOT$CADDY_DIR/Caddyfile")" "mc-panel.caddy"
+  assert_not_contains "$(cat "$ROOT$CADDY_DIR/Caddyfile")" "mc-panel-web.caddy"
   assert_called 'systemctl stop mcpanel-panel.service'
   assert_called 'systemctl disable mcpanel-agent.service'
   assert_called 'systemctl daemon-reload'
@@ -59,6 +65,9 @@ test_ops_uninstall_removes_program_and_keeps_data() {
   assert_called 'nft delete table inet mcpanel'
   assert_called "docker rm -f $OPS_C1 $OPS_C2"
   assert_called 'docker rm -f mcpanel-router'
+  assert_called 'docker rm -f mcpanel-web'
+  assert_called 'docker network rm mcpanel-web'
+  assert_called 'nft delete table bridge mcpanel_web'
   assert_called 'docker network rm mcpanel-mc'
   assert_called 'docker network rm mcpanel-net-1 mcpanel-net-12'
   assert_called 'systemctl reload caddy'
@@ -129,8 +138,8 @@ test_ops_uninstall_leaves_foreign_objects() {
   assert_not_called 'nft delete ruleset'
   assert_not_called 'docker system'
   assert_not_called 'docker rmi'
-  # exactly the two removals of mc-panel containers: the labelled ones and the router
-  assert_eq 2 "$(grep -c '^docker rm -f' "$WORK/calls.log")"
+  # exactly the three removals of mc-panel containers: the labelled ones, the router and mcpanel-web
+  assert_eq 3 "$(grep -c '^docker rm -f' "$WORK/calls.log")"
   assert_eq 1 "$(grep -c '^docker stop' "$WORK/calls.log")"
 }
 
@@ -175,6 +184,7 @@ test_ops_uninstall_leaves_unlabelled_router_and_network() {
   uni_probe_has_router() { return 1; }
   uni_probe_has_network() { return 1; }
   uni_probe_instance_networks() { :; }
+  uni_probe_has_web_network() { return 1; }
   YES=1
   assert_exit 0 cmd_uninstall
   assert_not_called 'docker rm -f mcpanel-router'
@@ -210,6 +220,9 @@ test_ops_uninstall_is_idempotent() {
   uni_probe_has_network() { return 1; }
   uni_probe_instance_networks() { :; }
   uni_probe_has_table() { return 1; }
+  uni_probe_has_web() { return 1; }
+  uni_probe_has_web_network() { return 1; }
+  uni_probe_has_web_table() { return 1; }
   : >"$WORK/calls.log"
   assert_exit 0 cmd_uninstall
   assert_not_called 'docker'
@@ -226,6 +239,9 @@ test_ops_uninstall_without_docker_and_nft() {
   uni_probe_has_network() { return 127; }
   uni_probe_instance_networks() { return 127; }
   uni_probe_has_table() { return 127; }
+  uni_probe_has_web() { return 127; }
+  uni_probe_has_web_network() { return 127; }
+  uni_probe_has_web_table() { return 127; }
   YES=1
   assert_exit 0 cmd_uninstall
   assert_not_called 'docker'
@@ -326,4 +342,42 @@ test_ops_purge_reports_what_it_could_not_delete() {
   # the others are gone anyway
   assert_no_file "$ROOT$INSTANCES_DIR"
   assert_no_file "$ROOT$ETC_PANEL"
+}
+
+test_ops_uninstall_removes_the_web_router_before_the_networks_and_its_table() {
+  ops_uninstall_system
+  YES=1
+  assert_exit 0 cmd_uninstall
+  local web nets table
+  web="$(grep -n '^docker rm -f mcpanel-web' "$WORK/calls.log" | cut -d: -f1)"
+  nets="$(grep -n '^docker network rm mcpanel-net-1' "$WORK/calls.log" | cut -d: -f1)"
+  table="$(grep -n '^nft delete table bridge mcpanel_web' "$WORK/calls.log" | cut -d: -f1)"
+  # attached to the server networks, mcpanel-web would keep them; its port restriction goes
+  # only once the container is gone
+  ((web < nets)) || fail "mcpanel-web removed at line $web, server networks at line $nets"
+  ((web < table)) || fail "mcpanel-web removed at line $web, its table at line $table"
+}
+
+test_ops_uninstall_leaves_an_unlabelled_web_container_and_network() {
+  ops_uninstall_system
+  uni_probe_has_web() { return 1; }
+  uni_probe_has_web_network() { return 1; }
+  uni_probe_has_web_table() { return 1; }
+  YES=1
+  assert_exit 0 cmd_uninstall
+  assert_not_called 'docker rm -f mcpanel-web'
+  assert_not_called 'docker network rm mcpanel-web'
+  assert_not_called 'bridge mcpanel_web'
+}
+
+test_ops_uninstall_keeps_an_unmarked_web_import_line() {
+  ops_uninstall_system
+  printf 'import mc-panel.caddy # managed by mc-panel\nimport mc-panel-web.caddy\nother.example.org {\n}\n' >"$ROOT$CADDY_DIR/Caddyfile"
+  YES=1
+  assert_exit 0 cmd_uninstall
+  assert_file_contains "$ROOT$CADDY_DIR/Caddyfile" 'import mc-panel-web.caddy'
+  assert_file_contains "$ROOT$CADDY_DIR/mc-panel-web.caddy" '# mc-panel was uninstalled'
+  assert_not_contains "$(cat "$ROOT$CADDY_DIR/mc-panel-web.caddy")" 'https://'
+  assert_contains "$(cat "$WORK/out")" "still imports mc-panel-web.caddy"
+  assert_no_file "$ROOT$CADDY_DIR/mc-panel.caddy"
 }

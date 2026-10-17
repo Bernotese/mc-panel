@@ -4,6 +4,7 @@ import { Section } from '@/components/section'
 import { OnlinePlayersCard } from '@/features/players/online-players-card'
 import { useFormat } from '@/lib/format'
 import { describeInstance, formatGiB, javaLabel } from './format'
+import { WebMapLink } from './web-map-link'
 
 /** Spec §4.4: status, address, power and resources live in the server header; the overview keeps the details and online players. */
 export function ServerOverview({ server, instance }: { server: Server; instance: InstanceConfig; extracting?: boolean }) {
@@ -24,6 +25,14 @@ export function ServerOverview({ server, instance }: { server: Server; instance:
           <dd className="tabular-nums">{formatGiB(instance.memory_mib * 1024 ** 2, fmt.locale)} GiB</dd>
           <dt className="text-muted-foreground">{t('servers.overview.started')}</dt>
           <dd>{running && status.started_at > 0 ? fmt.relative(status.started_at) : '–'}</dd>
+          {server.web_status === 'active' && server.web_url ? (
+            <>
+              <dt className="text-muted-foreground">{t('servers.overview.web')}</dt>
+              <dd>
+                <WebMapLink server={server} />
+              </dd>
+            </>
+          ) : null}
           {status.operation ? (
             <>
               <dt className="text-muted-foreground">{t('servers.overview.status')}</dt>

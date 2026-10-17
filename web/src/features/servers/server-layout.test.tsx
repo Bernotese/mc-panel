@@ -57,6 +57,28 @@ describe('ServerLayout', () => {
     expect(await within(screen.getByRole('region', { name: 'Online-Spieler' })).findByText('2 / 20')).toBeInTheDocument()
   })
 
+  it('links the web map in header and overview only while the web port is active', async () => {
+    await renderApp('/servers/1', loginAs('alice'))
+    const header = await screen.findByRole('region', { name: 'survival' })
+    const link = within(header).getByRole('link', { name: 'Webkarte öffnen' })
+    expect(link).toHaveAttribute('href', 'https://survival.mc.example.com')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(within(screen.getByRole('region', { name: 'Zustand' })).getByRole('link', { name: 'Webkarte öffnen' })).toBeInTheDocument()
+  })
+
+  // pending settles to active on the next GET of the mock, so error and off stand for "not active".
+  it.each([
+    ['error', { webState: 'error' }],
+    ['off', { webPort: null }],
+  ] as const)('shows no web map link while the web port is %s', async (_, patch) => {
+    Object.assign(mockServer(1), patch)
+    await renderApp('/servers/1', loginAs('admin'))
+    const header = await screen.findByRole('region', { name: 'survival' })
+    expect(within(header).getByText('survival.mc.example.com')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Webkarte öffnen' })).not.toBeInTheDocument()
+  })
+
   it('shows admins the last error of a failed server', async () => {
     const survival = mockServer(1)
     survival.status = { ...survival.status, state: 'error', last_error: 'image pull failed: manifest unknown' }

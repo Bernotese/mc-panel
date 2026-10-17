@@ -1,0 +1,146 @@
+{
+  "admin": {
+    "disabled": true,
+    "config": {
+      "persist": false
+    }
+  },
+  "apps": {
+    "http": {
+      "servers": {
+        "ask": {
+          "listen": [
+            ":8081"
+          ],
+          "automatic_https": {
+            "disable": true
+          },
+          "routes": [
+            {
+              "match": [
+                {
+                  "query": {
+                    "domain": [
+                      "survival.example.com"
+                    ]
+                  }
+                }
+              ],
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "status_code": 200
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "match": [
+                {
+                  "query": {
+                    "domain": [
+                      "xn--mnchen-3ya.0-9.example.com"
+                    ]
+                  }
+                }
+              ],
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "status_code": 200
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "status_code": 404
+                }
+              ]
+            }
+          ]
+        },
+        "proxy": {
+          "listen": [
+            ":8080"
+          ],
+          "automatic_https": {
+            "disable": true
+          },
+          "trusted_proxies": {
+            "source": "static",
+            "ranges": [
+              "10.213.255.240/28"
+            ]
+          },
+          "routes": [
+            {
+              "match": [
+                {
+                  "host": [
+                    "survival.example.com"
+                  ]
+                }
+              ],
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "upstreams": [
+                    {
+                      "dial": "mcpanel-mc-3:8100"
+                    }
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "match": [
+                {
+                  "host": [
+                    "xn--mnchen-3ya.0-9.example.com"
+                  ]
+                }
+              ],
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "upstreams": [
+                    {
+                      "dial": "mcpanel-mc-12:65535"
+                    }
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "status_code": 404,
+                  "body": "Not found\n"
+                }
+              ]
+            }
+          ],
+          "errors": {
+            "routes": [
+              {
+                "handle": [
+                  {
+                    "handler": "static_response",
+                    "status_code": 502,
+                    "body": "The server's web interface is not reachable right now.\n"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

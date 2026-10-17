@@ -1,0 +1,22 @@
+# Managed by mc-panel install.sh {{VERSION}}; install.sh update rewrites this file.
+# Web interfaces of the Minecraft servers (https://<server>.<base domain>), routed by the
+# agent's mcpanel-web container. Imported from /etc/caddy/Caddyfile (line "import
+# mc-panel-web.caddy"); the panel's own site (mc-panel.caddy) names its host and always wins over
+# this catch-all. Certificates are issued on demand, only for names that mcpanel-web allows
+# (on_demand_tls ask in the Caddyfile's global options; without it, never import this file).
+https:// {
+	tls {{TLS_ON_DEMAND}}
+	# Access log: client IPs, URLs and user agents of the web interfaces.
+	log {
+		output file /var/log/caddy/mc-panel-web.log {
+			roll_size 50MiB
+			roll_keep 14
+		}
+	}
+	# Your additions for every web interface go into /etc/caddy/mc-panel-web.d/*.caddy; this file
+	# is rewritten by install and update, that directory never. To keep search engines off the
+	# web maps, put this line into e.g. mc-panel-web.d/robots.caddy:
+	# header X-Robots-Tag "noindex"
+	import /etc/caddy/mc-panel-web.d/*.caddy
+	reverse_proxy 127.0.0.1:{{WEB_PROXY_PORT}}
+}

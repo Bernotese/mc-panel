@@ -76,6 +76,30 @@ function settle(s: MockServer): void {
   }
 }
 
+/** Same rule as agentapi.ValidWebPort. */
+function validWebPort(p: unknown): p is number {
+  return typeof p === 'number' && Number.isInteger(p) && p >= 1024 && p <= 65535 && p !== 25565 && p !== 25575
+}
+
+/** The reconcile applies a changed route list within seconds: "pending" becomes "active" on the next GET. */
+function settleWeb(s: MockServer): void {
+  if (s.webPort && s.webState === 'pending' && db.serverSettings.base_domain) s.webState = 'active'
+}
+
+/** Like the panel: off without port or base domain; web_port (whenever one is stored) and web_error only for admins. */
+function webFields(s: MockServer, admin: boolean): Pick<Server, 'web_status' | 'web_url' | 'web_port' | 'web_error'> {
+  const base = db.serverSettings.base_domain
+  if (!s.webPort) return { web_status: 'off' }
+  if (!base) return { web_status: 'off', ...(admin ? { web_port: s.webPort } : {}) }
+  const status = s.webState ?? 'pending'
+  return {
+    web_status: status,
+    web_url: `https://${s.name}.${base}`,
+    ...(admin ? { web_port: s.webPort } : {}),
+    ...(admin && status === 'error' && s.webError ? { web_error: s.webError } : {}),
+  }
+}
+
 /** New desired revision: a running server needs a restart, a stopped one is recreated at once. */
 function bumpRevision(s: MockServer): void {
   s.revision += 1
@@ -103,6 +127,7 @@ function toServer(s: MockServer, permissions: Permission[], admin = true): Serve
     instance,
     status: admin ? s.status : { ...s.status, last_error: '' },
     down_alerts: admin ? (db.monitoring.downAlerts[s.id] ?? true) : null,
+    ...webFields(s, admin),
   }
 }
 
@@ -115,6 +140,7 @@ export const serverOperations: MockOperation[] = [
       const visible = db.servers
         .map((s) => {
           settle(s)
+          settleWeb(s)
           return toServer(s, serverPermissions(g.user, s.id), g.user.role === 'admin')
         })
         .filter((s) => s.permissions.length > 0)
@@ -209,7 +235,11 @@ export const serverOperations: MockOperation[] = [
         if (next !== db.serverSettings.base_domain) {
           details.base_domain = { old: db.serverSettings.base_domain, new: next }
           db.serverSettings.base_domain = next
-          for (const s of db.servers) if (s.instance) bumpRevision(s)
+          for (const s of db.servers) {
+            if (s.instance) bumpRevision(s)
+            // the route list changes with the base domain: pending until the agent confirms
+            if (s.webPort) s.webState = 'pending'
+          }
         }
       }
       if (body.curseforge_api_key !== undefined) {
@@ -242,6 +272,7 @@ export const serverOperations: MockOperation[] = [
       const server = db.servers.find((s) => s.id === id)
       if (!server) return apiError(404, 'not_found', 'server not found')
       settle(server)
+      settleWeb(server)
       return HttpResponse.json<Server>(toServer(server, permissions, g.user.role === 'admin'))
     }),
   ),
@@ -259,6 +290,10 @@ export const serverOperations: MockOperation[] = [
       if (body.memory_mib !== undefined && !validMemory(body.memory_mib)) {
         return apiError(400, 'validation_failed', MEMORY_MESSAGE)
       }
+      if (body.web_port !== undefined && body.web_port !== null && !validWebPort(body.web_port)) {
+        return apiError(400, 'validation_failed', 'web_port: must be 1024..65535 and not 25565 or 25575')
+      }
+      if (body.web_port !== undefined && !db.serverSettings.base_domain) return apiError(409, 'conflict', 'base domain required')
       const before = JSON.stringify(server.instance)
       const next = { ...server.instance }
       if (body.version !== undefined) next.version = body.version
@@ -271,6 +306,13 @@ export const serverOperations: MockOperation[] = [
         server.instance = next
         bumpRevision(server)
         recordAudit(g.user, 'server.update', `server:${server.id}`, 'success', { name: server.name, revision: server.revision })
+      }
+      // Not part of the instance spec: no revision bump, an audit entry of its own.
+      if (body.web_port !== undefined && body.web_port !== (server.webPort ?? null)) {
+        recordAudit(g.user, 'server.web_port_update', `server:${server.id}`, 'success', { name: server.name, old: server.webPort ?? null, new: body.web_port })
+        server.webPort = body.web_port
+        server.webState = 'pending'
+        delete server.webError
       }
       return HttpResponse.json<Server>(toServer(server, [...ALL_PERMISSIONS]))
     }),
