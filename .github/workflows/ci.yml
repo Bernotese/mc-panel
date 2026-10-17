@@ -27,17 +27,15 @@ defaults:
 jobs:
   # Decides which jobs a pull request needs (git diff against the merge base, no third-party
   # action). The weekly run, manual runs and any change to this workflow run everything. Pushes
-  # to main run every job on the self-hosted test-VM runners (free), but not the root jobs on
-  # GitHub-hosted runners (instances, nftables, installer): the pull request already ran them
-  # on the same tree, and they cost most of the billed minutes.
+  # to main run every job except the root jobs (instances, nftables, installer): the pull
+  # request already ran them on the same tree, and they take the longest.
   #
-  # Runner placement: jobs without root run on the self-hosted runners on the test VM (labels
-  # self-hosted + mcpanel-vm; four runners, see docs/dev/README.md). Their timing-sensitive test
-  # steps take the same lock as `make test-vm`, so CI and teammates never run them at once. The
-  # root jobs change the host (nftables, Docker, port 25565) and stay on GitHub-hosted runners.
+  # Runner placement: every job runs on a fresh GitHub-hosted runner (ubuntu-24.04). Never use
+  # self-hosted runners here: in a public repository a pull request from a fork runs its own
+  # code in these jobs (SEC-08).
   changes:
     name: Changes
-    runs-on: [self-hosted, mcpanel-vm]
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       go: ${{ steps.diff.outputs.go }}
@@ -89,11 +87,11 @@ jobs:
             echo "$1=${v}"
           }
           gomod='^go\.(mod|sum)$'
-          out go "^(cmd|internal|api|deploy)/|${gomod}|^sqlc\.yaml$|^\.golangci\.yml$|^Makefile$|^scripts/install-restic\.sh$"
-          out web '^web/|^api/'
+          out go "^(cmd|internal|api|deploy)/|${gomod}|^sqlc\.yaml$|^\.golangci\.yml$|^Makefile$|^scripts/install-(restic|golangci-lint)\.sh$"
+          out web '^web/|^api/|^\.node-version$'
           out preview '^web/Dockerfile\.preview$|^compose\.preview\.yaml$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$'
-          out openapi '^api/|^tools/redocly/'
-          out e2e "^(cmd|internal|api|web)/|${gomod}"
+          out openapi '^api/|^tools/redocly/|^\.node-version$'
+          out e2e "^(cmd|internal|api|web)/|^scripts/vm-test\.sh$|^\.node-version$|${gomod}"
           out nftables "^internal/(agent|defense|auth)/|^cmd/(agent|panel)/|^scripts/ci-acceptance\.sh$|${gomod}" root
           # Instance acceptance shards (scripts/ci-instances/<shard>.sh), each a matrix entry of
           # the job instances. Shared code runs every shard: cmd/, go.mod/sum, the dispatcher and
@@ -121,11 +119,11 @@ jobs:
           if [ "${json}" = '[]' ]; then instances=false; fi
           echo "instances=${instances}" >> "${GITHUB_OUTPUT}"
           echo "instances=${instances}"
-          out release "^cmd/|^internal/(webui|timescale)/|^deploy/|^scripts/install/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|${gomod}"
+          out release "^cmd/|^internal/(webui|timescale)/|^deploy/|^scripts/install/|^\.goreleaser\.yaml$|^Makefile$|^web/package(-lock)?\.json$|^web/vite\.config\.ts$|^\.node-version$|${gomod}"
           # The installer jobs share one filter: the lint on every run; the lifecycle (root, not on
           # pushes to main) also on any internal/ change, since it runs the real panel, agent and
           # files service (like instances).
-          installer="^scripts/install/|^deploy/|^scripts/(ci-installer|install-restic|testvm-deploy|sign-release|verify-release-build|release-lib)\.sh$|^\.node-version$|^cmd/|^internal/(config|unixsock)/|^\.goreleaser\.yaml$|^Makefile$|${gomod}"
+          installer="^scripts/install/|^deploy/|^scripts/(ci-installer|install-restic|install-golangci-lint|testvm-deploy|sign-release|verify-release-build|release-lib)\.sh$|^\.node-version$|^cmd/|^internal/(config|unixsock)/|^\.goreleaser\.yaml$|^Makefile$|${gomod}"
           out installer "${installer}"
           out installer_root "${installer}|^internal/" root
 
@@ -133,22 +131,19 @@ jobs:
     name: Go (race tests, lint, vulns)
     needs: changes
     if: needs.changes.outputs.go == 'true'
-    runs-on: [self-hosted, mcpanel-vm]
-    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # No GitHub cache on the self-hosted runners: they share a persistent ~/.cache/go-build and
-      # ~/go/pkg/mod on the VM, and restoring/saving the multi-GB cache over the uplink took
-      # minutes per job and filled the disk. The toolchain stays in the runner tool cache.
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: false
+          cache: true
 
       - name: Verify modules
         run: |
@@ -198,15 +193,26 @@ jobs:
           MCPANEL_TEST_RESTIC: /usr/local/bin/restic
         run: |
           umask 022
-          mkdir -p ~/.cache
-          flock ~/.cache/mcpanel-vm-test.lock make test-race
+          make test-race
+
+      # The pinned release archive, checked against its checksums.txt (the same script as
+      # make test-vm); its analysis cache is kept between runs like the Go caches.
+      - name: Install golangci-lint
+        run: |
+          bash scripts/install-golangci-lint.sh "${RUNNER_TEMP}/bin"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Cache golangci-lint
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml', 'scripts/install-golangci-lint.sh') }}-${{ github.sha }}
+          restore-keys: |
+            golangci-lint-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml', 'scripts/install-golangci-lint.sh') }}-
+            golangci-lint-${{ runner.os }}-
 
       - name: golangci-lint (incl. gosec, gofmt, goimports)
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: v2.14.0
-          # The VM keeps ~/.cache/golangci-lint itself (see "Set up Go").
-          skip-cache: true
+        run: golangci-lint run ./...
 
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
@@ -215,8 +221,8 @@ jobs:
     name: Web (lint, typecheck, test, build, audit)
     needs: changes
     if: needs.changes.outputs.web == 'true'
-    runs-on: [self-hosted, mcpanel-vm]
-    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: web
@@ -226,14 +232,15 @@ jobs:
         with:
           persist-credentials: false
 
-      # No npm cache through GitHub on the self-hosted runners: ~/.npm on the VM persists.
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
-      # No lifecycle scripts on the self-hosted runners (SEC-08): only fsevents (macOS) and msw (copies the
-      # committed public/mockServiceWorker.js) have any.
+      # No lifecycle scripts (SEC-08): only fsevents (macOS) and msw (copies the committed
+      # public/mockServiceWorker.js) have any.
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
@@ -244,10 +251,7 @@ jobs:
         run: npm run typecheck
 
       - name: Unit tests
-        run: |
-          umask 022
-          mkdir -p ~/.cache
-          flock ~/.cache/mcpanel-vm-test.lock npm test
+        run: npm test
 
       - name: Build
         run: npm run build
@@ -275,7 +279,7 @@ jobs:
     name: OpenAPI lint
     needs: changes
     if: needs.changes.outputs.openapi == 'true'
-    runs-on: [self-hosted, mcpanel-vm]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -286,7 +290,9 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: tools/redocly/package-lock.json
 
       # Pinned by tools/redocly/package-lock.json, without install scripts (SEC-08).
       - name: Install Redocly
@@ -300,19 +306,34 @@ jobs:
     name: E2E (Playwright, real backend)
     needs: changes
     if: needs.changes.outputs.e2e == 'true'
-    runs-on: [self-hosted, mcpanel-vm]
-    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # The same suite as `make test-vm SUITE=e2e`: real backend in dev mode on its own ports
-      # (panel 18080, Playwright mock 5174), so the panel deployed on the VM (8080) is not
-      # touched; it takes the VM test lock itself. Go and Node come from the VM
-      # (scripts/testvm-deploy.sh).
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The same suite as `make test-vm SUITE=e2e`: real backend in dev mode (panel 18080,
+      # Playwright mock 5174); it installs Chromium of the lockfile's Playwright version and its
+      # system packages (sudo). Go and Node come from the steps above. No test lock (empty
+      # MCPANEL_TEST_LOCK): the runner is this job's alone.
       - name: Playwright (real and mock backend)
+        env:
+          MCPANEL_TEST_LOCK: ""
         run: bash scripts/vm-test.sh e2e
 
       - name: Logs on failure
@@ -448,7 +469,7 @@ jobs:
     name: Build & release snapshot
     needs: changes
     if: needs.changes.outputs.release == 'true'
-    runs-on: [self-hosted, mcpanel-vm]
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -457,17 +478,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # No GitHub cache on the self-hosted runners (see the go job); Node likewise.
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: false
+          cache: true
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
       - name: Install web dependencies
         working-directory: web
@@ -571,8 +593,7 @@ jobs:
     name: Installer (shellcheck, Bash tests)
     needs: changes
     if: needs.changes.outputs.installer == 'true'
-    runs-on: [self-hosted, mcpanel-vm]
-    # ~3 min on an idle VM; the Bash tests run outside the test lock and slow down next to the race tests.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -584,7 +605,7 @@ jobs:
         run: make installer INSTALLER_VERSION=0.0.0-ci
 
       - name: shellcheck
-        run: shellcheck --version && shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh scripts/ci-installer.sh scripts/testvm-deploy.sh scripts/sign-release.sh scripts/verify-release-build.sh scripts/release-lib.sh
+        run: shellcheck --version && shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh scripts/ci-installer.sh scripts/install-golangci-lint.sh scripts/testvm-deploy.sh scripts/sign-release.sh scripts/verify-release-build.sh scripts/release-lib.sh
 
       - name: Bash tests
         run: bash scripts/install/test.sh
@@ -618,8 +639,7 @@ jobs:
         run: sudo env "PATH=$PATH" "GOCACHE=$(go env GOCACHE)" "GOMODCACHE=$(go env GOMODCACHE)" scripts/ci-installer.sh .
 
   # The one result to wait for (gh pr checks): green when every job either passed or was not
-  # needed for this change. It only reads `needs` (no checkout) and runs on a GitHub-hosted runner:
-  # on the VM it starved behind busy runners and GitHub cancelled it ("not acquired by Runner").
+  # needed for this change. It only reads `needs` (no checkout).
   ci-ok:
     name: CI OK
     if: always()

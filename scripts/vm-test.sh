@@ -7,18 +7,25 @@
 # shots): parallel runs of several teammates overload the VM and make those tests fail. Lint,
 # npm ci and builds run outside the lock.
 #
+# The CI job e2e runs "vm-test.sh e2e" on a GitHub-hosted runner: there Go and Node come from
+# setup-go/setup-node on PATH, and MCPANEL_TEST_LOCK= (empty) turns the lock off (each job has
+# its own machine).
+#
 #   bash scripts/vm-test.sh [all|go|lint|web|e2e|shots]
 set -euo pipefail
 
-export PATH="/usr/local/go/bin:/usr/local/lib/nodejs/bin:${HOME}/.local/bin:${PATH}"
+# The VM's Go and Node (testvm-deploy.sh) when they exist, otherwise whatever is on PATH (CI).
+for dir in /usr/local/lib/nodejs/bin /usr/local/go/bin; do
+  if [ -d "${dir}" ]; then PATH="${dir}:${PATH}"; fi
+done
+export PATH="${HOME}/.local/bin:${PATH}"
 # The VM user's default umask is 0002; tests that check directory modes expect the CI's 0022.
 umask 022
 cd "$(dirname "$0")/.."
 
 suite="${1:-all}"
-GOLANGCI_VERSION="2.14.0"
 E2E_PORT=18080
-VM_LOCK="${HOME}/.cache/mcpanel-vm-test.lock"
+VM_LOCK="${MCPANEL_TEST_LOCK-${HOME}/.cache/mcpanel-vm-test.lock}"
 
 log() { printf '\n==> %s\n' "$*"; }
 die() {
@@ -48,27 +55,7 @@ need_node_modules() {
 }
 
 need_golangci() {
-  local bin="${HOME}/.local/bin/golangci-lint"
-  if [ -x "${bin}" ] && "${bin}" version 2> /dev/null | grep -q "version ${GOLANGCI_VERSION} "; then
-    return
-  fi
-  log "installing golangci-lint ${GOLANGCI_VERSION} to ~/.local/bin"
-  local arch tmp name base
-  case "$(uname -m)" in
-    x86_64) arch=amd64 ;;
-    aarch64) arch=arm64 ;;
-    *) die "unsupported architecture $(uname -m)" ;;
-  esac
-  tmp="$(mktemp -d)"
-  name="golangci-lint-${GOLANGCI_VERSION}-linux-${arch}"
-  base="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_VERSION}"
-  curl -fsSL -o "${tmp}/${name}.tar.gz" "${base}/${name}.tar.gz"
-  curl -fsSL -o "${tmp}/checksums.txt" "${base}/golangci-lint-${GOLANGCI_VERSION}-checksums.txt"
-  (cd "${tmp}" && grep " ${name}.tar.gz\$" checksums.txt | sha256sum -c -)
-  tar -xzf "${tmp}/${name}.tar.gz" -C "${tmp}"
-  mkdir -p "${HOME}/.local/bin"
-  install -m 0755 "${tmp}/${name}/golangci-lint" "${bin}"
-  rm -rf "${tmp}"
+  bash scripts/install-golangci-lint.sh "${HOME}/.local/bin"
 }
 
 # restic for the backup integration tests of the files service (sub-project 4); they skip
@@ -91,11 +78,11 @@ need_playwright() {
   touch "${marker}"
 }
 
-# with_lock runs "$@" while holding the VM test lock (shared with the CI jobs, which flock the
-# same file around their race and Vitest steps). Nested calls reuse a lock that is already held.
+# with_lock runs "$@" while holding the VM test lock (shared by all checkouts on the VM). Nested
+# calls reuse a lock that is already held; an empty MCPANEL_TEST_LOCK runs "$@" without a lock.
 lock_held=""
 with_lock() {
-  if [ -n "${lock_held}" ]; then
+  if [ -n "${lock_held}" ] || [ -z "${VM_LOCK}" ]; then
     "$@"
     return
   fi
@@ -147,7 +134,7 @@ suite_lint() {
   # Like the CI job installer-lint (installer plan V5).
   log "installer: assemble, shellcheck, Bash tests"
   make installer INSTALLER_VERSION=0.0.0-vm
-  shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh scripts/sign-release.sh scripts/verify-release-build.sh scripts/release-lib.sh
+  shellcheck -x scripts/install/*.sh scripts/install/tests/*.sh build/install.sh scripts/install-golangci-lint.sh scripts/sign-release.sh scripts/verify-release-build.sh scripts/release-lib.sh
   bash scripts/install/test.sh
 }
 

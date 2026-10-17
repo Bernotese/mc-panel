@@ -16,14 +16,12 @@ defaults:
     shell: bash
 
 jobs:
-  # Lint and tests run on the self-hosted runners on the test VM (label mcpanel-vm, see
-  # docs/dev/README.md "CI"): the GitHub-hosted runner needed more than 13 minutes for Vitest
-  # alone and the job hit its 30-minute limit. This job only has read access; the release
-  # job below builds and publishes on a fresh GitHub-hosted runner.
+  # Lint and tests on a fresh GitHub-hosted runner with read access only; the release job below
+  # builds and publishes on another fresh runner.
   verify:
     name: Lint and tests
-    runs-on: [self-hosted, mcpanel-vm]
-    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     permissions:
       contents: read
     env:
@@ -74,29 +72,33 @@ jobs:
         working-directory: web
         run: npm ci --ignore-scripts
 
-      # golangci-lint is built from source with the Go toolchain (module proxy + checksum DB)
-      # rather than via an action, so no GITHUB_TOKEN is involved. Same version as ci.yml.
+      # The pinned release archive, checked against its checksums.txt (same script and version as
+      # ci.yml and make test-vm); no action, so no GITHUB_TOKEN is involved.
       - name: Install golangci-lint
         run: |
-          set -euo pipefail
-          GOBIN="${RUNNER_TEMP}/bin" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+          bash scripts/install-golangci-lint.sh "${RUNNER_TEMP}/bin"
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      # restic for the backup integration tests of the files service (pinned, SHA-256 checked).
+      - name: Install restic
+        run: sudo bash scripts/install-restic.sh
 
       - name: Lint
         run: make lint
 
-      # The test steps share the lock of make test-vm and the CI jobs on the test VM.
       - name: Tests
+        env:
+          MCPANEL_TEST_RESTIC: /usr/local/bin/restic
         run: |
           umask 022
-          mkdir -p ~/.cache
-          flock ~/.cache/mcpanel-vm-test.lock make test
+          make test
 
       - name: Race tests
+        env:
+          MCPANEL_TEST_RESTIC: /usr/local/bin/restic
         run: |
           umask 022
-          mkdir -p ~/.cache
-          flock ~/.cache/mcpanel-vm-test.lock make test-race
+          make test-race
 
   # GoReleaser creates the release as a draft (.goreleaser.yaml). It is published only by
   # make sign-release on the owner's machine, which adds checksums.txt.sig signed with the
