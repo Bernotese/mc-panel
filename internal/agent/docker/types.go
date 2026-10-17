@@ -26,6 +26,7 @@ type HostConfig struct {
 	Binds          []string                 `json:"Binds,omitempty"`
 	NetworkMode    string                   `json:"NetworkMode,omitempty"`
 	PortBindings   map[string][]PortBinding `json:"PortBindings,omitempty"`
+	Tmpfs          map[string]string        `json:"Tmpfs,omitempty"` // mount point → options
 	RestartPolicy  RestartPolicy            `json:"RestartPolicy"`
 	CapAdd         []string                 `json:"CapAdd,omitempty"`
 	CapDrop        []string                 `json:"CapDrop,omitempty"`
@@ -66,7 +67,13 @@ type NetworkingConfig struct {
 }
 
 type EndpointSettings struct {
-	Aliases []string `json:"Aliases,omitempty"`
+	Aliases    []string            `json:"Aliases,omitempty"`
+	IPAMConfig *EndpointIPAMConfig `json:"IPAMConfig,omitempty"`
+}
+
+// EndpointIPAMConfig fixes a container's address on a network.
+type EndpointIPAMConfig struct {
+	IPv4Address string `json:"IPv4Address,omitempty"`
 }
 
 // ContainerSummary is one entry of GET /containers/json.

@@ -354,6 +354,7 @@ func TestCheckImages(t *testing.T) {
 		"java8":  func(i *config.Images) { i.Java8 = "Itzg/minecraft-server" + digest },
 		"java17": func(i *config.Images) { i.Java17 = "itzg//minecraft-server" + digest },
 		"router": func(i *config.Images) { i.Router = "itzg/mc-router/" + digest },
+		"web":    func(i *config.Images) { i.Web = "Caddy" + digest },
 	} {
 		imgs := config.DefaultImages()
 		mod(&imgs)
