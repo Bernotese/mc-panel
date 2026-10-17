@@ -198,6 +198,11 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		api.Get("/health", rbac.Public(), func(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		})
+		// The running version for the UI's source code link (AGPL-3.0 §13). Signed-in users only:
+		// the public health check does not reveal the version.
+		api.Get("/about", rbac.Authenticated(), func(w http.ResponseWriter, r *http.Request) {
+			httpx.WriteJSON(w, http.StatusOK, map[string]string{"version": d.Version})
+		})
 		authH.Routes(api)
 		defenseH.Routes(api)
 		notifyH.Routes(api)

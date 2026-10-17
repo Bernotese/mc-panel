@@ -206,5 +206,6 @@ What CI covers (CI and `make test-vm`): token contrast in light and dark (`web/s
 - [ ] **Rail and layout:** on desktop the rail expands with labels and stays expanded after reload; all pages share the same content width; the server form, panel settings and profile use two columns on a wide window; stat values are readable (no pixel font).
 - [ ] **Keyboard:** tab through rail, tree and pages; focus is always visible.
 - [ ] **Login/2FA and sudo dialog** in the new style.
+- [ ] **Source code (AGPL-3.0):** the code icon in the rail opens `https://github.com/Bernotese/mc-panel/tree/v<version>` of the running release in a new tab, its tooltip names the version; the sign-in pages link the repository next to the theme switch.
 - [ ] **CSP:** no CSP errors in the browser console; fonts load from the panel itself (no foreign hosts in the network tab).
 - [ ] **CSP and Trusted Types:** in both themes the browser console shows no CSP or Trusted Types message on the login, the 2FA setup (QR code), the files editor, toasts and dialogs.
