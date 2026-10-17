@@ -61,6 +61,14 @@ func isRouterNetwork(n docker.Network) bool {
 	return n.Name == RouterNetwork && n.Driver == "bridge" && n.Labels[LabelNetwork] == "1"
 }
 
+// webNetworkLabels mark the web router's network mcpanel-web as mc-panel's own.
+func webNetworkLabels() map[string]string { return map[string]string{LabelNetwork: "1", LabelWeb: "1"} }
+
+// isWebNetwork reports whether n is mc-panel's own mcpanel-web network.
+func isWebNetwork(n docker.Network) bool {
+	return n.Name == WebNetwork && n.Driver == "bridge" && n.Labels[LabelNetwork] == "1" && n.Labels[LabelWeb] == "1"
+}
+
 // NextSubnet returns the first /bits block of pool that overlaps none of used.
 func NextSubnet(pool netip.Prefix, bits int, used []netip.Prefix) (netip.Prefix, bool) {
 	if !pool.Addr().Is4() || bits < pool.Bits() || bits > 32 {
@@ -157,6 +165,19 @@ func (m *Manager) ensureInstanceNetwork(ctx context.Context, id int64) (docker.N
 	return n, nil
 }
 
+// ownWeb reports whether mcpanel-web exists and carries mc-panel's label; a container that
+// only shares the name is never connected, disconnected, replaced or removed.
+func (m *Manager) ownWeb(ctx context.Context) (bool, error) {
+	info, err := m.dc.Inspect(ctx, WebName)
+	if docker.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return info.Config.Labels[LabelWeb] == "1", nil
+}
+
 // ownRouter reports whether mcpanel-router exists and carries mc-panel's label; a
 // container that only shares the name is never connected, disconnected or replaced.
 func (m *Manager) ownRouter(ctx context.Context) (bool, error) {
@@ -185,6 +206,16 @@ func (m *Manager) connectRouter(ctx context.Context, name string) error {
 // createInstanceNetwork creates the network of instance id with the first free subnet of
 // the pool; nets are all existing networks. The caller holds netMu.
 func (m *Manager) createInstanceNetwork(ctx context.Context, id int64, nets []docker.Network) (docker.Network, error) {
+	n, err := m.createPoolNetwork(ctx, InstanceNetwork(id), instanceNetworkLabels(id), nets)
+	if err == nil {
+		m.log.Info("instance network created", "id", id, "network", n.Name, "subnet", n.Subnets[0].String())
+	}
+	return n, err
+}
+
+// createPoolNetwork creates the bridge network name with labels and the first free /28 of
+// the pool; nets are all existing networks. The caller holds netMu.
+func (m *Manager) createPoolNetwork(ctx context.Context, name string, labels map[string]string, nets []docker.Network) (docker.Network, error) {
 	used, err := m.hostNetworks(nets)
 	if err != nil {
 		return docker.Network{}, fmt.Errorf("read the host's networks: %w", err)
@@ -192,14 +223,13 @@ func (m *Manager) createInstanceNetwork(ctx context.Context, id int64, nets []do
 	for _, n := range nets {
 		used = append(used, n.Subnets...)
 	}
-	name := InstanceNetwork(id)
 	for range maxAllocationTries {
 		subnet, ok := NextSubnet(m.pool, config.InstanceNetworkBits, used)
 		if !ok {
 			m.notePool(true)
 			return docker.Network{}, fmt.Errorf("%w (%s, /%d per server)", ErrPoolExhausted, m.pool, config.InstanceNetworkBits)
 		}
-		netID, err := m.dc.CreateNetwork(ctx, name, instanceNetworkLabels(id), subnet)
+		netID, err := m.dc.CreateNetwork(ctx, name, labels, subnet)
 		if docker.IsPoolOverlap(err) {
 			used = append(used, subnet)
 			continue
@@ -208,9 +238,7 @@ func (m *Manager) createInstanceNetwork(ctx context.Context, id int64, nets []do
 			return docker.Network{}, err
 		}
 		m.notePool(false)
-		m.log.Info("instance network created", "id", id, "network", name, "subnet", subnet.String())
-		return docker.Network{ID: netID, Name: name, Driver: "bridge", Labels: instanceNetworkLabels(id),
-			Subnets: []netip.Prefix{subnet}}, nil
+		return docker.Network{ID: netID, Name: name, Driver: "bridge", Labels: labels, Subnets: []netip.Prefix{subnet}}, nil
 	}
 	return docker.Network{}, fmt.Errorf("network %s: every tried subnet overlaps another network", name)
 }
@@ -277,6 +305,15 @@ func (m *Manager) removeInstanceNetworkLocked(ctx context.Context, id int64) err
 			return err
 		}
 	}
+	// The web router is on the networks of servers with a web route; the next apply drops
+	// the route of a server that is gone.
+	if ok, err := m.ownWeb(ctx); err != nil {
+		return err
+	} else if ok {
+		if err := m.dc.NetworkDisconnect(ctx, name, WebName); err != nil {
+			return err
+		}
+	}
 	if err := m.dc.RemoveNetwork(ctx, name); err != nil {
 		return err
 	}
@@ -284,8 +321,8 @@ func (m *Manager) removeInstanceNetworkLocked(ctx context.Context, id int64) err
 	return nil
 }
 
-// managedNetworks returns the subnets of mc-panel's own networks (mcpanel-mc and every
-// mcpanel-net-<id>) in a fixed order, and the instance networks by instance ID.
+// managedNetworks returns the subnets of mc-panel's own networks (mcpanel-mc, mcpanel-web
+// and every mcpanel-net-<id>) in a fixed order, and the instance networks by instance ID.
 func (m *Manager) managedNetworks(ctx context.Context) ([]netip.Prefix, map[int64]docker.Network, error) {
 	nets, err := m.dc.ListNetworks(ctx, LabelNetwork)
 	if err != nil {
@@ -295,7 +332,7 @@ func (m *Manager) managedNetworks(ctx context.Context) ([]netip.Prefix, map[int6
 	byID := map[int64]docker.Network{}
 	for _, n := range nets {
 		id, ok := managedNetworkID(n)
-		if !ok && !isRouterNetwork(n) {
+		if !ok && !isRouterNetwork(n) && !isWebNetwork(n) {
 			continue
 		}
 		if ok {
@@ -452,7 +489,7 @@ func (m *Manager) removeOrphanNetwork(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	if slices.ContainsFunc(n.Containers, func(c string) bool { return c != RouterName }) {
+	if slices.ContainsFunc(n.Containers, func(c string) bool { return c != RouterName && c != WebName }) {
 		return fmt.Errorf("network %s has no instance but other containers (%v); leaving it", name, n.Containers)
 	}
 	return m.removeInstanceNetworkLocked(ctx, id)

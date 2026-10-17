@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/netip"
 	"os"
 	"runtime"
@@ -74,6 +75,11 @@ type Config struct {
 	RouterConnectionRateLimit int
 	// WebProxyPort and WebAskPort are mcpanel-web's host ports on 127.0.0.1; 0 = default.
 	WebProxyPort, WebAskPort int
+	// Web is the bridge port restriction of mcpanel-web; nil = none (tests that do not care).
+	Web WebFilter
+	// WebAsk checks whether mcpanel-web serves fqdn; nil means an HTTP request to its ask
+	// port on 127.0.0.1. Tests set it.
+	WebAsk func(ctx context.Context, fqdn string) (bool, error)
 }
 
 // EgressFilter is the firewall part that filters the containers' new connections
@@ -127,6 +133,21 @@ type Manager struct {
 	// unknown, e.g. after an agent restart). Guarded by routerMu.
 	lastApplied []byte
 
+	web        WebFilter
+	webAsk     func(context.Context, string) (bool, error)
+	askClient  *http.Client
+	webWake    chan struct{} // buffer 1: SetWebRoutes wakes the apply loop
+	webApplyMu sync.Mutex    // serialises apply rounds
+	// webRules are the rules the filter was last given (nil: not since the agent started).
+	// Guarded by webApplyMu.
+	webRules []agentapi.WebRule
+	webMu    sync.Mutex // guards the fields below; never held across Docker calls
+	// webDesired is the last list of PUT /v1/web/routes; nil until the first one since the
+	// agent started, and then applyWeb changes nothing.
+	webDesired []agentapi.WebRoute
+	webStatus  map[int64]webRouteState
+	webErr     string // last general apply error, logged on change
+
 	mu        sync.Mutex
 	idle      *sync.Cond
 	active    int // running workers
@@ -158,6 +179,15 @@ func New(cfg Config) *Manager {
 		cancel:        cancel,
 		inst:          map[int64]*instanceState{},
 		stats:         map[int64]sample{},
+		web:           cfg.Web,
+		webAsk:        cfg.WebAsk,
+		webWake:       make(chan struct{}, 1),
+		webStatus:     map[int64]webRouteState{},
+		// The ask port is on 127.0.0.1; never through a proxy from the environment.
+		askClient: &http.Client{Transport: &http.Transport{Proxy: nil}},
+	}
+	if m.webAsk == nil {
+		m.webAsk = m.askWeb
 	}
 	if !m.pool.IsValid() {
 		m.pool = netip.MustParsePrefix(config.DefaultInstanceNetworkPool)
@@ -879,7 +909,7 @@ func cpuPercent(prev, cur sample, onlineCPUs uint32) float64 {
 	return float64(cur.cpuTotal-prev.cpuTotal) / float64(cur.systemTotal-prev.systemTotal) * cpus * 100
 }
 
-// Tick is one round of the background loop: Docker check, routes and router, stats.
+// Tick is one round of the background loop: Docker check, routes and router, web routes, stats.
 func (m *Manager) Tick(ctx context.Context) {
 	if !m.CheckDocker(ctx) {
 		return
@@ -893,11 +923,19 @@ func (m *Manager) Tick(ctx context.Context) {
 		m.log.Warn("instance networks not reconciled", "err", sanitizeError(err))
 	}
 	_ = m.RefreshRouter(ctx)
+	m.tryApplyWeb(ctx)
 	m.SampleStats(ctx)
 }
 
-// Run calls Tick at start and every SampleInterval until ctx is done.
+// Run calls Tick at start and every SampleInterval until ctx is done, and applies the web
+// routes whenever SetWebRoutes stored a new list.
 func (m *Manager) Run(ctx context.Context) {
+	done := make(chan struct{})
+	defer func() { <-done }()
+	go func() {
+		defer close(done)
+		m.webLoop(ctx)
+	}()
 	m.Tick(ctx)
 	t := time.NewTicker(SampleInterval)
 	defer t.Stop()

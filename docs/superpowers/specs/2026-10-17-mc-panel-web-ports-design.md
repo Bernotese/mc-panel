@@ -129,12 +129,11 @@ Applying the list is idempotent and serialised with the instance network mutex:
 
 ### 4.2 Port restriction
 
-`mcpanel-web` must reach only the published port of each attached server. The agent manages the table `bridge mcpanel_web` (the bridge family sees traffic inside a Docker bridge without relying on `br_netfilter`). For each attached server network:
-- allow TCP from the IP of `mcpanel-web` on that network to the server's IP on `dport <web_port>`;
-- allow established/related replies;
-- drop every other new connection from `mcpanel-web` to the server.
+`mcpanel-web` must reach only the published port of each attached server. The agent manages the table `bridge mcpanel_web` (the bridge family sees traffic inside a Docker bridge without relying on `br_netfilter`). `mcpanel-web` gets a fixed address on each attached server network (the last usable host of its /28), so the rules can be written before the connect. For each attached server network:
+- allow TCP from that address of `mcpanel-web` to the server network's subnet on `dport <web_port>`. The rule targets the subnet, not the server's IP: the only other member, mc-router, listens on 25565 only, and the server's IP is not known before its container runs;
+- drop everything else from that address.
 
-Rules are rebuilt idempotently on every apply and every tick, like the egress filter: self-repairing, and fail-closed, meaning no network connect before the rules exist. The egress filter (F1) covers the `mcpanel-web` network like every other managed network.
+The rules are stateless: replies come from the server's side and are not matched, and a connection from `mcpanel-web` is only possible to the published port. They are rebuilt idempotently on every apply and every tick, like the egress filter: self-repairing, and fail-closed. `mcpanel-web` is never on a server network without its rule: it is disconnected before a rule goes, connected only after the rule exists, and disconnected from every server network when the rules cannot be applied. The egress filter (F1) covers the `mcpanel-web` network like every other managed network.
 
 ### 4.3 Certificates
 

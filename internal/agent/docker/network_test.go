@@ -2,8 +2,12 @@ package docker_test
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"net/netip"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Bernotese/mc-panel/internal/agent/docker"
@@ -202,5 +206,53 @@ func TestRemoveNetwork(t *testing.T) {
 	}
 	if d.HasNetwork("mcpanel-net-1") {
 		t.Fatal("network still there")
+	}
+}
+
+// NetworkConnectIP fixes the container's IPv4 address on the network; connecting it again
+// is not an error, and only IPv4 addresses are sent.
+func TestNetworkConnectIP(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []string
+	path := rawServer(t, func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, r.Method+" "+r.URL.Path+" "+strings.TrimSpace(string(b)))
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	})
+	c := docker.New(path)
+	ctx := context.Background()
+	if err := c.NetworkConnectIP(ctx, "mcpanel-net-1", "mcpanel-web", netip.MustParseAddr("10.213.0.14")); err != nil {
+		t.Fatal(err)
+	}
+	for _, ip := range []netip.Addr{{}, netip.MustParseAddr("fd00::1"), netip.MustParseAddr("::ffff:10.0.0.1")} {
+		if err := c.NetworkConnectIP(ctx, "mcpanel-net-1", "mcpanel-web", ip); err == nil {
+			t.Errorf("address %v accepted", ip)
+		}
+	}
+	if err := c.NetworkConnectIP(ctx, "../x", "mcpanel-web", netip.MustParseAddr("10.213.0.14")); err == nil {
+		t.Error("invalid network name accepted")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{`POST /v1.44/networks/mcpanel-net-1/connect {"Container":"mcpanel-web","EndpointConfig":{"IPAMConfig":{"IPv4Address":"10.213.0.14"}}}`}
+	if !slices.Equal(bodies, want) {
+		t.Fatalf("requests =\n%q\nwant\n%q", bodies, want)
+	}
+
+	// Against the fake: the address shows up in inspect, a second connect is fine.
+	d := dockertest.New(t)
+	fc := docker.New(d.Socket)
+	d.AddNetwork("mcpanel-net-1", "bridge", nil, "10.213.0.0/28")
+	d.AddContainer("mcpanel-web", docker.ContainerConfig{Image: "x"}, true)
+	for range 2 {
+		if err := fc.NetworkConnectIP(ctx, "mcpanel-net-1", "mcpanel-web", netip.MustParseAddr("10.213.0.14")); err != nil {
+			t.Fatalf("NetworkConnectIP: %v", err)
+		}
+	}
+	info, err := fc.Inspect(ctx, "mcpanel-web")
+	if err != nil || info.NetworkSettings.Networks["mcpanel-net-1"].IPAddress != "10.213.0.14" {
+		t.Fatalf("inspect = %+v, %v", info.NetworkSettings, err)
 	}
 }
