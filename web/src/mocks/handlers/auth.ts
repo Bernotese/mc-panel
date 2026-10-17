@@ -54,6 +54,15 @@ export const authOperations: MockOperation[] = [
   op('getHealth', http.get(`${API}/health`, () => HttpResponse.json({ status: 'ok' as const }))),
 
   op(
+    'getAbout',
+    http.get(`${API}/about`, ({ request }) => {
+      const g = guard(request)
+      if (g instanceof Response) return g
+      return HttpResponse.json({ version: 'dev' })
+    }),
+  ),
+
+  op(
     'login',
     http.post(`${API}/auth/login`, async ({ request }) => {
       const body = await readJson<{ username?: string; password?: string }>(request)

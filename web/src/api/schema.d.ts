@@ -20,6 +20,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/about": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The running panel version, for the link to its source code (AGPL-3.0 §13). Signed-in users only; the public health check does not reveal it. */
+        get: operations["getAbout"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -2706,6 +2723,10 @@ export interface components {
             /** @enum {string} */
             status: "ok";
         };
+        About: {
+            /** @description Release version without a leading v (e.g. 0.5.0), or 'dev' for a development build */
+            version: string;
+        };
     };
     responses: {
         /** @description Bad request */
@@ -2840,6 +2861,28 @@ export interface operations {
                     "application/json": components["schemas"]["Health"];
                 };
             };
+        };
+    };
+    getAbout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["About"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     login: {

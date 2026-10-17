@@ -28,6 +28,11 @@ describe('AuthLayout', () => {
     expect(screen.getByRole('main')).toHaveClass('max-w-lg')
   })
 
+  it('links the source code (AGPL-3.0)', () => {
+    render(<AuthLayout title="A">x</AuthLayout>)
+    expect(screen.getByRole('link', { name: 'Quellcode (AGPL-3.0)' })).toHaveAttribute('href', 'https://github.com/Bernotese/mc-panel')
+  })
+
   it('draws the pixel pattern on the page background', () => {
     const { container } = render(<AuthLayout title="A">x</AuthLayout>)
     expect(container.firstElementChild).toHaveClass('pixel-pattern')

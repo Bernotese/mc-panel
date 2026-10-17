@@ -1,5 +1,5 @@
 # golangci-lint v2 configuration for mc-panel (spec §10).
-# CI pins golangci-lint v2.14.0 (.github/workflows/ci.yml); run the same version locally:
+# CI pins golangci-lint v2.14.0 (scripts/install-golangci-lint.sh); run the same version locally:
 #   GOBIN="$PWD/.dev/tools" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 # Validate this file with: golangci-lint config verify
 version: "2"

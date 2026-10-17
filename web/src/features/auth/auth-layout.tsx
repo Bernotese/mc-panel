@@ -2,6 +2,7 @@
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PixelIcon } from '@/components/pixel-icon'
+import { SourceLink } from '@/components/source-link'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { cn } from '@/lib/utils'
 
@@ -9,7 +10,8 @@ export function AuthLayout({ title, description, wide = false, children }: { tit
   const { t } = useTranslation()
   return (
     <div className="pixel-pattern relative flex min-h-svh flex-col items-center justify-center px-4 py-12">
-      <div className="absolute top-3 right-3">
+      <div className="absolute top-3 right-3 flex gap-1">
+        <SourceLink />
         <ThemeToggle />
       </div>
       <main id="main" className={cn('w-full', wide ? 'max-w-lg' : 'max-w-md')}>

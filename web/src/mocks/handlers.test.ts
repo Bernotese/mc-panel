@@ -14,7 +14,7 @@ const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../
 describe('mock coverage', () => {
   it('mocks every operationId of api/openapi.yaml exactly once', () => {
     const ids = [...openapiYaml.matchAll(/operationId:\s*(\w+)/g)].map((m) => m[1]).sort()
-    expect(ids).toHaveLength(105)
+    expect(ids).toHaveLength(106)
     expect(operations.map((o) => o.operationId).sort()).toEqual(ids)
   })
 })
