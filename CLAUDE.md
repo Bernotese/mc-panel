@@ -18,6 +18,7 @@ mc-panel is a self-hosted Minecraft server panel: a Go backend with an embedded 
 - `docs/superpowers/specs/2026-10-13-mc-panel-monitoring-design.md`: monitoring and alerts (sub-project 5).
 - `docs/superpowers/specs/2026-10-13-mc-panel-installer-design.md`: installer `install.sh` with install/update/doctor/uninstall (sub-project 6).
 - `docs/superpowers/specs/2026-10-14-mc-panel-ui-redesign-design.md`: UI redesign (sub-project 7: design tokens, navigation, pages).
+- `docs/superpowers/specs/2026-10-17-mc-panel-web-ports-design.md`: one published HTTP port per server (e.g. BlueMap) under `https://<name>.<base domain>` through the agent's `mcpanel-web` container and host Caddy with on-demand TLS.
 
 ## Working rules
 
