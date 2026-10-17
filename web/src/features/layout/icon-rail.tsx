@@ -3,6 +3,7 @@ import { ChevronsLeft, ChevronsRight, LogOut, PanelLeftClose, PanelLeftOpen } fr
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PixelIcon } from '@/components/pixel-icon'
+import { RunningSourceLink } from '@/components/source-link'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { useMe } from '@/features/auth/me'
@@ -129,6 +130,7 @@ export function IconRail({
             {treeOpen ? <PanelLeftClose aria-hidden="true" /> : <PanelLeftOpen aria-hidden="true" />}
           </Button>
         ) : null}
+        <RunningSourceLink />
         <ThemeToggle />
         <Button
           type="button"

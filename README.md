@@ -73,3 +73,13 @@ All installer options, updates, rollback, `doctor`, uninstalling and troubleshoo
 ## Releases
 
 Each `v*` tag on `main` publishes a GitHub release with `mc-panel_<version>_linux_{amd64,arm64}.tar.gz` (`panel`, `agent`, `files` and the installer templates in `deploy/`), `install.sh`, `checksums.txt` (SHA-256 of all assets) and, from v0.5.0 on, `checksums.txt.sig` (SSH signature of `checksums.txt` by the release key). The workflow creates a draft; the maintainer signs and publishes it with `make sign-release`.
+
+## Security
+
+Please report vulnerabilities privately, not as public issues: see [`SECURITY.md`](SECURITY.md).
+
+## License
+
+Copyright (c) 2026 Jannes
+
+mc-panel is free software, licensed under the GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`); the full text is in [`LICENSE`](LICENSE). If you run a modified version for others over a network, the AGPL requires you to offer them its source code; the panel links to its source in the sidebar.

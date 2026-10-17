@@ -209,6 +209,10 @@ export const de = {
     home: 'Startseite',
     no_servers: 'Noch keine Server.',
   },
+  about: {
+    source: 'Quellcode (AGPL-3.0)',
+    source_version: 'Quellcode von mc-panel {{version}} (AGPL-3.0)',
+  },
   permission: {
     server: {
       view: 'Ansehen',
