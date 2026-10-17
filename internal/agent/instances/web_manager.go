@@ -1,20 +1,17 @@
 package instances
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"maps"
-	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/agent/docker"
-	"github.com/Bernotese/mc-panel/internal/config"
 )
 
 // The web routes (web ports spec §4): the panel sends the complete desired list with
@@ -24,11 +21,19 @@ import (
 // again on every tick, which repairs anything changed from outside.
 
 const (
-	// webAskTimeout bounds one check of the ask endpoint.
-	webAskTimeout = 2 * time.Second
-	// webAskRounds is the number of apply rounds a route may stay unconfirmed by the ask
-	// endpoint (Caddy's file watch polls once per second) before it reports an error.
-	webAskRounds = 3
+	// webAskTimeout bounds one check of the ask endpoint (wget's own -T is 2 s; the rest is
+	// for the Docker exec around it).
+	webAskTimeout = 5 * time.Second
+	// webAskWget is wget's network timeout in seconds inside mcpanel-web.
+	webAskWget = "2"
+	// webConfirmWindow is how long a route may stay unconfirmed by the ask endpoint after its
+	// config was written or the container was (re)created before it reports an error: a
+	// freshly created Caddy needs a moment to listen, and its file watch polls once per second.
+	webConfirmWindow = 30 * time.Second
+	// webRechecks bounds the quick rechecks of pending routes after a new list.
+	webRechecks = 25
+	// webAskOutputBytes bounds what the agent reads of wget's output.
+	webAskOutputBytes = 4 << 10
 
 	webErrContainer = "server container missing"
 	webErrNetwork   = "server network missing"
@@ -37,8 +42,8 @@ const (
 )
 
 // webRecheck is the pause before the apply loop checks a pending route again (Caddy's
-// file watch polls once per second). A variable for tests.
-var webRecheck = 1500 * time.Millisecond
+// file watch polls once per second).
+const webRecheck = 1500 * time.Millisecond
 
 // WebFilter is the bridge port restriction of mcpanel-web (firewall.Backend): for every rule,
 // mcpanel-web at Source may open TCP connections to Port in Dest, and nothing else from Source.
@@ -49,9 +54,11 @@ type WebFilter interface {
 
 // webRouteState is the last applied state of one route.
 type webRouteState struct {
-	route    agentapi.WebRoute
-	status   agentapi.WebRouteStatus
-	unloaded int // consecutive rounds the ask endpoint did not confirm the route
+	route  agentapi.WebRoute
+	status agentapi.WebRouteStatus
+	// unconfirmed is when the ask endpoint stopped confirming the route (or when its config
+	// was written); zero while it is confirmed.
+	unconfirmed time.Time
 }
 
 // SetWebRoutes implements agent.Web. It validates req, stores it as the desired list, wakes
@@ -92,7 +99,7 @@ func (m *Manager) webLoop(ctx context.Context) {
 			return
 		case <-m.webWake:
 		}
-		for range webAskRounds {
+		for range webRechecks {
 			if !m.applyWeb(ctx) {
 				break
 			}
@@ -332,7 +339,8 @@ func (m *Manager) applyWebRoutes(ctx context.Context, desired []agentapi.WebRout
 	if err != nil {
 		return failAll(fmt.Errorf("web router config: %w", err))
 	}
-	if err := m.ensureWebContainer(ctx, info, exists); err != nil {
+	created, err := m.ensureWebContainer(ctx, info, exists)
+	if err != nil {
 		if errors.Is(err, docker.ErrUnavailable) {
 			m.setDocker(false, err)
 		}
@@ -353,7 +361,7 @@ func (m *Manager) applyWebRoutes(ctx context.Context, desired []agentapi.WebRout
 	}
 	m.noteWebErr(nil)
 	// 8. Confirm through the ask endpoint that Caddy serves the route.
-	m.checkWeb(ctx, ready, prev, changed, next)
+	m.checkWeb(ctx, ready, prev, changed || created, next)
 	return next
 }
 
@@ -478,18 +486,19 @@ func (m *Manager) connectWeb(ctx context.Context, ns docker.NetworkSettings, t w
 }
 
 // ensureWebContainer makes sure mcpanel-web exists with the current template and pinned
-// image and is running; info is its inspect result when exists (label already checked).
-func (m *Manager) ensureWebContainer(ctx context.Context, info docker.ContainerInfo, exists bool) error {
+// image and is running; info is its inspect result when exists (label already checked). It
+// reports whether it created or started the container.
+func (m *Manager) ensureWebContainer(ctx context.Context, info docker.ContainerInfo, exists bool) (bool, error) {
 	cfg, err := WebContainer(m.host)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if m.customize != nil {
 		m.customize(WebName, &cfg)
 	}
 	template, err := templateHash(cfg)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if cfg.Labels == nil {
 		cfg.Labels = map[string]string{}
@@ -499,34 +508,36 @@ func (m *Manager) ensureWebContainer(ctx context.Context, info docker.ContainerI
 		m.log.Info("replacing web router container", "old_image", info.Config.Image, "new_image", cfg.Image,
 			"old_template", info.Config.Labels[LabelWebTemplate], "new_template", template)
 		if err := m.ensureImage(ctx, -1, cfg.Image); err != nil {
-			return err
+			return false, err
 		}
 		if err := m.dc.Remove(ctx, WebName, true); err != nil && !docker.IsNotFound(err) {
-			return err
+			return false, err
 		}
 		exists = false
 	}
 	if !exists {
 		if err := m.ensureImage(ctx, -1, cfg.Image); err != nil {
-			return err
+			return false, err
 		}
 		if _, err := m.dc.CreateContainer(ctx, WebName, cfg); err != nil {
-			return err
+			return false, err
 		}
 		m.log.Info("web router container created", "image", cfg.Image)
-		return m.dc.Start(ctx, WebName)
+		return true, m.dc.Start(ctx, WebName)
 	}
 	if !info.State.Running {
-		return m.dc.Start(ctx, WebName)
+		return true, m.dc.Start(ctx, WebName)
 	}
-	return nil
+	return false, nil
 }
 
-// checkWeb asks the ask endpoint for every ready target: 200 makes it active; otherwise it
-// stays pending and turns into an error after webAskRounds rounds. After the first failed
-// request the remaining targets are not asked in this round (a stopped router would cost
-// webAskTimeout per route).
-func (m *Manager) checkWeb(ctx context.Context, ready []webTarget, prev map[int64]webRouteState, changed bool, next map[int64]webRouteState) {
+// checkWeb asks the ask endpoint for every ready target: a confirmation makes it active;
+// otherwise it stays pending and turns into an error once it has been unconfirmed for
+// webConfirmWindow. restarted (new config or container) starts that window again. After the
+// first unreachable ask endpoint the remaining targets are not asked in this round (a
+// stopped router would cost webAskTimeout per route).
+func (m *Manager) checkWeb(ctx context.Context, ready []webTarget, prev map[int64]webRouteState, restarted bool, next map[int64]webRouteState) {
+	now := m.clock.Now()
 	reachable := true
 	for _, t := range ready {
 		ok := false
@@ -538,36 +549,61 @@ func (m *Manager) checkWeb(ctx context.Context, ready []webTarget, prev map[int6
 			}
 		}
 		st := webRouteState{route: t.route}
-		if p, had := prev[t.route.ID]; had && p.route == t.route && !changed {
-			st.unloaded = p.unloaded
+		switch p, had := prev[t.route.ID]; {
+		case ok:
+		case had && p.route == t.route && !restarted && !p.unconfirmed.IsZero():
+			st.unconfirmed = p.unconfirmed
+		default:
+			st.unconfirmed = now
 		}
 		switch {
 		case ok:
 			st.status = agentapi.WebRouteStatus{ID: t.route.ID, Status: agentapi.WebActive}
-		case st.unloaded+1 >= webAskRounds:
-			st.unloaded++
+		case now.Sub(st.unconfirmed) >= webConfirmWindow:
 			st.status = agentapi.WebRouteStatus{ID: t.route.ID, Status: agentapi.WebError, Error: webErrNotLoaded}
 		default:
-			st.unloaded++
 			st.status = agentapi.WebRouteStatus{ID: t.route.ID, Status: agentapi.WebPending}
 		}
 		next[t.route.ID] = st
 	}
 }
 
-// askWeb is the default ask check: GET http://127.0.0.1:<ask port>/?domain=<fqdn>, true on 200.
+// askWeb is the default ask check. It runs wget inside mcpanel-web against Caddy's ask server
+// (argv, no shell, as Caddy's own user), so the agent itself opens no network socket (its
+// unit allows only AF_UNIX and AF_NETLINK). Exit 0 confirms the name; busybox wget exits 1
+// on every failure, so only a "404" answer counts as "not served", anything else (no
+// listener, exec or Docker error) as unreachable.
 func (m *Manager) askWeb(ctx context.Context, fqdn string) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, webAskTimeout)
 	defer cancel()
-	u := "http://127.0.0.1:" + strconv.Itoa(cmp.Or(m.host.WebAskPort, config.DefaultWebAskPort)) + "/?domain=" + url.QueryEscape(fqdn)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	execID, err := m.dc.ExecCreate(ctx, WebName, docker.ExecConfig{
+		Cmd: []string{"wget", "-q", "-O", "/dev/null", "-T", webAskWget,
+			"http://127.0.0.1:" + portNumber(webAskPort) + "/?domain=" + url.QueryEscape(fqdn)},
+		User:         webUser,
+		AttachStdout: true,
+		AttachStderr: true,
+	})
 	if err != nil {
 		return false, err
 	}
-	resp, err := m.askClient.Do(req)
+	body, err := m.dc.ExecStart(ctx, execID)
 	if err != nil {
 		return false, err
 	}
-	_ = resp.Body.Close()
-	return resp.StatusCode == http.StatusOK, nil
+	out, _, err := readExecOutput(body, webAskOutputBytes)
+	_ = body.Close()
+	if err != nil {
+		return false, err
+	}
+	code, err := m.execExitCode(ctx, execID)
+	switch {
+	case err != nil:
+		return false, err
+	case code == 0:
+		return true, nil
+	case code == 1 && strings.Contains(out, " 404 "):
+		return false, nil
+	default:
+		return false, fmt.Errorf("ask endpoint: wget exited with code %d: %s", code, firstRunes(out, maxRconErrorRunes))
+	}
 }
