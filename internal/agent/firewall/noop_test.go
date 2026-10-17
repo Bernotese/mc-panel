@@ -164,3 +164,22 @@ func TestNoopConcurrent(t *testing.T) {
 		t.Fatalf("List = %d bans, %v; want 25", len(bans), err)
 	}
 }
+
+func TestNoopWebRules(t *testing.T) {
+	fw, _ := newNoop(t)
+	ctx := context.Background()
+	rules := []agentapi.WebRule{{Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Port: 8100}}
+	if err := fw.SetWebRules(ctx, rules); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := fw.WebRulesInPlace(ctx, rules); !ok || err != nil {
+		t.Fatalf("WebRulesInPlace = %v, %v", ok, err)
+	}
+	if err := fw.SetWebRules(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	bad := []agentapi.WebRule{{Source: netip.MustParseAddr("172.30.2.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Port: 8100}}
+	if err := fw.SetWebRules(ctx, bad); !errors.Is(err, firewall.ErrInvalidWebRule) {
+		t.Fatalf("SetWebRules(source outside dest) = %v, want ErrInvalidWebRule", err)
+	}
+}
