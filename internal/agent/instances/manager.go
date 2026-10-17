@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"net/netip"
 	"os"
 	"runtime"
@@ -77,8 +76,8 @@ type Config struct {
 	WebProxyPort, WebAskPort int
 	// Web is the bridge port restriction of mcpanel-web; nil = none (tests that do not care).
 	Web WebFilter
-	// WebAsk checks whether mcpanel-web serves fqdn; nil means an HTTP request to its ask
-	// port on 127.0.0.1. Tests set it.
+	// WebAsk checks whether mcpanel-web serves fqdn; nil means wget against its ask server,
+	// run inside mcpanel-web through Docker exec. Tests set it.
 	WebAsk func(ctx context.Context, fqdn string) (bool, error)
 }
 
@@ -135,7 +134,6 @@ type Manager struct {
 
 	web        WebFilter
 	webAsk     func(context.Context, string) (bool, error)
-	askClient  *http.Client
 	webWake    chan struct{} // buffer 1: SetWebRoutes wakes the apply loop
 	webApplyMu sync.Mutex    // serialises apply rounds
 	// webRules are the rules the filter was last given (nil: not since the agent started).
@@ -183,8 +181,6 @@ func New(cfg Config) *Manager {
 		webAsk:        cfg.WebAsk,
 		webWake:       make(chan struct{}, 1),
 		webStatus:     map[int64]webRouteState{},
-		// The ask port is on 127.0.0.1; never through a proxy from the environment.
-		askClient: &http.Client{Transport: &http.Transport{Proxy: nil}},
 	}
 	if m.webAsk == nil {
 		m.webAsk = m.askWeb
