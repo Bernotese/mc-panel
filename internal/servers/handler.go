@@ -30,8 +30,11 @@ type Deps struct {
 	// Instances is the agent's instance API; nil means "no agent" (every call fails with
 	// agentapi.ErrUnavailable).
 	Instances agentapi.InstancesClient
-	Log       *slog.Logger  // nil = slog.Default()
-	Catalog   CatalogSource // nil = catalog.New with the default upstreams
+	// Web is the agent's web router API (the same *agent.Client in production); nil means
+	// "no agent" like Instances.
+	Web     agentapi.WebClient
+	Log     *slog.Logger  // nil = slog.Default()
+	Catalog CatalogSource // nil = catalog.New with the default upstreams
 	// Gate holds starts while a job rewrites a server's data directory (extract, restore);
 	// nil = never blocked.
 	Gate DataGate
@@ -52,6 +55,7 @@ type Handler struct {
 	rec     audit.Recorder
 	box     *secretbox.Box
 	inst    agentapi.InstancesClient
+	web     agentapi.WebClient
 	catalog CatalogSource
 	gate    DataGate
 	backups BackupPurger
@@ -61,6 +65,7 @@ type Handler struct {
 	power      *powerLimiter
 	kick       chan struct{} // Trigger -> reconcile loop (buffer 1, never blocks)
 	status     statusCache   // last actual state reported by the agent
+	webs       webState      // last answer of the agent per web route
 
 	reconcile reconcileState
 }
@@ -69,6 +74,10 @@ func NewHandler(d Deps) *Handler {
 	inst := d.Instances
 	if inst == nil {
 		inst = noAgent{}
+	}
+	web := d.Web
+	if web == nil {
+		web = noAgent{}
 	}
 	log := d.Log
 	if log == nil {
@@ -87,7 +96,7 @@ func NewHandler(d Deps) *Handler {
 		purger = noPurger{}
 	}
 	return &Handler{
-		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst, catalog: cat, log: log,
+		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst, web: web, catalog: cat, log: log,
 		gate: gate, backups: purger, ioClock: clock.Real{}, hostMemory: d.HostMemory,
 		power: newPowerLimiter(), kick: make(chan struct{}, 1),
 		reconcile: reconcileState{attempts: map[int64]attempt{}, warned: map[int64]bool{}, foreign: map[int64]bool{}},
@@ -171,3 +180,7 @@ func (noAgent) Power(context.Context, int64, agentapi.PowerAction) error {
 	return agentapi.ErrUnavailable
 }
 func (noAgent) Remove(context.Context, int64) error { return agentapi.ErrUnavailable }
+
+func (noAgent) WebRoutes(context.Context, agentapi.WebRoutesRequest) (agentapi.WebRoutesResponse, error) {
+	return agentapi.WebRoutesResponse{}, agentapi.ErrUnavailable
+}

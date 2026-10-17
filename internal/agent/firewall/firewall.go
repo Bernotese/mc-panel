@@ -14,8 +14,8 @@ import (
 	"github.com/Bernotese/mc-panel/internal/agent/banrules"
 )
 
-// Names of the nftables objects owned by mc-panel. Nothing outside the table
-// "inet mcpanel" is ever created, modified or deleted.
+// Names of the nftables objects owned by mc-panel. Nothing outside the tables
+// "inet mcpanel" and "bridge mcpanel_web" is ever created, modified or deleted.
 const (
 	TableName     = "mcpanel"
 	Set4Name      = "mcpanel_jail4"
@@ -31,6 +31,14 @@ const (
 	EgressChainName = "forward"
 	EgressSet4Name  = "mcpanel_egress_deny4"
 	EgressSet6Name  = "mcpanel_egress_deny6"
+
+	// WebTableName is the table (family bridge) of the port restriction of mcpanel-web:
+	// the bridge family sees traffic between two ports of one Docker bridge without
+	// br_netfilter. Its filter chain on the forward hook lets mcpanel-web reach only the
+	// published port of each server network.
+	WebTableName     = "mcpanel_web"
+	WebChainName     = "forward"
+	WebChainPriority = -10
 )
 
 // Backend is a firewall backend: the IP jail plus the egress filter of the
@@ -44,6 +52,12 @@ type Backend interface {
 	// EgressInPlace reports whether the filter set by SetEgressSubnets for these
 	// subnets is still installed (it may have been flushed from outside).
 	EgressInPlace(ctx context.Context, subnets []netip.Prefix) (bool, error)
+	// SetWebRules replaces the port restriction of mcpanel-web with exactly these rules;
+	// an empty list removes it. Invalid rules are an error and change nothing.
+	SetWebRules(ctx context.Context, rules []agentapi.WebRule) error
+	// WebRulesInPlace reports whether exactly the restriction SetWebRules writes for these
+	// rules is installed (it may have been flushed from outside).
+	WebRulesInPlace(ctx context.Context, rules []agentapi.WebRule) (bool, error)
 }
 
 // entry is a ban as seen by a backend: prefix plus remaining lifetime.
