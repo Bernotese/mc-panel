@@ -1,11 +1,11 @@
 # shellcheck shell=bash
 # binaries.sh - installer spec §4.4: the release tarball and checksums.txt of the same release,
 # the signature of checksums.txt (release_verify, SEC-07), SHA-256 check, extraction into
-# $WORK, atomic install of panel, agent and files into BIN_DIR. Nothing is written to the
-# system before the download is verified. With --from-dir the local build is used as is (no
-# network). Sets BIN_SOURCE_DIR (render_template then takes deploy/ from there) and BIN_CHANGED
-# (units.sh restarts the services when a binary changed); RELEASE_RECORD says how the
-# installed release was verified (doctor).
+# $WORK, atomic install of panel, agent and files into BIN_DIR and of the tarball's LICENSE
+# into DOC_DIR. Nothing is written to the system before the download is verified. With
+# --from-dir the local build is used as is (no network). Sets BIN_SOURCE_DIR (render_template
+# then takes deploy/ from there) and BIN_CHANGED (units.sh restarts the services when a binary
+# changed); RELEASE_RECORD says how the installed release was verified (doctor).
 
 BIN_NAMES=(panel agent files)
 BIN_CHANGED=0
@@ -75,6 +75,17 @@ bin_record() {
     write_file "$RELEASE_RECORD" 0644 root root)" || return 1
 }
 
+# bin_license SRC: installs SRC/LICENSE (the AGPL text at the tarball root) as
+# DOC_DIR/LICENSE. Releases before the license and local builds without one have none: then
+# nothing is written and an installed copy stays (it is the same license).
+bin_license() {
+  local r
+  [[ -f $1/LICENSE && ! -L $1/LICENSE ]] || return 0
+  r="$(ensure_dir "$DOC_DIR" 0755 root root)" || return 1
+  r="$(write_file "$DOC_DIR/LICENSE" 0644 root root <"$1/LICENSE")" || return 1
+  [[ $r == unchanged ]] || log_changed "license text in $DOC_DIR"
+}
+
 # shellcheck disable=SC2034 # BIN_SOURCE_DIR (render_template, update) and BIN_CHANGED (units.sh)
 bin_install() {
   log_step "binaries"
@@ -98,6 +109,7 @@ bin_install() {
     r="$(write_file "$BIN_DIR/$b" 0755 root root <"$src/$b")" || return 1
     [[ $r == unchanged ]] || changed+=("$b")
   done
+  bin_license "$src" || return 1
   BIN_SOURCE_DIR="$src"
   bin_record || return 1
   if ((${#changed[@]} > 0)); then
