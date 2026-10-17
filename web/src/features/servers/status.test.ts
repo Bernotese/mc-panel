@@ -21,7 +21,7 @@ function status(patch: Partial<ServerStatus>): ServerStatus {
 }
 
 function server(patch: Partial<ServerStatus>): Server {
-  return { id: 1, name: 'survival', permissions: [], address: null, instance: null, status: status(patch), down_alerts: null }
+  return { id: 1, name: 'survival', permissions: [], address: null, instance: null, status: status(patch), down_alerts: null, web_status: 'off' }
 }
 
 describe('server status', () => {
@@ -51,6 +51,8 @@ describe('server status', () => {
     expect(pollInterval(undefined)).toBe(SLOW_POLL_MS)
     expect(pollInterval([server({}), server({ state: 'stopped', desired_state: 'stopped' })])).toBe(SLOW_POLL_MS)
     expect(pollInterval([server({}), server({ operation: 'creating', state: 'creating' })])).toBe(FAST_POLL_MS)
+    // a published web port waits for the next reconcile
+    expect(pollInterval([{ ...server({}), web_status: 'pending' }])).toBe(FAST_POLL_MS)
   })
 
   it('allows only power actions that make sense in the current state', () => {

@@ -92,3 +92,16 @@ func (n *Noop) SetEgressSubnets(_ context.Context, subnets []netip.Prefix) error
 
 // EgressInPlace is always true: there is nothing that could have been removed.
 func (n *Noop) EgressInPlace(context.Context, []netip.Prefix) (bool, error) { return true, nil }
+
+// SetWebRules only checks and logs: without nftables mcpanel-web is not restricted.
+func (n *Noop) SetWebRules(_ context.Context, rules []agentapi.WebRule) error {
+	sorted, err := sortedWebRules(rules)
+	if err != nil {
+		return err
+	}
+	n.log.Info("noop firewall: web port restriction NOT enforced", "rules", fmt.Sprint(sorted))
+	return nil
+}
+
+// WebRulesInPlace is always true: there is nothing that could have been removed.
+func (n *Noop) WebRulesInPlace(context.Context, []agentapi.WebRule) (bool, error) { return true, nil }

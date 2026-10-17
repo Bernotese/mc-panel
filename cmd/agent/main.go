@@ -136,10 +136,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			Clock:        clock.Real{},
 			Log:          log,
 			Egress:       fw,
+			Web:          fw,
 			NanoCPUs:     int64(math.Round(cfg.CPUPerInstance * 1e9)),
 			NetworkPool:  cfg.NetworkPool(),
 
 			RouterConnectionRateLimit: cfg.RouterConnectionRateLimit,
+			WebProxyPort:              cfg.WebProxyPort,
+			WebAskPort:                cfg.WebAskPort,
 		})
 		// The layout of instances_dir (instances/ root:<mc gid> 0750 for the files service)
 		// is enforced before serving, also when Docker is down and no Ensure follows.
@@ -167,7 +170,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			<-runDone
 			mgr.Close()
 		}
-		opts = append(opts, agent.WithInstances(mgr), agent.WithConsole(mgr))
+		opts = append(opts, agent.WithInstances(mgr), agent.WithConsole(mgr), agent.WithWeb(mgr))
 	}
 
 	srv := agent.NewServer(fw, version, log, opts...)
@@ -262,7 +265,7 @@ func mcUserIDs(cfg config.Agent, panelGID int, lookup func(name string) (*user.U
 func checkImages(imgs config.Images) error {
 	var errs []error
 	for _, e := range []struct{ key, ref string }{
-		{"java8", imgs.Java8}, {"java17", imgs.Java17}, {"java21", imgs.Java21}, {"java25", imgs.Java25}, {"router", imgs.Router},
+		{"java8", imgs.Java8}, {"java17", imgs.Java17}, {"java21", imgs.Java21}, {"java25", imgs.Java25}, {"router", imgs.Router}, {"web", imgs.Web},
 	} {
 		if _, err := docker.ParseImageRef(e.ref); err != nil {
 			errs = append(errs, fmt.Errorf("images.%s: %w", e.key, err))

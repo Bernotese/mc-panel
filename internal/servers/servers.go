@@ -139,6 +139,7 @@ func (h *Handler) handleGetServer(w http.ResponseWriter, r *http.Request) {
 
 // redactFor hides the raw last_error from non-admins: it can name host paths, images and
 // Docker internals. The state (error) stays visible. The alert switch is admin-only too. The
+// web port and its error are admin-only as well (viewers get web_url and web_status). The
 // world seed is left out unless the caller is admin or has server.files on this server (it
 // reads server.properties anyway; SEC-28). v.Permissions are the caller's permissions.
 func redactFor(p principal.Principal, v serverJSON) serverJSON {
@@ -147,6 +148,7 @@ func redactFor(p principal.Principal, v serverJSON) serverJSON {
 	}
 	v.Status.LastError = ""
 	v.DownAlerts = nil
+	v.WebPort, v.WebError = nil, ""
 	if v.Instance != nil && !slices.Contains(v.Permissions, rbac.PermServerFiles) {
 		in := *v.Instance
 		in.Properties.Seed = nil
@@ -269,6 +271,8 @@ type updateServerRequest struct {
 	Java          optional[instancespec.Java] `json:"java"`
 	MemoryMiB     optional[int]               `json:"memory_mib"`
 	Properties    optional[json.RawMessage]   `json:"properties"`
+	// WebPort is not part of the spec (no revision bump); null turns the web port off.
+	WebPort optional[int] `json:"web_port"`
 }
 
 var errNotNullable = errors.New("must not be null")
@@ -349,6 +353,16 @@ func (h *Handler) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		writeValidation(w, r, err.Error())
 		return
 	}
+	if req.WebPort.Value != nil {
+		if !agentapi.ValidWebPort(*req.WebPort.Value) {
+			writeValidation(w, r, "web_port must be 1024..65535 and not 25565 or 25575")
+			return
+		}
+		if set.BaseDomain == nil {
+			writeConflict(w, r, errBaseDomainRequired)
+			return
+		}
+	}
 	changes, err := diff(cur, next)
 	if err != nil {
 		httpx.Internal(w, r, err)
@@ -377,6 +391,11 @@ func (h *Handler) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"name": s.Name, "revision": in.Revision, "changes": changes})
 		h.Trigger()
 	}
+	if req.WebPort.Set {
+		if in, ok = h.updateWebPort(w, r, s, in, req.WebPort.Value); !ok {
+			return
+		}
+	}
 	out, err := view(s, allPerms(), &in, set.BaseDomain, h.snapshot())
 	if err != nil {
 		httpx.Internal(w, r, err)
@@ -389,6 +408,38 @@ func (h *Handler) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	out.DownAlerts = &on
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// updateWebPort stores a new web port (nil = off) of an already validated request, audits it
+// and triggers the reconcile loop that sends the route list; an unchanged value writes
+// nothing. On failure it has written the error answer and returns ok = false.
+func (h *Handler) updateWebPort(w http.ResponseWriter, r *http.Request, s store.Server, in store.Instance, port *int) (store.Instance, bool) {
+	var old *int
+	if in.WebPort.Valid {
+		p := int(in.WebPort.Int64)
+		old = &p
+	}
+	if (old == nil) == (port == nil) && (old == nil || *old == *port) {
+		return in, true
+	}
+	ctx := r.Context()
+	var v sql.NullInt64
+	if port != nil {
+		v = sql.NullInt64{Int64: int64(*port), Valid: true}
+	}
+	in, err := h.q.ServersSetWebPort(ctx, store.ServersSetWebPortParams{WebPort: v, ServerID: s.ID})
+	if errors.Is(err, sql.ErrNoRows) { // deleted concurrently
+		writeNotFound(w, r)
+		return store.Instance{}, false
+	}
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return store.Instance{}, false
+	}
+	h.record(ctx, audit.ActionServerWebPortUpdate, serverTarget(s.ID), audit.ResultSuccess,
+		map[string]any{"name": s.Name, "old": webPortDetails(old), "new": webPortDetails(port)})
+	h.Trigger()
+	return in, true
 }
 
 // downAlerts is the TP5 per-server alert switch; a missing row means on.
@@ -476,6 +527,7 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.record(ctx, audit.ActionServerDelete, serverTarget(s.ID), audit.ResultSuccess, details)
+	h.Trigger() // the next pass drops the server's web route
 	w.WriteHeader(http.StatusNoContent)
 }
 

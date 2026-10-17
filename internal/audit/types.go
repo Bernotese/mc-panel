@@ -62,6 +62,7 @@ const (
 	ActionServerSettingsUpdate = "server.settings_update"
 	ActionServerConsoleCommand = "server.console_command"
 	ActionServerPlayerAction   = "server.player_action"
+	ActionServerWebPortUpdate  = "server.web_port_update"
 	ActionFileWrite            = "file.write"
 	ActionFileUpload           = "file.upload"
 	ActionFileMkdir            = "file.mkdir"

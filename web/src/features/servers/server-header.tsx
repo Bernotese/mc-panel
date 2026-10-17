@@ -13,6 +13,7 @@ import { PowerButtons } from './power-buttons'
 import { useServerContext } from './server-context'
 import { StatusBadge } from './status-badge'
 import { usePower } from './use-power'
+import { WebMapLink } from './web-map-link'
 
 function tpsTone(tps: number | null): 'default' | 'warn' | 'danger' {
   if (tps === null) return 'default'
@@ -55,7 +56,12 @@ export function ServerHeader() {
               </h1>
               <StatusBadge state={status.state} />
             </div>
-            {instance ? <AddressLine address={server.address} /> : null}
+            {instance ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+                <AddressLine address={server.address} />
+                <WebMapLink server={server} />
+              </div>
+            ) : null}
           </div>
         </div>
         {instance && canPower ? (

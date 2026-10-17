@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # uninstall.sh - install.sh uninstall [--purge] (installer spec §7): removes mc-panel's units,
-# binaries, Caddy site, nftables tables, containers and sockets - only mc-panel objects, never
+# binaries, Caddy sites, nftables tables, containers and sockets - only mc-panel objects, never
 # packages. Worlds, backups, the database, the rollback copies, the configuration and the users
 # stay unless --purge, which needs the panel domain typed in on the terminal (also with --yes).
 # cmd_uninstall returns 0 (removed) or 1 (aborted).
@@ -11,6 +11,8 @@ UNI_IMPORT_LINE='import mc-panel.caddy # managed by mc-panel'
 UNI_UNITS=(mcpanel-panel.socket mcpanel-panel.service mcpanel-files.socket mcpanel-files.service
   mcpanel-agent.service mcpanel-fw.service)
 UNI_IMPORT_RE='^[[:space:]]*import[[:space:]]+mc-panel\.caddy([[:space:]]|$)'
+UNI_WEB_IMPORT_LINE='import mc-panel-web.caddy # managed by mc-panel'
+UNI_WEB_IMPORT_RE='^[[:space:]]*import[[:space:]]+mc-panel-web\.caddy([[:space:]]|$)'
 UNI_FAILED=() # what --purge could not delete
 UNI_TABLES=(mcpanel_fw mcpanel)
 UNI_SOCKETS=(/run/mc-panel-web/panel.sock /run/mc-panel-files/files.sock /run/mc-panel/agent.sock)
@@ -29,6 +31,15 @@ uni_probe_has_network() {
 # The per-server networks mcpanel-net-<id> (one per Minecraft server) carry the same label.
 uni_probe_instance_networks() { docker network ls --filter label=mcpanel.network --format '{{.Name}}' 2>/dev/null </dev/null; }
 uni_probe_has_table() { nft list table inet "$1" >/dev/null 2>&1 </dev/null; }
+# mcpanel-web (web interfaces of the servers), its network and its port restriction: the
+# container and the network only with the agent's label mcpanel.web.
+uni_probe_has_web() {
+  [[ $(docker container inspect -f '{{index .Config.Labels "mcpanel.web"}}' mcpanel-web 2>/dev/null </dev/null) == 1 ]]
+}
+uni_probe_has_web_network() {
+  [[ $(docker network inspect -f '{{index .Labels "mcpanel.web"}}' mcpanel-web 2>/dev/null </dev/null) == 1 ]]
+}
+uni_probe_has_web_table() { nft list table bridge mcpanel_web >/dev/null 2>&1 </dev/null; }
 uni_probe_user_exists() { getent passwd "$1" >/dev/null 2>&1; }
 uni_probe_mountpoint() { mountpoint -q -- "$1" 2>/dev/null; }
 uni_userdel() { sys_userdel "$1"; }
@@ -112,18 +123,15 @@ uni_binaries() {
   rmdir -- "$ROOT$DOC_DIR" 2>/dev/null || true
 }
 
-# uni_caddy removes exactly the marked import line (other sites stay) and mc-panel.caddy. An
-# import line of the operator (unmarked) stays; mc-panel.caddy then becomes a comment-only file,
-# so Caddy still loads. The configuration is validated as caddy before the reload. Like the
-# Caddy package, its repository and the Caddyfile, the drop-in caddy.service.d/mc-panel.conf
-# stays: a Caddyfile of the installer keeps its admin socket in /run/caddy. So does mc-panel.d/ with
-# the operator's additions to the site.
-uni_caddy() {
-  local file="$CADDY_DIR/Caddyfile" site="$CADDY_DIR/mc-panel.caddy" touched=0 mode og content foreign=0
-  if [[ -f $ROOT$file && ! -L $ROOT$file ]] && grep -qxF -- "$UNI_IMPORT_LINE" "$ROOT$file"; then
+# uni_caddy_site NAME LINE RE removes the marked import LINE of site file NAME from the
+# Caddyfile and the file itself; 0 if it changed something. An import line of the operator
+# (unmarked, matching RE) stays; NAME then becomes a comment-only file, so Caddy still loads.
+uni_caddy_site() {
+  local file="$CADDY_DIR/Caddyfile" site="$CADDY_DIR/$1" line="$2" re="$3" touched=0 mode og content
+  if [[ -f $ROOT$file && ! -L $ROOT$file ]] && grep -qxF -- "$line" "$ROOT$file"; then
     mode="$(stat -c '%a' -- "$ROOT$file")"
     og="$(_owner_get "$file")"
-    content="$(grep -vxF -- "$UNI_IMPORT_LINE" "$ROOT$file")" || content=""
+    content="$(grep -vxF -- "$line" "$ROOT$file")" || content=""
     if [[ -n $content ]]; then
       printf '%s\n' "$content" | write_file "$file" "0$mode" "${og%%:*}" "${og#*:}" >/dev/null
     else
@@ -131,22 +139,36 @@ uni_caddy() {
     fi
     touched=1
   fi
-  if [[ -f $ROOT$file && ! -L $ROOT$file ]] && grep -vxF -- "$UNI_IMPORT_LINE" "$ROOT$file" | grep -qE "$UNI_IMPORT_RE"; then
-    foreign=1
-  fi
-  if [[ $foreign == 1 ]]; then
+  if [[ -f $ROOT$file && ! -L $ROOT$file ]] && grep -vxF -- "$line" "$ROOT$file" | grep -qE "$re"; then
     if [[ -e $ROOT$site || -L $ROOT$site ]] && ! grep -q '^# mc-panel was uninstalled' "$ROOT$site" 2>/dev/null; then
-      printf '%s\n' "# mc-panel was uninstalled; remove \"import mc-panel.caddy\" from $file and then this file." |
+      printf '%s\n' "# mc-panel was uninstalled; remove \"import $1\" from $file and then this file." |
         write_file "$site" 0644 root root >/dev/null
       touched=1
     fi
-    warn "$file still imports mc-panel.caddy (a line not written by install.sh); $site is now empty - remove that line and the file yourself"
+    warn "$file still imports $1 (a line not written by install.sh); $site is now empty - remove that line and the file yourself"
   elif [[ -e $ROOT$site || -L $ROOT$site ]]; then
     rm -f -- "$ROOT$site"
     touched=1
   fi
+  [[ $touched == 1 ]]
+}
+
+# uni_caddy removes the panel site and the web interfaces site (uni_caddy_site; other sites
+# stay). The configuration is validated as caddy before the reload. Like the Caddy package, its
+# repository and the Caddyfile (with its global options: admin socket, on_demand_tls), the drop-in
+# caddy.service.d/mc-panel.conf stays: a Caddyfile of the installer keeps its admin socket in
+# /run/caddy. So does mc-panel.d/ with the operator's additions to the site.
+uni_caddy() {
+  local file="$CADDY_DIR/Caddyfile" touched=0
+  if uni_caddy_site mc-panel.caddy "$UNI_IMPORT_LINE" "$UNI_IMPORT_RE"; then
+    log_changed "removed the panel site from Caddy"
+    touched=1
+  fi
+  if uni_caddy_site mc-panel-web.caddy "$UNI_WEB_IMPORT_LINE" "$UNI_WEB_IMPORT_RE"; then
+    log_changed "removed the web interfaces site from Caddy"
+    touched=1
+  fi
   [[ $touched == 1 ]] || return 0
-  log_changed "removed the panel site from Caddy"
   # as caddy with its own HOME, like install (caddy.sh)
   if ! run_as caddy env HOME=/var/lib/caddy caddy validate --config "$file" --adapter caddyfile </dev/null >/dev/null 2>&1; then
     warn "caddy rejects $file now; Caddy was not reloaded - fix the file, then: systemctl reload caddy"
@@ -165,8 +187,9 @@ uni_firewall() {
 }
 
 # uni_docker stops the Minecraft containers (label mcpanel.instance) with time to save the
-# worlds and removes them, then the router and the network (only with the agent's labels)
-# directly: the agent is stopped by now. Other containers are never touched.
+# worlds and removes them, then the router, mcpanel-web and the networks (only with the agent's
+# labels) directly: the agent is stopped by now. Other containers are never touched. The port
+# restriction of mcpanel-web (table bridge mcpanel_web) goes only after the container.
 uni_docker() {
   local ids=() running=() nets=() id
   while IFS= read -r id; do
@@ -191,6 +214,11 @@ uni_docker() {
     sys_docker rm -f mcpanel-router </dev/null || warn "could not remove mcpanel-router"
     log_changed "removed the container mcpanel-router"
   fi
+  # before the server networks: attached to them, it would keep them in use
+  if uni_probe_has_web; then
+    sys_docker rm -f mcpanel-web </dev/null || warn "could not remove mcpanel-web"
+    log_changed "removed the container mcpanel-web"
+  fi
   while IFS= read -r id; do
     if [[ $id =~ ^mcpanel-net-[0-9]+$ ]]; then nets+=("$id"); fi
   done < <(uni_probe_instance_networks || true)
@@ -198,9 +226,17 @@ uni_docker() {
     sys_docker network rm "${nets[@]}" </dev/null || warn "could not remove all server networks"
     log_changed "removed ${#nets[@]} server network(s) mcpanel-net-<id>"
   fi
+  if uni_probe_has_web_network; then
+    sys_docker network rm mcpanel-web </dev/null || warn "could not remove the network mcpanel-web"
+    log_changed "removed the network mcpanel-web"
+  fi
   if uni_probe_has_network; then
     sys_docker network rm mcpanel-mc </dev/null || warn "could not remove the network mcpanel-mc"
     log_changed "removed the network mcpanel-mc"
+  fi
+  if uni_probe_has_web_table; then
+    sys_nft delete table bridge mcpanel_web || warn "could not delete the nftables table bridge mcpanel_web"
+    log_changed "removed the nftables table bridge mcpanel_web"
   fi
 }
 

@@ -60,7 +60,8 @@ export function isBusy(status: ServerStatus): boolean {
 }
 
 export function pollInterval(servers: readonly Server[] | undefined): number {
-  return servers?.some((s) => isBusy(s.status)) ? FAST_POLL_MS : SLOW_POLL_MS
+  // A changed web port is "pending" until the next reconcile (≤ 10 s, web ports spec §3).
+  return servers?.some((s) => isBusy(s.status) || s.web_status === 'pending') ? FAST_POLL_MS : SLOW_POLL_MS
 }
 
 /**

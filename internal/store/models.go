@@ -63,6 +63,7 @@ type Instance struct {
 	Revision      int64
 	CreatedAt     int64
 	UpdatedAt     int64
+	WebPort       sql.NullInt64
 }
 
 type InstanceSetting struct {

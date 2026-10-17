@@ -12,6 +12,7 @@ package firewall_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/netip"
@@ -601,4 +602,175 @@ func TestNFTablesEgressManyInstanceSubnets(t *testing.T) {
 	if rules, err := egressRules(t, c); err != nil || len(rules) != 3 {
 		t.Fatalf("after removing: %d rules, %v", len(rules), err)
 	}
+}
+
+var webTable = &nftables.Table{Family: nftables.TableFamilyBridge, Name: firewall.WebTableName}
+
+// webVerdicts lists the chain's rules as "<saddr>/<accept|drop>" with the port for accepts.
+func webVerdicts(t *testing.T, c *nftables.Conn) []string {
+	t.Helper()
+	rules, err := c.GetRules(webTable, &nftables.Chain{Name: firewall.WebChainName, Table: webTable})
+	if err != nil {
+		t.Fatalf("list %s: %v", firewall.WebTableName, err)
+	}
+	var out []string
+	for _, r := range rules {
+		var src netip.Addr
+		var port uint16
+		verdict := "?"
+		for i, e := range r.Exprs {
+			switch e := e.(type) {
+			case *expr.Cmp:
+				if p, ok := r.Exprs[i-1].(*expr.Payload); ok {
+					switch {
+					case p.Base == expr.PayloadBaseNetworkHeader && p.Offset == 12:
+						src, _ = netip.AddrFromSlice(e.Data)
+					case p.Base == expr.PayloadBaseTransportHeader && p.Offset == 2:
+						port = uint16(e.Data[0])<<8 | uint16(e.Data[1])
+					}
+				}
+			case *expr.Verdict:
+				verdict = map[expr.VerdictKind]string{expr.VerdictAccept: "accept", expr.VerdictDrop: "drop"}[e.Kind]
+			}
+		}
+		s := src.String() + "/" + verdict
+		if port != 0 {
+			s += fmt.Sprintf(":%d", port)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func webTableExists(t *testing.T, c *nftables.Conn) bool {
+	t.Helper()
+	tables, err := c.ListTablesOfFamily(nftables.TableFamilyBridge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return slices.ContainsFunc(tables, func(tb *nftables.Table) bool { return tb.Name == firewall.WebTableName })
+}
+
+// TestNFTablesWebRules: SetWebRules replaces table "bridge mcpanel_web" as a whole,
+// WebRulesInPlace notices outside changes, an empty list removes the table, and neither
+// "inet mcpanel" nor a foreign table is touched.
+func TestNFTablesWebRules(t *testing.T) {
+	fd := newNetNS(t)
+	c := rawConn(t, fd)
+	foreign := c.AddTable(&nftables.Table{Family: nftables.TableFamilyBridge, Name: "othertable"})
+	c.AddChain(&nftables.Chain{Name: "keepme", Table: foreign})
+	if err := c.Flush(); err != nil {
+		t.Fatalf("create foreign table: %v", err)
+	}
+	fw := newBackend(t, fd)
+	ctx := context.Background()
+	if err := fw.Ban(ctx, netip.MustParsePrefix("203.0.113.7/32"), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	// Removing a table that does not exist is a no-op; an absent table is "in place" for no rules.
+	if err := fw.SetWebRules(ctx, nil); err != nil {
+		t.Fatalf("SetWebRules(nil) without table: %v", err)
+	}
+	if ok, err := fw.WebRulesInPlace(ctx, nil); err != nil || !ok {
+		t.Fatalf("WebRulesInPlace(nil) without table = %v, %v", ok, err)
+	}
+
+	a := agentapi.WebRule{Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Port: 8100}
+	b := agentapi.WebRule{Source: netip.MustParseAddr("172.30.2.2"), Dest: netip.MustParsePrefix("172.30.2.0/24"), Port: 8123}
+	if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{a}); err != nil || ok {
+		t.Fatalf("before SetWebRules: in place = %v, %v", ok, err)
+	}
+	for range 2 { // idempotent: replaced, never duplicated
+		if err := fw.SetWebRules(ctx, []agentapi.WebRule{b, a}); err != nil {
+			t.Fatalf("SetWebRules: %v", err)
+		}
+	}
+	chain, err := c.ListChain(webTable, firewall.WebChainName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chain.Type != nftables.ChainTypeFilter ||
+		chain.Hooknum == nil || *chain.Hooknum != *nftables.ChainHookForward ||
+		chain.Priority == nil || *chain.Priority != nftables.ChainPriority(firewall.WebChainPriority) ||
+		chain.Policy == nil || *chain.Policy != nftables.ChainPolicyAccept {
+		t.Fatalf("web chain = %+v", chain)
+	}
+	want := []string{"172.30.1.2/accept:8100", "172.30.1.2/drop", "172.30.2.2/accept:8123", "172.30.2.2/drop"}
+	if got := webVerdicts(t, c); !slices.Equal(got, want) {
+		t.Fatalf("rules = %v, want %v", got, want)
+	}
+	if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{a, b}); err != nil || !ok {
+		t.Fatalf("after SetWebRules: in place = %v, %v", ok, err)
+	}
+	other := b
+	other.Port = 8124
+	if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{a, other}); err != nil || ok {
+		t.Fatalf("other port: in place = %v, %v; want false", ok, err)
+	}
+	if ok, err := fw.WebRulesInPlace(ctx, nil); err != nil || ok {
+		t.Fatalf("table present, no rules wanted: in place = %v, %v; want false", ok, err)
+	}
+
+	// One rule left: the other is gone.
+	if err := fw.SetWebRules(ctx, []agentapi.WebRule{a}); err != nil {
+		t.Fatal(err)
+	}
+	if got := webVerdicts(t, c); !slices.Equal(got, want[:2]) {
+		t.Fatalf("rules = %v, want %v", got, want[:2])
+	}
+	if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{a}); err != nil || !ok {
+		t.Fatalf("one rule: in place = %v, %v", ok, err)
+	}
+
+	// Invalid input changes nothing.
+	bad := agentapi.WebRule{Source: netip.MustParseAddr("172.30.9.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Port: 8100}
+	if err := fw.SetWebRules(ctx, []agentapi.WebRule{bad}); !errors.Is(err, firewall.ErrInvalidWebRule) {
+		t.Fatalf("SetWebRules(invalid) = %v", err)
+	}
+	if got := webVerdicts(t, c); !slices.Equal(got, want[:2]) {
+		t.Fatalf("after invalid input: rules = %v", got)
+	}
+
+	// Flushed from outside: reported, and SetWebRules repairs it.
+	c.FlushChain(&nftables.Chain{Name: firewall.WebChainName, Table: webTable})
+	if err := c.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{a}); err != nil || ok {
+		t.Fatalf("after outside flush: in place = %v, %v; want false", ok, err)
+	}
+	c.DelTable(webTable)
+	if err := c.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{a}); err != nil || ok {
+		t.Fatalf("after outside delete: in place = %v, %v; want false", ok, err)
+	}
+	if err := fw.SetWebRules(ctx, []agentapi.WebRule{a}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{a}); err != nil || !ok {
+		t.Fatalf("after repair: in place = %v, %v", ok, err)
+	}
+
+	// An empty list removes the table.
+	if err := fw.SetWebRules(ctx, []agentapi.WebRule{}); err != nil {
+		t.Fatal(err)
+	}
+	if webTableExists(t, c) {
+		t.Fatal("table still exists after SetWebRules(empty)")
+	}
+	if ok, err := fw.WebRulesInPlace(ctx, nil); err != nil || !ok {
+		t.Fatalf("after removal: in place = %v, %v", ok, err)
+	}
+
+	// "inet mcpanel" and the foreign table are untouched.
+	if _, err := c.ListChain(foreign, "keepme"); err != nil {
+		t.Fatalf("foreign table changed: %v", err)
+	}
+	if jail, err := c.GetRules(mcTable, &nftables.Chain{Name: firewall.ChainName, Table: mcTable}); err != nil || len(jail) != 2 {
+		t.Fatalf("jail chain: %d rules, %v", len(jail), err)
+	}
+	assertPrefixes(t, listBans(t, fw), []string{"203.0.113.7/32"})
 }

@@ -7,9 +7,14 @@
 # Required top-level keys and their TOML values, filled by cfg_keys. The lists match
 # internal/config (panel: listen, public_url, data_dir, agent_socket, files_socket,
 # trusted_proxies, monitoring_ping_addr, instances_dir; agent: socket, panel_uid, firewall,
-# instances_dir, mc_user; files: socket, panel_uid, instances_dir, restic_binary).
+# instances_dir, mc_user, web_proxy_port, web_ask_port; files: socket, panel_uid, instances_dir,
+# restic_binary).
 declare -gA CFG_REQUIRED_PANEL=() CFG_REQUIRED_AGENT=() CFG_REQUIRED_FILES=()
 CFG_CHANGED=0 # 1 once cfg_ensure changed a file (units.sh restarts the services)
+# The ports of mcpanel-web on 127.0.0.1 (internal/config defaults); agent.toml may move them, and
+# mc-panel-web.caddy and the Caddyfile's on_demand_tls ask follow (cfg_web_ports).
+CFG_WEB_PROXY_PORT=18100
+CFG_WEB_ASK_PORT=18101
 
 # cfg_restic_path prints the restic from PATH ("" if none; a query, tests stub it).
 cfg_restic_path() {
@@ -26,8 +31,44 @@ cfg_domain_from_config() {
     sed -E 's,^https?://,,; s,[/:].*$,,'
 }
 
+# cfg_agent_value KEY prints the raw value of a top-level KEY in agent.toml (trailing comment
+# removed; "" when the key or the file is missing).
+cfg_agent_value() {
+  local f="$ROOT$ETC_PANEL/agent.toml"
+  [[ -f $f && ! -L $f ]] || return 0
+  awk -v k="$1" '
+    /^[[:space:]]*\[/ { exit }
+    { line = $0; sub(/^[[:space:]]+/, "", line)
+      if (index(line, k) == 1) { r = substr(line, length(k) + 1); sub(/^[[:space:]]+/, "", r)
+        if (substr(r, 1, 1) == "=") { r = substr(r, 2); sub(/^[[:space:]]+/, "", r)
+          sub(/[[:space:]]*(#.*)?$/, "", r); print r; exit } } }' "$f"
+}
+
+# cfg_web_ports sets CFG_WEB_PROXY_PORT and CFG_WEB_ASK_PORT from agent.toml (the defaults when a
+# key is missing). 1 with a warning for a value the agent would refuse (internal/config: decimal
+# 1024-65535, not 25565 or 25575, the two different): Caddy must never get other ports than the
+# agent.
+cfg_web_ports() {
+  local key v
+  CFG_WEB_PROXY_PORT=18100
+  CFG_WEB_ASK_PORT=18101
+  for key in web_proxy_port web_ask_port; do
+    v="$(cfg_agent_value "$key")"
+    [[ -n $v ]] || continue
+    if ! [[ $v =~ ^[1-9][0-9]{3,4}$ ]] || ((v < 1024 || v > 65535 || v == 25565 || v == 25575)); then
+      warn "$ETC_PANEL/agent.toml: $key = $v is not a port in 1024-65535 (25565 and 25575 are taken)"
+      return 1
+    fi
+    if [[ $key == web_proxy_port ]]; then CFG_WEB_PROXY_PORT="$v"; else CFG_WEB_ASK_PORT="$v"; fi
+  done
+  if [[ $CFG_WEB_PROXY_PORT == "$CFG_WEB_ASK_PORT" ]]; then
+    warn "$ETC_PANEL/agent.toml: web_proxy_port and web_ask_port are both $CFG_WEB_ASK_PORT"
+    return 1
+  fi
+}
+
 # cfg_keys sets (and exports, render_template runs in subshells) the template values and the
-# required-key lists. 1 if the user mcpanel does not exist.
+# required-key lists. 1 if the user mcpanel does not exist or agent.toml has invalid web ports.
 # shellcheck disable=SC2034 # CFG_REQUIRED_* are read through a nameref (cfg_file) and by doctor
 cfg_keys() {
   local uid
@@ -52,6 +93,14 @@ cfg_keys() {
   else
     export KEY_TLS="tls $EMAIL"
   fi
+  # mc-panel-web.caddy: "tls <issuer> {" with on_demand on a line of its own (Caddy rejects a
+  # one-line block).
+  local issuer="internal"
+  if [[ $TLS_MODE != internal ]]; then issuer="$EMAIL"; fi
+  export KEY_TLS_ON_DEMAND="${issuer:+$issuer }{"$'\n\t\ton_demand\n\t}'
+  cfg_web_ports || return 1
+  export KEY_WEB_PROXY_PORT="$CFG_WEB_PROXY_PORT"
+  export KEY_WEB_ASK_PORT="$CFG_WEB_ASK_PORT"
   CFG_REQUIRED_PANEL=(
     [listen]='"unix:/run/mc-panel-web/panel.sock"'
     [data_dir]="\"$DATA_DIR\""
@@ -74,6 +123,8 @@ cfg_keys() {
     [firewall]='"nftables"'
     [instances_dir]="\"$INSTANCES_DIR\""
     [mc_user]='"mcpanel-mc"'
+    [web_proxy_port]="$CFG_WEB_PROXY_PORT"
+    [web_ask_port]="$CFG_WEB_ASK_PORT"
   )
   CFG_REQUIRED_FILES=(
     [socket]='"/run/mc-panel-files/files.sock"'

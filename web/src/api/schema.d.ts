@@ -1770,6 +1770,20 @@ export interface components {
             status: components["schemas"]["ServerStatus"];
             /** @description Down/crash-loop alerts for this server (TP5); admins only, null for other users */
             down_alerts: boolean | null;
+            /**
+             * Format: uri
+             * @description https://<name>.<base_domain> when a web port is published and a base domain is set; absent otherwise
+             */
+            web_url?: string;
+            /**
+             * @description off: no web port (or no base domain); pending: not yet applied by the agent; active: the route is live (the plugin itself may still answer 502); error: see web_error
+             * @enum {string}
+             */
+            web_status: "off" | "pending" | "active" | "error";
+            /** @description Stored web port inside the container; admins only, absent when none is stored (also shown while web_status is off for lack of a base domain) */
+            web_port?: number;
+            /** @description The agent's reason for web_status error, sanitized like last_error; admins only, absent when there is none */
+            web_error?: string;
         };
         CreateServerRequest: {
             name: string;
@@ -1794,6 +1808,8 @@ export interface components {
             /** @description At most max_mib of GET /servers/memory on this host */
             memory_mib?: number;
             properties?: components["schemas"]["ServerProperties"];
+            /** @description Publish this port of the container under https://<name>.<base_domain> (not 25565 or 25575); null turns it off. Admin and sudo; 409 conflict without a base domain. Does not bump revision. */
+            web_port?: number | null;
         };
         /** @description start/stop set the desired state (applied by the reconcile loop, works without agent); restart needs the agent */
         PowerRequest: {

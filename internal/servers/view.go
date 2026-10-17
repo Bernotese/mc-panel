@@ -60,6 +60,11 @@ type serverJSON struct {
 	// DownAlerts is the per-server switch of the TP5 down/crash-loop alerts; admins only
 	// (missing row = on), null for other users.
 	DownAlerts *bool `json:"down_alerts"`
+	// Web port fields (web ports spec §3.2, applyWebView); web_port and web_error admins only.
+	WebURL    *string `json:"web_url,omitempty"`
+	WebStatus string  `json:"web_status"`
+	WebPort   *int    `json:"web_port,omitempty"`
+	WebError  string  `json:"web_error,omitempty"`
 }
 
 // viewData is everything a Server response needs besides the server row.
@@ -115,6 +120,7 @@ func (d viewData) server(s store.Server, perms []rbac.Permission) (serverJSON, e
 // all instance fields null).
 func view(s store.Server, perms []rbac.Permission, in *store.Instance, baseDomain *string, snap Snapshot) (serverJSON, error) {
 	out := serverJSON{ID: s.ID, Name: s.Name, Permissions: perms, Status: deriveStatus(s.Name, in, snap)}
+	applyWebView(&out, s.Name, in, baseDomain, snap.Web)
 	if in == nil {
 		return out, nil
 	}

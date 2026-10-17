@@ -18,6 +18,7 @@ func renderDeploy(t *testing.T, name string) string {
 	vals := map[string]string{
 		"VERSION": "1.2.3", "PUBLIC_URL": "https://panel.example.com", "PANEL_UID": "998",
 		"INSTANCES_DIR": "/srv/mc-panel", "RESTIC_BINARY": "/usr/bin/restic", "PING_ADDR": "127.0.0.1:25565",
+		"WEB_PROXY_PORT": "18100", "WEB_ASK_PORT": "18101", // web ports plan task 7
 	}
 	s := regexp.MustCompile(`\{\{([A-Z0-9_]+)\}\}`).ReplaceAllStringFunc(string(b), func(m string) string {
 		v, ok := vals[strings.Trim(m, "{}")]

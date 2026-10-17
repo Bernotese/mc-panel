@@ -175,6 +175,20 @@ func (c *Client) Remove(ctx context.Context, id int64) error {
 	return c.do(ctx, http.MethodPost, agentapi.PathInstanceRemove, agentapi.RemoveRequest{ID: id}, nil)
 }
 
+var _ agentapi.WebClient = (*Client)(nil)
+
+// WebRoutes sends the complete route list (PUT /v1/web/routes) and returns the status per route.
+func (c *Client) WebRoutes(ctx context.Context, req agentapi.WebRoutesRequest) (agentapi.WebRoutesResponse, error) {
+	if err := req.Validate(); err != nil {
+		return agentapi.WebRoutesResponse{}, err
+	}
+	var out agentapi.WebRoutesResponse
+	if err := c.do(ctx, http.MethodPut, agentapi.PathWebRoutes, req, &out); err != nil {
+		return agentapi.WebRoutesResponse{}, err
+	}
+	return out, nil
+}
+
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
 	return c.doTimeout(ctx, c.timeout, method, path, in, out)
 }

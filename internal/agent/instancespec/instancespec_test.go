@@ -135,3 +135,18 @@ func TestNamesAndDomains(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckDNSName(t *testing.T) {
+	long := strings.Repeat(strings.Repeat("a", 63)+".", 3) + strings.Repeat("a", 61) // 253 characters
+	for _, n := range []string{"survival.mc.example.com", "a.b", "x", "a-b.c-d.example", long} {
+		if err := instancespec.CheckDNSName(n); err != nil {
+			t.Errorf("CheckDNSName(%q): %v", n, err)
+		}
+	}
+	for _, n := range []string{"", "Survival.example.com", "survival.example.com.", ".a.b", "a..b", "a_b.example", "-a.example",
+		"a.b:25565", "a.b\n", long + "a", strings.Repeat("a", 64) + ".example"} {
+		if err := instancespec.CheckDNSName(n); !errors.Is(err, instancespec.ErrInvalid) {
+			t.Errorf("CheckDNSName(%q) = %v", n, err)
+		}
+	}
+}
