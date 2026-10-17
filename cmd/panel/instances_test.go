@@ -52,12 +52,14 @@ func TestInstanceLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("first ensure = %+v", req)
 	}
 
-	out := admin.must(200, "PATCH", fmt.Sprintf("/servers/%d", srvA), map[string]any{"memory_mib": 6144})
+	// Below the 4096 of paperServer: the host cap (servers.MaxMemoryMiB) depends on the test
+	// machine, and a 2-vCPU/8-GB GitHub runner allows at most 5376 MiB.
+	out := admin.must(200, "PATCH", fmt.Sprintf("/servers/%d", srvA), map[string]any{"memory_mib": 3072})
 	if st, _ := out["status"].(map[string]any); !isTrue(st["restart_required"]) {
 		t.Fatalf("after PATCH: %v", st)
 	}
 	admin.must(202, "POST", fmt.Sprintf("/servers/%d/power", srvA), map[string]string{"action": "restart"})
-	if req := e.instances.lastEnsure(); req.ID != srvA || !req.Recreate || req.Revision != 2 || req.Spec.MemoryMiB != 6144 {
+	if req := e.instances.lastEnsure(); req.ID != srvA || !req.Recreate || req.Revision != 2 || req.Spec.MemoryMiB != 3072 {
 		t.Fatalf("restart ensure = %+v", req)
 	}
 	waitServer(t, admin, srvA, "running in revision 2", func(st map[string]any) bool {
