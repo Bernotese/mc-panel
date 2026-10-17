@@ -1739,7 +1739,7 @@ components:
         cpu_percent: { type: number }
     Server:
       type: object
-      required: [id, name, permissions, address, instance, status, down_alerts]
+      required: [id, name, permissions, address, instance, status, down_alerts, web_status]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
@@ -1748,6 +1748,13 @@ components:
         instance: { anyOf: [{ $ref: '#/components/schemas/InstanceConfig' }, { type: 'null' }] }
         status: { $ref: '#/components/schemas/ServerStatus' }
         down_alerts: { type: [boolean, 'null'], description: 'Down/crash-loop alerts for this server (TP5); admins only, null for other users' }
+        web_url: { type: string, format: uri, description: 'https://<name>.<base_domain> when a web port is published and a base domain is set; absent otherwise' }
+        web_status:
+          type: string
+          enum: ['off', pending, active, error]
+          description: 'off: no web port (or no base domain); pending: not yet applied by the agent; active: the route is live (the plugin itself may still answer 502); error: see web_error'
+        web_port: { type: integer, minimum: 1024, maximum: 65535, description: 'Published web port inside the container; admins only, absent when off' }
+        web_error: { type: string, description: "The agent's reason for web_status error, sanitized like last_error; admins only, absent when there is none" }
     CreateServerRequest:
       type: object
       additionalProperties: false
@@ -1773,6 +1780,11 @@ components:
         java: { $ref: '#/components/schemas/JavaVersion' }
         memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256, description: 'At most max_mib of GET /servers/memory on this host' }
         properties: { $ref: '#/components/schemas/ServerProperties' }
+        web_port:
+          type: [integer, 'null']
+          minimum: 1024
+          maximum: 65535
+          description: 'Publish this port of the container under https://<name>.<base_domain> (not 25565 or 25575); null turns it off. Admin and sudo; 409 conflict without a base domain. Does not bump revision.'
     PowerRequest:
       type: object
       required: [action]

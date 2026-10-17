@@ -105,3 +105,43 @@ func TestInstanceSettingsRow(t *testing.T) {
 		t.Fatal("only one settings row (id = 1) is allowed")
 	}
 }
+
+func TestInstanceWebPort(t *testing.T) {
+	db := storetest.Open(t)
+	q := store.New(db)
+	ctx := context.Background()
+	sid := storetest.CreateServer(t, db, "survival")
+	in := createInstance(t, q, sid)
+	if in.WebPort.Valid {
+		t.Fatalf("new instance has web port %+v", in.WebPort)
+	}
+
+	got, err := q.ServersSetWebPort(ctx, store.ServersSetWebPortParams{WebPort: sql.NullInt64{Int64: 8100, Valid: true}, ServerID: sid})
+	if err != nil || got.WebPort.Int64 != 8100 || !got.WebPort.Valid {
+		t.Fatalf("set 8100 = %+v, %v", got, err)
+	}
+	if got.Revision != in.Revision || got.UpdatedAt != in.UpdatedAt {
+		t.Fatalf("web port changed revision/updated_at: %+v", got)
+	}
+	list, err := q.ServersListInstances(ctx)
+	if err != nil || len(list) != 1 || list[0].WebPort.Int64 != 8100 {
+		t.Fatalf("list = %+v, %v", list, err)
+	}
+	for _, p := range []int64{80, 1023, 25565, 25575, 65536} {
+		if _, err := q.ServersSetWebPort(ctx, store.ServersSetWebPortParams{WebPort: sql.NullInt64{Int64: p, Valid: true}, ServerID: sid}); err == nil {
+			t.Errorf("web port %d accepted", p)
+		}
+	}
+	for _, p := range []int64{1024, 25566, 65535} {
+		if _, err := q.ServersSetWebPort(ctx, store.ServersSetWebPortParams{WebPort: sql.NullInt64{Int64: p, Valid: true}, ServerID: sid}); err != nil {
+			t.Errorf("web port %d: %v", p, err)
+		}
+	}
+	got, err = q.ServersSetWebPort(ctx, store.ServersSetWebPortParams{ServerID: sid})
+	if err != nil || got.WebPort.Valid {
+		t.Fatalf("set NULL = %+v, %v", got, err)
+	}
+	if _, err := q.ServersSetWebPort(ctx, store.ServersSetWebPortParams{ServerID: sid + 100}); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("unknown server: %v", err)
+	}
+}

@@ -11,7 +11,7 @@ SELECT * FROM instances WHERE server_id = ?;
 
 -- name: ServersListInstances :many
 SELECT s.name, i.server_id, i.type, i.version, i.loader_version, i.modpack, i.java, i.memory_mib,
-       i.properties, i.desired_state, i.revision, i.created_at, i.updated_at
+       i.properties, i.desired_state, i.revision, i.created_at, i.updated_at, i.web_port
 FROM instances i JOIN servers s ON s.id = i.server_id
 ORDER BY s.name;
 
@@ -24,6 +24,9 @@ RETURNING *;
 
 -- name: ServersSetDesiredState :execrows
 UPDATE instances SET desired_state = ?, updated_at = ? WHERE server_id = ?;
+
+-- name: ServersSetWebPort :one
+UPDATE instances SET web_port = ? WHERE server_id = ? RETURNING *;
 
 -- name: ServersBumpAllRevisions :exec
 UPDATE instances SET revision = revision + 1, updated_at = ?;
