@@ -6,10 +6,8 @@ import { server as mockApi } from '@/mocks/node'
 import { renderServerTab } from '@/test/render-section'
 import { ServerSettingsTab } from './server-settings-tab'
 
-const SETTINGS = '/servers/2/settings'
-
 function settingsTab(serverId = 2, username = 'admin') {
-  return renderServerTab((s) => <ServerSettingsTab server={s} instance={s.instance} />, { serverId, username, sudo: true, path: SETTINGS })
+  return renderServerTab((s) => <ServerSettingsTab server={s} instance={s.instance} />, { serverId, username, sudo: true, path: `/servers/${serverId}/settings` })
 }
 
 /** Records the bodies of PATCH /servers/2; returning nothing hands the request on to the mock handler. */
@@ -100,6 +98,16 @@ describe('WebPortSection', () => {
     expect(within(section).getByText(/braucht eine Basisdomain/)).toBeInTheDocument()
     expect(within(section).getByRole('link', { name: 'Zu den Einstellungen' })).toHaveAttribute('href', '/settings')
     expect(within(section).getByRole('switch', { name: 'Web-Port veröffentlichen' })).toBeDisabled()
+  })
+
+  it('keeps showing the stored port while the base domain is missing', async () => {
+    db.serverSettings.base_domain = null
+    await settingsTab(1)
+    const section = await screen.findByRole('region', { name: 'Weboberfläche' })
+    expect(within(section).getByRole('switch', { name: 'Web-Port veröffentlichen' })).toBeChecked()
+    expect(within(section).getByLabelText('Port im Container')).toHaveValue(8100)
+    expect(within(section).getByText('Aus')).toBeInTheDocument()
+    expect(within(section).getByText(/braucht eine Basisdomain/)).toBeInTheDocument()
   })
 
   it('shows the same explanation when the panel answers 409 base domain required', async () => {

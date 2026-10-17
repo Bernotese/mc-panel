@@ -83,13 +83,14 @@ function validWebPort(p: unknown): p is number {
 
 /** The reconcile applies a changed route list within seconds: "pending" becomes "active" on the next GET. */
 function settleWeb(s: MockServer): void {
-  if (s.webPort && s.webState === 'pending') s.webState = 'active'
+  if (s.webPort && s.webState === 'pending' && db.serverSettings.base_domain) s.webState = 'active'
 }
 
-/** Like the panel: off without port or base domain; web_port and web_error only for admins. */
+/** Like the panel: off without port or base domain; web_port (whenever one is stored) and web_error only for admins. */
 function webFields(s: MockServer, admin: boolean): Pick<Server, 'web_status' | 'web_url' | 'web_port' | 'web_error'> {
   const base = db.serverSettings.base_domain
-  if (!s.webPort || !base) return { web_status: 'off' }
+  if (!s.webPort) return { web_status: 'off' }
+  if (!base) return { web_status: 'off', ...(admin ? { web_port: s.webPort } : {}) }
   const status = s.webState ?? 'pending'
   return {
     web_status: status,
@@ -234,7 +235,11 @@ export const serverOperations: MockOperation[] = [
         if (next !== db.serverSettings.base_domain) {
           details.base_domain = { old: db.serverSettings.base_domain, new: next }
           db.serverSettings.base_domain = next
-          for (const s of db.servers) if (s.instance) bumpRevision(s)
+          for (const s of db.servers) {
+            if (s.instance) bumpRevision(s)
+            // the route list changes with the base domain: pending until the agent confirms
+            if (s.webPort) s.webState = 'pending'
+          }
         }
       }
       if (body.curseforge_api_key !== undefined) {
