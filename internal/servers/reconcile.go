@@ -67,6 +67,7 @@ type reconcileState struct {
 	warned    map[int64]bool // unknown containers already logged
 	foreign   map[int64]bool // foreign containers already logged
 	agentDown bool
+	webDown   bool // the last route list did not reach the agent (logged once)
 }
 
 // panelError is a reconcile error that happened before the agent was called (for example no
@@ -98,12 +99,18 @@ func (h *Handler) Run(ctx context.Context) {
 }
 
 // ReconcileOnce runs one pass: it reads the actual state from the agent and makes at most one
-// agent call per instance. Failures are logged, never returned; an unreachable agent or
-// Docker ends the pass and the next pass retries.
+// agent call per instance, then sends the complete web route list. Failures are logged, never
+// returned; an unreachable agent or Docker ends the instance part and the next pass retries.
 func (h *Handler) ReconcileOnce(ctx context.Context) {
+	h.reconcile.mu.Lock()
+	defer h.reconcile.mu.Unlock()
+	h.reconcileInstances(ctx)
+	h.syncWeb(ctx)
+}
+
+// reconcileInstances is the instance part of ReconcileOnce (caller holds reconcile.mu).
+func (h *Handler) reconcileInstances(ctx context.Context) {
 	rs := &h.reconcile
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
 	resp, snap, err := h.refreshStatus(ctx)
 	if err == nil && resp.Docker != agentapi.DockerOK {
 		err = agentapi.ErrDockerUnavailable
