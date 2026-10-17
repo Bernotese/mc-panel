@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent"
-	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/agent/docker"
 	"github.com/Bernotese/mc-panel/internal/agent/firewall"
 	"github.com/Bernotese/mc-panel/internal/agent/instances"
@@ -137,7 +136,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			Clock:        clock.Real{},
 			Log:          log,
 			Egress:       fw,
-			Web:          webFilter(fw),
+			Web:          fw,
 			NanoCPUs:     int64(math.Round(cfg.CPUPerInstance * 1e9)),
 			NetworkPool:  cfg.NetworkPool(),
 
@@ -199,25 +198,6 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return <-errc
-}
-
-// webFilter returns the bridge port restriction of mcpanel-web. A firewall backend without
-// one gets a filter that always fails, so the web router is never connected to a server
-// network (fail closed).
-func webFilter(fw firewall.Backend) instances.WebFilter {
-	if w, ok := any(fw).(instances.WebFilter); ok {
-		return w
-	}
-	return noWebFilter{}
-}
-
-type noWebFilter struct{}
-
-var errNoWebFilter = errors.New("the firewall backend has no web port restriction")
-
-func (noWebFilter) SetWebRules(context.Context, []agentapi.WebRule) error { return errNoWebFilter }
-func (noWebFilter) WebRulesInPlace(context.Context, []agentapi.WebRule) (bool, error) {
-	return false, errNoWebFilter
 }
 
 // socketPerms returns the socket mode and group: dev 0600 without chown; prod

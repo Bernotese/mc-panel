@@ -49,7 +49,7 @@ Components:
 
 1. **`mcpanel-web`** is a container managed by the agent.
    - Caddy image, pinned by digest like the other images.
-   - Runs as a non-root UID with a read-only rootfs (small tmpfs for Caddy's data/config dirs), `CapDrop ALL`, `no-new-privileges`, and memory and PIDs limits. It gets no Docker socket.
+   - Runs as a non-root UID (65532) with a read-only rootfs (small tmpfs for Caddy's data/config dirs, owned by that UID with mode 0700, because Caddy creates `/data/caddy` at start), `CapDrop ALL`, `CapAdd NET_BIND_SERVICE` (the image's caddy binary carries that file capability, and the kernel refuses to exec it without it in the bounding set; it only allows ports < 1024 in the container's own netns), `no-new-privileges`, and memory and PIDs limits. It gets no Docker socket.
    - Sits on its own network `mcpanel-web` (labelled, IPv4 only, subnet from the instance network pool or its own fixed /28). It is also attached to the network `mcpanel-net-<id>` of **every server with an active web port, and only those**.
    - Publishes exactly two ports, both on `127.0.0.1` only:
      - the proxy port (default 18100), carrying the web traffic;
