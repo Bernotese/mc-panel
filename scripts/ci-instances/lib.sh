@@ -14,10 +14,15 @@ case "$ts" in '' | *[!0-9]* | 0*)
   ;;
 esac
 
-work="$(mktemp -d)"
+# Not below /tmp: the agent runs with the production unit's PrivateTmp=yes (agent_unit) and must
+# read its binary and config here; /srv is neither private nor hidden (ProtectHome) in it.
+install -d -m 0755 /srv
+work="$(mktemp -d /srv/mcpanel-ci.XXXXXX)"
 chmod 0755 "$work"
-sock="$work/run/agent.sock"
-agent_pid=""
+# The production socket: RuntimeDirectory=mc-panel of the unit (root:mcpanel 0750).
+sock="/run/mc-panel/agent.sock"
+agent_unit="mcpanel-agent-ci.service" # the test copy of deploy/systemd/mcpanel-agent.service
+agent_started=""
 fsock="$work/frun/files.sock"
 fo="$work/fout"
 files_pid=""
@@ -57,9 +62,10 @@ cleanup() {
     kill "$files_pid" 2>/dev/null || true
     wait "$files_pid" 2>/dev/null || true
   fi
-  if [ -n "$agent_pid" ]; then
-    kill "$agent_pid" 2>/dev/null || true
-    wait "$agent_pid" 2>/dev/null || true
+  if [ -n "$agent_started" ]; then
+    systemctl stop "$agent_unit" 2>/dev/null || true
+    rm -f "/run/systemd/system/$agent_unit"
+    systemctl daemon-reload 2>/dev/null || true
   fi
   if [ -n "$mon_nft" ]; then
     nft delete table inet mcpanel_citest 2>/dev/null || true
@@ -83,8 +89,11 @@ trap cleanup EXIT
 
 fail() {
   echo "FAIL: $*" >&2
-  echo "--- agent log" >&2
+  echo "--- agent log ($agent_unit)" >&2
   cat "$work/agent.log" >&2 || true
+  if [ -n "$agent_started" ]; then
+    systemctl status --no-pager "$agent_unit" >&2 2>/dev/null || true
+  fi
   echo "--- files log" >&2
   cat "$work/files.log" >&2 || true
   echo "--- panel log" >&2
@@ -563,8 +572,41 @@ wait_for() { # wait_for <seconds> <description> <command...>
 
 # The function bodies below are not indented: they hold heredocs and python -c programs.
 
-# setup_agent_files: users, the agent as root (nftables firewall, Docker) and the files service
-# as mcpanel-mc with restic.
+# agent_unit_install writes the test copy of the agent's production unit to /run/systemd/system,
+# so the agent runs with exactly its sandbox (SEC-12: capabilities, ProtectSystem=strict,
+# PrivateTmp, RestrictAddressFamilies=AF_UNIX AF_NETLINK, IPAddressDeny=any, the system call
+# filter, ...) and an agent that needs more than production allows fails here. The unit is
+# rendered by the installer's own render_template ({{INSTANCES_DIR}} = $work/mc, as install does
+# with /srv/mc-panel); only these lines change, each checked to exist exactly once:
+#   ExecStart   the binary and config below $work instead of /usr/local/bin and /etc/mc-panel
+#   Restart     no: a crashing agent must fail the run, not be restarted quietly
+#   + StandardOutput/StandardError  append to $work/agent.log (shown by fail)
+# Every other directive, the socket in RuntimeDirectory=mc-panel included, is production's.
+agent_unit_install() {
+local tpl="$work/agent.service.rendered" key
+(
+  export MCPANEL_INSTALL_NO_MAIN=1 MCPANEL_INSTALL_DRYRUN=1
+  # shellcheck source=scripts/install/main.sh
+  . scripts/install/main.sh
+  TEMPLATE_DIR="$PWD/deploy"
+  export KEY_VERSION=ci KEY_INSTANCES_DIR="$work/mc"
+  render_template systemd/mcpanel-agent.service
+) >"$tpl" || fail "render deploy/systemd/mcpanel-agent.service"
+for key in ExecStart Restart; do
+  [ "$(grep -c "^$key=" "$tpl")" = 1 ] || fail "mcpanel-agent.service: expected one $key= line"
+done
+grep -qx "ReadWritePaths=$work/mc" "$tpl" || fail "mcpanel-agent.service: ReadWritePaths is not instances_dir"
+sed -e "s#^ExecStart=.*#ExecStart=$work/bin/agent -config $work/agent.toml#" \
+  -e 's#^Restart=.*#Restart=no#' \
+  -e "s#^\[Service\]\$#[Service]\nStandardOutput=append:$work/agent.log\nStandardError=append:$work/agent.log#" \
+  "$tpl" >"/run/systemd/system/$agent_unit"
+agent_started=1
+systemctl daemon-reload
+echo "OK: $agent_unit written from deploy/systemd/mcpanel-agent.service (production sandbox)"
+}
+
+# setup_agent_files: users, the agent as root (nftables firewall, Docker) under the production
+# unit's sandbox (agent_unit_install) and the files service as mcpanel-mc with restic.
 setup_agent_files() {
 echo "== setup: users, config, agent"
 for u in mcpanel mcpanel-mc; do
@@ -574,7 +616,8 @@ for u in mcpanel mcpanel-mc; do
 done
 install -d -m 0755 "$work/bin"
 install -m 0755 "$agent_bin" "$work/bin/agent"
-install -d -m 0750 -o root -g mcpanel "$work/run"
+# instances_dir exists before the start, as the installer creates it (ReadWritePaths needs it).
+install -d -m 0755 "$work/mc"
 # nftables (not noop): the container egress filter (default container_egress_deny) is checked below.
 cat >"$work/agent.toml" <<EOF
 socket = "$sock"
@@ -584,8 +627,8 @@ docker_socket = "/var/run/docker.sock"
 instances_dir = "$work/mc"
 mc_user = "mcpanel-mc"
 EOF
-"$work/bin/agent" -config "$work/agent.toml" >"$work/agent.log" 2>&1 &
-agent_pid=$!
+agent_unit_install
+systemctl start "$agent_unit" || fail "systemctl start $agent_unit"
 for _ in $(seq 1 50); do [ -S "$sock" ] && break; sleep 0.2; done
 [ -S "$sock" ] || fail "agent socket missing"
 # The agent reports Docker as unavailable until its first background check; poll briefly.
