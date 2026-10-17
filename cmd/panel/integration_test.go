@@ -69,7 +69,8 @@ func newEnv(t *testing.T) *env {
 	fb := newFakeBackups()
 	up := newFakeUpstream(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clk, Agent: fa, Instances: fi, Console: fc, Files: ff, Backups: fb, Upstream: up.client(clk), Version: "test"})
+	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clk, Agent: fa, Instances: fi, Console: fc, Files: ff, Backups: fb, Upstream: up.client(clk), Version: "test",
+		HostMemory: func() (uint64, error) { return 16 << 30, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,8 +189,17 @@ func TestRouteCoverage(t *testing.T) {
 	if un := rbac.Uncovered(e.app.Mux, e.app.Routes, func(_, p string) bool { return p == "/*" }); len(un) != 0 {
 		t.Fatalf("routes registered without rbac rule: %v", un)
 	}
-	if n := len(e.app.Routes); n != 105 {
-		t.Fatalf("registered %d API routes, OpenAPI defines 105 operations (incl. GET /health)", n)
+	if n := len(e.app.Routes); n != 106 {
+		t.Fatalf("registered %d API routes, OpenAPI defines 106 operations (incl. GET /health)", n)
+	}
+}
+
+func TestAboutNeedsSignInAndReportsVersion(t *testing.T) {
+	e := newEnv(t)
+	e.client("").must(401, "GET", "/about", nil)
+	admin, _ := loginAdminWithTOTP(e)
+	if got := admin.must(200, "GET", "/about", nil); got["version"] != "test" {
+		t.Fatalf("about = %v, want version test", got)
 	}
 }
 

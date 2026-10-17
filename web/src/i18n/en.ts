@@ -211,6 +211,10 @@ export const en: Messages = {
     home: 'Home',
     no_servers: 'No servers yet.',
   },
+  about: {
+    source: 'Source code (AGPL-3.0)',
+    source_version: 'Source code of mc-panel {{version}} (AGPL-3.0)',
+  },
   permission: {
     server: {
       view: 'View',

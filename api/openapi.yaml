@@ -7,7 +7,7 @@ servers:
 security:
   - session: []
 tags:
-  - { name: health, description: 'Health check (public)' }
+  - { name: health, description: 'Health check (public) and the running version (signed in)' }
   - { name: auth, description: 'Login, second factor and sudo' }
   - { name: me, description: 'Current user: profile, 2FA, sessions' }
   - { name: admin, description: 'Admin-only session management' }
@@ -28,6 +28,15 @@ paths:
       security: []
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+  /about:
+    get:
+      operationId: getAbout
+      tags: [health]
+      description: 'The running panel version, for the link to its source code (AGPL-3.0 §13). Signed-in users only; the public health check does not reveal it.'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/About' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /auth/login:
     post:
       operationId: login
@@ -2656,3 +2665,7 @@ components:
       type: object
       required: [status]
       properties: { status: { type: string, enum: [ok] } }
+    About:
+      type: object
+      required: [version]
+      properties: { version: { type: string, description: "Release version without a leading v (e.g. 0.5.0), or 'dev' for a development build" } }
