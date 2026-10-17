@@ -149,8 +149,10 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		Reconcile:   func() { serversH.Trigger() },
 		MaxDuration: cfg.Backups.MaxDuration.Duration,
 	})
+	// The web router endpoint is part of the same *agent.Client; a fake without it means no agent.
+	web, _ := d.Instances.(agentapi.WebClient)
 	serversH = servers.NewHandler(servers.Deps{
-		DB: db, Clock: d.Clock, Audit: auditRec, Box: box, Instances: d.Instances,
+		DB: db, Clock: d.Clock, Audit: auditRec, Box: box, Instances: d.Instances, Web: web,
 		Catalog: cat,
 		// The panel's own restore hold first (a map lookup), then the file service's jobs.
 		Gate:    servers.AnyGate(backupsH, filesH),

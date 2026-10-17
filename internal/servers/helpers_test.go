@@ -68,7 +68,7 @@ func newEnv(t *testing.T) *env {
 		gate: &fakeGate{running: map[int64]bool{}}, purger: &fakePurger{},
 	}
 	e.h = servers.NewHandler(servers.Deps{
-		DB: db, Clock: e.clk, Audit: e.rec, Box: box, Instances: e.agent,
+		DB: db, Clock: e.clk, Audit: e.rec, Box: box, Instances: e.agent, Web: e.agent,
 		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog, Gate: e.gate,
 		Backups: e.purger,
 		HostMemory: func() (uint64, error) {
@@ -190,6 +190,10 @@ type fakeAgent struct {
 	calls       []string // accepted calls
 	failed      []string // calls answered with an error
 	ensures     []agentapi.EnsureRequest
+	// webErr is returned by WebRoutes only; webStatus answers each route (nil = active).
+	webErr    error
+	webStatus func(agentapi.WebRoute) agentapi.WebRouteStatus
+	webReqs   []agentapi.WebRoutesRequest
 }
 
 func newFakeAgent() *fakeAgent {
@@ -285,6 +289,44 @@ func (f *fakeAgent) Remove(_ context.Context, id int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.record(fmt.Sprintf("remove %d", id))
+}
+
+func (f *fakeAgent) setWebErr(err error) { f.mu.Lock(); f.webErr = err; f.mu.Unlock() }
+
+func (f *fakeAgent) setWebStatus(fn func(agentapi.WebRoute) agentapi.WebRouteStatus) {
+	f.mu.Lock()
+	f.webStatus = fn
+	f.mu.Unlock()
+}
+
+// takeWeb returns the route lists sent so far and forgets them.
+func (f *fakeAgent) takeWeb() []agentapi.WebRoutesRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := f.webReqs
+	f.webReqs = nil
+	return out
+}
+
+func (f *fakeAgent) WebRoutes(_ context.Context, req agentapi.WebRoutesRequest) (agentapi.WebRoutesResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := req.Validate(); err != nil {
+		return agentapi.WebRoutesResponse{}, err
+	}
+	f.webReqs = append(f.webReqs, req)
+	if err := cmp.Or(f.err, f.webErr); err != nil {
+		return agentapi.WebRoutesResponse{}, err
+	}
+	out := agentapi.WebRoutesResponse{Routes: make([]agentapi.WebRouteStatus, 0, len(req.Routes))}
+	for _, r := range req.Routes {
+		st := agentapi.WebRouteStatus{ID: r.ID, Status: agentapi.WebActive}
+		if f.webStatus != nil {
+			st = f.webStatus(r)
+		}
+		out.Routes = append(out.Routes, st)
+	}
+	return out, nil
 }
 
 // fakeCatalog is a servers.CatalogSource with a fixed answer.

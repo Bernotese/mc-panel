@@ -22,6 +22,9 @@ type Snapshot struct {
 	Instances map[int64]agentapi.InstanceStatus // by server id
 	// PanelErrors are reconcile errors that never reached the agent, by server id.
 	PanelErrors map[int64]string
+	// Web is the agent's last answer per web route; kept also when the snapshot is too old
+	// (the reconcile pass marks the routes error itself when the agent does not answer).
+	Web map[int64]webEntry
 }
 
 type statusCache struct {
@@ -58,8 +61,9 @@ func (h *Handler) snapshot() Snapshot {
 	s.PanelErrors = maps.Clone(h.status.panelErr)
 	h.status.mu.Unlock()
 	if s.At.IsZero() || h.clock.Now().Sub(s.At) > statusMaxAge {
-		return Snapshot{}
+		s = Snapshot{}
 	}
+	s.Web = h.webs.snapshot()
 	return s
 }
 
