@@ -2,17 +2,20 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { InstanceConfig, Server, ServerState } from '@/api/types'
+import { useMe } from '@/features/auth/me'
 import { serverKey, serversKey, updateServer } from './api'
 import { DeleteServerSection } from './delete-server-section'
 import { formFromInstance, type ServerFormResult } from './form-model'
 import { ServerForm } from './server-form'
+import { WebPortSection } from './web-port-section'
 
 const RUNNING_STATES: ReadonlySet<ServerState> = new Set<ServerState>(['running', 'starting', 'restarting'])
 
-/** The settings area: the instance form (if the server has one) and the danger zone at the end. */
+/** The settings area: the instance form (if the server has one), the web interface (admins) and the danger zone at the end. */
 export function ServerSettingsTab({ server, instance }: { server: Server; instance: InstanceConfig | null }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const isAdmin = useMe()?.role === 'admin'
   // Errors are rendered by the form; a cancelled sudo dialog stays silent.
   const save = useMutation({
     // java is always sent: an omitted java would stay stale after a version change (V4: omitted = unchanged).
@@ -49,6 +52,8 @@ export function ServerSettingsTab({ server, instance }: { server: Server; instan
       ) : (
         <p className="bevel-inset px-4 py-3 text-sm">{t('servers.detail.not_configured')}</p>
       )}
+      {/* Re-initialised when the published port changes (after saving or by another admin). */}
+      {instance && isAdmin ? <WebPortSection key={server.web_port ?? 'off'} server={server} /> : null}
       <DeleteServerSection server={server} />
     </div>
   )
