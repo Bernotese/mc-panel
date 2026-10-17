@@ -599,23 +599,118 @@ func TestWebAttachedNetworkIsRemoved(t *testing.T) {
 	}
 }
 
-// The ask endpoint decides: active on 200, pending meanwhile, an error after three rounds.
+// The ask endpoint decides: active when it confirms the name, pending meanwhile, and an
+// error only after 30 s unconfirmed, counted from the config write (no error flash while a
+// fresh container starts, however many rounds run meanwhile).
 func TestWebAskCheck(t *testing.T) {
 	e := newWebEnv(t)
 	e.ensure(t, ensureReq(1, "survival", 1))
 	r := webRoute(1, "survival", 8100)
 	e.put(t, r)
 	e.ask.setDown(true)
-	for i, want := range []agentapi.WebRouteState{agentapi.WebPending, agentapi.WebPending, agentapi.WebError} {
+	for i := range 5 {
 		e.tick(t)
-		if got := e.statuses(t, r)[1]; got.Status != want || (want == agentapi.WebError && got.Error != "web router did not load the config") {
-			t.Fatalf("round %d: status = %+v, want %s", i+1, got, want)
+		if got := e.statuses(t, r)[1]; got.Status != agentapi.WebPending {
+			t.Fatalf("round %d: status = %+v, want pending", i+1, got)
 		}
+	}
+	e.clk.Advance(29 * time.Second)
+	e.tick(t)
+	if got := e.statuses(t, r)[1]; got.Status != agentapi.WebPending {
+		t.Fatalf("after 29 s: status = %+v", got)
+	}
+	e.clk.Advance(time.Second)
+	e.tick(t)
+	if got := e.statuses(t, r)[1]; got.Status != agentapi.WebError || got.Error != "web router did not load the config" {
+		t.Fatalf("after 30 s: status = %+v", got)
 	}
 	e.ask.setDown(false)
 	e.tick(t)
 	if got := e.statuses(t, r)[1]; got.Status != agentapi.WebActive {
 		t.Fatalf("status = %+v", got)
+	}
+	// Losing the confirmation later starts a new window.
+	e.ask.setDown(true)
+	e.clk.Advance(time.Minute)
+	e.tick(t)
+	if got := e.statuses(t, r)[1]; got.Status != agentapi.WebPending {
+		t.Fatalf("after losing the confirmation: status = %+v", got)
+	}
+	// A new config starts the window again.
+	e.clk.Advance(25 * time.Second)
+	r.Port = 8101
+	e.put(t, r)
+	e.tick(t)
+	e.clk.Advance(25 * time.Second)
+	e.tick(t)
+	if got := e.statuses(t, r)[1]; got.Status != agentapi.WebPending {
+		t.Fatalf("25 s after a new config: status = %+v", got)
+	}
+}
+
+// The default ask check runs wget inside mcpanel-web (argv, as Caddy's user): exit 0 is
+// active, a 404 is not served, anything else is unreachable and stops the round.
+func TestWebAskThroughExec(t *testing.T) {
+	e := newWebEnv(t, func(c *instances.Config) { c.WebAsk = nil })
+	var routes []agentapi.WebRoute
+	for id := int64(1); id <= 3; id++ {
+		name := fmt.Sprintf("srv-%d", id)
+		e.ensure(t, ensureReq(id, name, 1))
+		routes = append(routes, webRoute(id, name, 8100))
+	}
+	answer := map[string]dockertest.ExecResult{} // by domain query
+	var mu sync.Mutex
+	e.d.SetExecHandler(func(container string, cfg docker.ExecConfig) dockertest.ExecResult {
+		mu.Lock()
+		defer mu.Unlock()
+		u := cfg.Cmd[len(cfg.Cmd)-1]
+		return answer[u[strings.Index(u, "=")+1:]]
+	})
+	set := func(fqdn string, r dockertest.ExecResult) {
+		mu.Lock()
+		defer mu.Unlock()
+		answer[fqdn] = r
+	}
+	notFound := dockertest.ExecResult{Stderr: "wget: server returned error: HTTP/1.1 404 Not Found\n", ExitCode: 1}
+	set("srv-1.mc.example.com", dockertest.ExecResult{})
+	set("srv-2.mc.example.com", notFound)
+	set("srv-3.mc.example.com", dockertest.ExecResult{})
+	e.put(t, routes...)
+	e.tick(t)
+	st := e.statuses(t, routes...)
+	if st[1].Status != agentapi.WebActive || st[2].Status != agentapi.WebPending || st[3].Status != agentapi.WebActive {
+		t.Fatalf("statuses = %+v", st)
+	}
+	execs := e.d.Execs()
+	if len(execs) != 3 {
+		t.Fatalf("execs = %+v", execs)
+	}
+	want := []string{"wget", "-q", "-O", "/dev/null", "-T", "2", "http://127.0.0.1:8081/?domain=srv-1.mc.example.com"}
+	if x := execs[0]; x.Container != instances.WebName || !slices.Equal(x.Config.Cmd, want) || x.Config.User != "65532:65532" {
+		t.Fatalf("exec = %+v", x)
+	}
+
+	// No listener: busybox also exits 1, but without a 404; the round stops there.
+	set("srv-1.mc.example.com", dockertest.ExecResult{Stderr: "wget: can't connect to remote host (127.0.0.1): Connection refused\n", ExitCode: 1})
+	e.tick(t)
+	if n := len(e.d.Execs()) - len(execs); n != 1 {
+		t.Fatalf("asks after an unreachable endpoint = %d, want 1", n)
+	}
+	if st := e.statuses(t, routes...); st[1].Status != agentapi.WebPending || st[3].Status != agentapi.WebPending {
+		t.Fatalf("statuses = %+v", st)
+	}
+
+	// A failing exec counts as unreachable too.
+	set("srv-1.mc.example.com", dockertest.ExecResult{})
+	e.d.Fail(dockertest.OpExecCreate, 500, "exec failed")
+	e.tick(t)
+	if st := e.statuses(t, routes...); st[1].Status != agentapi.WebPending {
+		t.Fatalf("status with a failing exec = %+v", st[1])
+	}
+	e.d.Clear()
+	e.tick(t)
+	if st := e.statuses(t, routes...); st[1].Status != agentapi.WebActive || st[3].Status != agentapi.WebActive {
+		t.Fatalf("statuses after recovery = %+v", st)
 	}
 }
 
