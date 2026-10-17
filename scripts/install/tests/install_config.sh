@@ -149,3 +149,45 @@ test_install_cfg_ensure_warns_when_listen_is_not_the_socket() {
   sed -i 's|^listen = .*|listen = "unix:/run/mc-panel-web/panel.sock" # socket unit|' "$ROOT$ETC_PANEL/panel.toml"
   assert_not_contains "$(cfg_ensure)" "[warn]"
 }
+
+test_install_cfg_keys_web_ports_default_and_tls_on_demand() {
+  cfg_fixture
+  cfg_keys
+  assert_eq 18100 "$KEY_WEB_PROXY_PORT"
+  assert_eq 18101 "$KEY_WEB_ASK_PORT"
+  assert_eq 18100 "${CFG_REQUIRED_AGENT[web_proxy_port]}"
+  assert_eq 18101 "${CFG_REQUIRED_AGENT[web_ask_port]}"
+  assert_eq "$(printf 'a@example.com {\n\t\ton_demand\n\t}')" "$KEY_TLS_ON_DEMAND"
+  TLS_MODE=internal
+  cfg_keys
+  assert_eq "$(printf 'internal {\n\t\ton_demand\n\t}')" "$KEY_TLS_ON_DEMAND"
+}
+
+test_install_cfg_ensure_writes_and_keeps_the_web_ports() {
+  cfg_fixture
+  cfg_ensure >/dev/null
+  assert_file_contains "$ROOT$ETC_PANEL/agent.toml" 'web_proxy_port = 18100'
+  assert_file_contains "$ROOT$ETC_PANEL/agent.toml" 'web_ask_port = 18101'
+  # an older agent.toml gets the keys; values of the operator stay and are what Caddy gets
+  printf 'socket = "/run/mc-panel/agent.sock"\nweb_ask_port = 18301 # moved\n' >"$ROOT$ETC_PANEL/agent.toml"
+  cfg_ensure >/dev/null
+  assert_file_contains "$ROOT$ETC_PANEL/agent.toml" 'web_proxy_port = 18100'
+  assert_file_contains "$ROOT$ETC_PANEL/agent.toml" 'web_ask_port = 18301 # moved'
+  assert_eq 1 "$(grep -c '^web_ask_port' "$ROOT$ETC_PANEL/agent.toml")"
+  assert_eq 18301 "$KEY_WEB_ASK_PORT"
+}
+
+test_install_cfg_keys_rejects_invalid_web_ports() {
+  cfg_fixture
+  local v
+  for v in 'web_proxy_port = 80' 'web_proxy_port = 1023' 'web_proxy_port = 25565' 'web_ask_port = 25575' 'web_ask_port = 65536' \
+    'web_proxy_port = "18100"' 'web_ask_port = 18100' 'web_proxy_port = 0x4000'; do
+    printf '%s\n' "$v" >"$ROOT$ETC_PANEL/agent.toml"
+    assert_fails cfg_keys
+    assert_contains "$(cat "$WORK/out")" "[warn] $ETC_PANEL/agent.toml: web_"
+  done
+  # a key in a section is not the top-level key
+  printf '[other]\nweb_proxy_port = 80\n' >"$ROOT$ETC_PANEL/agent.toml"
+  cfg_keys
+  assert_eq 18100 "$KEY_WEB_PROXY_PORT"
+}

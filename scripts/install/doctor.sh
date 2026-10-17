@@ -9,7 +9,7 @@
 # Check ids (stable): services sockets files_process versions update_available release_signature update_state
 # config permissions caddy_config caddy_import caddy_package caddy_admin certificate dns firewall
 # docker docker_version docker_live_restore docker_isolation docker_dns restic tzdata time_sync upgrades reboot_required
-# storage_fs storage_free backup_keys ssh_password ssh_root ssh_kbdinteractive
+# storage_fs storage_free backup_keys ssh_password ssh_root ssh_kbdinteractive web_router web_catchall
 
 DOC_IDS=()
 DOC_STATUS=()
@@ -28,7 +28,7 @@ DOC_EGRESS_DENY_DEFAULT="169.254.0.0/16 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 
 # Required top-level keys: the same lists install adds (config.sh CFG_REQUIRED_*; a test compares
 # them).
 DOC_REQ_PANEL="listen public_url data_dir agent_socket files_socket trusted_proxies monitoring_ping_addr instances_dir"
-DOC_REQ_AGENT="socket panel_uid firewall instances_dir mc_user"
+DOC_REQ_AGENT="socket panel_uid firewall instances_dir mc_user web_proxy_port web_ask_port"
 DOC_REQ_FILES="socket panel_uid instances_dir restic_binary"
 
 # doc_result STATUS ID MSG [HINT] records one result (STATUS ok|warn|fail).
@@ -120,6 +120,20 @@ doc_probe_free_percent() {
   echo $((100 - used))
 }
 doc_probe_sshd() { sshd -T 2>/dev/null; }
+# doc_probe_web_container: "<running> <label mcpanel.web>" of the container mcpanel-web (web
+# interfaces of the servers); nothing when there is none.
+doc_probe_web_container() {
+  timeout 20 docker container inspect -f '{{.State.Running}} {{index .Config.Labels "mcpanel.web"}}' mcpanel-web 2>/dev/null </dev/null
+}
+# doc_probe_web_ports: the published ports of mcpanel-web, lines "8080/tcp -> 127.0.0.1:18100".
+doc_probe_web_ports() { timeout 20 docker port mcpanel-web 2>/dev/null </dev/null; }
+doc_probe_web_table() { nft list table bridge mcpanel_web >/dev/null 2>&1 </dev/null; }
+# doc_probe_web_catchall: the HTTP status Caddy answers for a name nobody published, "000" when
+# the TLS handshake fails (no certificate). Caddy asks mcpanel-web about the name first.
+doc_probe_web_catchall() {
+  curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve doctor-check.invalid:443:127.0.0.1 \
+    https://doctor-check.invalid/ 2>/dev/null </dev/null || true
+}
 
 # --- helpers -------------------------------------------------------------------------------
 
@@ -670,6 +684,81 @@ doc_chk_ssh() {
   fi
 }
 
+# doc_chk_web_router: without published web ports there is no mcpanel-web; with them it runs,
+# publishes on 127.0.0.1 only and its port restriction (table bridge mcpanel_web) exists.
+doc_chk_web_router() {
+  doc_need_root web_router || return 0
+  local c running label ports line addr bad=() hint="docker rm -f mcpanel-web (the agent creates it again within 10 s)"
+  c="$(doc_probe_web_container)" || c=""
+  if [[ -z $c ]]; then
+    doc_result ok web_router "no web ports published (no container mcpanel-web)"
+    return 0
+  fi
+  read -r running label <<<"$c"
+  if [[ $label != 1 ]]; then
+    doc_result warn web_router "a container mcpanel-web exists that mc-panel did not create; the agent leaves it alone, so web ports cannot work" \
+      "rename or remove that container if it is not needed"
+    return 0
+  fi
+  if [[ $running != true ]]; then
+    doc_result fail web_router "mcpanel-web is not running" "journalctl -u mcpanel-agent -n 50; docker logs mcpanel-web"
+    return 0
+  fi
+  ports="$(doc_probe_web_ports)" || ports=""
+  while IFS= read -r line; do
+    [[ -n $line ]] || continue
+    addr="${line##* -> }"
+    if [[ $addr != 127.0.0.1:* ]]; then bad+=("$addr"); fi
+  done <<<"$ports"
+  if ((${#bad[@]} > 0)); then
+    doc_result fail web_router "mcpanel-web publishes on ${bad[*]} (only 127.0.0.1 is expected)" "$hint"
+  elif [[ -z $ports ]]; then
+    doc_result fail web_router "mcpanel-web publishes no port" "$hint"
+  elif ! doc_probe_web_table; then
+    doc_result fail web_router "the port restriction of mcpanel-web (table bridge mcpanel_web) is missing" \
+      "journalctl -u mcpanel-agent (the agent writes it every 10 s); systemctl restart mcpanel-agent"
+  else
+    doc_result ok web_router "mcpanel-web is running, published on 127.0.0.1 only, port restriction in place"
+  fi
+}
+
+# doc_chk_web_catchall: the Caddyfile imports mc-panel-web.caddy together with the ask of
+# mcpanel-web, and a name nobody published gets no page (Let's Encrypt limits, web ports spec §4.3).
+doc_chk_web_catchall() {
+  local file="$ROOT$CADDY_DIR/Caddyfile" ask code f found=0
+  cfg_web_ports >/dev/null 2>&1 || true # agent.toml is root's; the defaults otherwise
+  ask="ask http://127.0.0.1:$CFG_WEB_ASK_PORT/"
+  if [[ -e $file && ! -r $file ]] && ! doc_is_root; then
+    doc_result warn web_catchall "web_catchall: skipped ($CADDY_DIR/Caddyfile is not readable)" "sudo bash install.sh doctor"
+    return 0
+  fi
+  if ! grep -qE -- "$CAD_WEB_IMPORT_RE" "$file" 2>/dev/null; then
+    doc_result warn web_catchall "the web interfaces of the servers are not served: $CADDY_DIR/Caddyfile does not import mc-panel-web.caddy" \
+      "add \"on_demand_tls { $ask }\" to its global options and the line \"$CAD_WEB_IMPORT\", then systemctl reload caddy (docs/install.md, Web interfaces)"
+    return 0
+  fi
+  # shellcheck disable=SC2046 # one path per line, no blanks in Caddy's import paths
+  for f in "$file" $(cad_import_files "$file"); do
+    if grep -qE "^[[:space:]]*ask[[:space:]]+http://127[.]0[.]0[.]1:$CFG_WEB_ASK_PORT/[[:space:]]*$" -- "$f" 2>/dev/null; then
+      found=1
+    fi
+  done
+  if [[ $found == 0 ]]; then
+    doc_result fail web_catchall "certificates on demand without the ask of mcpanel-web ($ask)" \
+      "add \"on_demand_tls { $ask }\" to the global options of $CADDY_DIR/Caddyfile, then systemctl reload caddy"
+    return 0
+  fi
+  code="$(doc_probe_web_catchall)" || code=""
+  if [[ $code == 200 ]]; then
+    doc_result fail web_catchall "Caddy answers an unknown host name with 200 (https://doctor-check.invalid/)" \
+      "check on_demand_tls in $CADDY_DIR/Caddyfile and journalctl -u caddy"
+  elif [[ $code == 000 || -z $code ]]; then
+    doc_result ok web_catchall "unknown host names get no certificate (on_demand_tls ask on 127.0.0.1:$CFG_WEB_ASK_PORT)"
+  else
+    doc_result ok web_catchall "unknown host names get no page (HTTP $code; on_demand_tls ask on 127.0.0.1:$CFG_WEB_ASK_PORT)"
+  fi
+}
+
 # --- output --------------------------------------------------------------------------------
 
 # doc_print prints the results (text or JSON) and returns 0, 1 or 2.
@@ -742,6 +831,8 @@ cmd_doctor() {
   doc_chk_system
   doc_chk_storage
   doc_chk_ssh
+  doc_chk_web_router
+  doc_chk_web_catchall
   local rc=0
   doc_print || rc=$?
   return "$rc"
