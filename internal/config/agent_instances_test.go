@@ -163,3 +163,46 @@ func TestLoadAgentRejectsUnpinnedImage(t *testing.T) {
 		t.Fatalf("expected digest error, got %v", err)
 	}
 }
+
+func TestAgentWebDefaults(t *testing.T) {
+	a := validProdAgent()
+	if a.WebProxyPort != 18100 || a.WebAskPort != 18101 {
+		t.Fatalf("web ports = %d, %d", a.WebProxyPort, a.WebAskPort)
+	}
+	if !strings.HasPrefix(a.Images.Web, "caddy:2.11.7-alpine@sha256:") {
+		t.Fatalf("web image = %q", a.Images.Web)
+	}
+	got, err := config.LoadAgent(writeAgentConfig(t, "web_proxy_port = 28100\nweb_ask_port = 28101\n[images]\nweb = \"caddy@"+testDigest+"\"\n"), false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WebProxyPort != 28100 || got.WebAskPort != 28101 || got.Images.Web != "caddy@"+testDigest {
+		t.Fatalf("loaded = %+v", got)
+	}
+}
+
+func TestAgentWebValidation(t *testing.T) {
+	cases := map[string]func(*config.Agent){
+		"equal ports":       func(a *config.Agent) { a.WebAskPort = a.WebProxyPort },
+		"privileged proxy":  func(a *config.Agent) { a.WebProxyPort = 80 },
+		"privileged ask":    func(a *config.Agent) { a.WebAskPort = 1023 },
+		"minecraft port":    func(a *config.Agent) { a.WebProxyPort = 25565 },
+		"rcon port":         func(a *config.Agent) { a.WebAskPort = 25575 },
+		"too large":         func(a *config.Agent) { a.WebProxyPort = 65536 },
+		"zero":              func(a *config.Agent) { a.WebAskPort = 0 },
+		"web image no pin":  func(a *config.Agent) { a.Images.Web = "caddy:2.11.7-alpine" },
+		"web image missing": func(a *config.Agent) { a.Images.Web = "" },
+	}
+	for name, mod := range cases {
+		a := validProdAgent()
+		mod(&a)
+		if err := a.Validate(); err == nil {
+			t.Errorf("%s: Validate = nil, want error", name)
+		}
+	}
+	ok := validProdAgent()
+	ok.WebProxyPort, ok.WebAskPort = 1024, 65535
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("bounds: %v", err)
+	}
+}

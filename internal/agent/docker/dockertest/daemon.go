@@ -66,6 +66,8 @@ type Container struct {
 	Networks     []string // connected networks, sorted
 	// NetIDs holds the network ID of each endpoint once the container ran on it.
 	NetIDs map[string]string
+	// IPs holds the fixed addresses requested per network (IPAMConfig.IPv4Address).
+	IPs map[string]string
 }
 
 type failure struct {
@@ -191,6 +193,7 @@ func (d *Daemon) Container(name string) (Container, bool) {
 	cp.StopTimes = slices.Clone(c.StopTimes)
 	cp.Networks = slices.Clone(c.Networks)
 	cp.NetIDs = maps.Clone(c.NetIDs)
+	cp.IPs = maps.Clone(c.IPs)
 	return cp, true
 }
 
@@ -361,8 +364,9 @@ func (d *Daemon) newContainer(name string, cfg docker.ContainerConfig) *Containe
 	if mode := cfg.HostConfig.NetworkMode; mode != "" {
 		c.connect(mode)
 	}
-	for n := range cfg.NetworkingConfig.EndpointsConfig {
+	for n, ep := range cfg.NetworkingConfig.EndpointsConfig {
 		c.connect(n)
+		c.setIP(n, ep.IPAMConfig)
 	}
 	d.containers[name] = c
 	return c
@@ -375,10 +379,21 @@ func (c *Container) connect(network string) {
 	}
 }
 
+func (c *Container) setIP(network string, ipam *docker.EndpointIPAMConfig) {
+	if ipam == nil || ipam.IPv4Address == "" {
+		delete(c.IPs, network)
+		return
+	}
+	if c.IPs == nil {
+		c.IPs = map[string]string{}
+	}
+	c.IPs[network] = ipam.IPv4Address
+}
+
 func (c *Container) settings() docker.NetworkSettings {
 	ns := docker.NetworkSettings{Networks: map[string]docker.Endpoint{}}
 	for i, n := range c.Networks {
-		ns.Networks[n] = docker.Endpoint{NetworkID: c.NetIDs[n], IPAddress: fmt.Sprintf("192.0.2.%d", i+2)}
+		ns.Networks[n] = docker.Endpoint{NetworkID: c.NetIDs[n], IPAddress: cmp.Or(c.IPs[n], fmt.Sprintf("192.0.2.%d", i+2))}
 	}
 	return ns
 }
@@ -639,8 +654,9 @@ func (d *Daemon) networkList(w http.ResponseWriter, r *http.Request) {
 // container twice is 403 "already exists", disconnecting one that is not connected 500.
 func (d *Daemon) networkMember(w http.ResponseWriter, r *http.Request, op, name string) {
 	var req struct {
-		Container string
-		Force     bool
+		Container      string
+		EndpointConfig *docker.EndpointSettings
+		Force          bool
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Container == "" {
 		writeError(w, http.StatusBadRequest, "bad request")
@@ -661,6 +677,11 @@ func (d *Daemon) networkMember(w http.ResponseWriter, r *http.Request, op, name 
 		writeError(w, http.StatusForbidden, "endpoint with name "+c.Name+" already exists in network "+name)
 	case op == OpNetworkConnect:
 		c.connect(name)
+		if req.EndpointConfig != nil {
+			c.setIP(name, req.EndpointConfig.IPAMConfig)
+		} else {
+			c.setIP(name, nil)
+		}
 		if c.Status == "running" {
 			if c.NetIDs == nil {
 				c.NetIDs = map[string]string{}
@@ -673,6 +694,7 @@ func (d *Daemon) networkMember(w http.ResponseWriter, r *http.Request, op, name 
 	default:
 		c.Networks = slices.DeleteFunc(c.Networks, func(n string) bool { return n == name })
 		delete(c.NetIDs, name)
+		delete(c.IPs, name)
 		w.WriteHeader(http.StatusOK)
 	}
 }
