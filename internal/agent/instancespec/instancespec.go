@@ -62,7 +62,10 @@ var (
 	cfKeyRe   = regexp.MustCompile(`^[A-Za-z0-9$./_-]{1,128}$`)
 )
 
-const maxBaseDomainLen = 200
+const (
+	maxBaseDomainLen = 200
+	maxDNSNameLen    = 253
+)
 
 func invalid(field, format string, args ...any) error {
 	return fmt.Errorf("%w: %s: %s", ErrInvalid, field, fmt.Sprintf(format, args...))
@@ -153,6 +156,21 @@ func ValidBaseDomain(d string) error {
 	for _, l := range labels {
 		if !labelRe.MatchString(l) {
 			return invalid("base_domain", "label %q must match %s", l, labelRe)
+		}
+	}
+	return nil
+}
+
+// CheckDNSName accepts a lowercase DNS name of at most 253 characters without a trailing
+// dot, every label matching the base domain label rule (the number of labels is the
+// caller's rule).
+func CheckDNSName(fqdn string) error {
+	if fqdn == "" || len(fqdn) > maxDNSNameLen {
+		return invalid("fqdn", "must be 1..%d characters", maxDNSNameLen)
+	}
+	for l := range strings.SplitSeq(fqdn, ".") {
+		if !labelRe.MatchString(l) {
+			return invalid("fqdn", "label %q must match %s", l, labelRe)
 		}
 	}
 	return nil

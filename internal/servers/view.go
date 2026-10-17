@@ -60,6 +60,8 @@ type serverJSON struct {
 	// DownAlerts is the per-server switch of the TP5 down/crash-loop alerts; admins only
 	// (missing row = on), null for other users.
 	DownAlerts *bool `json:"down_alerts"`
+	// WebStatus is off | pending | active | error (web ports spec §3.2).
+	WebStatus string `json:"web_status"`
 }
 
 // viewData is everything a Server response needs besides the server row.
@@ -114,7 +116,7 @@ func (d viewData) server(s store.Server, perms []rbac.Permission) (serverJSON, e
 // view builds the Server schema; in == nil is a server without instance ("not configured",
 // all instance fields null).
 func view(s store.Server, perms []rbac.Permission, in *store.Instance, baseDomain *string, snap Snapshot) (serverJSON, error) {
-	out := serverJSON{ID: s.ID, Name: s.Name, Permissions: perms, Status: deriveStatus(s.Name, in, snap)}
+	out := serverJSON{ID: s.ID, Name: s.Name, Permissions: perms, Status: deriveStatus(s.Name, in, snap), WebStatus: "off"}
 	if in == nil {
 		return out, nil
 	}

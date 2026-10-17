@@ -103,6 +103,7 @@ function toServer(s: MockServer, permissions: Permission[], admin = true): Serve
     instance,
     status: admin ? s.status : { ...s.status, last_error: '' },
     down_alerts: admin ? (db.monitoring.downAlerts[s.id] ?? true) : null,
+    web_status: 'off',
   }
 }
 

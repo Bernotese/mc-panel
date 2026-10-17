@@ -36,6 +36,11 @@ type Instances interface {
 	Remove(ctx context.Context, id int64) error
 }
 
+// Web is the web router part of the instance manager (instances.Manager implements it).
+type Web interface {
+	SetWebRoutes(ctx context.Context, req agentapi.WebRoutesRequest) (agentapi.WebRoutesResponse, error)
+}
+
 // Option configures a Server.
 type Option func(*Server)
 
@@ -43,11 +48,16 @@ type Option func(*Server)
 // if Docker were unavailable.
 func WithInstances(in Instances) Option { return func(s *Server) { s.inst = in } }
 
+// WithWeb enables PUT /v1/web/routes. Without it the endpoint answers as if Docker were
+// unavailable.
+func WithWeb(w Web) Option { return func(s *Server) { s.web = w } }
+
 // Server serves the agentapi endpoints. It implements http.Handler; Serve
 // adds the peer UID to each request context and applies conservative timeouts.
 type Server struct {
 	fw      agentapi.Firewall
 	inst    Instances
+	web     Web
 	console Console
 	version string
 	log     *slog.Logger
@@ -65,7 +75,7 @@ type Server struct {
 
 func NewServer(fw agentapi.Firewall, version string, log *slog.Logger, opts ...Option) *Server {
 	s := &Server{
-		fw: fw, inst: noInstances{}, console: noConsole{}, version: version, log: log,
+		fw: fw, inst: noInstances{}, web: noWeb{}, console: noConsole{}, version: version, log: log,
 		streams: make(chan struct{}, MaxLogStreams), playerReads: make(chan struct{}, MaxParallelPlayers), readTimeout: 5 * time.Second, writeTimeout: 10 * time.Second,
 		streamWriteTimeout: streamWriteTimeout,
 	}
@@ -86,6 +96,7 @@ func NewServer(fw agentapi.Firewall, version string, log *slog.Logger, opts ...O
 		agentapi.PathInstanceLogs:    {method: http.MethodPost, handler: s.logs},
 		agentapi.PathInstanceRcon:    {method: http.MethodPost, handler: s.rcon},
 		agentapi.PathInstancePlayers: {method: http.MethodPost, handler: s.players},
+		agentapi.PathWebRoutes:       {method: http.MethodPut, handler: s.webRoutes},
 	}
 	s.srv = &http.Server{
 		Handler:           s,
@@ -124,7 +135,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.reject(w, r, http.StatusMethodNotAllowed, fmt.Errorf("method %s not allowed", r.Method))
 		return
 	}
-	if r.Method == http.MethodPost {
+	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err != nil || mt != "application/json" {
 			s.reject(w, r, http.StatusUnsupportedMediaType, errors.New("content type must be application/json"))
@@ -234,6 +245,30 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
 	s.queued(w, r, "remove", req.ID, s.inst.Remove(r.Context(), req.ID))
 }
 
+func (s *Server) webRoutes(w http.ResponseWriter, r *http.Request) {
+	var req agentapi.WebRoutesRequest
+	if !s.decode(w, r, &req, agentapi.MaxWebRequestBytes) {
+		return
+	}
+	if err := req.Validate(); err != nil {
+		s.reject(w, r, http.StatusBadRequest, err)
+		return
+	}
+	resp, err := s.web.SetWebRoutes(r.Context(), req)
+	switch {
+	case err == nil:
+		s.log.Debug("web routes accepted", "routes", len(req.Routes), "peer_uid", peerUID(r))
+		writeJSON(w, http.StatusOK, resp)
+	case errors.Is(err, instancespec.ErrInvalid):
+		s.reject(w, r, http.StatusBadRequest, err)
+	case errors.Is(err, agentapi.ErrDockerUnavailable):
+		s.rejectCode(w, r, http.StatusServiceUnavailable, agentapi.ErrorCodeDockerUnavailable, err)
+	default:
+		s.log.Error("web routes failed", "routes", len(req.Routes), "err", err, "peer_uid", peerUID(r))
+		writeJSON(w, http.StatusInternalServerError, agentapi.ErrorResponse{Error: "web routes failed"})
+	}
+}
+
 // queued answers a write to the instance queue: 202, or the mapped error.
 func (s *Server) queued(w http.ResponseWriter, r *http.Request, op string, id int64, err error) {
 	switch {
@@ -323,6 +358,13 @@ func (noInstances) Power(context.Context, int64, agentapi.PowerAction) error {
 }
 
 func (noInstances) Remove(context.Context, int64) error { return agentapi.ErrDockerUnavailable }
+
+// noWeb is the web backend of a server without WithWeb.
+type noWeb struct{}
+
+func (noWeb) SetWebRoutes(context.Context, agentapi.WebRoutesRequest) (agentapi.WebRoutesResponse, error) {
+	return agentapi.WebRoutesResponse{}, agentapi.ErrDockerUnavailable
+}
 
 // peerUID returns the UID stored by peercred.ConnContext, or -1 if unknown.
 func peerUID(r *http.Request) int64 {
