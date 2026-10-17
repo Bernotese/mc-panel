@@ -5,9 +5,11 @@
 # Run: bash scripts/install/test.sh tests/verify_release_build.sh
 # shellcheck disable=SC2034,SC2317,SC2329
 
-# vb_fixture: repo $WORK/repo (deploy/ of this checkout, .goreleaser.yaml, go.mod, a
-# .node-version of 24.21.0), tag v1.2.3 on origin's main, a "rebuild" in $WORK/pre/<arch>/ and
+# vb_fixture: repo $WORK/repo (deploy/ and LICENSE of this checkout, .goreleaser.yaml, go.mod,
+# a .node-version of 24.21.0), tag v1.2.3 on origin's main, a "rebuild" in $WORK/pre/<arch>/ and
 # matching draft tarballs in $WORK/assets; fake node (v24.21.0) and go in $WORK/bin.
+# VB_NO_LICENSE=1: a tag from before LICENSE existed (v0.5.0 and older), without it in repo
+# and tarballs.
 vb_fixture() {
   local src repo="$WORK/repo" g arch b
   src="$(cd "$(sig_src_dir)/../.." && pwd)"
@@ -15,6 +17,7 @@ vb_fixture() {
   mkdir -p "$repo" "$WORK/assets" "$WORK/bin"
   cp -R "$src/deploy" "$repo/deploy"
   cp "$src/.goreleaser.yaml" "$repo/.goreleaser.yaml"
+  [[ ${VB_NO_LICENSE:-0} == 1 ]] || cp "$src/LICENSE" "$repo/LICENSE"
   printf 'module example\n\ngo 1.27.2\n' >"$repo/go.mod"
   echo 24.21.0 >"$repo/.node-version"
   git init -q -b main "$repo"
@@ -31,6 +34,7 @@ vb_fixture() {
       cp "$WORK/pre/$arch/$b" "$WORK/rel-$arch/$b"
     done
     cp -R "$repo/deploy" "$WORK/rel-$arch/deploy"
+    [[ ${VB_NO_LICENSE:-0} == 1 ]] || cp "$repo/LICENSE" "$WORK/rel-$arch/LICENSE"
     vb_pack "$arch"
   done
   printf '#!/bin/sh\necho "%s"\n' "${VB_NODE:-v24.21.0}" >"$WORK/bin/node"
@@ -106,6 +110,43 @@ test_verify_build_refuses_a_changed_deploy_file() {
   vb_pack arm64
   vb_run
   vb_refused "deploy/systemd/mcpanel-agent.service: DIFFERS from v1.2.3"
+}
+
+test_verify_build_compares_the_license() {
+  vb_fixture
+  vb_run
+  [[ $_rc == 0 ]] || fail "exit $_rc" "$(cat "$WORK/out")"
+  echo "plus an extra clause" >>"$WORK/rel-amd64/LICENSE"
+  vb_pack amd64
+  vb_run
+  vb_refused "LICENSE: DIFFERS from v1.2.3"
+}
+
+test_verify_build_refuses_a_missing_license() {
+  vb_fixture
+  rm -f -- "$WORK/rel-arm64/LICENSE"
+  vb_pack arm64
+  vb_run
+  vb_refused "entries differ"
+  assert_contains "$(cat "$WORK/out")" "> LICENSE"
+}
+
+test_verify_build_old_tag_without_license_passes() {
+  VB_NO_LICENSE=1
+  vb_fixture
+  vb_run
+  [[ $_rc == 0 ]] || fail "exit $_rc" "$(cat "$WORK/out")"
+  assert_contains "$(cat "$WORK/out")" "OK: the tarballs of v1.2.3 are exactly what"
+}
+
+test_verify_build_refuses_a_license_the_tag_does_not_have() {
+  VB_NO_LICENSE=1
+  vb_fixture
+  echo "some license" >"$WORK/rel-amd64/LICENSE"
+  vb_pack amd64
+  vb_run
+  vb_refused "entries differ"
+  assert_contains "$(cat "$WORK/out")" "< LICENSE"
 }
 
 test_verify_build_refuses_another_node_version() {

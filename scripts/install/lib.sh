@@ -9,6 +9,7 @@ MCPANEL_VERSION=dev
 # shellcheck disable=SC2034 # constants of all steps; the step files read them
 {
   BIN_DIR=/usr/local/bin
+  DOC_DIR=/usr/local/share/doc/mc-panel # LICENSE of the release tarball (AGPL text)
   ETC_PANEL=/etc/mc-panel
   ETC_FILES=/etc/mc-panel-files
   DATA_DIR=/var/lib/mc-panel

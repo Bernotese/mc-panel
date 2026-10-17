@@ -13,9 +13,9 @@
 #      -ldflags "-s -w -X main.version=<version>" and GOTOOLCHAIN=go<go.mod version>;
 #   4. each draft tarball (--assets DIR: already downloaded and checked by sign-release.sh;
 #      otherwise downloaded here by release ID, uploader github-actions[bot]) is extracted into
-#      a temp dir: only regular files and directories, exactly panel, agent, files and the
-#      files of deploy/; the binaries must be byte-identical to the rebuild and deploy/ to the
-#      tagged commit's.
+#      a temp dir: only regular files and directories, exactly panel, agent, files, the files
+#      of deploy/ and LICENSE (only if the tag has one; v0.5.0 and older do not); the binaries
+#      must be byte-identical to the rebuild, deploy/ and LICENSE to the tagged commit's.
 #
 # Everything (clone, Go module and build caches, the Go toolchain, the npm cache, node_modules)
 # lives in one temp dir that is removed at the end; nothing is installed. --node-version is for
@@ -133,7 +133,12 @@ fi
 
 mkdir "$tmp/tree"
 git -C "$src" archive "$commit" deploy | tar -x -C "$tmp/tree" # $tmp/tree/deploy/...
-(cd "$tmp/tree" && find deploy -type f | LC_ALL=C sort) >"$tmp/deploy.list"
+(cd "$tmp/tree" && find deploy -type f | LC_ALL=C sort) >"$tmp/tree.list"
+# The AGPL license text sits at the archive root from the tag on that has it in the repo.
+if git -C "$src" cat-file -e "$commit:LICENSE" 2>/dev/null; then
+  git -C "$src" archive "$commit" LICENSE | tar -x -C "$tmp/tree"
+  echo LICENSE >>"$tmp/tree.list"
+fi
 fail=0
 for arch in amd64 arm64; do
   tarball="$assets/mc-panel_${v}_linux_${arch}.tar.gz"
@@ -150,7 +155,7 @@ for arch in amd64 arm64; do
     rl_die "$tarball holds entries that are neither files nor directories: $(find "$x" ! -type f ! -type d | sed "s|^$x/||" | tr '\n' ' ')"
   fi
   (cd "$x" && find . -type f | sed 's|^\./||' | LC_ALL=C sort) >"$tmp/got.list"
-  { printf '%s\n' agent files panel; cat "$tmp/deploy.list"; } | LC_ALL=C sort >"$tmp/want.list"
+  { printf '%s\n' agent files panel; cat "$tmp/tree.list"; } | LC_ALL=C sort >"$tmp/want.list"
   if ! cmp -s "$tmp/got.list" "$tmp/want.list"; then
     echo "  entries differ (< tarball, > expected):" >&2
     diff "$tmp/got.list" "$tmp/want.list" | grep '^[<>]' | sed 's/^/    /' >&2 || true
@@ -170,7 +175,7 @@ for arch in amd64 arm64; do
       echo "  $f: DIFFERS from $tag" >&2
       fail=1
     fi
-  done <"$tmp/deploy.list"
+  done <"$tmp/tree.list"
 done
 [ "$fail" = 0 ] || rl_die "the release tarballs of $tag are not what its commit builds; do not sign"
 echo "OK: the tarballs of $tag are exactly what $commit builds"

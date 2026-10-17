@@ -104,10 +104,19 @@ archives:
     formats:
       - tar.gz
     name_template: "mc-panel_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    # Binaries plus the templates the installer uses with --from-dir (installer spec §3); this
-    # also replaces the default README/LICENSE globs.
+    # Binaries plus the templates the installer uses with --from-dir (installer spec §3) and the
+    # AGPL license text at the archive root; this replaces the default README/LICENSE globs.
+    # verify-release-build.sh compares contents only; the fixed file info just keeps the archive
+    # free of the checkout's owner and mtime.
     files:
       - deploy/**/*
+      - src: LICENSE
+        dst: LICENSE
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
 
 checksum:
   name_template: checksums.txt
