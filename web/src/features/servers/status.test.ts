@@ -51,6 +51,8 @@ describe('server status', () => {
     expect(pollInterval(undefined)).toBe(SLOW_POLL_MS)
     expect(pollInterval([server({}), server({ state: 'stopped', desired_state: 'stopped' })])).toBe(SLOW_POLL_MS)
     expect(pollInterval([server({}), server({ operation: 'creating', state: 'creating' })])).toBe(FAST_POLL_MS)
+    // a published web port waits for the next reconcile
+    expect(pollInterval([{ ...server({}), web_status: 'pending' }])).toBe(FAST_POLL_MS)
   })
 
   it('allows only power actions that make sense in the current state', () => {
