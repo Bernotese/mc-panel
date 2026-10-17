@@ -111,6 +111,7 @@ jobs:
           shard monitoring-metrics '^internal/(monitoring|notify|timescale)/'
           shard monitoring-alerts '^internal/(monitoring|notify|timescale)/'
           shard backups '^internal/(files|backups|timescale)/'
+          shard web '^internal/agent/(instances|firewall)/|^internal/servers/|^deploy/caddy/|^scripts/install/'
           if [ "${main_push}" = true ]; then shards=(); fi # root job, see above
           json="$(printf '%s\n' "${shards[@]}" | jq -Rnc '[inputs | select(. != "")]')"
           echo "instances_shards=${json}" >> "${GITHUB_OUTPUT}"
@@ -420,13 +421,13 @@ jobs:
           cache: true
 
       # The panel is built without the web build (internal/webui/dist only holds .gitkeep, as in
-      # the nftables job): the acceptance uses /api only. The pinned server (java21) and router
-      # images from internal/config are pulled meanwhile.
+      # the nftables job): the acceptance uses /api only. The pinned server (java21), router and
+      # web router (Caddy) images from internal/config are pulled meanwhile.
       - name: Build agent, files service and panel; pull images
         run: |
           set -euo pipefail
-          images="$(grep -oE '"itzg/(minecraft-server:[^"]*-java21|mc-router:[^"]*)@sha256:[0-9a-f]{64}"' internal/config/config.go | tr -d '"')"
-          [ "$(wc -l <<<"${images}")" = 2 ] || { echo "image refs not found: ${images}" >&2; exit 1; }
+          images="$(grep -oE '"(itzg/(minecraft-server:[^"]*-java21|mc-router:[^"]*)|caddy:[^"]*)@sha256:[0-9a-f]{64}"' internal/config/config.go | tr -d '"')"
+          [ "$(wc -l <<<"${images}")" = 3 ] || { echo "image refs not found: ${images}" >&2; exit 1; }
           (for i in ${images}; do docker pull -q "${i}"; done) >"${RUNNER_TEMP}/pull.log" 2>&1 &
           pull=$!
           go build -o bin/agent ./cmd/agent
@@ -453,8 +454,10 @@ jobs:
       # ViaBackwards + ViaVersion from Hangar, mrpack import), monitoring-metrics (history, live
       # and host values, RCON noise, host.disk_low/ok), monitoring-alerts (server.down/recovered
       # via nftables, server.crash_loop, the down-alerts switch) and backups (real restic:
-      # backup, restore, download, schedule, pin, delete, purge). The panel shards run the panel
-      # in production mode with TOTP sign-in and sudo.
+      # backup, restore, download, schedule, pin, delete, purge) and web (web ports: a host Caddy
+      # with the installer's catch-all site in front of mcpanel-web, a responder in the server,
+      # isolation, unpublish). The panel shards run the panel in production mode with TOTP
+      # sign-in and sudo.
       - name: Instance acceptance (${{ matrix.shard }})
         env:
           SHARD: ${{ matrix.shard }}

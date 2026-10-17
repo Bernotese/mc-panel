@@ -10,19 +10,21 @@
 #   monitoring-metrics history, live and host values, RCON noise, host.disk_low/ok
 #   monitoring-alerts  server.down/recovered, server.crash_loop, the down-alerts switch
 #   backups            backup, restore, download, schedule, pin, delete, purge with restic
+#   web                web ports: host Caddy with the catch-all site, mcpanel-web, isolation (web.sh)
 #
 # MCPANEL_ACCEPTANCE_TIMESCALE=<n> (a panel built with -tags acceptance, see internal/timescale)
 # makes the monitoring passes, alert windows and the backup tick n times faster; the shards
 # scale their waits with it. CI uses 10.
 #
 # Usage (as root): scripts/ci-instances.sh SHARD AGENT_BINARY FILES_BINARY PANEL_BINARY
-# Changes the host (users, Docker containers/network, ports 25565 and 8080, nftables tables
-# inet mcpanel and inet mcpanel_citest, network namespace mcpcitest) and needs internet (Mojang,
+# Changes the host (users, Docker containers/network, ports 25565, 8080, 443, 18100, 18101 and
+# 18180, nftables tables inet mcpanel, inet mcpanel_citest and bridge mcpanel_web, network
+# namespace mcpcitest) and needs internet (Mojang,
 # PaperMC, Modrinth, Hangar): disposable CI runners only.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-shards="core plugins monitoring-metrics monitoring-alerts backups"
+shards="core plugins monitoring-metrics monitoring-alerts backups web"
 if [ "$#" -ne 4 ] || ! [[ " $shards " == *" $1 "* ]]; then
   echo "usage: scripts/ci-instances.sh SHARD AGENT_BINARY FILES_BINARY PANEL_BINARY (SHARD: ${shards// /, })" >&2
   exit 2
