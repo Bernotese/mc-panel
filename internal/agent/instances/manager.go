@@ -72,6 +72,8 @@ type Config struct {
 	NanoCPUs int64
 	// RouterConnectionRateLimit is mc-router's -connection-rate-limit; 0 = default.
 	RouterConnectionRateLimit int
+	// WebProxyPort and WebAskPort are mcpanel-web's host ports on 127.0.0.1; 0 = default.
+	WebProxyPort, WebAskPort int
 }
 
 // EgressFilter is the firewall part that filters the containers' new connections
@@ -141,7 +143,8 @@ func New(cfg Config) *Manager {
 	m := &Manager{
 		dc: cfg.Docker,
 		host: Host{InstancesDir: cfg.InstancesDir, UID: cfg.UID, GID: cfg.GID, Images: cfg.Images,
-			NanoCPUs: cfg.NanoCPUs, RouterConnectionRateLimit: cfg.RouterConnectionRateLimit},
+			NanoCPUs: cfg.NanoCPUs, RouterConnectionRateLimit: cfg.RouterConnectionRateLimit,
+			WebProxyPort: cfg.WebProxyPort, WebAskPort: cfg.WebAskPort},
 		egress:        cfg.Egress,
 		pool:          cfg.NetworkPool,
 		hostPrefixes:  cfg.HostPrefixes,
