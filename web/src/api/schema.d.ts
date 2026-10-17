@@ -1780,7 +1780,7 @@ export interface components {
              * @enum {string}
              */
             web_status: "off" | "pending" | "active" | "error";
-            /** @description Published web port inside the container; admins only, absent when off */
+            /** @description Stored web port inside the container; admins only, absent when none is stored (also shown while web_status is off for lack of a base domain) */
             web_port?: number;
             /** @description The agent's reason for web_status error, sanitized like last_error; admins only, absent when there is none */
             web_error?: string;
