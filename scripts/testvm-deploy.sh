@@ -236,19 +236,26 @@ caddy_validate() {
 # in Caddyfile.testvm-prev for restore_caddy_frame. The installer validates and reloads Caddy
 # when its site changes; a frame that changed on its own is validated and applied here (and put
 # back if Caddy rejects it): with a restart, because caddy reload would send the new
-# configuration to the admin address it names.
+# configuration to the admin address it names. A ref with web ports (deploy/caddy/mc-panel-web.caddy)
+# also gets what the installer adds only to a Caddyfile of its own: the on-demand ask of
+# mcpanel-web (the default web_ask_port 18101 of agent.toml) and the marked import of the web
+# interfaces site, which the installer writes next.
 write_caddy_frame() {
-  local panel_host="$1" ip="$2" tmp admin=""
+  local panel_host="$1" ip="$2" tmp admin="" ask="" web_import=""
   if [ -e "$CADDY_DROPIN" ]; then
     admin=$'\tadmin unix//run/caddy/admin.sock\n'
+  fi
+  if [ -f "$SRC/deploy/caddy/mc-panel-web.caddy" ]; then
+    ask=$'\ton_demand_tls {\n\t\task http://127.0.0.1:18101/\n\t}\n'
+    web_import=$'\nimport mc-panel-web.caddy # managed by mc-panel'
   fi
   tmp="$(mktemp)"
   cat >"$tmp" <<EOF
 {
 ${admin}	skip_install_trust
-}
+${ask}}
 
-import mc-panel.caddy # managed by mc-panel
+import mc-panel.caddy # managed by mc-panel${web_import}
 
 $ip {
 	tls internal
@@ -269,7 +276,9 @@ EOF
   rm -f "$tmp"
   # On the first run mc-panel.caddy does not exist yet: the installer writes it next and
   # reloads Caddy (the running Caddy keeps its old configuration until then).
-  if [ -e /etc/caddy/mc-panel.caddy ] && systemctl is-active --quiet caddy.service; then
+  # The same for mc-panel-web.caddy on the first deploy of a ref with web ports.
+  if [ -e /etc/caddy/mc-panel.caddy ] && { [ -z "$web_import" ] || [ -e /etc/caddy/mc-panel-web.caddy ]; } &&
+    systemctl is-active --quiet caddy.service; then
     if ! caddy_validate; then
       restore_caddy_frame
       echo "testvm-deploy: caddy rejects the new Caddyfile frame; the previous one is back" >&2
