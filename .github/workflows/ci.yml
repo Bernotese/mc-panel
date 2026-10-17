@@ -566,9 +566,10 @@ jobs:
               echo "::error::expected exactly one archive for ${arch}"
               exit 1
             fi
-            # The binaries plus the templates the installer uses with --from-dir (installer spec §3).
+            # The binaries plus the templates the installer uses with --from-dir (installer spec §3)
+            # and the AGPL license text at the root.
             contents="$(tar -tzf "$1" | sort)"
-            for want in agent files panel deploy/systemd/mcpanel-panel.socket deploy/config/panel.toml; do
+            for want in agent files panel LICENSE deploy/systemd/mcpanel-panel.socket deploy/config/panel.toml; do
               if ! grep -qx "${want}" <<<"${contents}"; then
                 echo "::error::$1 lacks ${want} (contents: $(paste -sd' ' <<<"${contents}"))"
                 exit 1

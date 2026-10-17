@@ -230,7 +230,7 @@ sudo bash install.sh uninstall           # asks once; --yes answers
 sudo bash install.sh uninstall --purge   # deletes everything after you type the panel domain
 ```
 
-`uninstall` stops and removes the units, the binaries, the Caddy site (`/etc/caddy/mc-panel.caddy` and the marked import line), the nftables tables `inet mcpanel_fw` and `inet mcpanel`, the Minecraft containers, mc-router, its network and the servers' networks `mcpanel-net-<id>`, and the sockets. It keeps worlds and backups (`/srv/mc-panel`), the database (`/var/lib/mc-panel`), the rollback copies, the configuration (`/etc/mc-panel*`) and the users, so a later `install` picks everything up again. Other Caddy sites, all packages, the Caddy repository and the drop-in `caddy.service.d/mc-panel.conf` stay (a Caddyfile of the installer still uses the admin socket in `/run/caddy`).
+`uninstall` stops and removes the units, the binaries and the license text, the Caddy site (`/etc/caddy/mc-panel.caddy` and the marked import line), the nftables tables `inet mcpanel_fw` and `inet mcpanel`, the Minecraft containers, mc-router, its network and the servers' networks `mcpanel-net-<id>`, and the sockets. It keeps worlds and backups (`/srv/mc-panel`), the database (`/var/lib/mc-panel`), the rollback copies, the configuration (`/etc/mc-panel*`) and the users, so a later `install` picks everything up again. Other Caddy sites, all packages, the Caddy repository and the drop-in `caddy.service.d/mc-panel.conf` stay (a Caddyfile of the installer still uses the admin socket in `/run/caddy`).
 
 `--purge` also deletes all worlds, backups, backup keys, the database, the rollback copies, the configuration and the users `mcpanel` and `mcpanel-mc`. It needs the panel domain typed on the terminal; `--yes` does not replace that.
 
@@ -267,6 +267,7 @@ How to restore a snapshot without the panel is described in [`docs/dev/README.md
 | Path | Content |
 |---|---|
 | `/usr/local/bin/{panel,agent,files}` | the binaries |
+| `/usr/local/share/doc/mc-panel/LICENSE` | the license text (AGPL-3.0-or-later) from the release tarball |
 | `/etc/mc-panel/{panel,agent}.toml`, `/etc/mc-panel-files/files.toml` | configuration; later runs of the installer only add missing keys, your edits stay |
 | `/var/lib/mc-panel/` | database, `secret.key`, optional GeoIP database |
 | `/srv/mc-panel/instances/<id>` | data directory of each Minecraft server |
