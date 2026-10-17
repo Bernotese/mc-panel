@@ -249,9 +249,11 @@ type Images struct {
 	Java21 string `toml:"java21"`
 	Java25 string `toml:"java25"`
 	Router string `toml:"router"`
+	// Web is the Caddy image of the web router mcpanel-web (web ports spec §2).
+	Web string `toml:"web"`
 }
 
-// DefaultImages are the pinned defaults (verified 2026-10-10).
+// DefaultImages are the pinned defaults (verified 2026-10-10; web verified 2026-10-17).
 func DefaultImages() Images {
 	return Images{
 		Java8:  "itzg/minecraft-server:2026.9.2-java8@sha256:a23a59bc9bd520d2c1bae97225b8672771cf82c90073ea36dc18f18c199f325b",
@@ -259,6 +261,7 @@ func DefaultImages() Images {
 		Java21: "itzg/minecraft-server:2026.9.2-java21@sha256:edf50d431ddc6f73929368e82f4334a405796874f7b0ae11f1edcbb267d670aa",
 		Java25: "itzg/minecraft-server:2026.9.2-java25@sha256:de5d1b1a83eba576f6c8a688fac2a3523ce457724cdebc8ea48d7818b74cdf6e",
 		Router: "itzg/mc-router:1.47.2@sha256:64ae69eaa7a6800a79bbf962f027f4020878efa25183359115bc7f6ee569c36e",
+		Web:    "caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f",
 	}
 }
 
@@ -284,7 +287,7 @@ var imageRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:-]*@sha256:[0-9a-f]{
 func (i Images) validate() []error {
 	var errs []error
 	for _, e := range []struct{ key, ref string }{
-		{"java8", i.Java8}, {"java17", i.Java17}, {"java21", i.Java21}, {"java25", i.Java25}, {"router", i.Router},
+		{"java8", i.Java8}, {"java17", i.Java17}, {"java21", i.Java21}, {"java25", i.Java25}, {"router", i.Router}, {"web", i.Web},
 	} {
 		if !imageRe.MatchString(e.ref) {
 			errs = append(errs, fmt.Errorf("images.%s: %q must be a reference pinned with @sha256:<64 hex>", e.key, e.ref))
@@ -308,6 +311,10 @@ const (
 	// InstanceNetworkBits is the prefix length of one server's network: 14 addresses for
 	// the gateway, the server and mc-router.
 	InstanceNetworkBits = 28
+	// DefaultWebProxyPort and DefaultWebAskPort are the host ports (on 127.0.0.1 only) of the
+	// web router mcpanel-web: web traffic from host Caddy, and its on-demand TLS ask.
+	DefaultWebProxyPort = 18100
+	DefaultWebAskPort   = 18101
 
 	maxEgressDeny           = 64
 	maxRouterConnectionRate = 100000
@@ -348,7 +355,11 @@ type Agent struct {
 	// InstanceNetworkPool is the IPv4 prefix (/8 to /24) the per-server Docker networks
 	// get their /28 subnets from.
 	InstanceNetworkPool string `toml:"instance_network_pool"`
-	Images              Images `toml:"images"`
+	// WebProxyPort and WebAskPort are the 127.0.0.1 host ports of mcpanel-web; the
+	// installer renders the same values into host Caddy's catch-all site.
+	WebProxyPort int    `toml:"web_proxy_port"`
+	WebAskPort   int    `toml:"web_ask_port"`
+	Images       Images `toml:"images"`
 }
 
 func DefaultAgent() Agent {
@@ -364,6 +375,8 @@ func DefaultAgent() Agent {
 		ContainerEgressDeny:       DefaultContainerEgressDeny(),
 		RouterConnectionRateLimit: DefaultRouterConnectionRateLimit,
 		InstanceNetworkPool:       DefaultInstanceNetworkPool,
+		WebProxyPort:              DefaultWebProxyPort,
+		WebAskPort:                DefaultWebAskPort,
 	}
 }
 
@@ -460,11 +473,29 @@ func (a Agent) Validate() error {
 	if _, err := parseNetworkPool(a.InstanceNetworkPool); err != nil {
 		errs = append(errs, err)
 	}
+	errs = append(errs, validateWebPorts(a.WebProxyPort, a.WebAskPort)...)
 	errs = append(errs, a.Images.validate()...)
 	if len(errs) > 0 {
 		return fmt.Errorf("config: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+// validateWebPorts: two different unprivileged ports that are not the Minecraft or RCON port.
+func validateWebPorts(proxy, ask int) []error {
+	var errs []error
+	for _, p := range []struct {
+		key  string
+		port int
+	}{{"web_proxy_port", proxy}, {"web_ask_port", ask}} {
+		if p.port < 1024 || p.port > 65535 || p.port == 25565 || p.port == 25575 {
+			errs = append(errs, fmt.Errorf("%s must be between 1024 and 65535 and not 25565 or 25575, got %d", p.key, p.port))
+		}
+	}
+	if proxy == ask {
+		errs = append(errs, fmt.Errorf("web_proxy_port and web_ask_port must differ, both are %d", proxy))
+	}
+	return errs
 }
 
 // NetworkPool returns InstanceNetworkPool parsed; call it only on a validated config.
