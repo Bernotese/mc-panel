@@ -173,8 +173,9 @@ func (c *Client) InspectNetwork(ctx context.Context, name string) (Network, erro
 }
 
 type networkMember struct {
-	Container string `json:"Container"`
-	Force     bool   `json:"Force,omitempty"`
+	Container      string            `json:"Container"`
+	EndpointConfig *EndpointSettings `json:"EndpointConfig,omitempty"`
+	Force          bool              `json:"Force,omitempty"`
 }
 
 // NetworkConnect connects container to network; an existing connection is not an error.
@@ -187,6 +188,27 @@ func (c *Client) NetworkConnect(ctx context.Context, network, container string) 
 	}
 	err := c.call(ctx, c.timeout, http.MethodPost, "/networks/"+url.PathEscape(network)+"/connect", nil,
 		networkMember{Container: container}, nil)
+	if statusIs(err, http.StatusForbidden) && strings.Contains(err.Error(), "already exists in network") {
+		return nil
+	}
+	return err
+}
+
+// NetworkConnectIP connects container to network with the fixed IPv4 address ip (it must
+// lie in the network's subnet); an existing connection is not an error. The caller checks
+// the address of an existing connection itself (inspect).
+func (c *Client) NetworkConnectIP(ctx context.Context, network, container string, ip netip.Addr) error {
+	if err := checkObjectName("network", network); err != nil {
+		return err
+	}
+	if err := checkObjectName("container", container); err != nil {
+		return err
+	}
+	if !ip.Is4() {
+		return fmt.Errorf("docker: connect %s to %s: %v is not an IPv4 address", container, network, ip)
+	}
+	err := c.call(ctx, c.timeout, http.MethodPost, "/networks/"+url.PathEscape(network)+"/connect", nil,
+		networkMember{Container: container, EndpointConfig: &EndpointSettings{IPAMConfig: &EndpointIPAMConfig{IPv4Address: ip.String()}}}, nil)
 	if statusIs(err, http.StatusForbidden) && strings.Contains(err.Error(), "already exists in network") {
 		return nil
 	}
