@@ -28,6 +28,8 @@ An admin turns the web port on in the server's settings. Shortly after, the URL 
 
 ### 1.2 Non-goals
 
+> **Superseded in part (2026-10-21):** "more than one web port per server" and "path prefixes" are now covered by `2026-10-21-mc-panel-web-port-paths-design.md` (up to 8 routes per server, the root plus `/<path>/`). The other non-goals stay.
+
 - More than one web port per server, path prefixes (`/map/`), or extra subdomains like `map.survival.quafter.io`.
 - Access protection in front of the web page (basic auth, panel login).
 - Non-HTTP protocols (other TCP or UDP ports).

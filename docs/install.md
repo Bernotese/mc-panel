@@ -146,7 +146,14 @@ After an update the egress filter and the router's new settings apply at once. A
 
 ## Web interfaces
 
-An admin can publish one HTTP port of a Minecraft server, e.g. the web map of BlueMap, under the server's own name: `https://survival.mc.example.com` then serves the plugin's web page, while `survival.mc.example.com:25565` stays the Minecraft server. The switch is in the server's settings (section "Web interface", admins only, with sudo); the port is 1024 to 65535 except 25565 and 25575, and the form suggests 8100 (BlueMap's default).
+An admin can publish HTTP ports of a Minecraft server under the server's own name: one at the root, e.g. the web map of BlueMap, and others under a path, e.g. the resource pack of a mod. `https://survival.mc.example.com/` then serves BlueMap and `https://survival.mc.example.com/afk-smoke/` the mod, while `survival.mc.example.com:25565` stays the Minecraft server. The list is in the server's settings (section "Web interfaces", admins only, with sudo):
+
+- up to 8 routes per server, each a path and a port; the root comes first, and the form suggests 8100 (BlueMap's default) for it;
+- a path is 1 to 32 characters of `a-z`, `0-9` and `-`, not starting or ending with `-`, and a single segment (no `/`);
+- a port is 1024 to 65535 except 25565 and 25575, and each port appears only once per server;
+- a server may also publish only paths; its root then answers "Not found" (`404`).
+
+**Paths.** The prefix is stripped before the request reaches the mod: `https://survival.mc.example.com/afk-smoke/pack.zip` arrives on the mod's port as `/pack.zip`, with the header `X-Forwarded-Prefix: /afk-smoke`. `/afk-smoke` without the trailing slash redirects to `/afk-smoke/`. A path always wins over the root app for its prefix. Apps that link their files absolutely (`/style.css`) only work at the root; that is what the root is for. For a mod that sends a resource pack, put the full link into its configuration, e.g. `https://survival.mc.example.com/afk-smoke/pack.zip` in `config/afk-smoke.json`.
 
 **DNS.** The wildcard record of the base domain (`*.mc.example.com`, see [DNS and base domain](#dns-and-base-domain)) must point to the host as `A` (and `AAAA` with IPv6) record; ports 80 and 443 are open already. No further record is needed.
 
@@ -158,11 +165,11 @@ An admin can publish one HTTP port of a Minecraft server, e.g. the web map of Bl
 
 1. Install BlueMap through the plugins area and start the server once, so that it writes its configuration.
 2. In `plugins/BlueMap/core.conf` set `accept-download: true` (BlueMap downloads Minecraft's client resources only with it) and keep the web server enabled (`plugins/BlueMap/webserver.conf`, `enabled: true`, `port: 8100`).
-3. Restart the server, then publish port 8100 in its settings. The status turns "active" and the header shows "Open web map".
+3. Restart the server, then publish port 8100 at the root in its settings. The status turns "active" and the header shows "Open web map".
 
 A published port whose plugin is not listening (server stopped, plugin not running, other port) answers `502` with a short notice; it works again by itself once the plugin listens.
 
-**How it is wired.** Caddy serves the catch-all site `/etc/caddy/mc-panel-web.caddy` (rewritten by `install` and `update`) next to the panel site; the panel's own name always wins over it. It forwards to `mcpanel-web` on `127.0.0.1:18100`, which routes each name to the server's container; Caddy's ask goes to `127.0.0.1:18101`. Both ports listen on 127.0.0.1 only and are `web_proxy_port` and `web_ask_port` in `/etc/mc-panel/agent.toml`; after changing one, run `install.sh update --force`, which writes the same values into the Caddy files and restarts the agent. The agent creates `mcpanel-web` (and its network `mcpanel-web`) with the first published port and removes both when none is left. Requests are logged to `/var/log/caddy/mc-panel-web.log` (JSON, rotated like the panel's log). Additions for all web interfaces go into files of your own in `/etc/caddy/mc-panel-web.d/` (never touched by the installer), e.g. `robots.caddy` with `header X-Robots-Tag "noindex"` to keep search engines off the maps, or a `basic_auth` block; then `systemctl reload caddy`.
+**How it is wired.** Caddy serves the catch-all site `/etc/caddy/mc-panel-web.caddy` (rewritten by `install` and `update`) next to the panel site; the panel's own name always wins over it. It forwards to `mcpanel-web` on `127.0.0.1:18100`, which routes each name to the server's container; Caddy's ask goes to `127.0.0.1:18101`. Both ports listen on 127.0.0.1 only and are `web_proxy_port` and `web_ask_port` in `/etc/mc-panel/agent.toml`; after changing one, run `install.sh update --force`, which writes the same values into the Caddy files and restarts the agent. The agent creates `mcpanel-web` (and its network `mcpanel-web`) with the first published route and removes both when none is left. Requests are logged to `/var/log/caddy/mc-panel-web.log` (JSON, rotated like the panel's log). Additions for all web interfaces go into files of your own in `/etc/caddy/mc-panel-web.d/` (never touched by the installer), e.g. `robots.caddy` with `header X-Robots-Tag "noindex"` to keep search engines off the maps, or a `basic_auth` block; then `systemctl reload caddy`.
 
 **Your own Caddyfile.** In a Caddyfile of the installer (also one you added sites to), `install` and `update` add the global option and the import line themselves. They never add them to a Caddyfile of your own, because the import without the ask would let Caddy request a certificate for every name pointing at the host. The installer prints both snippets instead; add them yourself and reload Caddy:
 
