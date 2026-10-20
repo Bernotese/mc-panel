@@ -59,7 +59,7 @@ The Down migration reverses it, keeping only the root route's port. As before, r
 
 ### 3.2 API
 
-`PATCH /servers/{id}` replaces `web_port` with **`web_routes`**: an array of `{path, port}`, the complete desired list for that server. `[]` turns publishing off. The rules about who may send it are unchanged (admin plus sudo, `403` otherwise; `409 conflict` "base domain required" when the list is not empty and no base domain is set). An invalid list answers `400 validation` naming the first broken route.
+`PATCH /servers/{id}` replaces `web_port` with **`web_routes`**: an array of `{path, port}`, the complete desired list for that server. `[]` turns publishing off. The rules about who may send it are unchanged (admin plus sudo, `403` otherwise; `409 conflict` "base domain required" when the list is not empty and no base domain is set). The panel sorts the list by path before it validates, so clients need not send it in order (the agent, in contrast, rejects an unsorted list). An invalid list answers `400 validation_failed` naming the first broken route.
 
 `GET /servers` and `GET /servers/{id}`:
 
@@ -97,7 +97,7 @@ Panel and agent ship in the same release and `install.sh update` swaps them toge
 For each route, `RenderWebConfig` emits one host-matched route whose handler is a subroute, in this order:
 
 1. for every non-root target `p`:
-   - path exactly `/<p>` → `308` redirect to `/<p>/` (keeping the query string);
+   - path exactly `/<p>` → `308` redirect to `/<p>/` (a query string on the bare prefix is dropped, builder's call);
    - path `/<p>/*` → `rewrite` with `strip_path_prefix: "/<p>"`, set the request header `X-Forwarded-Prefix: /<p>`, then `reverse_proxy mcpanel-mc-<id>:<port>`;
 2. the root target, if any → `reverse_proxy mcpanel-mc-<id>:<port>` for every other path;
 3. otherwise the static 404 page.
@@ -139,7 +139,7 @@ Changes to WP §6 only:
 - **Web:** as in §5, plus the mock handlers and `handlers.test.ts`.
 - **CI acceptance (`scripts/ci-instances/web.sh`):** the minimal responder listens on two ports with different bodies. Through host Caddy:
   - `/` answers the root port's body;
-  - `/extra/x` reaches the second port as `/x` (the responder echoes the path) with `X-Forwarded-Prefix: /extra`;
+  - `/extra/x` reaches the second port as `/x` (the responder serves a file `x`; without stripping it would answer 404). `X-Forwarded-Prefix` is covered by the golden config test;
   - `/extra` redirects with `308`;
   - a third, unpublished port stays unreachable from `mcpanel-web`;
   - removing the extra route makes `/extra/x` fall through to the root.
