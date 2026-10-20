@@ -202,7 +202,7 @@ func RenderWebConfig(routes []agentapi.WebRoute, trusted netip.Prefix) ([]byte, 
 		proxy.Routes = append(proxy.Routes, caddyRoute{
 			Match: []caddyMatch{{Host: []string{r.FQDN}}},
 			Handle: []caddyHandler{{Handler: "reverse_proxy", Upstreams: []caddyUpstream{
-				{Dial: ContainerName(r.ID) + ":" + strconv.Itoa(r.Port)},
+				{Dial: ContainerName(r.ID) + ":" + strconv.Itoa(r.Targets[0].Port)},
 			}}},
 			Terminal: true,
 		})

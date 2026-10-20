@@ -222,13 +222,13 @@ func TestWebRoutesReconcile(t *testing.T) {
 	e.setWebPort(t, c, 8123)
 	e.setWebPort(t, a, 8100)
 	e.pass()
-	want := []agentapi.WebRoute{{ID: a, FQDN: "survival.mc.example.com", Port: 8100}, {ID: c, FQDN: "lobby.mc.example.com", Port: 8123}}
-	if reqs := e.agent.takeWeb(); len(reqs) != 1 || !slices.Equal(reqs[0].Routes, want) {
+	want := []agentapi.WebRoute{{ID: a, FQDN: "survival.mc.example.com", Targets: []agentapi.WebTarget{{Port: 8100}}}, {ID: c, FQDN: "lobby.mc.example.com", Targets: []agentapi.WebTarget{{Port: 8123}}}}
+	if reqs := e.agent.takeWeb(); len(reqs) != 1 || !slices.EqualFunc(reqs[0].Routes, want, agentapi.WebRoute.Equal) {
 		t.Fatalf("routes = %+v, want %+v", reqs, want)
 	}
 	// Every pass sends the complete list again (the agent may have restarted).
 	e.pass()
-	if reqs := e.agent.takeWeb(); len(reqs) != 1 || !slices.Equal(reqs[0].Routes, want) {
+	if reqs := e.agent.takeWeb(); len(reqs) != 1 || !slices.EqualFunc(reqs[0].Routes, want, agentapi.WebRoute.Equal) {
 		t.Fatalf("second pass = %+v", reqs)
 	}
 
@@ -238,7 +238,7 @@ func TestWebRoutesReconcile(t *testing.T) {
 	}
 	e.pass()
 	want = want[:1]
-	if reqs := e.agent.takeWeb(); len(reqs) != 1 || !slices.Equal(reqs[0].Routes, want) {
+	if reqs := e.agent.takeWeb(); len(reqs) != 1 || !slices.EqualFunc(reqs[0].Routes, want, agentapi.WebRoute.Equal) {
 		t.Fatalf("after delete = %+v", reqs)
 	}
 
@@ -248,8 +248,8 @@ func TestWebRoutesReconcile(t *testing.T) {
 		t.Fatalf("after base domain change = %+v", got)
 	}
 	e.pass()
-	want = []agentapi.WebRoute{{ID: a, FQDN: "survival.play.example.org", Port: 8100}}
-	if reqs := e.agent.takeWeb(); len(reqs) != 1 || !slices.Equal(reqs[0].Routes, want) {
+	want = []agentapi.WebRoute{{ID: a, FQDN: "survival.play.example.org", Targets: []agentapi.WebTarget{{Port: 8100}}}}
+	if reqs := e.agent.takeWeb(); len(reqs) != 1 || !slices.EqualFunc(reqs[0].Routes, want, agentapi.WebRoute.Equal) {
 		t.Fatalf("after base domain change = %+v", reqs)
 	}
 	if got, _ := e.webOf(t, a, &admin); got.WebStatus != "active" {

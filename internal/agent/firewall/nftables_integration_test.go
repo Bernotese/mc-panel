@@ -676,8 +676,8 @@ func TestNFTablesWebRules(t *testing.T) {
 		t.Fatalf("WebRulesInPlace(nil) without table = %v, %v", ok, err)
 	}
 
-	a := agentapi.WebRule{Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Port: 8100}
-	b := agentapi.WebRule{Source: netip.MustParseAddr("172.30.2.2"), Dest: netip.MustParsePrefix("172.30.2.0/24"), Port: 8123}
+	a := agentapi.WebRule{Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Ports: []uint16{8100}}
+	b := agentapi.WebRule{Source: netip.MustParseAddr("172.30.2.2"), Dest: netip.MustParsePrefix("172.30.2.0/24"), Ports: []uint16{8123}}
 	if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{a}); err != nil || ok {
 		t.Fatalf("before SetWebRules: in place = %v, %v", ok, err)
 	}
@@ -704,7 +704,7 @@ func TestNFTablesWebRules(t *testing.T) {
 		t.Fatalf("after SetWebRules: in place = %v, %v", ok, err)
 	}
 	other := b
-	other.Port = 8124
+	other.Ports = []uint16{8124}
 	if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{a, other}); err != nil || ok {
 		t.Fatalf("other port: in place = %v, %v; want false", ok, err)
 	}
@@ -724,7 +724,7 @@ func TestNFTablesWebRules(t *testing.T) {
 	}
 
 	// Invalid input changes nothing.
-	bad := agentapi.WebRule{Source: netip.MustParseAddr("172.30.9.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Port: 8100}
+	bad := agentapi.WebRule{Source: netip.MustParseAddr("172.30.9.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Ports: []uint16{8100}}
 	if err := fw.SetWebRules(ctx, []agentapi.WebRule{bad}); !errors.Is(err, firewall.ErrInvalidWebRule) {
 		t.Fatalf("SetWebRules(invalid) = %v", err)
 	}

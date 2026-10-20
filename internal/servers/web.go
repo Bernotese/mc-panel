@@ -57,7 +57,7 @@ func webRoutes(rows []store.ServersListInstancesRow, baseDomain string) []agenta
 	}
 	for _, r := range rows {
 		if r.WebPort.Valid {
-			out = append(out, agentapi.WebRoute{ID: r.ServerID, FQDN: r.Name + "." + baseDomain, Port: int(r.WebPort.Int64)})
+			out = append(out, agentapi.WebRoute{ID: r.ServerID, FQDN: r.Name + "." + baseDomain, Targets: []agentapi.WebTarget{{Path: "", Port: int(r.WebPort.Int64)}}})
 		}
 	}
 	slices.SortFunc(out, func(a, b agentapi.WebRoute) int { return cmp.Compare(a.ID, b.ID) })
@@ -134,11 +134,11 @@ func applyWebView(out *serverJSON, name string, in *store.Instance, baseDomain *
 	if baseDomain == nil {
 		return
 	}
-	route := agentapi.WebRoute{ID: in.ServerID, FQDN: name + "." + *baseDomain, Port: port}
+	route := agentapi.WebRoute{ID: in.ServerID, FQDN: name + "." + *baseDomain, Targets: []agentapi.WebTarget{{Path: "", Port: port}}}
 	url := "https://" + route.FQDN
 	out.WebURL = &url
 	out.WebStatus = webPending
-	if e, ok := web[in.ServerID]; ok && e.route == route {
+	if e, ok := web[in.ServerID]; ok && e.route.Equal(route) {
 		out.WebStatus = string(e.status.Status)
 		if e.status.Status == agentapi.WebError {
 			out.WebError = e.status.Error
