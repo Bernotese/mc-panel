@@ -14,13 +14,13 @@ import (
 func TestClientWebRoutes(t *testing.T) {
 	st := &stubWeb{resp: agentapi.WebRoutesResponse{Routes: []agentapi.WebRouteStatus{{ID: 1, Status: agentapi.WebPending}}}}
 	c := agent.NewClient(handlerServer(t, newWebServer(st)))
-	req := agentapi.WebRoutesRequest{Routes: []agentapi.WebRoute{{ID: 1, FQDN: "survival.mc.example.com", Port: 8100}}}
+	req := agentapi.WebRoutesRequest{Routes: []agentapi.WebRoute{{ID: 1, FQDN: "survival.mc.example.com", Targets: []agentapi.WebTarget{{Port: 8100}}}}}
 
 	resp, err := c.WebRoutes(context.Background(), req)
 	if err != nil || len(resp.Routes) != 1 || resp.Routes[0] != (agentapi.WebRouteStatus{ID: 1, Status: agentapi.WebPending}) {
 		t.Fatalf("WebRoutes = %+v, %v", resp, err)
 	}
-	if len(st.got) != 1 || len(st.got[0].Routes) != 1 || st.got[0].Routes[0] != req.Routes[0] {
+	if len(st.got) != 1 || len(st.got[0].Routes) != 1 || !st.got[0].Routes[0].Equal(req.Routes[0]) {
 		t.Fatalf("agent got %+v", st.got)
 	}
 
@@ -38,7 +38,7 @@ func TestClientWebRoutesValidatesFirst(t *testing.T) {
 	c := agent.NewClient(handlerServer(t, newWebServer(st)))
 	for _, req := range []agentapi.WebRoutesRequest{
 		{},
-		{Routes: []agentapi.WebRoute{{ID: 1, FQDN: "survival.mc.example.com", Port: 25575}}},
+		{Routes: []agentapi.WebRoute{{ID: 1, FQDN: "survival.mc.example.com", Targets: []agentapi.WebTarget{{Port: 25575}}}}},
 	} {
 		if _, err := c.WebRoutes(context.Background(), req); !errors.Is(err, instancespec.ErrInvalid) {
 			t.Fatalf("WebRoutes(%+v) = %v", req, err)

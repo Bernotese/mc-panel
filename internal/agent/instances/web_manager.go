@@ -76,7 +76,7 @@ func (m *Manager) SetWebRoutes(ctx context.Context, req agentapi.WebRoutesReques
 	m.webDesired = append([]agentapi.WebRoute{}, req.Routes...) // never nil: a list was received
 	for _, r := range req.Routes {
 		st, ok := m.webStatus[r.ID]
-		if ok && st.route == r {
+		if ok && st.route.Equal(r) {
 			resp.Routes = append(resp.Routes, st.status)
 		} else {
 			resp.Routes = append(resp.Routes, agentapi.WebRouteStatus{ID: r.ID, Status: agentapi.WebPending})
@@ -167,7 +167,7 @@ func (m *Manager) applyWebLocked(ctx context.Context) (pending bool) {
 			if st.Status == agentapi.WebError {
 				m.log.Warn("web route not applied", "id", r.ID, "fqdn", r.FQDN, "err", st.Error)
 			} else {
-				m.log.Info("web route", "id", r.ID, "fqdn", r.FQDN, "port", r.Port, "status", st.Status)
+				m.log.Info("web route", "id", r.ID, "fqdn", r.FQDN, "targets", r.Targets, "status", st.Status)
 			}
 		}
 	}
@@ -235,7 +235,7 @@ func (m *Manager) setWebRules(ctx context.Context, rules []agentapi.WebRule) err
 	if rules == nil {
 		rules = []agentapi.WebRule{}
 	}
-	if m.webRules != nil && slices.Equal(rules, m.webRules) {
+	if m.webRules != nil && slices.EqualFunc(rules, m.webRules, agentapi.WebRule.Equal) {
 		ok, err := m.web.WebRulesInPlace(ctx, rules)
 		if err != nil {
 			return err
@@ -313,7 +313,7 @@ func (m *Manager) applyWebRoutes(ctx context.Context, desired []agentapi.WebRout
 	}
 	for _, n := range stay {
 		for _, r := range m.webRules {
-			if slices.Contains(n.Subnets, r.Dest) && !slices.Contains(rules, r) {
+			if slices.Contains(n.Subnets, r.Dest) && !slices.ContainsFunc(rules, r.Equal) {
 				rules = append(rules, r)
 			}
 		}
@@ -437,7 +437,7 @@ func (m *Manager) webTargets(ctx context.Context, desired []agentapi.WebRoute, f
 			continue
 		}
 		targets = append(targets, webTarget{route: r, network: n.Name,
-			rule: agentapi.WebRule{Source: addr, Dest: n.Subnets[0].Masked(), Port: uint16(r.Port)}}) //nolint:gosec // G115: Validate keeps the port in 1024..65535
+			rule: agentapi.WebRule{Source: addr, Dest: n.Subnets[0].Masked(), Ports: []uint16{uint16(r.Targets[0].Port)}}}) //nolint:gosec // G115: Validate keeps the port in 1024..65535
 	}
 	return targets, byID, nil
 }
@@ -551,7 +551,7 @@ func (m *Manager) checkWeb(ctx context.Context, ready []webTarget, prev map[int6
 		st := webRouteState{route: t.route}
 		switch p, had := prev[t.route.ID]; {
 		case ok:
-		case had && p.route == t.route && !restarted && !p.unconfirmed.IsZero():
+		case had && p.route.Equal(t.route) && !restarted && !p.unconfirmed.IsZero():
 			st.unconfirmed = p.unconfirmed
 		default:
 			st.unconfirmed = now

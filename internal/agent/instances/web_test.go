@@ -123,8 +123,8 @@ func TestRenderWebConfigGolden(t *testing.T) {
 	// Reverse id order in the input; the output is sorted by id. The second name looks odd
 	// but is a valid DNS name and must appear verbatim (and only) in its two places.
 	routes := []agentapi.WebRoute{
-		{ID: 12, FQDN: "xn--mnchen-3ya.0-9.example.com", Port: 65535},
-		{ID: 3, FQDN: "survival.example.com", Port: 8100},
+		{ID: 12, FQDN: "xn--mnchen-3ya.0-9.example.com", Targets: []agentapi.WebTarget{{Port: 65535}}},
+		{ID: 3, FQDN: "survival.example.com", Targets: []agentapi.WebTarget{{Port: 8100}}},
 	}
 	got, err := instances.RenderWebConfig(routes, netip.MustParsePrefix("10.213.255.240/28"))
 	if err != nil {
@@ -149,21 +149,21 @@ func TestRenderWebConfigGolden(t *testing.T) {
 func TestRenderWebConfigRefusesInvalidInput(t *testing.T) {
 	trusted := netip.MustParsePrefix("10.213.255.240/28")
 	for name, routes := range map[string][]agentapi.WebRoute{
-		"json breakout":   {{ID: 1, FQDN: `a.example.com"}],"handle":[{"handler":"x`, Port: 8100}},
-		"placeholder":     {{ID: 1, FQDN: "{http.request.host}.example.com", Port: 8100}},
-		"upper case":      {{ID: 1, FQDN: "Survival.example.com", Port: 8100}},
-		"trailing dot":    {{ID: 1, FQDN: "survival.example.com.", Port: 8100}},
-		"two labels":      {{ID: 1, FQDN: "example.com", Port: 8100}},
-		"rcon port":       {{ID: 1, FQDN: "survival.example.com", Port: 25575}},
-		"id 0":            {{ID: 0, FQDN: "survival.example.com", Port: 8100}},
-		"duplicate fqdn":  {{ID: 1, FQDN: "a.example.com", Port: 8100}, {ID: 2, FQDN: "a.example.com", Port: 8100}},
-		"newline in name": {{ID: 1, FQDN: "a.example.com\n", Port: 8100}},
+		"json breakout":   {{ID: 1, FQDN: `a.example.com"}],"handle":[{"handler":"x`, Targets: []agentapi.WebTarget{{Port: 8100}}}},
+		"placeholder":     {{ID: 1, FQDN: "{http.request.host}.example.com", Targets: []agentapi.WebTarget{{Port: 8100}}}},
+		"upper case":      {{ID: 1, FQDN: "Survival.example.com", Targets: []agentapi.WebTarget{{Port: 8100}}}},
+		"trailing dot":    {{ID: 1, FQDN: "survival.example.com.", Targets: []agentapi.WebTarget{{Port: 8100}}}},
+		"two labels":      {{ID: 1, FQDN: "example.com", Targets: []agentapi.WebTarget{{Port: 8100}}}},
+		"rcon port":       {{ID: 1, FQDN: "survival.example.com", Targets: []agentapi.WebTarget{{Port: 25575}}}},
+		"id 0":            {{ID: 0, FQDN: "survival.example.com", Targets: []agentapi.WebTarget{{Port: 8100}}}},
+		"duplicate fqdn":  {{ID: 1, FQDN: "a.example.com", Targets: []agentapi.WebTarget{{Port: 8100}}}, {ID: 2, FQDN: "a.example.com", Targets: []agentapi.WebTarget{{Port: 8100}}}},
+		"newline in name": {{ID: 1, FQDN: "a.example.com\n", Targets: []agentapi.WebTarget{{Port: 8100}}}},
 	} {
 		if _, err := instances.RenderWebConfig(routes, trusted); !errors.Is(err, instancespec.ErrInvalid) {
 			t.Errorf("%s: RenderWebConfig = %v, want ErrInvalid", name, err)
 		}
 	}
-	ok := []agentapi.WebRoute{{ID: 1, FQDN: "a.example.com", Port: 8100}}
+	ok := []agentapi.WebRoute{{ID: 1, FQDN: "a.example.com", Targets: []agentapi.WebTarget{{Port: 8100}}}}
 	for _, p := range []netip.Prefix{{}, netip.MustParsePrefix("fd00::/64")} {
 		if _, err := instances.RenderWebConfig(ok, p); err == nil {
 			t.Errorf("trusted %v must be refused", p)

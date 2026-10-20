@@ -10,7 +10,7 @@ import (
 )
 
 func webRule(src, dest string, port uint16) agentapi.WebRule {
-	return agentapi.WebRule{Source: netip.MustParseAddr(src), Dest: netip.MustParsePrefix(dest), Port: port}
+	return agentapi.WebRule{Source: netip.MustParseAddr(src), Dest: netip.MustParsePrefix(dest), Ports: []uint16{port}}
 }
 
 func TestSortedWebRulesSortsBySourceDestPort(t *testing.T) {
@@ -24,7 +24,7 @@ func TestSortedWebRulesSortsBySourceDestPort(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []agentapi.WebRule{in[2], in[1], in[0]}
-	if !slices.Equal(got, want) {
+	if !slices.EqualFunc(got, want, agentapi.WebRule.Equal) {
 		t.Fatalf("sorted = %+v, want %+v", got, want)
 	}
 	if in[0].Source != netip.MustParseAddr("172.30.2.2") {
@@ -44,10 +44,10 @@ func TestSortedWebRulesMasksDest(t *testing.T) {
 
 func TestSortedWebRulesRejectsInvalid(t *testing.T) {
 	for name, r := range map[string]agentapi.WebRule{
-		"zero source":        {Dest: netip.MustParsePrefix("172.30.1.0/24"), Port: 8100},
+		"zero source":        {Dest: netip.MustParsePrefix("172.30.1.0/24"), Ports: []uint16{8100}},
 		"ipv6 source":        webRule("fd00::2", "fd00::/64", 8100),
 		"ipv4-mapped source": webRule("::ffff:172.30.1.2", "172.30.1.0/24", 8100),
-		"zero dest":          {Source: netip.MustParseAddr("172.30.1.2"), Port: 8100},
+		"zero dest":          {Source: netip.MustParseAddr("172.30.1.2"), Ports: []uint16{8100}},
 		"ipv6 dest":          webRule("172.30.1.2", "fd00::/64", 8100),
 		"source outside":     webRule("172.30.2.2", "172.30.1.0/24", 8100),
 		"port 0":             webRule("172.30.1.2", "172.30.1.0/24", 0),

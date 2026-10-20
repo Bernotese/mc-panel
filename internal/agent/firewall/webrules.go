@@ -29,8 +29,8 @@ func sortedWebRules(rules []agentapi.WebRule) ([]agentapi.WebRule, error) {
 			return nil, fmt.Errorf("%w: rules[%d]: dest %s is not an IPv4 prefix", ErrInvalidWebRule, i, r.Dest)
 		case !r.Dest.Contains(r.Source):
 			return nil, fmt.Errorf("%w: rules[%d]: source %s is not inside %s", ErrInvalidWebRule, i, r.Source, r.Dest)
-		case r.Port < minWebPort:
-			return nil, fmt.Errorf("%w: rules[%d]: port %d is below %d", ErrInvalidWebRule, i, r.Port, minWebPort)
+		case len(r.Ports) != 1 || r.Ports[0] < minWebPort:
+			return nil, fmt.Errorf("%w: rules[%d]: ports %v: one port of at least %d required", ErrInvalidWebRule, i, r.Ports, minWebPort)
 		}
 		r.Dest = r.Dest.Masked()
 		out = append(out, r)
@@ -40,7 +40,7 @@ func sortedWebRules(rules []agentapi.WebRule) ([]agentapi.WebRule, error) {
 			a.Source.Compare(b.Source),
 			a.Dest.Addr().Compare(b.Dest.Addr()),
 			cmp.Compare(a.Dest.Bits(), b.Dest.Bits()),
-			cmp.Compare(a.Port, b.Port),
+			cmp.Compare(a.Ports[0], b.Ports[0]),
 		)
 	})
 	for i := 1; i < len(out); i++ {
