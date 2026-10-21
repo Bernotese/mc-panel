@@ -33,7 +33,7 @@ const serversCreateInstance = `-- name: ServersCreateInstance :one
 INSERT INTO instances (server_id, type, version, loader_version, modpack, java, memory_mib, properties,
                        desired_state, revision, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', 1, ?, ?)
-RETURNING server_id, type, version, loader_version, modpack, java, memory_mib, properties, desired_state, revision, created_at, updated_at, web_port
+RETURNING server_id, type, version, loader_version, modpack, java, memory_mib, properties, desired_state, revision, created_at, updated_at
 `
 
 type ServersCreateInstanceParams struct {
@@ -77,7 +77,6 @@ func (q *Queries) ServersCreateInstance(ctx context.Context, arg ServersCreateIn
 		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.WebPort,
 	)
 	return i, err
 }
@@ -100,8 +99,17 @@ func (q *Queries) ServersCreateServer(ctx context.Context, arg ServersCreateServ
 	return i, err
 }
 
+const serversDeleteWebRoutes = `-- name: ServersDeleteWebRoutes :exec
+DELETE FROM web_routes WHERE server_id = ?
+`
+
+func (q *Queries) ServersDeleteWebRoutes(ctx context.Context, serverID int64) error {
+	_, err := q.db.ExecContext(ctx, serversDeleteWebRoutes, serverID)
+	return err
+}
+
 const serversGetInstance = `-- name: ServersGetInstance :one
-SELECT server_id, type, version, loader_version, modpack, java, memory_mib, properties, desired_state, revision, created_at, updated_at, web_port FROM instances WHERE server_id = ?
+SELECT server_id, type, version, loader_version, modpack, java, memory_mib, properties, desired_state, revision, created_at, updated_at FROM instances WHERE server_id = ?
 `
 
 func (q *Queries) ServersGetInstance(ctx context.Context, serverID int64) (Instance, error) {
@@ -120,7 +128,6 @@ func (q *Queries) ServersGetInstance(ctx context.Context, serverID int64) (Insta
 		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.WebPort,
 	)
 	return i, err
 }
@@ -142,9 +149,24 @@ func (q *Queries) ServersGetSettings(ctx context.Context) (InstanceSetting, erro
 	return i, err
 }
 
+const serversInsertWebRoute = `-- name: ServersInsertWebRoute :exec
+INSERT INTO web_routes (server_id, path, port) VALUES (?, ?, ?)
+`
+
+type ServersInsertWebRouteParams struct {
+	ServerID int64
+	Path     string
+	Port     int64
+}
+
+func (q *Queries) ServersInsertWebRoute(ctx context.Context, arg ServersInsertWebRouteParams) error {
+	_, err := q.db.ExecContext(ctx, serversInsertWebRoute, arg.ServerID, arg.Path, arg.Port)
+	return err
+}
+
 const serversListInstances = `-- name: ServersListInstances :many
 SELECT s.name, i.server_id, i.type, i.version, i.loader_version, i.modpack, i.java, i.memory_mib,
-       i.properties, i.desired_state, i.revision, i.created_at, i.updated_at, i.web_port
+       i.properties, i.desired_state, i.revision, i.created_at, i.updated_at
 FROM instances i JOIN servers s ON s.id = i.server_id
 ORDER BY s.name
 `
@@ -163,7 +185,6 @@ type ServersListInstancesRow struct {
 	Revision      int64
 	CreatedAt     int64
 	UpdatedAt     int64
-	WebPort       sql.NullInt64
 }
 
 func (q *Queries) ServersListInstances(ctx context.Context) ([]ServersListInstancesRow, error) {
@@ -189,8 +210,61 @@ func (q *Queries) ServersListInstances(ctx context.Context) ([]ServersListInstan
 			&i.Revision,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.WebPort,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const serversListServerWebRoutes = `-- name: ServersListServerWebRoutes :many
+SELECT server_id, path, port FROM web_routes WHERE server_id = ? ORDER BY path
+`
+
+func (q *Queries) ServersListServerWebRoutes(ctx context.Context, serverID int64) ([]WebRoute, error) {
+	rows, err := q.db.QueryContext(ctx, serversListServerWebRoutes, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []WebRoute{}
+	for rows.Next() {
+		var i WebRoute
+		if err := rows.Scan(&i.ServerID, &i.Path, &i.Port); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const serversListWebRoutes = `-- name: ServersListWebRoutes :many
+SELECT server_id, path, port FROM web_routes ORDER BY server_id, path
+`
+
+func (q *Queries) ServersListWebRoutes(ctx context.Context) ([]WebRoute, error) {
+	rows, err := q.db.QueryContext(ctx, serversListWebRoutes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []WebRoute{}
+	for rows.Next() {
+		var i WebRoute
+		if err := rows.Scan(&i.ServerID, &i.Path, &i.Port); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -251,42 +325,12 @@ func (q *Queries) ServersSetDesiredState(ctx context.Context, arg ServersSetDesi
 	return result.RowsAffected()
 }
 
-const serversSetWebPort = `-- name: ServersSetWebPort :one
-UPDATE instances SET web_port = ? WHERE server_id = ? RETURNING server_id, type, version, loader_version, modpack, java, memory_mib, properties, desired_state, revision, created_at, updated_at, web_port
-`
-
-type ServersSetWebPortParams struct {
-	WebPort  sql.NullInt64
-	ServerID int64
-}
-
-func (q *Queries) ServersSetWebPort(ctx context.Context, arg ServersSetWebPortParams) (Instance, error) {
-	row := q.db.QueryRowContext(ctx, serversSetWebPort, arg.WebPort, arg.ServerID)
-	var i Instance
-	err := row.Scan(
-		&i.ServerID,
-		&i.Type,
-		&i.Version,
-		&i.LoaderVersion,
-		&i.Modpack,
-		&i.Java,
-		&i.MemoryMib,
-		&i.Properties,
-		&i.DesiredState,
-		&i.Revision,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.WebPort,
-	)
-	return i, err
-}
-
 const serversUpdateInstance = `-- name: ServersUpdateInstance :one
 UPDATE instances
 SET version = ?, loader_version = ?, modpack = ?, java = ?, memory_mib = ?, properties = ?,
     revision = revision + 1, updated_at = ?
 WHERE server_id = ?
-RETURNING server_id, type, version, loader_version, modpack, java, memory_mib, properties, desired_state, revision, created_at, updated_at, web_port
+RETURNING server_id, type, version, loader_version, modpack, java, memory_mib, properties, desired_state, revision, created_at, updated_at
 `
 
 type ServersUpdateInstanceParams struct {
@@ -325,7 +369,6 @@ func (q *Queries) ServersUpdateInstance(ctx context.Context, arg ServersUpdateIn
 		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.WebPort,
 	)
 	return i, err
 }
