@@ -314,6 +314,23 @@ func TestWebFirstPutCreatesRouter(t *testing.T) {
 	if got := e.statuses(t, r)[1]; got.Status != agentapi.WebActive {
 		t.Fatalf("status after the port change = %+v", got)
 	}
+	// A path target adds its port to the rule of the server network.
+	r.Targets = append(r.Targets, agentapi.WebTarget{Path: "afk-smoke", Port: 8200})
+	if got := e.statuses(t, r)[1]; got.Status != agentapi.WebPending {
+		t.Fatalf("status of an added target = %+v", got)
+	}
+	e.tick(t)
+	two := rule("10.213.0.14", "10.213.0.0/28", 8123)
+	two.Ports = []uint16{8123, 8200}
+	if got := e.fw.last(); !slices.EqualFunc(got, []agentapi.WebRule{two}, agentapi.WebRule.Equal) {
+		t.Fatalf("rules after the added target = %v", got)
+	}
+	if !strings.Contains(e.webConfig(t), `"dial": "mcpanel-mc-1:8200"`) {
+		t.Fatal("config without the added target")
+	}
+	if got := e.statuses(t, r)[1]; got.Status != agentapi.WebActive {
+		t.Fatalf("status after the added target = %+v", got)
+	}
 }
 
 // The rule for a server network exists before mcpanel-web is connected to it.
@@ -799,14 +816,20 @@ func TestWebSetRoutesRefuses(t *testing.T) {
 }
 
 // A busy server (operation in progress) keeps mcpanel-web on its network until the next round,
-// and with it its old rule: the restriction never has a gap.
+// and with it its old rule as a whole (both ports): the restriction never has a gap.
 func TestWebBusyServerKeepsItsRule(t *testing.T) {
 	e := newWebEnv(t)
 	e.ensure(t, ensureReq(1, "survival", 1))
 	e.ensure(t, ensureReq(2, "creative", 1))
 	r1, r2 := webRoute(1, "survival", 8100), webRoute(2, "creative", 8200)
+	r1.Targets = append(r1.Targets, agentapi.WebTarget{Path: "afk-smoke", Port: 8101})
 	e.put(t, r1, r2)
 	e.tick(t)
+	two := rule("10.213.0.14", "10.213.0.0/28", 8100)
+	two.Ports = []uint16{8100, 8101}
+	if got := e.fw.last(); !slices.EqualFunc(got, []agentapi.WebRule{two, rule("10.213.0.30", "10.213.0.16/28", 8200)}, agentapi.WebRule.Equal) {
+		t.Fatalf("rules = %v", got)
+	}
 
 	arrived, release := e.d.Hold(dockertest.OpStop)
 	defer release()
@@ -819,7 +842,7 @@ func TestWebBusyServerKeepsItsRule(t *testing.T) {
 	if c := e.container(t, instances.WebName); !slices.Contains(c.Networks, "mcpanel-net-1") {
 		t.Fatalf("web router left the network of a busy server: %v", c.Networks)
 	}
-	want := []agentapi.WebRule{rule("10.213.0.30", "10.213.0.16/28", 8200), rule("10.213.0.14", "10.213.0.0/28", 8100)}
+	want := []agentapi.WebRule{rule("10.213.0.30", "10.213.0.16/28", 8200), two}
 	if got := e.fw.last(); !slices.EqualFunc(got, want, agentapi.WebRule.Equal) {
 		t.Fatalf("rules while busy = %v, want %v", got, want)
 	}
