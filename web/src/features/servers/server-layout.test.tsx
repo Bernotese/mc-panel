@@ -57,7 +57,7 @@ describe('ServerLayout', () => {
     expect(await within(screen.getByRole('region', { name: 'Online-Spieler' })).findByText('2 / 20')).toBeInTheDocument()
   })
 
-  it('links the web map in header and overview only while the web port is active', async () => {
+  it('links the web map in header and overview only while a root web route is active', async () => {
     await renderApp('/servers/1', loginAs('alice'))
     const header = await screen.findByRole('region', { name: 'survival' })
     const link = within(header).getByRole('link', { name: 'Webkarte öffnen' })
@@ -70,8 +70,9 @@ describe('ServerLayout', () => {
   // pending settles to active on the next GET of the mock, so error and off stand for "not active".
   it.each([
     ['error', { webState: 'error' }],
-    ['off', { webPort: null }],
-  ] as const)('shows no web map link while the web port is %s', async (_, patch) => {
+    ['off', { webRoutes: [] }],
+    ['only published under a path', { webRoutes: [{ path: 'afk-smoke', port: 8200 }] }],
+  ] as const)('shows no web map link while the web interface is %s', async (_, patch) => {
     Object.assign(mockServer(1), patch)
     await renderApp('/servers/1', loginAs('admin'))
     const header = await screen.findByRole('region', { name: 'survival' })
