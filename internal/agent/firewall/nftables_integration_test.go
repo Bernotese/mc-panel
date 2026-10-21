@@ -676,8 +676,9 @@ func TestNFTablesWebRules(t *testing.T) {
 		t.Fatalf("WebRulesInPlace(nil) without table = %v, %v", ok, err)
 	}
 
-	a := agentapi.WebRule{Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Port: 8100}
-	b := agentapi.WebRule{Source: netip.MustParseAddr("172.30.2.2"), Dest: netip.MustParsePrefix("172.30.2.0/24"), Port: 8123}
+	// Two allowed ports on one network (given unsorted); a third port of it stays denied.
+	a := agentapi.WebRule{Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Ports: []uint16{8200, 8100}}
+	b := agentapi.WebRule{Source: netip.MustParseAddr("172.30.2.2"), Dest: netip.MustParsePrefix("172.30.2.0/24"), Ports: []uint16{8123}}
 	if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{a}); err != nil || ok {
 		t.Fatalf("before SetWebRules: in place = %v, %v", ok, err)
 	}
@@ -696,39 +697,50 @@ func TestNFTablesWebRules(t *testing.T) {
 		chain.Policy == nil || *chain.Policy != nftables.ChainPolicyAccept {
 		t.Fatalf("web chain = %+v", chain)
 	}
-	want := []string{"172.30.1.2/accept:8100", "172.30.1.2/drop", "172.30.2.2/accept:8123", "172.30.2.2/drop"}
-	if got := webVerdicts(t, c); !slices.Equal(got, want) {
+	want := []string{"172.30.1.2/accept:8100", "172.30.1.2/accept:8200", "172.30.1.2/drop", "172.30.2.2/accept:8123", "172.30.2.2/drop"}
+	got := webVerdicts(t, c)
+	if !slices.Equal(got, want) {
 		t.Fatalf("rules = %v, want %v", got, want)
+	}
+	if slices.Contains(got, "172.30.1.2/accept:8300") {
+		t.Fatal("the third port 8300 must fall through to the drop")
 	}
 	if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{a, b}); err != nil || !ok {
 		t.Fatalf("after SetWebRules: in place = %v, %v", ok, err)
 	}
 	other := b
-	other.Port = 8124
+	other.Ports = []uint16{8124}
 	if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{a, other}); err != nil || ok {
 		t.Fatalf("other port: in place = %v, %v; want false", ok, err)
 	}
 	if ok, err := fw.WebRulesInPlace(ctx, nil); err != nil || ok {
 		t.Fatalf("table present, no rules wanted: in place = %v, %v; want false", ok, err)
 	}
+	for _, ports := range [][]uint16{{8100}, {8100, 8200, 8300}} {
+		changed := a
+		changed.Ports = ports
+		if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{changed, b}); err != nil || ok {
+			t.Fatalf("ports %v: in place = %v, %v; want false", ports, ok, err)
+		}
+	}
 
 	// One rule left: the other is gone.
 	if err := fw.SetWebRules(ctx, []agentapi.WebRule{a}); err != nil {
 		t.Fatal(err)
 	}
-	if got := webVerdicts(t, c); !slices.Equal(got, want[:2]) {
-		t.Fatalf("rules = %v, want %v", got, want[:2])
+	if got := webVerdicts(t, c); !slices.Equal(got, want[:3]) {
+		t.Fatalf("rules = %v, want %v", got, want[:3])
 	}
 	if ok, err := fw.WebRulesInPlace(ctx, []agentapi.WebRule{a}); err != nil || !ok {
 		t.Fatalf("one rule: in place = %v, %v", ok, err)
 	}
 
 	// Invalid input changes nothing.
-	bad := agentapi.WebRule{Source: netip.MustParseAddr("172.30.9.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Port: 8100}
+	bad := agentapi.WebRule{Source: netip.MustParseAddr("172.30.9.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Ports: []uint16{8100}}
 	if err := fw.SetWebRules(ctx, []agentapi.WebRule{bad}); !errors.Is(err, firewall.ErrInvalidWebRule) {
 		t.Fatalf("SetWebRules(invalid) = %v", err)
 	}
-	if got := webVerdicts(t, c); !slices.Equal(got, want[:2]) {
+	if got := webVerdicts(t, c); !slices.Equal(got, want[:3]) {
 		t.Fatalf("after invalid input: rules = %v", got)
 	}
 

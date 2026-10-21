@@ -81,21 +81,64 @@ function validWebPort(p: unknown): p is number {
   return typeof p === 'number' && Number.isInteger(p) && p >= 1024 && p <= 65535 && p !== 25565 && p !== 25575
 }
 
-/** The reconcile applies a changed route list within seconds: "pending" becomes "active" on the next GET. */
-function settleWeb(s: MockServer): void {
-  if (s.webPort && s.webState === 'pending' && db.serverSettings.base_domain) s.webState = 'active'
+/** Same rules as agentapi.ValidWebPath and MaxWebTargets. */
+const WEB_PATH = /^([a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?)?$/
+const MAX_WEB_ROUTES = 8
+
+type WebRoute = { path: string; port: number }
+
+/**
+ * Like the panel: sorts by path first (clients need not send the list in order), then applies the rules of
+ * agentapi.CheckWebTargets; the message names the first broken route by its index in the sorted list. Returns the
+ * sorted list or the error response.
+ */
+function checkWebRoutes(raw: unknown): WebRoute[] | Response {
+  if (raw === null) return apiError(400, 'validation_failed', 'web_routes: must not be null')
+  // Like the panel's strict JSON decoding: an unknown field (e.g. url) or a wrong type is a bad request.
+  const shapeOk =
+    Array.isArray(raw) &&
+    raw.every(
+      (r: unknown) =>
+        typeof r === 'object' &&
+        r !== null &&
+        Object.keys(r).every((k) => k === 'path' || k === 'port') &&
+        typeof (r as Partial<WebRoute>).path === 'string' &&
+        typeof (r as Partial<WebRoute>).port === 'number',
+    )
+  if (!shapeOk) return apiError(400, 'bad_request', 'invalid JSON body')
+  const routes = (raw as WebRoute[]).map((r) => ({ path: r.path, port: r.port }))
+  if (routes.length > MAX_WEB_ROUTES) return apiError(400, 'validation_failed', `web_routes: at most ${MAX_WEB_ROUTES} routes`)
+  const invalid = (msg: string) => apiError(400, 'validation_failed', msg)
+  const sorted = routes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  for (const [i, r] of sorted.entries()) {
+    if (!WEB_PATH.test(r.path)) return invalid(`web_routes: targets[${i}].path: must be "" or 1-32 characters of [a-z0-9-], first and last a letter or digit`)
+    if (!validWebPort(r.port)) return invalid(`web_routes: targets[${i}].port: must be 1024..65535 and not 25565 or 25575`)
+    if (i > 0 && sorted[i - 1].path === r.path) return invalid(`web_routes: targets[${i}].path: duplicate path`)
+    if (sorted.findIndex((o) => o.port === r.port) !== i) return invalid(`web_routes: targets[${i}].port: duplicate port`)
+  }
+  return sorted
 }
 
-/** Like the panel: off without port or base domain; web_port (whenever one is stored) and web_error only for admins. */
-function webFields(s: MockServer, admin: boolean): Pick<Server, 'web_status' | 'web_url' | 'web_port' | 'web_error'> {
+/** The reconcile applies a changed route list within seconds: "pending" becomes "active" on the next GET. */
+function settleWeb(s: MockServer): void {
+  if (s.webRoutes?.length && s.webState === 'pending' && db.serverSettings.base_domain) s.webState = 'active'
+}
+
+/**
+ * Like the panel: off without routes or base domain; web_url only with a root route; web_routes (always, [] when
+ * none, url only with a base domain) and web_error only for admins.
+ */
+function webFields(s: MockServer, admin: boolean): Pick<Server, 'web_status' | 'web_url' | 'web_routes' | 'web_error'> {
   const base = db.serverSettings.base_domain
-  if (!s.webPort) return { web_status: 'off' }
-  if (!base) return { web_status: 'off', ...(admin ? { web_port: s.webPort } : {}) }
+  const routes = s.webRoutes ?? []
+  const fqdn = base ? `${s.name}.${base}` : null
+  const listed = admin ? { web_routes: routes.map((r) => (fqdn ? { ...r, url: r.path ? `https://${fqdn}/${r.path}/` : `https://${fqdn}/` } : { ...r })) } : {}
+  if (routes.length === 0 || !fqdn) return { web_status: 'off', ...listed }
   const status = s.webState ?? 'pending'
   return {
     web_status: status,
-    web_url: `https://${s.name}.${base}`,
-    ...(admin ? { web_port: s.webPort } : {}),
+    ...(routes.some((r) => r.path === '') ? { web_url: `https://${fqdn}` } : {}),
+    ...listed,
     ...(admin && status === 'error' && s.webError ? { web_error: s.webError } : {}),
   }
 }
@@ -238,7 +281,7 @@ export const serverOperations: MockOperation[] = [
           for (const s of db.servers) {
             if (s.instance) bumpRevision(s)
             // the route list changes with the base domain: pending until the agent confirms
-            if (s.webPort) s.webState = 'pending'
+            if (s.webRoutes?.length) s.webState = 'pending'
           }
         }
       }
@@ -290,10 +333,13 @@ export const serverOperations: MockOperation[] = [
       if (body.memory_mib !== undefined && !validMemory(body.memory_mib)) {
         return apiError(400, 'validation_failed', MEMORY_MESSAGE)
       }
-      if (body.web_port !== undefined && body.web_port !== null && !validWebPort(body.web_port)) {
-        return apiError(400, 'validation_failed', 'web_port: must be 1024..65535 and not 25565 or 25575')
+      let webRoutes: WebRoute[] | undefined
+      if (body.web_routes !== undefined) {
+        const checked = checkWebRoutes(body.web_routes)
+        if (checked instanceof Response) return checked
+        if (checked.length > 0 && !db.serverSettings.base_domain) return apiError(409, 'conflict', 'base domain required')
+        webRoutes = checked
       }
-      if (body.web_port !== undefined && !db.serverSettings.base_domain) return apiError(409, 'conflict', 'base domain required')
       const before = JSON.stringify(server.instance)
       const next = { ...server.instance }
       if (body.version !== undefined) next.version = body.version
@@ -308,9 +354,9 @@ export const serverOperations: MockOperation[] = [
         recordAudit(g.user, 'server.update', `server:${server.id}`, 'success', { name: server.name, revision: server.revision })
       }
       // Not part of the instance spec: no revision bump, an audit entry of its own.
-      if (body.web_port !== undefined && body.web_port !== (server.webPort ?? null)) {
-        recordAudit(g.user, 'server.web_port_update', `server:${server.id}`, 'success', { name: server.name, old: server.webPort ?? null, new: body.web_port })
-        server.webPort = body.web_port
+      if (webRoutes && JSON.stringify(webRoutes) !== JSON.stringify(server.webRoutes ?? [])) {
+        recordAudit(g.user, 'server.web_routes_update', `server:${server.id}`, 'success', { name: server.name, old: server.webRoutes ?? [], new: webRoutes })
+        server.webRoutes = webRoutes
         server.webState = 'pending'
         delete server.webError
       }

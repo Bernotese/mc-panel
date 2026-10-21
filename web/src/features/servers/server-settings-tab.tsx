@@ -7,11 +7,11 @@ import { serverKey, serversKey, updateServer } from './api'
 import { DeleteServerSection } from './delete-server-section'
 import { formFromInstance, type ServerFormResult } from './form-model'
 import { ServerForm } from './server-form'
-import { WebPortSection } from './web-port-section'
+import { WebRoutesSection } from './web-routes-section'
 
 const RUNNING_STATES: ReadonlySet<ServerState> = new Set<ServerState>(['running', 'starting', 'restarting'])
 
-/** The settings area: the instance form (if the server has one), the web interface (admins) and the danger zone at the end. */
+/** The settings area: the instance form (if the server has one), the web interfaces (admins) and the danger zone at the end. */
 export function ServerSettingsTab({ server, instance }: { server: Server; instance: InstanceConfig | null }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -52,8 +52,8 @@ export function ServerSettingsTab({ server, instance }: { server: Server; instan
       ) : (
         <p className="bevel-inset px-4 py-3 text-sm">{t('servers.detail.not_configured')}</p>
       )}
-      {/* Re-initialised when the published port changes (after saving or by another admin). */}
-      {instance && isAdmin ? <WebPortSection key={server.web_port ?? 'off'} server={server} /> : null}
+      {/* Re-initialised when the stored routes change (after saving or by another admin). */}
+      {instance && isAdmin ? <WebRoutesSection key={JSON.stringify(server.web_routes ?? [])} server={server} /> : null}
       <DeleteServerSection server={server} />
     </div>
   )

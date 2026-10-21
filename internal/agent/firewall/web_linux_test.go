@@ -48,7 +48,7 @@ func TestWebExprs(t *testing.T) {
 		&expr.Verdict{Kind: expr.VerdictAccept},
 	)
 	drop := append(append([]expr.Any{}, ipv4...), &expr.Verdict{Kind: expr.VerdictDrop})
-	if got := webAcceptExprs(r); !reflect.DeepEqual(got, accept) {
+	if got := webAcceptExprs(r, 8100); !reflect.DeepEqual(got, accept) {
 		t.Errorf("accept = %#v", got)
 	}
 	if got := webDropExprs(r); !reflect.DeepEqual(got, drop) {
@@ -61,8 +61,26 @@ func TestWebRuleExprsOrder(t *testing.T) {
 	a := webRule("172.30.1.2", "172.30.1.0/24", 8100)
 	b := webRule("172.30.2.2", "172.30.2.0/24", 8123)
 	got := webRuleExprs([]agentapi.WebRule{a, b})
-	want := [][]expr.Any{webAcceptExprs(a), webDropExprs(a), webAcceptExprs(b), webDropExprs(b)}
+	want := [][]expr.Any{webAcceptExprs(a, 8100), webDropExprs(a), webAcceptExprs(b, 8123), webDropExprs(b)}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rules = %#v", got)
+	}
+}
+
+// A rule with several ports gives one accept per port (ascending), then one drop.
+func TestWebRuleExprsMultiPort(t *testing.T) {
+	r := webRule("172.30.1.2", "172.30.1.0/24", 8100)
+	r.Ports = []uint16{8100, 8200}
+	got := webRuleExprs([]agentapi.WebRule{r})
+	if len(got) != 3 {
+		t.Fatalf("%d rules, want 3", len(got))
+	}
+	want := [][]expr.Any{webAcceptExprs(r, 8100), webAcceptExprs(r, 8200), webDropExprs(r)}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rules = %#v", got)
+	}
+	port := got[1][len(got[1])-2].(*expr.Cmp)
+	if !reflect.DeepEqual(port.Data, []byte{0x20, 0x08}) {
+		t.Fatalf("second accept dport = %v, want 8200", port.Data)
 	}
 }

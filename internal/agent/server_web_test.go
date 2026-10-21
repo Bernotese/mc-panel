@@ -36,7 +36,7 @@ func (s *stubWeb) calls() int {
 	return len(s.got)
 }
 
-const webBody = `{"routes":[{"id":1,"fqdn":"survival.mc.example.com","port":8100},{"id":2,"fqdn":"creative.mc.example.com","port":8123}]}`
+const webBody = `{"routes":[{"id":1,"fqdn":"survival.mc.example.com","targets":[{"path":"","port":8100}]},{"id":2,"fqdn":"creative.mc.example.com","targets":[{"path":"","port":8123},{"path":"afk-smoke","port":8200}]}]}`
 
 func newWebServer(st *stubWeb) *agent.Server {
 	fw, _ := newNoop()
@@ -53,7 +53,7 @@ func TestServerWebRoutes(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Body.String() != want {
 		t.Fatalf("PUT web routes: %d %s", rec.Code, rec.Body)
 	}
-	if len(st.got) != 1 || len(st.got[0].Routes) != 2 || st.got[0].Routes[1] != (agentapi.WebRoute{ID: 2, FQDN: "creative.mc.example.com", Port: 8123}) {
+	if len(st.got) != 1 || len(st.got[0].Routes) != 2 || !st.got[0].Routes[1].Equal(agentapi.WebRoute{ID: 2, FQDN: "creative.mc.example.com", Targets: []agentapi.WebTarget{{Port: 8123}, {Path: "afk-smoke", Port: 8200}}}) {
 		t.Fatalf("got = %+v", st.got)
 	}
 }
@@ -64,11 +64,15 @@ func TestServerWebRoutesRejects(t *testing.T) {
 		want                   int
 	}{
 		{"unknown field", http.MethodPut, jsonCT, `{"routes":[],"extra":1}`, http.StatusBadRequest},
-		{"unknown route field", http.MethodPut, jsonCT, `{"routes":[{"id":1,"fqdn":"a.b.c","port":8100,"host":"x"}]}`, http.StatusBadRequest},
+		{"unknown route field", http.MethodPut, jsonCT, `{"routes":[{"id":1,"fqdn":"a.b.c","targets":[{"path":"","port":8100}],"host":"x"}]}`, http.StatusBadRequest},
 		{"null routes", http.MethodPut, jsonCT, `{"routes":null}`, http.StatusBadRequest},
 		{"missing routes", http.MethodPut, jsonCT, `{}`, http.StatusBadRequest},
-		{"invalid port", http.MethodPut, jsonCT, `{"routes":[{"id":1,"fqdn":"a.b.c","port":25565}]}`, http.StatusBadRequest},
-		{"upper case fqdn", http.MethodPut, jsonCT, `{"routes":[{"id":1,"fqdn":"A.b.c","port":8100}]}`, http.StatusBadRequest},
+		{"unknown target field", http.MethodPut, jsonCT, `{"routes":[{"id":1,"fqdn":"a.b.c","targets":[{"path":"","port":8100,"x":1}]}]}`, http.StatusBadRequest},
+		{"old port field", http.MethodPut, jsonCT, `{"routes":[{"id":1,"fqdn":"a.b.c","port":8100}]}`, http.StatusBadRequest},
+		{"invalid port", http.MethodPut, jsonCT, `{"routes":[{"id":1,"fqdn":"a.b.c","targets":[{"path":"","port":25565}]}]}`, http.StatusBadRequest},
+		{"invalid path", http.MethodPut, jsonCT, `{"routes":[{"id":1,"fqdn":"a.b.c","targets":[{"path":"../x","port":8100}]}]}`, http.StatusBadRequest},
+		{"unsorted targets", http.MethodPut, jsonCT, `{"routes":[{"id":1,"fqdn":"a.b.c","targets":[{"path":"b","port":8101},{"path":"a","port":8100}]}]}`, http.StatusBadRequest},
+		{"upper case fqdn", http.MethodPut, jsonCT, `{"routes":[{"id":1,"fqdn":"A.b.c","targets":[{"path":"","port":8100}]}]}`, http.StatusBadRequest},
 		{"trailing data", http.MethodPut, jsonCT, `{"routes":[]}{}`, http.StatusBadRequest},
 		{"too large", http.MethodPut, jsonCT, `{"routes":[],"x":"` + strings.Repeat("a", agentapi.MaxWebRequestBytes) + `"}`, http.StatusRequestEntityTooLarge},
 		{"wrong content type", http.MethodPut, "text/plain", `{"routes":[]}`, http.StatusUnsupportedMediaType},

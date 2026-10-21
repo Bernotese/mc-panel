@@ -53,6 +53,24 @@
               "terminal": true
             },
             {
+              "match": [
+                {
+                  "query": {
+                    "domain": [
+                      "paths.example.com"
+                    ]
+                  }
+                }
+              ],
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "status_code": 200
+                }
+              ],
+              "terminal": true
+            },
+            {
               "handle": [
                 {
                   "handler": "static_response",
@@ -86,10 +104,74 @@
               ],
               "handle": [
                 {
-                  "handler": "reverse_proxy",
-                  "upstreams": [
+                  "handler": "subroute",
+                  "routes": [
                     {
-                      "dial": "mcpanel-mc-3:8100"
+                      "match": [
+                        {
+                          "path": [
+                            "/afk-smoke"
+                          ]
+                        }
+                      ],
+                      "handle": [
+                        {
+                          "handler": "static_response",
+                          "status_code": 308,
+                          "headers": {
+                            "Location": [
+                              "/afk-smoke/"
+                            ]
+                          }
+                        }
+                      ],
+                      "terminal": true
+                    },
+                    {
+                      "match": [
+                        {
+                          "path": [
+                            "/afk-smoke/*"
+                          ]
+                        }
+                      ],
+                      "handle": [
+                        {
+                          "handler": "rewrite",
+                          "strip_path_prefix": "/afk-smoke"
+                        },
+                        {
+                          "handler": "headers",
+                          "request": {
+                            "set": {
+                              "X-Forwarded-Prefix": [
+                                "/afk-smoke"
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "handler": "reverse_proxy",
+                          "upstreams": [
+                            {
+                              "dial": "mcpanel-mc-3:8200"
+                            }
+                          ]
+                        }
+                      ],
+                      "terminal": true
+                    },
+                    {
+                      "handle": [
+                        {
+                          "handler": "reverse_proxy",
+                          "upstreams": [
+                            {
+                              "dial": "mcpanel-mc-3:8100"
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -106,10 +188,100 @@
               ],
               "handle": [
                 {
-                  "handler": "reverse_proxy",
-                  "upstreams": [
+                  "handler": "subroute",
+                  "routes": [
                     {
-                      "dial": "mcpanel-mc-12:65535"
+                      "handle": [
+                        {
+                          "handler": "reverse_proxy",
+                          "upstreams": [
+                            {
+                              "dial": "mcpanel-mc-12:65535"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "match": [
+                {
+                  "host": [
+                    "paths.example.com"
+                  ]
+                }
+              ],
+              "handle": [
+                {
+                  "handler": "subroute",
+                  "routes": [
+                    {
+                      "match": [
+                        {
+                          "path": [
+                            "/map"
+                          ]
+                        }
+                      ],
+                      "handle": [
+                        {
+                          "handler": "static_response",
+                          "status_code": 308,
+                          "headers": {
+                            "Location": [
+                              "/map/"
+                            ]
+                          }
+                        }
+                      ],
+                      "terminal": true
+                    },
+                    {
+                      "match": [
+                        {
+                          "path": [
+                            "/map/*"
+                          ]
+                        }
+                      ],
+                      "handle": [
+                        {
+                          "handler": "rewrite",
+                          "strip_path_prefix": "/map"
+                        },
+                        {
+                          "handler": "headers",
+                          "request": {
+                            "set": {
+                              "X-Forwarded-Prefix": [
+                                "/map"
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "handler": "reverse_proxy",
+                          "upstreams": [
+                            {
+                              "dial": "mcpanel-mc-20:8300"
+                            }
+                          ]
+                        }
+                      ],
+                      "terminal": true
+                    },
+                    {
+                      "handle": [
+                        {
+                          "handler": "static_response",
+                          "status_code": 404,
+                          "body": "Not found\n"
+                        }
+                      ]
                     }
                   ]
                 }
