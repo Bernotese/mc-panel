@@ -32,6 +32,25 @@ func TestSortedWebRulesSortsBySourceDestPort(t *testing.T) {
 	}
 }
 
+func TestSortedWebRulesSortsPorts(t *testing.T) {
+	in := []agentapi.WebRule{{Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Ports: []uint16{8200, 8100}}}
+	got, err := sortedWebRules(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got[0].Ports, []uint16{8100, 8200}) {
+		t.Fatalf("ports = %v, want [8100 8200]", got[0].Ports)
+	}
+	if !slices.Equal(in[0].Ports, []uint16{8200, 8100}) {
+		t.Fatalf("the caller's ports were modified: %v", in[0].Ports)
+	}
+	// Eight ports are the most a rule may have.
+	in[0].Ports = []uint16{8107, 8106, 8105, 8104, 8103, 8102, 8101, 8100}
+	if got, err := sortedWebRules(in); err != nil || got[0].Ports[0] != 8100 || got[0].Ports[7] != 8107 {
+		t.Fatalf("eight ports = %v, %v", got, err)
+	}
+}
+
 func TestSortedWebRulesMasksDest(t *testing.T) {
 	got, err := sortedWebRules([]agentapi.WebRule{webRule("172.30.1.2", "172.30.1.9/24", 8100)})
 	if err != nil {
@@ -52,6 +71,12 @@ func TestSortedWebRulesRejectsInvalid(t *testing.T) {
 		"source outside":     webRule("172.30.2.2", "172.30.1.0/24", 8100),
 		"port 0":             webRule("172.30.1.2", "172.30.1.0/24", 0),
 		"port 1023":          webRule("172.30.1.2", "172.30.1.0/24", 1023),
+		"no ports":           {Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24")},
+		"empty ports":        {Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Ports: []uint16{}},
+		"9 ports": {Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"),
+			Ports: []uint16{8100, 8101, 8102, 8103, 8104, 8105, 8106, 8107, 8108}},
+		"second port 1023": {Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Ports: []uint16{8100, 1023}},
+		"duplicate port":   {Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Ports: []uint16{8200, 8100, 8200}},
 	} {
 		if _, err := sortedWebRules([]agentapi.WebRule{r}); !errors.Is(err, ErrInvalidWebRule) {
 			t.Errorf("%s: err = %v, want ErrInvalidWebRule", name, err)

@@ -34,7 +34,6 @@ func instanceFromListRow(r store.ServersListInstancesRow) store.Instance {
 		ServerID: r.ServerID, Type: r.Type, Version: r.Version, LoaderVersion: r.LoaderVersion,
 		Modpack: r.Modpack, Java: r.Java, MemoryMib: r.MemoryMib, Properties: r.Properties,
 		DesiredState: r.DesiredState, Revision: r.Revision, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
-		WebPort: r.WebPort,
 	}
 }
 

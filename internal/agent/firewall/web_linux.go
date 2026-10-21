@@ -21,7 +21,7 @@ import (
 // bridge family's forward hook sees frames between two ports of one Docker bridge, which
 // the inet family only sees with br_netfilter. It is stateless on purpose: replies come
 // from the servers' addresses and match no rule, and a connection from mcpanel-web is only
-// possible to Dest:Port.
+// possible to Dest on one of Ports.
 
 func webTable() *nftables.Table {
 	return &nftables.Table{Family: nftables.TableFamilyBridge, Name: WebTableName}
@@ -41,7 +41,7 @@ func webChain(table *nftables.Table) *nftables.Chain {
 
 // SetWebRules replaces the whole table "bridge mcpanel_web" in one batch: table, chain
 // (filter, hook forward, priority -10, policy accept), flushed, then per rule (sorted)
-// an accept for Dest:Port and a drop for everything else from Source. An empty list
+// an accept for Dest and each of Ports and a drop for everything else from Source. An empty list
 // deletes the table if it exists.
 func (n *NFTables) SetWebRules(_ context.Context, rules []agentapi.WebRule) error {
 	sorted, err := sortedWebRules(rules)
@@ -135,11 +135,15 @@ func sameChain(have, want *nftables.Chain) bool {
 		have.Policy != nil && *have.Policy == *want.Policy
 }
 
-// webRuleExprs returns the chain's rules for sorted rules: per rule its accept, then its drop.
+// webRuleExprs returns the chain's rules for sorted rules: per rule an accept for each of
+// its Ports (ascending), then its drop.
 func webRuleExprs(sorted []agentapi.WebRule) [][]expr.Any {
-	out := make([][]expr.Any, 0, 2*len(sorted))
+	var out [][]expr.Any
 	for _, r := range sorted {
-		out = append(out, webAcceptExprs(r), webDropExprs(r))
+		for _, p := range r.Ports {
+			out = append(out, webAcceptExprs(r, p))
+		}
+		out = append(out, webDropExprs(r))
 	}
 	return out
 }
@@ -156,8 +160,8 @@ func webSourceExprs(r agentapi.WebRule) []expr.Any {
 }
 
 // webAcceptExprs builds "meta protocol ip ip saddr <Source> ip daddr <Dest> tcp dport
-// <Port> accept" (Dest masked by sortedWebRules).
-func webAcceptExprs(r agentapi.WebRule) []expr.Any {
+// <port> accept" for one of the rule's Ports (Dest masked by sortedWebRules).
+func webAcceptExprs(r agentapi.WebRule, port uint16) []expr.Any {
 	dst := r.Dest.Addr().As4()
 	return append(webSourceExprs(r),
 		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 16, Len: 4},
@@ -166,7 +170,7 @@ func webAcceptExprs(r agentapi.WebRule) []expr.Any {
 		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.IPPROTO_TCP}},
 		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
-		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binary.BigEndian.AppendUint16(nil, r.Ports[0])},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binary.BigEndian.AppendUint16(nil, port)},
 		&expr.Verdict{Kind: expr.VerdictAccept},
 	)
 }
