@@ -11,9 +11,9 @@ test('admin publishes the root and a path, the header links the web map, removin
 
   await openServerSection(page, 'creative', 'Einstellungen')
   const section = page.getByRole('region', { name: 'Weboberflächen' })
-  const rootSwitch = section.getByRole('switch', { name: 'Am Stamm veröffentlichen' })
+  const rootSwitch = section.getByRole('switch', { name: 'Unter der Hauptadresse veröffentlichen' })
   const save = section.getByRole('button', { name: 'Weboberflächen speichern' })
-  await expect(section.getByRole('spinbutton', { name: 'Port im Container am Stamm' })).toHaveValue('8100')
+  await expect(section.getByRole('spinbutton', { name: 'Port im Container für die Hauptadresse' })).toHaveValue('8100')
   await rootSwitch.click()
   await section.getByRole('button', { name: 'Port hinzufügen' }).click()
   await section.getByRole('textbox', { name: 'Pfad 1' }).fill('afk-smoke')
