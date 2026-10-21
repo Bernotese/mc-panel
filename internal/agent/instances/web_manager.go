@@ -46,7 +46,7 @@ const (
 const webRecheck = 1500 * time.Millisecond
 
 // WebFilter is the bridge port restriction of mcpanel-web (firewall.Backend): for every rule,
-// mcpanel-web at Source may open TCP connections to Port in Dest, and nothing else from Source.
+// mcpanel-web at Source may open TCP connections to Ports in Dest, and nothing else from Source.
 type WebFilter interface {
 	SetWebRules(ctx context.Context, rules []agentapi.WebRule) error
 	WebRulesInPlace(ctx context.Context, rules []agentapi.WebRule) (bool, error)
@@ -305,8 +305,8 @@ func (m *Manager) applyWebRoutes(ctx context.Context, desired []agentapi.WebRout
 	if exists {
 		stay = m.disconnectWeb(ctx, info.NetworkSettings, byID, targets, false)
 	}
-	// 5. The port restriction: a rule for every target, and the old rule for every network
-	// mcpanel-web is still on (busy server, failed disconnect) until it is gone.
+	// 5. The port restriction: a rule for every target, and the old rule (all its ports) for
+	// every network mcpanel-web is still on (busy server, failed disconnect) until it is gone.
 	rules := make([]agentapi.WebRule, 0, len(targets)+len(stay))
 	for _, t := range targets {
 		rules = append(rules, t.rule)
@@ -437,9 +437,19 @@ func (m *Manager) webTargets(ctx context.Context, desired []agentapi.WebRoute, f
 			continue
 		}
 		targets = append(targets, webTarget{route: r, network: n.Name,
-			rule: agentapi.WebRule{Source: addr, Dest: n.Subnets[0].Masked(), Ports: []uint16{uint16(r.Targets[0].Port)}}}) //nolint:gosec // G115: Validate keeps the port in 1024..65535
+			rule: agentapi.WebRule{Source: addr, Dest: n.Subnets[0].Masked(), Ports: webPorts(r)}})
 	}
 	return targets, byID, nil
+}
+
+// webPorts is the sorted port set of a route's targets.
+func webPorts(r agentapi.WebRoute) []uint16 {
+	ports := make([]uint16, 0, len(r.Targets))
+	for _, t := range r.Targets {
+		ports = append(ports, uint16(t.Port)) //nolint:gosec // G115: Validate keeps the port in 1024..65535
+	}
+	slices.Sort(ports)
+	return ports
 }
 
 // disconnectWeb takes mcpanel-web off every server network it is on (mc-panel's own

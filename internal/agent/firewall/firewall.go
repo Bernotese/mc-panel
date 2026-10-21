@@ -35,7 +35,7 @@ const (
 	// WebTableName is the table (family bridge) of the port restriction of mcpanel-web:
 	// the bridge family sees traffic between two ports of one Docker bridge without
 	// br_netfilter. Its filter chain on the forward hook lets mcpanel-web reach only the
-	// published port of each server network.
+	// published ports of each server network.
 	WebTableName     = "mcpanel_web"
 	WebChainName     = "forward"
 	WebChainPriority = -10
