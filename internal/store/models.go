@@ -63,7 +63,6 @@ type Instance struct {
 	Revision      int64
 	CreatedAt     int64
 	UpdatedAt     int64
-	WebPort       sql.NullInt64
 }
 
 type InstanceSetting struct {
@@ -246,6 +245,12 @@ type User struct {
 type UserID struct {
 	ID     int64
 	LastID int64
+}
+
+type WebRoute struct {
+	ServerID int64
+	Path     string
+	Port     int64
 }
 
 type WebauthnCredential struct {
