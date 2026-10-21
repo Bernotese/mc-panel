@@ -1772,18 +1772,35 @@ export interface components {
             down_alerts: boolean | null;
             /**
              * Format: uri
-             * @description https://<name>.<base_domain> when a web port is published and a base domain is set; absent otherwise
+             * @description https://<name>.<base_domain> when a root web route (path "") exists and a base domain is set; absent otherwise. Visible to everyone who sees the server.
              */
             web_url?: string;
             /**
-             * @description off: no web port (or no base domain); pending: not yet applied by the agent; active: the route is live (the plugin itself may still answer 502); error: see web_error
+             * @description One status for all web routes of the server (the agent applies them all or nothing). off: no web routes (or no base domain); pending: not yet applied by the agent; active: the routes are live (a mod itself may still answer 502); error: see web_error
              * @enum {string}
              */
             web_status: "off" | "pending" | "active" | "error";
-            /** @description Stored web port inside the container; admins only, absent when none is stored (also shown while web_status is off for lack of a base domain) */
-            web_port?: number;
+            /** @description Stored web routes, sorted by path (root first); admins only, absent for other users. [] when none are stored; also listed while web_status is off for lack of a base domain. */
+            web_routes?: components["schemas"]["WebRoute"][];
             /** @description The agent's reason for web_status error, sanitized like last_error; admins only, absent when there is none */
             web_error?: string;
+        };
+        WebRoute: {
+            /** @description "" = the root (https://<fqdn>/); otherwise one segment published at https://<fqdn>/<path>/, with the prefix stripped before forwarding */
+            path: string;
+            /** @description Port inside the container; not 25565 or 25575 */
+            port: number;
+            /**
+             * Format: uri
+             * @description https://<fqdn>/ or https://<fqdn>/<path>/; absent without a base domain
+             */
+            readonly url?: string;
+        };
+        WebRouteInput: {
+            /** @description "" = the root; otherwise 1-32 characters of [a-z0-9-], first and last a letter or digit */
+            path: string;
+            /** @description Port inside the container; not 25565 or 25575 */
+            port: number;
         };
         CreateServerRequest: {
             name: string;
@@ -1808,8 +1825,8 @@ export interface components {
             /** @description At most max_mib of GET /servers/memory on this host */
             memory_mib?: number;
             properties?: components["schemas"]["ServerProperties"];
-            /** @description Publish this port of the container under https://<name>.<base_domain> (not 25565 or 25575); null turns it off. Admin and sudo; 409 conflict without a base domain. Does not bump revision. */
-            web_port?: number | null;
+            /** @description The complete list of web routes to publish under https://<name>.<base_domain>; [] turns publishing off. Paths and ports unique, at most one root (path ""). Any order: the panel sorts by path before validating. Admin and sudo; 409 conflict without a base domain unless the list is empty. Does not bump revision. */
+            web_routes?: components["schemas"]["WebRouteInput"][];
         };
         /** @description start/stop set the desired state (applied by the reconcile loop, works without agent); restart needs the agent */
         PowerRequest: {
