@@ -18,7 +18,7 @@ vb_fixture() {
   cp -R "$src/deploy" "$repo/deploy"
   cp "$src/.goreleaser.yaml" "$repo/.goreleaser.yaml"
   [[ ${VB_NO_LICENSE:-0} == 1 ]] || cp "$src/LICENSE" "$repo/LICENSE"
-  printf 'module example\n\ngo 1.27.2\n' >"$repo/go.mod"
+  printf 'module example\n\ngo 1.27.3\n' >"$repo/go.mod"
   echo 24.21.0 >"$repo/.node-version"
   git init -q -b main "$repo"
   "${g[@]}" add -A
