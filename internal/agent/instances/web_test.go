@@ -2,6 +2,7 @@ package instances_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"net/netip"
 	"os"
@@ -120,11 +121,14 @@ func TestWebDir(t *testing.T) {
 }
 
 func TestRenderWebConfigGolden(t *testing.T) {
-	// Reverse id order in the input; the output is sorted by id. The second name looks odd
-	// but is a valid DNS name and must appear verbatim (and only) in its two places.
+	// Reverse id order in the input; the output is sorted by id. Route 3 has a root and a
+	// path, route 12 only a root, route 20 only a path (its root answers 404). The second
+	// name looks odd but is a valid DNS name and must appear verbatim (and only) in its two
+	// places.
 	routes := []agentapi.WebRoute{
+		{ID: 20, FQDN: "paths.example.com", Targets: []agentapi.WebTarget{{Path: "map", Port: 8300}}},
 		{ID: 12, FQDN: "xn--mnchen-3ya.0-9.example.com", Targets: []agentapi.WebTarget{{Port: 65535}}},
-		{ID: 3, FQDN: "survival.example.com", Targets: []agentapi.WebTarget{{Port: 8100}}},
+		{ID: 3, FQDN: "survival.example.com", Targets: []agentapi.WebTarget{{Port: 8100}, {Path: "afk-smoke", Port: 8200}}},
 	}
 	got, err := instances.RenderWebConfig(routes, netip.MustParsePrefix("10.213.255.240/28"))
 	if err != nil {
@@ -137,12 +141,121 @@ func TestRenderWebConfigGolden(t *testing.T) {
 	if !bytes.Equal(got, want) {
 		t.Fatalf("RenderWebConfig =\n%s\nwant\n%s", got, want)
 	}
-	if routes[0].ID != 12 {
+	if routes[0].ID != 20 {
 		t.Fatal("RenderWebConfig must not reorder the caller's slice")
 	}
-	again, err := instances.RenderWebConfig([]agentapi.WebRoute{routes[1], routes[0]}, netip.MustParsePrefix("10.213.255.240/28"))
+	again, err := instances.RenderWebConfig([]agentapi.WebRoute{routes[2], routes[0], routes[1]}, netip.MustParsePrefix("10.213.255.240/28"))
 	if err != nil || !bytes.Equal(again, got) {
 		t.Fatalf("equal routes must give equal bytes: %v", err)
+	}
+}
+
+// The parts of the rendered config that TestRenderWebConfigPathMatchers checks.
+type (
+	renderedRoute struct {
+		Match []struct {
+			Host []string `json:"host"`
+			Path []string `json:"path"`
+		} `json:"match"`
+		Handle   []renderedHandler `json:"handle"`
+		Terminal bool              `json:"terminal"`
+	}
+	renderedHandler struct {
+		Handler         string          `json:"handler"`
+		Routes          []renderedRoute `json:"routes"`
+		StripPathPrefix string          `json:"strip_path_prefix"`
+		Request         struct {
+			Set map[string][]string `json:"set"`
+		} `json:"request"`
+		Upstreams []struct {
+			Dial string `json:"dial"`
+		} `json:"upstreams"`
+		StatusCode int                 `json:"status_code"`
+		Headers    map[string][]string `json:"headers"`
+		Body       string              `json:"body"`
+	}
+)
+
+// Path targets come before the root, "/p" redirects, "/p/*" strips the prefix; the only path
+// matchers are exactly "/p" and "/p/*", so "/afk-smokeX/" and "/afk-smoke-old/" never reach
+// the afk-smoke route (Caddy's path matcher matches "/p/*" by the prefix "/p/").
+func TestRenderWebConfigPathMatchers(t *testing.T) {
+	b, err := instances.RenderWebConfig([]agentapi.WebRoute{
+		{ID: 3, FQDN: "survival.example.com", Targets: []agentapi.WebTarget{{Port: 8100}, {Path: "afk-smoke", Port: 8200}}},
+		{ID: 20, FQDN: "paths.example.com", Targets: []agentapi.WebTarget{{Path: "map", Port: 8300}}},
+	}, netip.MustParsePrefix("10.213.255.240/28"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Apps struct {
+			HTTP struct {
+				Servers map[string]struct {
+					Routes []renderedRoute `json:"routes"`
+				} `json:"servers"`
+			} `json:"http"`
+		} `json:"apps"`
+	}
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	proxy := cfg.Apps.HTTP.Servers["proxy"].Routes
+	if len(proxy) != 3 {
+		t.Fatalf("%d proxy routes, want 2 servers and the 404", len(proxy))
+	}
+	sub := func(r renderedRoute, fqdn string) []renderedRoute {
+		t.Helper()
+		if len(r.Match) != 1 || !slices.Equal(r.Match[0].Host, []string{fqdn}) || !r.Terminal ||
+			len(r.Handle) != 1 || r.Handle[0].Handler != "subroute" {
+			t.Fatalf("route for %s = %+v", fqdn, r)
+		}
+		return r.Handle[0].Routes
+	}
+	path := func(r renderedRoute) []string {
+		if len(r.Match) == 0 {
+			return nil
+		}
+		return r.Match[0].Path
+	}
+
+	s3 := sub(proxy[0], "survival.example.com")
+	if len(s3) != 3 {
+		t.Fatalf("subroute of 3 = %+v", s3)
+	}
+	if h := s3[0].Handle; !slices.Equal(path(s3[0]), []string{"/afk-smoke"}) || !s3[0].Terminal || len(h) != 1 ||
+		h[0].Handler != "static_response" || h[0].StatusCode != 308 || !slices.Equal(h[0].Headers["Location"], []string{"/afk-smoke/"}) {
+		t.Errorf("redirect = %+v", s3[0])
+	}
+	if h := s3[1].Handle; !slices.Equal(path(s3[1]), []string{"/afk-smoke/*"}) || !s3[1].Terminal || len(h) != 3 ||
+		h[0].Handler != "rewrite" || h[0].StripPathPrefix != "/afk-smoke" ||
+		h[1].Handler != "headers" || len(h[1].Request.Set) != 1 || !slices.Equal(h[1].Request.Set["X-Forwarded-Prefix"], []string{"/afk-smoke"}) ||
+		h[2].Handler != "reverse_proxy" || len(h[2].Upstreams) != 1 || h[2].Upstreams[0].Dial != "mcpanel-mc-3:8200" {
+		t.Errorf("prefix route = %+v", s3[1])
+	}
+	if h := s3[2].Handle; len(s3[2].Match) != 0 || len(h) != 1 ||
+		h[0].Handler != "reverse_proxy" || len(h[0].Upstreams) != 1 || h[0].Upstreams[0].Dial != "mcpanel-mc-3:8100" {
+		t.Errorf("root route = %+v", s3[2])
+	}
+
+	s20 := sub(proxy[1], "paths.example.com")
+	if len(s20) != 3 || !slices.Equal(path(s20[0]), []string{"/map"}) || !slices.Equal(path(s20[1]), []string{"/map/*"}) {
+		t.Fatalf("subroute of 20 = %+v", s20)
+	}
+	if h := s20[2].Handle; len(s20[2].Match) != 0 || len(h) != 1 ||
+		h[0].Handler != "static_response" || h[0].StatusCode != 404 || h[0].Body != "Not found\n" {
+		t.Errorf("route 20 without root ends in %+v, want the static 404", s20[2])
+	}
+
+	// Every path matcher in the config.
+	var matchers []string
+	for _, r := range append(s3, s20...) {
+		matchers = append(matchers, path(r)...)
+	}
+	if want := []string{"/afk-smoke", "/afk-smoke/*", "/map", "/map/*"}; !slices.Equal(matchers, want) {
+		t.Fatalf("path matchers = %q, want %q", matchers, want)
+	}
+	if n := strings.Count(string(b), `"path"`); n != 4 {
+		t.Fatalf("%d path matchers in the config, want 4", n)
 	}
 }
 
@@ -158,6 +271,11 @@ func TestRenderWebConfigRefusesInvalidInput(t *testing.T) {
 		"id 0":            {{ID: 0, FQDN: "survival.example.com", Targets: []agentapi.WebTarget{{Port: 8100}}}},
 		"duplicate fqdn":  {{ID: 1, FQDN: "a.example.com", Targets: []agentapi.WebTarget{{Port: 8100}}}, {ID: 2, FQDN: "a.example.com", Targets: []agentapi.WebTarget{{Port: 8100}}}},
 		"newline in name": {{ID: 1, FQDN: "a.example.com\n", Targets: []agentapi.WebTarget{{Port: 8100}}}},
+		"path breakout":   {{ID: 1, FQDN: "a.example.com", Targets: []agentapi.WebTarget{{Path: `a"]}`, Port: 8100}}}},
+		"path with slash": {{ID: 1, FQDN: "a.example.com", Targets: []agentapi.WebTarget{{Path: "a/../b", Port: 8100}}}},
+		"path wildcard":   {{ID: 1, FQDN: "a.example.com", Targets: []agentapi.WebTarget{{Path: "a*", Port: 8100}}}},
+		"unsorted":        {{ID: 1, FQDN: "a.example.com", Targets: []agentapi.WebTarget{{Path: "b", Port: 8200}, {Path: "a", Port: 8100}}}},
+		"no targets":      {{ID: 1, FQDN: "a.example.com"}},
 	} {
 		if _, err := instances.RenderWebConfig(routes, trusted); !errors.Is(err, instancespec.ErrInvalid) {
 			t.Errorf("%s: RenderWebConfig = %v, want ErrInvalid", name, err)
