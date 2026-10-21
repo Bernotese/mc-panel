@@ -187,7 +187,7 @@ func newWebEnv(t *testing.T, opts ...func(*instances.Config)) *webEnv {
 }
 
 func webRoute(id int64, name string, port int) agentapi.WebRoute {
-	return agentapi.WebRoute{ID: id, FQDN: name + ".mc.example.com", Port: port}
+	return agentapi.WebRoute{ID: id, FQDN: name + ".mc.example.com", Targets: []agentapi.WebTarget{{Port: port}}}
 }
 
 func (e *webEnv) put(t *testing.T, routes ...agentapi.WebRoute) agentapi.WebRoutesResponse {
@@ -257,7 +257,7 @@ func (e *webEnv) webConfig(t *testing.T) string {
 }
 
 func rule(src, dest string, port uint16) agentapi.WebRule {
-	return agentapi.WebRule{Source: netip.MustParseAddr(src), Dest: netip.MustParsePrefix(dest), Port: port}
+	return agentapi.WebRule{Source: netip.MustParseAddr(src), Dest: netip.MustParsePrefix(dest), Ports: []uint16{port}}
 }
 
 // The first PUT creates the network, the config, the container and the connection with the
@@ -289,7 +289,7 @@ func TestWebFirstPutCreatesRouter(t *testing.T) {
 	if !slices.Equal(c.Networks, []string{"mcpanel-net-1", "mcpanel-web"}) || c.IPs["mcpanel-net-1"] != "10.213.0.14" {
 		t.Fatalf("web networks = %v, addresses %v", c.Networks, c.IPs)
 	}
-	if got := e.fw.last(); !slices.Equal(got, []agentapi.WebRule{rule("10.213.0.14", "10.213.0.0/28", 8100)}) {
+	if got := e.fw.last(); !slices.EqualFunc(got, []agentapi.WebRule{rule("10.213.0.14", "10.213.0.0/28", 8100)}, agentapi.WebRule.Equal) {
 		t.Fatalf("rules = %v", got)
 	}
 	want, err := instances.RenderWebConfig([]agentapi.WebRoute{r}, netip.MustParsePrefix("10.213.0.16/28"))
@@ -303,16 +303,33 @@ func TestWebFirstPutCreatesRouter(t *testing.T) {
 		t.Fatalf("status after apply = %+v", got)
 	}
 	// A changed port is pending again until it is applied.
-	r.Port = 8123
+	r.Targets = []agentapi.WebTarget{{Port: 8123}}
 	if got := e.statuses(t, r)[1]; got.Status != agentapi.WebPending {
 		t.Fatalf("status of a changed route = %+v", got)
 	}
 	e.tick(t)
-	if got := e.fw.last(); !slices.Equal(got, []agentapi.WebRule{rule("10.213.0.14", "10.213.0.0/28", 8123)}) {
+	if got := e.fw.last(); !slices.EqualFunc(got, []agentapi.WebRule{rule("10.213.0.14", "10.213.0.0/28", 8123)}, agentapi.WebRule.Equal) {
 		t.Fatalf("rules after the port change = %v", got)
 	}
 	if got := e.statuses(t, r)[1]; got.Status != agentapi.WebActive {
 		t.Fatalf("status after the port change = %+v", got)
+	}
+	// A path target adds its port to the rule of the server network.
+	r.Targets = append(r.Targets, agentapi.WebTarget{Path: "afk-smoke", Port: 8200})
+	if got := e.statuses(t, r)[1]; got.Status != agentapi.WebPending {
+		t.Fatalf("status of an added target = %+v", got)
+	}
+	e.tick(t)
+	two := rule("10.213.0.14", "10.213.0.0/28", 8123)
+	two.Ports = []uint16{8123, 8200}
+	if got := e.fw.last(); !slices.EqualFunc(got, []agentapi.WebRule{two}, agentapi.WebRule.Equal) {
+		t.Fatalf("rules after the added target = %v", got)
+	}
+	if !strings.Contains(e.webConfig(t), `"dial": "mcpanel-mc-1:8200"`) {
+		t.Fatal("config without the added target")
+	}
+	if got := e.statuses(t, r)[1]; got.Status != agentapi.WebActive {
+		t.Fatalf("status after the added target = %+v", got)
 	}
 }
 
@@ -332,7 +349,7 @@ func TestWebRulesBeforeConnect(t *testing.T) {
 		if target != "mcpanel-net-1" {
 			t.Errorf("first connect to %s", target)
 		}
-		if got := e.fw.last(); !slices.Equal(got, []agentapi.WebRule{rule("10.213.0.14", "10.213.0.0/28", 8100)}) {
+		if got := e.fw.last(); !slices.EqualFunc(got, []agentapi.WebRule{rule("10.213.0.14", "10.213.0.0/28", 8100)}, agentapi.WebRule.Equal) {
 			t.Errorf("rules at the connect = %v", got)
 		}
 	case <-done:
@@ -419,7 +436,7 @@ func TestWebSecondPutDisconnectsRemovedRoute(t *testing.T) {
 	if !slices.Equal(c.Networks, []string{"mcpanel-net-2", "mcpanel-net-7", "mcpanel-web", "someone"}) {
 		t.Fatalf("web networks = %v", c.Networks)
 	}
-	if got := e.fw.last(); !slices.Equal(got, []agentapi.WebRule{rule("10.213.0.30", "10.213.0.16/28", 8200)}) {
+	if got := e.fw.last(); !slices.EqualFunc(got, []agentapi.WebRule{rule("10.213.0.30", "10.213.0.16/28", 8200)}, agentapi.WebRule.Equal) {
 		t.Fatalf("rules = %v", got)
 	}
 	if cfg := e.webConfig(t); strings.Contains(cfg, "survival") || !strings.Contains(cfg, "creative.mc.example.com") {
@@ -638,7 +655,7 @@ func TestWebAskCheck(t *testing.T) {
 	}
 	// A new config starts the window again.
 	e.clk.Advance(25 * time.Second)
-	r.Port = 8101
+	r.Targets = []agentapi.WebTarget{{Port: 8101}}
 	e.put(t, r)
 	e.tick(t)
 	e.clk.Advance(25 * time.Second)
@@ -784,7 +801,7 @@ func TestWebSetRoutesRefuses(t *testing.T) {
 	if _, err := e.m.SetWebRoutes(ctx, agentapi.WebRoutesRequest{}); err == nil {
 		t.Fatal("nil routes accepted")
 	}
-	if _, err := e.m.SetWebRoutes(ctx, agentapi.WebRoutesRequest{Routes: []agentapi.WebRoute{{ID: 1, FQDN: "a.mc.example.com", Port: 25565}}}); err == nil {
+	if _, err := e.m.SetWebRoutes(ctx, agentapi.WebRoutesRequest{Routes: []agentapi.WebRoute{{ID: 1, FQDN: "a.mc.example.com", Targets: []agentapi.WebTarget{{Port: 25565}}}}}); err == nil {
 		t.Fatal("port 25565 accepted")
 	}
 	e.d.Fail(dockertest.OpPing, 500, "down")
@@ -799,14 +816,20 @@ func TestWebSetRoutesRefuses(t *testing.T) {
 }
 
 // A busy server (operation in progress) keeps mcpanel-web on its network until the next round,
-// and with it its old rule: the restriction never has a gap.
+// and with it its old rule as a whole (both ports): the restriction never has a gap.
 func TestWebBusyServerKeepsItsRule(t *testing.T) {
 	e := newWebEnv(t)
 	e.ensure(t, ensureReq(1, "survival", 1))
 	e.ensure(t, ensureReq(2, "creative", 1))
 	r1, r2 := webRoute(1, "survival", 8100), webRoute(2, "creative", 8200)
+	r1.Targets = append(r1.Targets, agentapi.WebTarget{Path: "afk-smoke", Port: 8101})
 	e.put(t, r1, r2)
 	e.tick(t)
+	two := rule("10.213.0.14", "10.213.0.0/28", 8100)
+	two.Ports = []uint16{8100, 8101}
+	if got := e.fw.last(); !slices.EqualFunc(got, []agentapi.WebRule{two, rule("10.213.0.30", "10.213.0.16/28", 8200)}, agentapi.WebRule.Equal) {
+		t.Fatalf("rules = %v", got)
+	}
 
 	arrived, release := e.d.Hold(dockertest.OpStop)
 	defer release()
@@ -819,8 +842,8 @@ func TestWebBusyServerKeepsItsRule(t *testing.T) {
 	if c := e.container(t, instances.WebName); !slices.Contains(c.Networks, "mcpanel-net-1") {
 		t.Fatalf("web router left the network of a busy server: %v", c.Networks)
 	}
-	want := []agentapi.WebRule{rule("10.213.0.30", "10.213.0.16/28", 8200), rule("10.213.0.14", "10.213.0.0/28", 8100)}
-	if got := e.fw.last(); !slices.Equal(got, want) {
+	want := []agentapi.WebRule{rule("10.213.0.30", "10.213.0.16/28", 8200), two}
+	if got := e.fw.last(); !slices.EqualFunc(got, want, agentapi.WebRule.Equal) {
 		t.Fatalf("rules while busy = %v, want %v", got, want)
 	}
 	release()
@@ -829,7 +852,7 @@ func TestWebBusyServerKeepsItsRule(t *testing.T) {
 	if c := e.container(t, instances.WebName); slices.Contains(c.Networks, "mcpanel-net-1") {
 		t.Fatalf("web networks after the operation = %v", c.Networks)
 	}
-	if got := e.fw.last(); !slices.Equal(got, want[:1]) {
+	if got := e.fw.last(); !slices.EqualFunc(got, want[:1], agentapi.WebRule.Equal) {
 		t.Fatalf("rules after the operation = %v", got)
 	}
 }

@@ -11,7 +11,7 @@ SELECT * FROM instances WHERE server_id = ?;
 
 -- name: ServersListInstances :many
 SELECT s.name, i.server_id, i.type, i.version, i.loader_version, i.modpack, i.java, i.memory_mib,
-       i.properties, i.desired_state, i.revision, i.created_at, i.updated_at, i.web_port
+       i.properties, i.desired_state, i.revision, i.created_at, i.updated_at
 FROM instances i JOIN servers s ON s.id = i.server_id
 ORDER BY s.name;
 
@@ -25,8 +25,17 @@ RETURNING *;
 -- name: ServersSetDesiredState :execrows
 UPDATE instances SET desired_state = ?, updated_at = ? WHERE server_id = ?;
 
--- name: ServersSetWebPort :one
-UPDATE instances SET web_port = ? WHERE server_id = ? RETURNING *;
+-- name: ServersListWebRoutes :many
+SELECT * FROM web_routes ORDER BY server_id, path;
+
+-- name: ServersListServerWebRoutes :many
+SELECT * FROM web_routes WHERE server_id = ? ORDER BY path;
+
+-- name: ServersDeleteWebRoutes :exec
+DELETE FROM web_routes WHERE server_id = ?;
+
+-- name: ServersInsertWebRoute :exec
+INSERT INTO web_routes (server_id, path, port) VALUES (?, ?, ?);
 
 -- name: ServersBumpAllRevisions :exec
 UPDATE instances SET revision = revision + 1, updated_at = ?;

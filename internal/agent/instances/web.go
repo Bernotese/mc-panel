@@ -16,9 +16,10 @@ import (
 	"github.com/Bernotese/mc-panel/internal/config"
 )
 
-// The web router mcpanel-web (web ports spec §2) is a Caddy container that serves the one
-// published HTTP port of a server under its own name. Host Caddy terminates TLS and forwards
-// to its proxy port; its ask port tells host Caddy which names may get a certificate.
+// The web router mcpanel-web (web ports spec §2) is a Caddy container that serves the
+// published HTTP ports of a server under its own name, one at the root and the others under
+// paths (web port paths spec §4). Host Caddy terminates TLS and forwards to its proxy port;
+// its ask port tells host Caddy which names may get a certificate.
 
 const (
 	WebName    = "mcpanel-web" // container
@@ -151,13 +152,21 @@ type (
 	}
 	caddyMatch struct {
 		Host  []string            `json:"host,omitempty"`
+		Path  []string            `json:"path,omitempty"`
 		Query map[string][]string `json:"query,omitempty"`
 	}
 	caddyHandler struct {
-		Handler    string          `json:"handler"`
-		Upstreams  []caddyUpstream `json:"upstreams,omitempty"`
-		StatusCode int             `json:"status_code,omitempty"`
-		Body       string          `json:"body,omitempty"`
+		Handler         string              `json:"handler"`
+		Routes          []caddyRoute        `json:"routes,omitempty"` // subroute
+		StripPathPrefix string              `json:"strip_path_prefix,omitempty"`
+		Request         *caddyHeaderOps     `json:"request,omitempty"` // headers
+		Upstreams       []caddyUpstream     `json:"upstreams,omitempty"`
+		StatusCode      int                 `json:"status_code,omitempty"`
+		Headers         map[string][]string `json:"headers,omitempty"` // static_response
+		Body            string              `json:"body,omitempty"`
+	}
+	caddyHeaderOps struct {
+		Set map[string][]string `json:"set"`
 	}
 	caddyUpstream struct {
 		Dial string `json:"dial"`
@@ -166,6 +175,43 @@ type (
 
 func staticResponse(status int, body string) caddyHandler {
 	return caddyHandler{Handler: "static_response", StatusCode: status, Body: body}
+}
+
+func reverseProxy(id int64, port int) caddyHandler {
+	return caddyHandler{Handler: "reverse_proxy", Upstreams: []caddyUpstream{{Dial: ContainerName(id) + ":" + strconv.Itoa(port)}}}
+}
+
+// webSubroutes is the subroute of one server (web port paths spec §4.2): for every path p,
+// "/p" redirects to "/p/" and "/p/*" goes to its port with the prefix stripped and named in
+// X-Forwarded-Prefix; then the root target takes every other path, or the static 404 answers
+// them. The targets are validated, so p is one segment of [a-z0-9-].
+func webSubroutes(r agentapi.WebRoute) []caddyRoute {
+	var routes []caddyRoute
+	var root *agentapi.WebTarget
+	for _, t := range r.Targets {
+		if t.Path == "" {
+			root = &t
+			continue
+		}
+		prefix := "/" + t.Path
+		redirect := staticResponse(308, "")
+		redirect.Headers = map[string][]string{"Location": {prefix + "/"}}
+		routes = append(routes,
+			caddyRoute{Match: []caddyMatch{{Path: []string{prefix}}}, Handle: []caddyHandler{redirect}, Terminal: true},
+			caddyRoute{
+				Match: []caddyMatch{{Path: []string{prefix + "/*"}}},
+				Handle: []caddyHandler{
+					{Handler: "rewrite", StripPathPrefix: prefix},
+					{Handler: "headers", Request: &caddyHeaderOps{Set: map[string][]string{"X-Forwarded-Prefix": {prefix}}}},
+					reverseProxy(r.ID, t.Port),
+				},
+				Terminal: true,
+			})
+	}
+	if root != nil {
+		return append(routes, caddyRoute{Handle: []caddyHandler{reverseProxy(r.ID, root.Port)}})
+	}
+	return append(routes, caddyRoute{Handle: []caddyHandler{staticResponse(404, webNotFoundBody)}})
 }
 
 func newCaddyServer(listen string) caddyServer {
@@ -179,9 +225,10 @@ func newCaddyServer(listen string) caddyServer {
 // and ports reach the config. trusted is the subnet of the mcpanel-web network: host
 // Caddy's requests arrive from its gateway, so their X-Forwarded-For is kept.
 //
-// The proxy server (:8080) routes each name to mcpanel-mc-<id>:<port>, answers unknown
-// names with 404 and an unreachable upstream with a static 502 page. The ask server
-// (:8081) answers 200 only when ?domain= is exactly one of the names.
+// The proxy server (:8080) routes each name through its subroute (webSubroutes) to
+// mcpanel-mc-<id>:<port>, answers unknown names with 404 and an unreachable upstream with a
+// static 502 page. The ask server (:8081) answers 200 only when ?domain= is exactly one of
+// the names.
 func RenderWebConfig(routes []agentapi.WebRoute, trusted netip.Prefix) ([]byte, error) {
 	sorted := slices.Clone(routes)
 	if sorted == nil {
@@ -200,10 +247,8 @@ func RenderWebConfig(routes []agentapi.WebRoute, trusted netip.Prefix) ([]byte, 
 	ask := newCaddyServer(":" + portNumber(webAskPort))
 	for _, r := range sorted {
 		proxy.Routes = append(proxy.Routes, caddyRoute{
-			Match: []caddyMatch{{Host: []string{r.FQDN}}},
-			Handle: []caddyHandler{{Handler: "reverse_proxy", Upstreams: []caddyUpstream{
-				{Dial: ContainerName(r.ID) + ":" + strconv.Itoa(r.Port)},
-			}}},
+			Match:    []caddyMatch{{Host: []string{r.FQDN}}},
+			Handle:   []caddyHandler{{Handler: "subroute", Routes: webSubroutes(r)}},
 			Terminal: true,
 		})
 		ask.Routes = append(ask.Routes, caddyRoute{

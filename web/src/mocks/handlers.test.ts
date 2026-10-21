@@ -352,6 +352,8 @@ describe('mock behaviour', () => {
       address: 'skyblock.mc.example.com',
       instance: { type: 'fabric', java: 'java17', properties: { motd: 'skyblock', max_players: 20 } },
       status: { state: 'creating', operation: 'pulling', desired_state: 'running' },
+      web_status: 'off',
+      web_routes: [],
     })
     const id = field(created.body, 'id') as number
     expect(field((await callApi('GET', `/servers/${id}`)).body, 'status')).toMatchObject({ state: 'running', operation: '' })
@@ -373,33 +375,89 @@ describe('mock behaviour', () => {
     expect((await callApi('PATCH', '/servers/3', { body: { memory_mib: 2048 }, csrf: me.csrf_token })).status).toBe(409)
   })
 
-  it('publishes a web port like the panel: pending, then active; admin-only fields; 409 without base domain', async () => {
+  it('publishes web routes like the panel: validated, sorted, pending then active; admin-only fields; 409 without base domain', async () => {
     const me = loginAs('admin', { sudo: true })
     const patch = (body: unknown) => callApi('PATCH', '/servers/2', { body, csrf: me.csrf_token })
-    expect(field((await patch({ web_port: 25565 })).body, 'error')).toBe('validation_failed')
-    expect((await patch({ web_port: 1023 })).status).toBe(400)
-    const published = await patch({ web_port: 8100 })
-    expect(published.body).toMatchObject({ web_status: 'pending', web_port: 8100, web_url: 'https://creative.mc.example.com', status: { restart_required: false } })
-    expect((await callApi('GET', '/servers/2')).body).toMatchObject({ web_status: 'active', web_port: 8100 })
+    const invalid = [
+      null,
+      [{ path: 'Afk', port: 8200 }],
+      [{ path: '-a', port: 8200 }],
+      [{ path: 'a'.repeat(33), port: 8200 }],
+      [{ path: '', port: 25565 }],
+      [{ path: '', port: 1023 }],
+      [{ path: '', port: 8100 }, { path: 'afk-smoke', port: 8100 }],
+      [{ path: '', port: 8100 }, { path: '', port: 8200 }],
+      Array.from({ length: 9 }, (_, i) => ({ path: `p${i}`, port: 8100 + i })),
+    ]
+    for (const web_routes of invalid) {
+      const res = await patch({ web_routes })
+      expect(res.status, JSON.stringify(web_routes)).toBe(400)
+      expect(field(res.body, 'error')).toBe('validation_failed')
+    }
+    expect(field((await patch({ web_routes: null })).body, 'message')).toBe('web_routes: must not be null')
+    // like the panel's strict decoding: the read-only url (or any other field) in an entry is a bad request
+    const withUrl = await patch({ web_routes: [{ path: '', port: 8100, url: 'https://x.example/' }] })
+    expect(withUrl.status).toBe(400)
+    expect(field(withUrl.body, 'error')).toBe('bad_request')
+    expect(db.audit.some((e) => e.action === 'server.web_routes_update')).toBe(false)
+
+    // an unsorted list is accepted and stored sorted, root first
+    const published = await patch({ web_routes: [{ path: 'afk-smoke', port: 8200 }, { path: '', port: 8100 }] })
+    expect(published.status).toBe(200)
+    expect(published.body).toMatchObject({
+      web_status: 'pending',
+      web_url: 'https://creative.mc.example.com',
+      web_routes: [
+        { path: '', port: 8100, url: 'https://creative.mc.example.com/' },
+        { path: 'afk-smoke', port: 8200, url: 'https://creative.mc.example.com/afk-smoke/' },
+      ],
+      status: { restart_required: false },
+    })
+    expect(db.audit.at(-1)).toMatchObject({
+      action: 'server.web_routes_update',
+      target: 'server:2',
+      details: { name: 'creative', old: [], new: [{ path: '', port: 8100 }, { path: 'afk-smoke', port: 8200 }] },
+    })
+    // the same list again writes no second entry
+    const audits = db.audit.length
+    await patch({ web_routes: [{ path: '', port: 8100 }, { path: 'afk-smoke', port: 8200 }] })
+    expect(db.audit.length).toBe(audits)
+    expect((await callApi('GET', '/servers/2')).body).toMatchObject({ web_status: 'active' })
+
     loginAs('alice')
     const viewer = (await callApi('GET', '/servers/2')).body as Record<string, unknown>
     expect(viewer).toMatchObject({ web_status: 'active', web_url: 'https://creative.mc.example.com' })
-    expect(viewer).not.toHaveProperty('web_port')
+    expect(viewer).not.toHaveProperty('web_routes')
+    expect(viewer).not.toHaveProperty('web_error')
+
+    // without a root route there is no web_url, the routes are still listed
     const admin = loginAs('admin', { sudo: true })
-    const off = await callApi('PATCH', '/servers/2', { body: { web_port: null }, csrf: admin.csrf_token })
-    expect(off.body).toMatchObject({ web_status: 'off' })
+    const noRoot = await callApi('PATCH', '/servers/2', { body: { web_routes: [{ path: 'afk-smoke', port: 8200 }] }, csrf: admin.csrf_token })
+    expect(noRoot.body).toMatchObject({ web_status: 'pending', web_routes: [{ path: 'afk-smoke', port: 8200, url: 'https://creative.mc.example.com/afk-smoke/' }] })
+    expect(noRoot.body).not.toHaveProperty('web_url')
+
+    // always listed for admins, also for a server without an instance
+    expect((await callApi('GET', '/servers/3')).body).toMatchObject({ web_status: 'off', web_routes: [] })
+
+    const off = await callApi('PATCH', '/servers/2', { body: { web_routes: [] }, csrf: admin.csrf_token })
+    expect(off.body).toMatchObject({ web_status: 'off', web_routes: [] })
     expect(off.body).not.toHaveProperty('web_url')
+
     db.serverSettings.base_domain = null
-    const noDomain = await callApi('PATCH', '/servers/2', { body: { web_port: 8100 }, csrf: admin.csrf_token })
+    const noDomain = await callApi('PATCH', '/servers/2', { body: { web_routes: [{ path: '', port: 8100 }] }, csrf: admin.csrf_token })
     expect(noDomain.status).toBe(409)
     expect(noDomain.body).toMatchObject({ error: 'conflict', message: 'base domain required' })
-    // admins still see the stored port while the base domain is missing
-    expect((await callApi('GET', '/servers/1')).body).toMatchObject({ web_status: 'off', web_port: 8100 })
-    expect((await callApi('GET', '/servers/1')).body).not.toHaveProperty('web_url')
+    // [] needs no base domain
+    expect((await callApi('PATCH', '/servers/2', { body: { web_routes: [] }, csrf: admin.csrf_token })).status).toBe(200)
+    // admins still see the stored routes (without url) while the base domain is missing
+    const stored = (await callApi('GET', '/servers/1')).body
+    expect(stored).toMatchObject({ web_status: 'off', web_routes: [{ path: '', port: 8100 }] })
+    expect(stored).not.toHaveProperty('web_url')
+    expect((stored as { web_routes: object[] }).web_routes[0]).not.toHaveProperty('url')
     // a new base domain changes the route list: pending first, active after the agent confirmed
     await callApi('PUT', '/servers/settings', { body: { base_domain: 'play.example.org' }, csrf: admin.csrf_token })
     const after = (await callApi('PATCH', '/servers/1', { body: {}, csrf: admin.csrf_token })).body
-    expect(after).toMatchObject({ web_status: 'pending', web_url: 'https://survival.play.example.org' })
+    expect(after).toMatchObject({ web_status: 'pending', web_url: 'https://survival.play.example.org', web_routes: [{ url: 'https://survival.play.example.org/' }] })
     expect((await callApi('GET', '/servers/1')).body).toMatchObject({ web_status: 'active' })
   })
 

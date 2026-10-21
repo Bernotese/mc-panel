@@ -1748,13 +1748,31 @@ components:
         instance: { anyOf: [{ $ref: '#/components/schemas/InstanceConfig' }, { type: 'null' }] }
         status: { $ref: '#/components/schemas/ServerStatus' }
         down_alerts: { type: [boolean, 'null'], description: 'Down/crash-loop alerts for this server (TP5); admins only, null for other users' }
-        web_url: { type: string, format: uri, description: 'https://<name>.<base_domain> when a web port is published and a base domain is set; absent otherwise' }
+        web_url: { type: string, format: uri, description: 'https://<name>.<base_domain> when a root web route (path "") exists and a base domain is set; absent otherwise. Visible to everyone who sees the server.' }
         web_status:
           type: string
           enum: ['off', pending, active, error]
-          description: 'off: no web port (or no base domain); pending: not yet applied by the agent; active: the route is live (the plugin itself may still answer 502); error: see web_error'
-        web_port: { type: integer, minimum: 1024, maximum: 65535, description: 'Stored web port inside the container; admins only, absent when none is stored (also shown while web_status is off for lack of a base domain)' }
+          description: 'One status for all web routes of the server (the agent applies them all or nothing). off: no web routes (or no base domain); pending: not yet applied by the agent; active: the routes are live (a mod itself may still answer 502); error: see web_error'
+        web_routes:
+          type: array
+          maxItems: 8
+          items: { $ref: '#/components/schemas/WebRoute' }
+          description: 'Stored web routes, sorted by path (root first); admins only, absent for other users. [] when none are stored; also listed while web_status is off for lack of a base domain.'
         web_error: { type: string, description: "The agent's reason for web_status error, sanitized like last_error; admins only, absent when there is none" }
+    WebRoute:
+      type: object
+      required: [path, port]
+      properties:
+        path: { type: string, pattern: '^([a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?)?$', description: '"" = the root (https://<fqdn>/); otherwise one segment published at https://<fqdn>/<path>/, with the prefix stripped before forwarding' }
+        port: { type: integer, minimum: 1024, maximum: 65535, description: 'Port inside the container; not 25565 or 25575' }
+        url: { type: string, format: uri, readOnly: true, description: 'https://<fqdn>/ or https://<fqdn>/<path>/; absent without a base domain' }
+    WebRouteInput:
+      type: object
+      additionalProperties: false
+      required: [path, port]
+      properties:
+        path: { type: string, pattern: '^([a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?)?$', description: '"" = the root; otherwise 1-32 characters of [a-z0-9-], first and last a letter or digit' }
+        port: { type: integer, minimum: 1024, maximum: 65535, description: 'Port inside the container; not 25565 or 25575' }
     CreateServerRequest:
       type: object
       additionalProperties: false
@@ -1780,11 +1798,11 @@ components:
         java: { $ref: '#/components/schemas/JavaVersion' }
         memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256, description: 'At most max_mib of GET /servers/memory on this host' }
         properties: { $ref: '#/components/schemas/ServerProperties' }
-        web_port:
-          type: [integer, 'null']
-          minimum: 1024
-          maximum: 65535
-          description: 'Publish this port of the container under https://<name>.<base_domain> (not 25565 or 25575); null turns it off. Admin and sudo; 409 conflict without a base domain. Does not bump revision.'
+        web_routes:
+          type: array
+          maxItems: 8
+          items: { $ref: '#/components/schemas/WebRouteInput' }
+          description: 'The complete list of web routes to publish under https://<name>.<base_domain>; [] turns publishing off. Paths and ports unique, at most one root (path ""). Any order: the panel sorts by path before validating. Admin and sudo; 409 conflict without a base domain unless the list is empty. Does not bump revision.'
     PowerRequest:
       type: object
       required: [action]

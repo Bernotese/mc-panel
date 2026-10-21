@@ -18,11 +18,11 @@ const (
 	webPending = string(agentapi.WebPending)
 )
 
-// errBaseDomainRequired answers a web port without base domain (409 conflict).
+// errBaseDomainRequired answers web routes without base domain (409 conflict).
 const errBaseDomainRequired = "base domain required"
 
 // webEntry is the agent's last answer for one route, together with the route it answered:
-// a status for another fqdn or port (base domain or port changed since) is no status.
+// a status for another fqdn or target list (base domain or routes changed since) is no status.
 type webEntry struct {
 	route  agentapi.WebRoute
 	status agentapi.WebRouteStatus
@@ -47,17 +47,36 @@ func (s *webState) snapshot() map[int64]webEntry {
 	return maps.Clone(s.byID)
 }
 
-// webRoutes builds the complete desired list (spec §3.3) from the instance rows and the
-// base domain: every row with web_port set, fqdn = name + "." + baseDomain; empty (never
-// nil) when baseDomain is "". Sorted by id.
-func webRoutes(rows []store.ServersListInstancesRow, baseDomain string) []agentapi.WebRoute {
+// webTargetsByServer groups the web_routes rows (ordered by server_id, path) per server,
+// keeping the order: root first, then by path (web port paths spec §2).
+func webTargetsByServer(rows []store.WebRoute) map[int64][]agentapi.WebTarget {
+	out := make(map[int64][]agentapi.WebTarget)
+	for _, r := range rows {
+		out[r.ServerID] = append(out[r.ServerID], agentapi.WebTarget{Path: r.Path, Port: int(r.Port)})
+	}
+	return out
+}
+
+// webTargets converts the rows of one server (ordered by path).
+func webTargets(rows []store.WebRoute) []agentapi.WebTarget {
+	out := make([]agentapi.WebTarget, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, agentapi.WebTarget{Path: r.Path, Port: int(r.Port)})
+	}
+	return out
+}
+
+// webRoutes builds the complete desired list (spec §3.3) from the instance rows, their web
+// routes and the base domain: one route per instance with at least one web route, fqdn =
+// name + "." + baseDomain; empty (never nil) when baseDomain is "". Sorted by id.
+func webRoutes(rows []store.ServersListInstancesRow, routes map[int64][]agentapi.WebTarget, baseDomain string) []agentapi.WebRoute {
 	out := []agentapi.WebRoute{}
 	if baseDomain == "" {
 		return out
 	}
 	for _, r := range rows {
-		if r.WebPort.Valid {
-			out = append(out, agentapi.WebRoute{ID: r.ServerID, FQDN: r.Name + "." + baseDomain, Port: int(r.WebPort.Int64)})
+		if ts := routes[r.ServerID]; len(ts) > 0 {
+			out = append(out, agentapi.WebRoute{ID: r.ServerID, FQDN: r.Name + "." + baseDomain, Targets: ts})
 		}
 	}
 	slices.SortFunc(out, func(a, b agentapi.WebRoute) int { return cmp.Compare(a.ID, b.ID) })
@@ -81,12 +100,17 @@ func (h *Handler) syncWeb(ctx context.Context) {
 		h.log.Error("servers: web routes: list instances", "err", err)
 		return
 	}
+	targets, err := h.q.ServersListWebRoutes(ctx)
+	if err != nil {
+		h.log.Error("servers: web routes: list routes", "err", err)
+		return
+	}
 	set, err := h.q.ServersGetSettings(ctx)
 	if err != nil {
 		h.log.Error("servers: web routes: load settings", "err", err)
 		return
 	}
-	routes := webRoutes(rows, set.BaseDomain.String)
+	routes := webRoutes(rows, webTargetsByServer(targets), set.BaseDomain.String)
 	resp, err := h.web.WebRoutes(ctx, agentapi.WebRoutesRequest{Routes: routes})
 	if err != nil && ctx.Err() != nil {
 		return // our own context ended: that says nothing about the agent
@@ -121,24 +145,45 @@ func (h *Handler) syncWeb(ctx context.Context) {
 	h.webs.set(byID)
 }
 
-// applyWebView fills the web fields of out (redactFor removes web_port and web_error for
-// non-admins). The status is off without web port or base domain, otherwise the agent's
-// answer for exactly this route, pending until there is one.
-func applyWebView(out *serverJSON, name string, in *store.Instance, baseDomain *string, web map[int64]webEntry) {
+// webRouteURL is the public URL of one target: https://<fqdn>/ or https://<fqdn>/<path>/.
+func webRouteURL(fqdn, path string) string {
+	if path == "" {
+		return "https://" + fqdn + "/"
+	}
+	return "https://" + fqdn + "/" + path + "/"
+}
+
+// applyWebView fills the web fields of out (redactFor removes web_routes and web_error for
+// non-admins). routes are the server's stored web routes, root first. The status is off
+// without routes or base domain, otherwise the agent's answer for exactly this route list,
+// pending until there is one. web_url is the root's link and absent without a root route.
+func applyWebView(out *serverJSON, name string, in *store.Instance, routes []agentapi.WebTarget, baseDomain *string, web map[int64]webEntry) {
 	out.WebStatus = webOff
-	if in == nil || !in.WebPort.Valid {
+	var fqdn string
+	if baseDomain != nil {
+		fqdn = name + "." + *baseDomain
+	}
+	// The stored routes, also while they are off for want of a base domain (then without url).
+	list := make([]webRouteJSON, 0, len(routes))
+	for _, t := range routes {
+		j := webRouteJSON{Path: t.Path, Port: t.Port}
+		if baseDomain != nil {
+			u := webRouteURL(fqdn, t.Path)
+			j.URL = &u
+		}
+		list = append(list, j)
+	}
+	out.WebRoutes = &list
+	if in == nil || len(routes) == 0 || baseDomain == nil {
 		return
 	}
-	port := int(in.WebPort.Int64)
-	out.WebPort = &port // the stored setting, also while it is off for want of a base domain
-	if baseDomain == nil {
-		return
+	if routes[0].Path == "" {
+		url := "https://" + fqdn
+		out.WebURL = &url
 	}
-	route := agentapi.WebRoute{ID: in.ServerID, FQDN: name + "." + *baseDomain, Port: port}
-	url := "https://" + route.FQDN
-	out.WebURL = &url
+	route := agentapi.WebRoute{ID: in.ServerID, FQDN: fqdn, Targets: routes}
 	out.WebStatus = webPending
-	if e, ok := web[in.ServerID]; ok && e.route == route {
+	if e, ok := web[in.ServerID]; ok && e.route.Equal(route) {
 		out.WebStatus = string(e.status.Status)
 		if e.status.Status == agentapi.WebError {
 			out.WebError = e.status.Error
@@ -146,10 +191,10 @@ func applyWebView(out *serverJSON, name string, in *store.Instance, baseDomain *
 	}
 }
 
-// webPortDetails is the audit value of a web port (number or null).
-func webPortDetails(p *int) any {
-	if p == nil {
-		return nil
+// webRoutesDetails is the audit value of a route list: [{path, port}], never null.
+func webRoutesDetails(ts []agentapi.WebTarget) []agentapi.WebTarget {
+	if ts == nil {
+		return []agentapi.WebTarget{}
 	}
-	return *p
+	return ts
 }

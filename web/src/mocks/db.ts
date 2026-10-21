@@ -120,8 +120,8 @@ export interface MockServer {
   revision: number // desired revision
   runningRevision: number // revision of the "running container"
   players: MockPlayers
-  /** Published web port (web ports spec §3); absent or null = off. */
-  webPort?: number | null
+  /** Published web routes (web port paths spec §3), sorted by path, root first; absent or [] = off. */
+  webRoutes?: { path: string; port: number }[]
   /** The agent's answer for the route: pending until the next GET, like the reconcile after a change. */
   webState?: 'pending' | 'active' | 'error'
   webError?: string
@@ -605,7 +605,7 @@ function seed(now: number): MockDb {
         status: runningStatus(4096, now - 2 * HOUR, Math.round(2.1 * GIB), 12.5),
         revision: 1,
         runningRevision: 1,
-        webPort: 8100,
+        webRoutes: [{ path: '', port: 8100 }],
         webState: 'active',
         players: {
           online: [

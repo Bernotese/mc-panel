@@ -46,7 +46,7 @@ const (
 const webRecheck = 1500 * time.Millisecond
 
 // WebFilter is the bridge port restriction of mcpanel-web (firewall.Backend): for every rule,
-// mcpanel-web at Source may open TCP connections to Port in Dest, and nothing else from Source.
+// mcpanel-web at Source may open TCP connections to Ports in Dest, and nothing else from Source.
 type WebFilter interface {
 	SetWebRules(ctx context.Context, rules []agentapi.WebRule) error
 	WebRulesInPlace(ctx context.Context, rules []agentapi.WebRule) (bool, error)
@@ -76,7 +76,7 @@ func (m *Manager) SetWebRoutes(ctx context.Context, req agentapi.WebRoutesReques
 	m.webDesired = append([]agentapi.WebRoute{}, req.Routes...) // never nil: a list was received
 	for _, r := range req.Routes {
 		st, ok := m.webStatus[r.ID]
-		if ok && st.route == r {
+		if ok && st.route.Equal(r) {
 			resp.Routes = append(resp.Routes, st.status)
 		} else {
 			resp.Routes = append(resp.Routes, agentapi.WebRouteStatus{ID: r.ID, Status: agentapi.WebPending})
@@ -167,7 +167,7 @@ func (m *Manager) applyWebLocked(ctx context.Context) (pending bool) {
 			if st.Status == agentapi.WebError {
 				m.log.Warn("web route not applied", "id", r.ID, "fqdn", r.FQDN, "err", st.Error)
 			} else {
-				m.log.Info("web route", "id", r.ID, "fqdn", r.FQDN, "port", r.Port, "status", st.Status)
+				m.log.Info("web route", "id", r.ID, "fqdn", r.FQDN, "targets", r.Targets, "status", st.Status)
 			}
 		}
 	}
@@ -235,7 +235,7 @@ func (m *Manager) setWebRules(ctx context.Context, rules []agentapi.WebRule) err
 	if rules == nil {
 		rules = []agentapi.WebRule{}
 	}
-	if m.webRules != nil && slices.Equal(rules, m.webRules) {
+	if m.webRules != nil && slices.EqualFunc(rules, m.webRules, agentapi.WebRule.Equal) {
 		ok, err := m.web.WebRulesInPlace(ctx, rules)
 		if err != nil {
 			return err
@@ -305,15 +305,15 @@ func (m *Manager) applyWebRoutes(ctx context.Context, desired []agentapi.WebRout
 	if exists {
 		stay = m.disconnectWeb(ctx, info.NetworkSettings, byID, targets, false)
 	}
-	// 5. The port restriction: a rule for every target, and the old rule for every network
-	// mcpanel-web is still on (busy server, failed disconnect) until it is gone.
+	// 5. The port restriction: a rule for every target, and the old rule (all its ports) for
+	// every network mcpanel-web is still on (busy server, failed disconnect) until it is gone.
 	rules := make([]agentapi.WebRule, 0, len(targets)+len(stay))
 	for _, t := range targets {
 		rules = append(rules, t.rule)
 	}
 	for _, n := range stay {
 		for _, r := range m.webRules {
-			if slices.Contains(n.Subnets, r.Dest) && !slices.Contains(rules, r) {
+			if slices.Contains(n.Subnets, r.Dest) && !slices.ContainsFunc(rules, r.Equal) {
 				rules = append(rules, r)
 			}
 		}
@@ -437,9 +437,19 @@ func (m *Manager) webTargets(ctx context.Context, desired []agentapi.WebRoute, f
 			continue
 		}
 		targets = append(targets, webTarget{route: r, network: n.Name,
-			rule: agentapi.WebRule{Source: addr, Dest: n.Subnets[0].Masked(), Port: uint16(r.Port)}}) //nolint:gosec // G115: Validate keeps the port in 1024..65535
+			rule: agentapi.WebRule{Source: addr, Dest: n.Subnets[0].Masked(), Ports: webPorts(r)}})
 	}
 	return targets, byID, nil
+}
+
+// webPorts is the sorted port set of a route's targets.
+func webPorts(r agentapi.WebRoute) []uint16 {
+	ports := make([]uint16, 0, len(r.Targets))
+	for _, t := range r.Targets {
+		ports = append(ports, uint16(t.Port)) //nolint:gosec // G115: Validate keeps the port in 1024..65535
+	}
+	slices.Sort(ports)
+	return ports
 }
 
 // disconnectWeb takes mcpanel-web off every server network it is on (mc-panel's own
@@ -551,7 +561,7 @@ func (m *Manager) checkWeb(ctx context.Context, ready []webTarget, prev map[int6
 		st := webRouteState{route: t.route}
 		switch p, had := prev[t.route.ID]; {
 		case ok:
-		case had && p.route == t.route && !restarted && !p.unconfirmed.IsZero():
+		case had && p.route.Equal(t.route) && !restarted && !p.unconfirmed.IsZero():
 			st.unconfirmed = p.unconfirmed
 		default:
 			st.unconfirmed = now

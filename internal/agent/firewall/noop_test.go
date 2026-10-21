@@ -168,7 +168,7 @@ func TestNoopConcurrent(t *testing.T) {
 func TestNoopWebRules(t *testing.T) {
 	fw, _ := newNoop(t)
 	ctx := context.Background()
-	rules := []agentapi.WebRule{{Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Port: 8100}}
+	rules := []agentapi.WebRule{{Source: netip.MustParseAddr("172.30.1.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Ports: []uint16{8100}}}
 	if err := fw.SetWebRules(ctx, rules); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestNoopWebRules(t *testing.T) {
 	if err := fw.SetWebRules(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
-	bad := []agentapi.WebRule{{Source: netip.MustParseAddr("172.30.2.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Port: 8100}}
+	bad := []agentapi.WebRule{{Source: netip.MustParseAddr("172.30.2.2"), Dest: netip.MustParsePrefix("172.30.1.0/24"), Ports: []uint16{8100}}}
 	if err := fw.SetWebRules(ctx, bad); !errors.Is(err, firewall.ErrInvalidWebRule) {
 		t.Fatalf("SetWebRules(source outside dest) = %v, want ErrInvalidWebRule", err)
 	}

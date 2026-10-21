@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Bernotese/mc-panel/internal/store"
@@ -106,42 +108,72 @@ func TestInstanceSettingsRow(t *testing.T) {
 	}
 }
 
-func TestInstanceWebPort(t *testing.T) {
+func TestWebRoutes(t *testing.T) {
 	db := storetest.Open(t)
 	q := store.New(db)
 	ctx := context.Background()
 	sid := storetest.CreateServer(t, db, "survival")
+	other := storetest.CreateServer(t, db, "creative")
 	in := createInstance(t, q, sid)
-	if in.WebPort.Valid {
-		t.Fatalf("new instance has web port %+v", in.WebPort)
+	createInstance(t, q, other)
+
+	insert := func(server int64, path string, port int64) error {
+		return q.ServersInsertWebRoute(ctx, store.ServersInsertWebRouteParams{ServerID: server, Path: path, Port: port})
+	}
+	for _, r := range []store.WebRoute{{ServerID: sid, Path: "afk-smoke", Port: 8200}, {ServerID: other, Path: "map", Port: 8100}, {ServerID: sid, Path: "", Port: 8100}} {
+		if err := insert(r.ServerID, r.Path, r.Port); err != nil {
+			t.Fatalf("insert %+v: %v", r, err)
+		}
+	}
+	all, err := q.ServersListWebRoutes(ctx)
+	want := []store.WebRoute{{ServerID: sid, Path: "", Port: 8100}, {ServerID: sid, Path: "afk-smoke", Port: 8200}, {ServerID: other, Path: "map", Port: 8100}}
+	if err != nil || !slices.Equal(all, want) {
+		t.Fatalf("all = %+v, %v; want %+v", all, err, want)
+	}
+	one, err := q.ServersListServerWebRoutes(ctx, sid)
+	if err != nil || !slices.Equal(one, want[:2]) {
+		t.Fatalf("server = %+v, %v", one, err)
+	}
+	if got, err := q.ServersGetInstance(ctx, sid); err != nil || got.Revision != in.Revision || got.UpdatedAt != in.UpdatedAt {
+		t.Fatalf("routes changed the instance: %+v, %v", got, err)
 	}
 
-	got, err := q.ServersSetWebPort(ctx, store.ServersSetWebPortParams{WebPort: sql.NullInt64{Int64: 8100, Valid: true}, ServerID: sid})
-	if err != nil || got.WebPort.Int64 != 8100 || !got.WebPort.Valid {
-		t.Fatalf("set 8100 = %+v, %v", got, err)
-	}
-	if got.Revision != in.Revision || got.UpdatedAt != in.UpdatedAt {
-		t.Fatalf("web port changed revision/updated_at: %+v", got)
-	}
-	list, err := q.ServersListInstances(ctx)
-	if err != nil || len(list) != 1 || list[0].WebPort.Int64 != 8100 {
-		t.Fatalf("list = %+v, %v", list, err)
-	}
-	for _, p := range []int64{80, 1023, 25565, 25575, 65536} {
-		if _, err := q.ServersSetWebPort(ctx, store.ServersSetWebPortParams{WebPort: sql.NullInt64{Int64: p, Valid: true}, ServerID: sid}); err == nil {
-			t.Errorf("web port %d accepted", p)
+	// The CHECKs of the path and port rules (web port paths spec §2), unique paths and ports.
+	for _, tc := range []struct {
+		path string
+		port int64
+	}{
+		{"Afk", 8300}, {"-a", 8300}, {"a-", 8300}, {"a/b", 8300}, {"a.b", 8300}, {"a_b", 8300},
+		{strings.Repeat("a", 33), 8300}, {"x", 25565}, {"x", 25575}, {"x", 1023}, {"x", 65536},
+		{"x", 8200}, {"afk-smoke", 8300},
+	} {
+		if err := insert(sid, tc.path, tc.port); err == nil {
+			t.Errorf("route %q %d accepted", tc.path, tc.port)
 		}
 	}
-	for _, p := range []int64{1024, 25566, 65535} {
-		if _, err := q.ServersSetWebPort(ctx, store.ServersSetWebPortParams{WebPort: sql.NullInt64{Int64: p, Valid: true}, ServerID: sid}); err != nil {
-			t.Errorf("web port %d: %v", p, err)
+	for _, tc := range []struct {
+		path string
+		port int64
+	}{{"0", 1024}, {strings.Repeat("a", 32), 65535}, {"a-b", 25566}} {
+		if err := insert(sid, tc.path, tc.port); err != nil {
+			t.Errorf("route %q %d: %v", tc.path, tc.port, err)
 		}
 	}
-	got, err = q.ServersSetWebPort(ctx, store.ServersSetWebPortParams{ServerID: sid})
-	if err != nil || got.WebPort.Valid {
-		t.Fatalf("set NULL = %+v, %v", got, err)
+	if err := insert(sid+100, "", 8100); err == nil {
+		t.Error("route of an unknown server accepted")
 	}
-	if _, err := q.ServersSetWebPort(ctx, store.ServersSetWebPortParams{ServerID: sid + 100}); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("unknown server: %v", err)
+
+	if err := q.ServersDeleteWebRoutes(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := q.ServersListServerWebRoutes(ctx, other); err != nil || len(got) != 0 || got == nil {
+		t.Fatalf("after delete = %#v, %v", got, err)
+	}
+	// Deleting the server removes its routes.
+	if _, err := q.RbacDeleteServer(ctx, sid); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := q.ServersListWebRoutes(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("after server delete = %+v, %v", got, err)
 	}
 }
