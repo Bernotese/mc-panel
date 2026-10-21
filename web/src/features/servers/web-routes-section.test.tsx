@@ -7,8 +7,8 @@ import { renderServerTab } from '@/test/render-section'
 import { ServerSettingsTab } from './server-settings-tab'
 
 const SECTION = 'Weboberflächen'
-const ROOT_SWITCH = 'Am Stamm veröffentlichen'
-const ROOT_PORT = 'Port im Container am Stamm'
+const ROOT_SWITCH = 'Unter der Hauptadresse veröffentlichen'
+const ROOT_PORT = 'Port im Container für die Hauptadresse'
 const ADD = 'Port hinzufügen'
 const SAVE = 'Weboberflächen speichern'
 
@@ -46,7 +46,7 @@ describe('WebRoutesSection', () => {
     expect(within(s).getByText('Aus')).toBeInTheDocument()
     expect(within(s).getByText(/accept-download: true/)).toBeInTheDocument()
     expect(within(s).getByText(/Unter einem Pfad wird das Präfix entfernt, bevor die Anfrage den Mod erreicht/)).toBeInTheDocument()
-    expect(within(s).getByText(/Apps, die ihre Dateien absolut verlinken, funktionieren nur am Stamm/)).toBeInTheDocument()
+    expect(within(s).getByText(/Apps, die ihre Dateien absolut verlinken, funktionieren nur unter der Hauptadresse/)).toBeInTheDocument()
     expect(within(s).getByRole('button', { name: SAVE })).toBeDisabled()
     const danger = screen.getByRole('region', { name: 'Server löschen' })
     expect(s.compareDocumentPosition(danger) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
