@@ -422,7 +422,7 @@ export const de = {
       large_biomes: 'Große Biome',
       amplified: 'Zerklüftet',
     },    restart: {
-      description: 'Geänderte Einstellungen werden erst nach einem Neustart aktiv. Spieler werden dabei kurz getrennt.',
+      description: 'Geänderte Einstellungen oder ein Panel-Update werden erst nach einem Neustart aktiv. Spieler werden dabei kurz getrennt.',
       now: 'Jetzt neu starten',
     },
     operation: {

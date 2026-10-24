@@ -76,21 +76,26 @@ func TestDeriveStatusTable(t *testing.T) {
 func TestRestartRequired(t *testing.T) {
 	in := &store.Instance{ServerID: 1, DesiredState: desiredRunning, Revision: 3}
 	for _, tc := range []struct {
-		state agentapi.ContainerState
-		rev   int64
-		want  bool
+		state    agentapi.ContainerState
+		rev      int64
+		outdated bool // template_outdated (F10)
+		want     bool
 	}{
-		{agentapi.StateRunning, 2, true},
-		{agentapi.StateRestarting, 2, true},
-		{agentapi.StateRunning, 3, false},
-		{agentapi.StateExited, 2, false},
-		{agentapi.StateCreated, 1, false},
+		{agentapi.StateRunning, 2, false, true},
+		{agentapi.StateRestarting, 2, false, true},
+		{agentapi.StateRunning, 3, false, false},
+		{agentapi.StateExited, 2, false, false},
+		{agentapi.StateCreated, 1, false, false},
+		{agentapi.StateRunning, 3, true, true},
+		{agentapi.StateRestarting, 3, true, true},
+		{agentapi.StateExited, 3, true, false},
+		{agentapi.StateCreated, 3, true, false},
 	} {
 		snap := Snapshot{Reachable: true, Docker: agentapi.DockerOK, Instances: map[int64]agentapi.InstanceStatus{
-			1: {ID: 1, Name: "survival", Revision: tc.rev, State: tc.state},
+			1: {ID: 1, Name: "survival", Revision: tc.rev, State: tc.state, TemplateOutdated: tc.outdated},
 		}}
 		if got := deriveStatus("survival", in, snap).RestartRequired; got != tc.want {
-			t.Errorf("%s rev %d: restart_required %t, want %t", tc.state, tc.rev, got, tc.want)
+			t.Errorf("%s rev %d outdated %t: restart_required %t, want %t", tc.state, tc.rev, tc.outdated, got, tc.want)
 		}
 	}
 }

@@ -112,6 +112,9 @@ type InstanceStatus struct {
 	CPUPercent       float64        `json:"cpu_percent"`
 	Operation        Operation      `json:"operation"`
 	LastError        string         `json:"last_error"`
+	// TemplateOutdated: the container was created from another template than this agent
+	// would create now (agent upgrade or host settings); a recreate replaces it.
+	TemplateOutdated bool `json:"template_outdated"`
 }
 
 type RouterStatus struct {
