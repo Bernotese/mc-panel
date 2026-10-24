@@ -25,7 +25,7 @@ func TestAdminSetPasswordForcesChange(t *testing.T) {
 		t.Fatal("flag not set")
 	}
 	en := e.rec.Entries[len(e.rec.Entries)-1]
-	if en.Action != audit.ActionUserUpdate || en.Details["must_change_password"] != true {
+	if forced, _ := en.Details["must_change_password"].(bool); en.Action != audit.ActionUserUpdate || !forced {
 		t.Fatalf("audit = %+v", en)
 	}
 
@@ -74,7 +74,7 @@ func TestCreateUserForcesChange(t *testing.T) {
 		t.Fatal("flag not set")
 	}
 	en := e.rec.Entries[len(e.rec.Entries)-1]
-	if en.Action != audit.ActionUserCreate || en.Details["must_change_password"] != true {
+	if forced, _ := en.Details["must_change_password"].(bool); en.Action != audit.ActionUserCreate || !forced {
 		t.Fatalf("audit = %+v", en)
 	}
 	list := decode[[]userResp](t, e.do(http.MethodGet, "/users", nil, &admin))
