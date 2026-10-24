@@ -24,6 +24,11 @@ agent -X POST http://agent/v1/instances/power -d '{"id": 9001, "action": "start"
 running() { [ "$(status_field 'i["state"]')" = running ]; }
 wait_for 120 "container running" running
 echo "OK: container running"
+# F10: a container the agent just created carries its current template.
+[ "$(status_field 'i["template_outdated"]')" = False ] || fail "fresh container reported template_outdated: $(status_field i)"
+[ "$(docker inspect -f '{{index .Config.Labels "mcpanel.type"}}/{{index .Config.Labels "mcpanel.java"}}' mcpanel-mc-9001)" = paper/java21 ] ||
+  fail "type/java labels missing on mcpanel-mc-9001"
+echo "OK: template label current"
 
 grep -q '"citest.mc.localhost"' "$routes" || fail "route missing in $routes"
 grep -q '"mcpanel-mc-9001:25565"' "$routes" || fail "route target missing in $routes"

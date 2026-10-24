@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/netip"
 	"os"
@@ -650,5 +651,131 @@ func TestStatusReportsRestartCount(t *testing.T) {
 	e.d.SetRestartCount("mcpanel-mc-1", 3)
 	if s := e.status(t, 1); s.RestartCount != 3 {
 		t.Fatalf("restart_count = %d, want 3", s.RestartCount)
+	}
+}
+
+// host is the template host of this env's manager.
+func (e *env) host() instances.Host {
+	return instances.Host{InstancesDir: e.dir, UID: os.Getuid(), GID: os.Getgid(), Images: config.DefaultImages()}
+}
+
+// addInstance seeds a managed container in revision 3 with the template of this agent and
+// the given extra labels (InstanceContainer alone sets no template, type or java label).
+func (e *env) addInstance(t *testing.T, id int64, running bool, labels map[string]string) dockertest.Container {
+	t.Helper()
+	cfg, err := instances.InstanceContainer(e.host(), ensureReq(id, "survival", 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	maps.Copy(cfg.Labels, labels)
+	return e.d.AddContainer(instances.ContainerName(id), cfg, running)
+}
+
+// TestTemplateHashStableAcrossEnsureAndStatus: a container the agent just created is never
+// outdated, even with a Customize hook (which the hash must not see).
+func TestTemplateHashStableAcrossEnsureAndStatus(t *testing.T) {
+	e := newEnv(t, func(c *instances.Config) {
+		c.Customize = func(name string, cfg *docker.ContainerConfig) {
+			if strings.HasPrefix(name, instances.ContainerPrefix) {
+				cfg.Env = append(cfg.Env, "TEST=1")
+			}
+		}
+	})
+	e.ensure(t, ensureReq(1, "survival", 1))
+	e.power(t, 1, agentapi.PowerStart)
+	want, err := instances.InstanceTemplateHash(e.host(), 1, instancespec.TypePaper, instancespec.Java21)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := e.container(t, "mcpanel-mc-1").Config.Labels
+	if l["mcpanel.template"] != want || l["mcpanel.type"] != "paper" || l["mcpanel.java"] != "java21" {
+		t.Fatalf("labels = %v, want template %s", l, want)
+	}
+	if s := e.status(t, 1); s.TemplateOutdated || s.State != agentapi.StateRunning {
+		t.Fatalf("fresh container: status = %+v", s)
+	}
+}
+
+// TestStatusTemplateOutdatedWithoutLabel: containers of an older agent (no template label),
+// with another template or with an unknown type are outdated.
+func TestStatusTemplateOutdatedWithoutLabel(t *testing.T) {
+	e := newEnv(t)
+	current, err := instances.InstanceTemplateHash(e.host(), 1, instancespec.TypePaper, instancespec.Java21)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := strings.Repeat("0", 64)
+	for _, tc := range []struct {
+		name   string
+		labels map[string]string
+		want   bool
+	}{
+		{"current", map[string]string{"mcpanel.template": current, "mcpanel.type": "paper", "mcpanel.java": "java21"}, false},
+		{"before F10", nil, true},
+		{"no template label", map[string]string{"mcpanel.type": "paper", "mcpanel.java": "java21"}, true},
+		{"wrong hash", map[string]string{"mcpanel.template": wrong, "mcpanel.type": "paper", "mcpanel.java": "java21"}, true},
+		{"unknown type", map[string]string{"mcpanel.template": current, "mcpanel.type": "bukkit", "mcpanel.java": "java21"}, true},
+		{"other java", map[string]string{"mcpanel.template": current, "mcpanel.type": "paper", "mcpanel.java": "java25"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e.addInstance(t, 1, true, tc.labels)
+			if s := e.status(t, 1); s.TemplateOutdated != tc.want {
+				t.Fatalf("template_outdated = %v, want %v", s.TemplateOutdated, tc.want)
+			}
+			e.do(t, func(ctx context.Context) error { return e.m.Remove(ctx, 1) })
+		})
+	}
+}
+
+// TestEnsureRecreatesOutdatedTemplateSameRevision: recreate with the container's own revision
+// replaces an outdated template (and starts it again if it ran); without recreate or with an
+// older revision nothing happens.
+func TestEnsureRecreatesOutdatedTemplateSameRevision(t *testing.T) {
+	e := newEnv(t)
+	before := e.addInstance(t, 1, true, map[string]string{
+		"mcpanel.template": strings.Repeat("0", 64), "mcpanel.type": "paper", "mcpanel.java": "java21",
+	})
+	if s := e.status(t, 1); !s.TemplateOutdated || s.Revision != 3 {
+		t.Fatalf("seeded status = %+v", s)
+	}
+	for _, req := range []agentapi.EnsureRequest{ensureReq(1, "survival", 3), ensureReq(1, "survival", 2)} {
+		req.Recreate = req.Revision == 2
+		e.ensure(t, req)
+		if c := e.container(t, "mcpanel-mc-1"); c.ID != before.ID || c.Status != "running" {
+			t.Fatalf("ensure revision %d recreate %v touched the container: %+v", req.Revision, req.Recreate, c)
+		}
+	}
+
+	mark := len(e.d.Calls())
+	req := ensureReq(1, "survival", 3)
+	req.Recreate = true
+	e.ensure(t, req)
+	c := e.container(t, "mcpanel-mc-1")
+	if c.ID == before.ID || c.Status != "running" || c.Config.Labels["mcpanel.revision"] != "3" {
+		t.Fatalf("outdated template not recreated: %+v", c)
+	}
+	if got, want := e.lifecycleCalls(mark, "mcpanel-mc-1"), []string{"stop mcpanel-mc-1", "remove mcpanel-mc-1", "create mcpanel-mc-1", "start mcpanel-mc-1"}; !slices.Equal(got, want) {
+		t.Fatalf("lifecycle = %v, want %v", got, want)
+	}
+	if s := e.status(t, 1); s.TemplateOutdated {
+		t.Fatalf("recreated container still outdated: %+v", s)
+	}
+
+	e.ensure(t, req) // current template: recreate is a no-op now
+	if again := e.container(t, "mcpanel-mc-1"); again.ID != c.ID {
+		t.Fatal("current container recreated again")
+	}
+}
+
+// TestEnsureRecreatesStoppedOutdatedTemplate: a stopped container stays stopped.
+func TestEnsureRecreatesStoppedOutdatedTemplate(t *testing.T) {
+	e := newEnv(t)
+	before := e.addInstance(t, 1, false, nil)
+	req := ensureReq(1, "survival", 3)
+	req.Recreate = true
+	e.ensure(t, req)
+	c := e.container(t, "mcpanel-mc-1")
+	if c.ID == before.ID || c.Status == "running" || c.Config.Labels["mcpanel.template"] == "" {
+		t.Fatalf("stopped outdated container = %+v", c)
 	}
 }

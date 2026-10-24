@@ -77,6 +77,46 @@ func TestReconcileTable(t *testing.T) {
 	}
 }
 
+// TestDecideRecreatesOutdatedTemplate (F10): a container from an older template is recreated
+// in its own revision before it starts; a running one is left alone (restart_required). A
+// container with a newer revision than the panel's (restored DB) is never recreated: the agent
+// would refuse the older revision, and the server must not stay down for it.
+func TestDecideRecreatesOutdatedTemplate(t *testing.T) {
+	cases := []struct {
+		name    string
+		desired string
+		state   agentapi.ContainerState
+		crev    int64
+		want    string // "" = no call
+	}{
+		{"running, exited", "running", agentapi.StateExited, 1, "ensure 1 r1 recreate=true"},
+		{"running, created", "running", agentapi.StateCreated, 1, "ensure 1 r1 recreate=true"},
+		{"stopped, exited", "stopped", agentapi.StateExited, 1, "ensure 1 r1 recreate=true"},
+		{"running, running", "running", agentapi.StateRunning, 1, ""},
+		{"running, restarting", "running", agentapi.StateRestarting, 1, ""},
+		{"stopped, running", "stopped", agentapi.StateRunning, 1, "power 1 stop"},
+		{"running, exited, newer revision", "running", agentapi.StateExited, 2, "power 1 start"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			setBaseDomain(t, e.db, "mc.example.com")
+			id := createInstance(t, e.db, "survival")
+			mustExec(t, e.db, `UPDATE instances SET desired_state = ? WHERE server_id = ?`, tc.desired, id)
+			c := container("survival", id, tc.crev, tc.state, "")
+			c.TemplateOutdated = true
+			e.agent.set(c)
+			var want []string
+			if tc.want != "" {
+				want = []string{tc.want}
+			}
+			if got := e.pass(); !slices.Equal(got, want) {
+				t.Fatalf("calls = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestReconcileEnsureRequest(t *testing.T) {
 	e := newEnv(t)
 	setBaseDomain(t, e.db, "mc.example.com")

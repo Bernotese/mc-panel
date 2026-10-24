@@ -430,7 +430,7 @@ export const en: Messages = {
       large_biomes: 'Large biomes',
       amplified: 'Amplified',
     },    restart: {
-      description: 'Changed settings only take effect after a restart. Players are briefly disconnected.',
+      description: 'Changed settings or a panel update only take effect after a restart. Players are briefly disconnected.',
       now: 'Restart now',
     },
     operation: {

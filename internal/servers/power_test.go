@@ -94,6 +94,32 @@ func TestPowerRestart(t *testing.T) {
 	}
 }
 
+// TestPowerRestartRecreatesOutdatedTemplate (F10): a restart of a container from an older
+// template recreates it in the current revision; a container with a newer revision than the
+// panel's (restored DB) gets a plain restart, since the agent never recreates it older.
+func TestPowerRestartRecreatesOutdatedTemplate(t *testing.T) {
+	e := newEnv(t)
+	setBaseDomain(t, e.db, "mc.example.com")
+	admin := e.admin()
+	id := createInstance(t, e.db, "survival")
+
+	e.agent.set(agentapi.InstanceStatus{ID: id, Name: "survival", Revision: 1, State: agentapi.StateRunning, TemplateOutdated: true})
+	if code, ec := e.power(id, "restart", &admin); code != http.StatusAccepted {
+		t.Fatalf("restart: %d %s", code, ec)
+	}
+	if calls := e.agent.takeCalls(); !slices.Equal(calls, []string{fmt.Sprintf("ensure %d r1 recreate=true", id)}) {
+		t.Fatalf("calls = %v", calls)
+	}
+
+	e.agent.set(agentapi.InstanceStatus{ID: id, Name: "survival", Revision: 2, State: agentapi.StateRunning, TemplateOutdated: true})
+	if code, ec := e.power(id, "restart", &admin); code != http.StatusAccepted {
+		t.Fatalf("restart newer revision: %d %s", code, ec)
+	}
+	if calls := e.agent.takeCalls(); !slices.Equal(calls, []string{fmt.Sprintf("power %d restart", id)}) {
+		t.Fatalf("calls = %v", calls)
+	}
+}
+
 func TestPowerRestartNeedsAgent(t *testing.T) {
 	e := newEnv(t)
 	setBaseDomain(t, e.db, "mc.example.com")

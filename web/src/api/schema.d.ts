@@ -1742,7 +1742,7 @@ export interface components {
          *     | container exited/created, desired_state running, exit_code != 0 or last_error set | error |
          *     | container exited/created | stopped |
          *
-         *     `restart_required`: the container exists, runs, and its label revision is older than the stored revision.
+         *     `restart_required`: the container exists, runs, and its label revision is older than the stored revision or it was created from an older container template (agent upgrade); a restart recreates it.
          */
         ServerStatus: {
             state: components["schemas"]["ServerState"];
