@@ -38,6 +38,9 @@ var version = "dev"
 // defaultConfigPath is read when neither -config nor -dev is given (a var for tests).
 var defaultConfigPath = "/etc/mc-panel/panel.toml"
 
+// getwd is os.Getwd (a var for tests).
+var getwd = os.Getwd
+
 // shutdownTimeout bounds the graceful HTTP shutdown. It outlasts a running console command
 // (agent.RconTimeout, 15 s), so a command sent just before the shutdown still gets its answer
 // and audit entry.
@@ -153,9 +156,14 @@ func commonFlags(args []string) (config.Panel, []string, error) {
 	if cfgPath == "" && !dev {
 		cfgPath = defaultConfigPath
 	}
-	root, err := os.Getwd()
-	if err != nil {
-		return config.Panel{}, nil, err
+	// Only -dev keeps its state below the working directory. The production CLI runs as mcpanel
+	// from wherever the operator is, often a home directory mcpanel cannot enter.
+	var root string
+	if dev {
+		var err error
+		if root, err = getwd(); err != nil {
+			return config.Panel{}, nil, err
+		}
 	}
 	cfg, err := config.LoadPanel(cfgPath, dev, root)
 	return cfg, rest, err
