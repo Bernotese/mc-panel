@@ -375,8 +375,12 @@ func TestIntegrationManagerCycle(t *testing.T) {
 }
 
 // consoleCmd prints to stdout and stderr like a server, then ticks once a second and
-// exits on SIGTERM.
-var consoleCmd = []string{"sh", "-c", "echo hello; echo oops >&2; trap 'exit 0' TERM; i=0; while true; do i=$((i+1)); echo tick $i; sleep 1; done"}
+// exits on SIGTERM. The pause after "hello" keeps the log file in timestamp order around it:
+// Docker stamps stdout and stderr in separate goroutines, so two lines written in the same
+// instant can land in the file in the other order, and its since filter stops at the first
+// entry at or after since in file order (everything after it comes unfiltered; the panel
+// drops the older lines itself).
+var consoleCmd = []string{"sh", "-c", "echo hello; sleep 1; echo oops >&2; trap 'exit 0' TERM; i=0; while true; do i=$((i+1)); echo tick $i; sleep 1; done"}
 
 func TestIntegrationConsole(t *testing.T) {
 	c := requireDocker(t)
@@ -486,15 +490,19 @@ func TestIntegrationConsole(t *testing.T) {
 		t.Fatalf("Rcon on a stopped container = %v, want ErrNotRunning", err)
 	}
 
-	// Resume after "hello": since wins over tail, no repeated line, and the stream of a
+	// Resume after "hello": since wins over tail, no line at or before it, and the stream of a
 	// stopped container ends after the history.
 	var resumed []string
 	var resumedRunning bool
-	err = m.Logs(ctx, agentapi.LogsRequest{ID: 1, Tail: 1, Since: seen["hello"].TS + 1}, func(running bool) { resumedRunning = running }, func(l agentapi.LogLine) error {
+	since := seen["hello"].TS + 1
+	err = m.Logs(ctx, agentapi.LogsRequest{ID: 1, Tail: 1, Since: since}, func(running bool) { resumedRunning = running }, func(l agentapi.LogLine) error {
+		if l.TS < since {
+			t.Errorf("resumed line %q at %d is older than since %d", l.Line, l.TS, since)
+		}
 		resumed = append(resumed, l.Line)
 		return nil
 	})
-	if err != nil || resumedRunning || slices.Contains(resumed, "hello") || !slices.Contains(resumed, "tick 1") {
+	if err != nil || resumedRunning || slices.Contains(resumed, "hello") || !slices.Contains(resumed, "oops") || !slices.Contains(resumed, "tick 1") {
 		t.Fatalf("resumed lines = %q (running %v), %v", resumed, resumedRunning, err)
 	}
 }

@@ -222,6 +222,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Changes the own password and revokes every other session. Allowed in stage password and full. The new password must differ from the current one (400 validation_failed). In stage password it ends the forced change: the session token rotates (CSRF token kept) and the session continues in stage full, or setup when 2FA is mandatory and not set up. */
         post: operations["changePassword"];
         delete?: never;
         options?: never;
@@ -1539,14 +1540,17 @@ export interface components {
     schemas: {
         Error: {
             /** @enum {string} */
-            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "files_unavailable" | "file_exists" | "file_modified" | "not_text" | "not_regular" | "instance_running" | "insufficient_storage" | "plugins_unsupported" | "plugin_source_unavailable" | "plugin_not_downloadable" | "plugin_incompatible" | "mrpack_incompatible" | "mrpack_version_mismatch" | "backups_unavailable" | "backup_running" | "internal";
+            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "password_change_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "files_unavailable" | "file_exists" | "file_modified" | "not_text" | "not_regular" | "instance_running" | "insufficient_storage" | "plugins_unsupported" | "plugin_source_unavailable" | "plugin_not_downloadable" | "plugin_incompatible" | "mrpack_incompatible" | "mrpack_version_mismatch" | "backups_unavailable" | "backup_running" | "internal";
             message: string;
             request_id?: string;
         };
         /** @enum {string} */
         Role: "admin" | "user";
-        /** @enum {string} */
-        Stage: "preauth" | "setup" | "full";
+        /**
+         * @description preauth: second factor pending; setup: 2FA must be set up first; password: the password an admin set must be changed first (only GET /auth/me, POST /auth/logout and POST /me/password; other routes answer 403 password_change_required); full: signed in
+         * @enum {string}
+         */
+        Stage: "preauth" | "setup" | "password" | "full";
         /** @enum {string} */
         Locale: "de" | "en";
         /** @enum {string} */
@@ -1670,6 +1674,8 @@ export interface components {
             created_at: number;
             /** Format: int64 */
             last_login_at: number | null;
+            /** @description An admin set the password (POST /users, or PATCH /users/{id} for another user); the user must change it at the next sign-in (stage password) */
+            must_change_password: boolean;
         };
         CreateUserRequest: {
             username: string;
@@ -1736,7 +1742,7 @@ export interface components {
          *     | container exited/created, desired_state running, exit_code != 0 or last_error set | error |
          *     | container exited/created | stopped |
          *
-         *     `restart_required`: the container exists, runs, and its label revision is older than the stored revision.
+         *     `restart_required`: the container exists, runs, and its label revision is older than the stored revision or it was created from an older container template (agent upgrade); a restart recreates it.
          */
         ServerStatus: {
             state: components["schemas"]["ServerState"];
@@ -2780,7 +2786,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description Forbidden (forbidden, sudo_required, setup_2fa_required, csrf_invalid, ip_blocked, jailed) */
+        /** @description Forbidden (forbidden, sudo_required, setup_2fa_required, password_change_required, csrf_invalid, ip_blocked, jailed) */
         Forbidden: {
             headers: {
                 [name: string]: unknown;

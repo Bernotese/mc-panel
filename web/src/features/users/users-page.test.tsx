@@ -24,6 +24,15 @@ describe('UsersPage', () => {
     const aliceRow = within(table).getByRole('row', { name: /alice/ })
     expect(within(aliceRow).getByRole('combobox', { name: 'Rolle von alice' })).toHaveValue('user')
     expect(within(aliceRow).getByText('keine')).toBeInTheDocument()
+    expect(within(table).queryByText('Muss Passwort ändern')).not.toBeInTheDocument()
+  })
+
+  it('marks users who must change the password an admin set (SEC-45)', async () => {
+    db.users.find((u) => u.username === 'alice')!.mustChangePassword = true
+    await renderWithProviders(<UsersPage />, { me: loginAs('admin') })
+    const table = await screen.findByRole('table', { name: 'Benutzerliste' })
+    expect(within(within(table).getByRole('row', { name: /alice/ })).getByText('Muss Passwort ändern')).toBeInTheDocument()
+    expect(within(within(table).getByRole('row', { name: /bob/ })).queryByText('Muss Passwort ändern')).not.toBeInTheDocument()
   })
 
   it('creates a user after sudo confirmation', async () => {
@@ -32,12 +41,18 @@ describe('UsersPage', () => {
     await user.click(await screen.findByRole('button', { name: 'Benutzer anlegen' }))
     const dialog = screen.getByRole('dialog', { name: 'Benutzer anlegen' })
     await user.type(within(dialog).getByLabelText('Benutzername'), 'carol')
+    expect(within(dialog).queryByText('Der Benutzer muss das Passwort bei der nächsten Anmeldung ändern.')).not.toBeInTheDocument()
     await user.type(within(dialog).getByLabelText('Initiales Passwort'), 'long-enough-password')
+    expect(within(dialog).getByLabelText('Initiales Passwort')).toHaveAccessibleDescription(
+      'Mindestens 12 Zeichen. Der Benutzer muss das Passwort bei der nächsten Anmeldung ändern.',
+    )
     await user.click(within(dialog).getByRole('button', { name: 'Anlegen' }))
     const sudo = await screen.findByRole('dialog', { name: 'Aktion bestätigen' })
     await user.type(within(sudo).getByLabelText('Code aus der Authenticator-App'), MOCK_TOTP_CODE)
     await user.click(within(sudo).getByRole('button', { name: 'Bestätigen' }))
-    expect(await screen.findByRole('row', { name: /carol/ })).toBeInTheDocument()
+    const row = await screen.findByRole('row', { name: /carol/ })
+    expect(within(row).getByText('Muss Passwort ändern')).toBeInTheDocument()
+    expect(db.users.find((u) => u.username === 'carol')?.mustChangePassword).toBe(true)
   })
 
   it('validates username and password before sending', async () => {

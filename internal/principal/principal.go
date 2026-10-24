@@ -14,13 +14,16 @@ const (
 )
 
 // Stage of a session: preauth = password ok, second factor pending;
-// setup = password ok, 2FA must be configured first; full = fully authenticated.
+// setup = password ok, 2FA must be configured first; password = signed in, but the password an
+// admin set must be changed first (never stored, derived from users.must_change_password);
+// full = fully authenticated.
 type Stage string
 
 const (
-	StagePreAuth Stage = "preauth"
-	StageSetup   Stage = "setup"
-	StageFull    Stage = "full"
+	StagePreAuth  Stage = "preauth"
+	StageSetup    Stage = "setup"
+	StagePassword Stage = "password"
+	StageFull     Stage = "full"
 )
 
 type Principal struct {

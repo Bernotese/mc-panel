@@ -31,16 +31,23 @@ func (a action) String() string {
 	return [...]string{"none", "ensure", "recreate", "start", "stop"}[a]
 }
 
+// needsRecreate: the container has an older revision, or the current one from an older
+// template (F10). A newer revision than the panel's (restored DB) is never recreated: the
+// agent refuses older revisions.
+func needsRecreate(revision int64, st agentapi.InstanceStatus) bool {
+	return st.Revision < revision || (st.Revision == revision && st.TemplateOutdated)
+}
+
 // decide implements the reconcile table of spec §5.3 for one instance. A container that is
-// up with an older revision is left alone (restart_required); one that is not up is
-// recreated before it is started, so it never starts with an old configuration.
+// up with an older revision or template is left alone (restart_required); one that is not
+// up is recreated before it is started, so it never starts with an old configuration.
 func decide(desired string, revision int64, st agentapi.InstanceStatus) action {
 	switch {
 	case st.Operation != agentapi.OpNone:
 		return actNone // the agent is working on it
 	case st.State == agentapi.StateMissing:
 		return actEnsure
-	case !isUp(st.State) && st.Revision < revision:
+	case !isUp(st.State) && needsRecreate(revision, st):
 		return actRecreate
 	case desired == desiredStopped && isUp(st.State):
 		return actStop

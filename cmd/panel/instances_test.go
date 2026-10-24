@@ -69,8 +69,7 @@ func TestInstanceLifecycleEndToEnd(t *testing.T) {
 	admin.must(200, "PUT", fmt.Sprintf("/users/%d/permissions", int64(u["id"].(float64))), map[string]any{
 		"grants": []map[string]any{{"server_id": srvA, "permissions": []string{"server.power"}}},
 	})
-	friend := e.client("")
-	friend.must(200, "POST", "/auth/login", map[string]string{"username": "friend", "password": "another long secret 42"})
+	friend := signInNewUser(e, "friend", "another long secret 42")
 	friend.must(202, "POST", fmt.Sprintf("/servers/%d/power", srvA), map[string]string{"action": "stop"})
 	waitServer(t, friend, srvA, "stopped", stateIs("stopped"))
 	friend.must(202, "POST", fmt.Sprintf("/servers/%d/power", srvA), map[string]string{"action": "start"})

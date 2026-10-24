@@ -28,7 +28,8 @@ export const ME_PATHS: ReadonlySet<string> = new Set([
 
 /**
  * Endpoints after which the backend rotates the session token without returning Me (sudo grants, first-factor
- * enrolment of a setup-stage session). /me/password only revokes the other sessions and keeps this one.
+ * enrolment of a setup-stage session). /me/password keeps the CSRF token: it revokes the other sessions and, for a
+ * forced change, rotates only the cookie; the change-password page reloads Me itself for the new stage.
  */
 export const ROTATING_PATHS: ReadonlySet<string> = new Set([
   '/auth/sudo/totp',
@@ -124,6 +125,10 @@ export function createApiClient(baseUrl: string = `${window.location.origin}/api
       if (response.status !== 403 || !copy) return response
       if (code === 'setup_2fa_required') {
         await apiHandlers().onSetupRequired()
+        return response
+      }
+      if (code === 'password_change_required') {
+        await apiHandlers().onPasswordChangeRequired()
         return response
       }
       if (code === 'csrf_invalid') {

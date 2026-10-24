@@ -10,7 +10,7 @@ import (
 
 func TestRoutesMatchContract(t *testing.T) {
 	e := newTestEnv(t)
-	anyStage := rbac.Authenticated().AllowStages(principal.StagePreAuth, principal.StageSetup, principal.StageFull)
+	anyStage := rbac.Authenticated().AllowStages(principal.StagePreAuth, principal.StageSetup, principal.StagePassword, principal.StageFull)
 	preAuth := rbac.Authenticated().AllowStages(principal.StagePreAuth)
 	setupOrFull := rbac.Authenticated().AllowStages(principal.StageSetup, principal.StageFull)
 	want := map[string]rbac.Rule{
@@ -25,7 +25,7 @@ func TestRoutesMatchContract(t *testing.T) {
 		"POST /auth/sudo/webauthn/begin":  rbac.Authenticated(),
 		"POST /auth/sudo/webauthn/finish": rbac.Authenticated(),
 		"PATCH /me":                       rbac.Authenticated(),
-		"POST /me/password":               rbac.Authenticated(),
+		"POST /me/password":               rbac.Authenticated().AllowStages(principal.StagePassword, principal.StageFull),
 		"POST /me/totp/setup":             setupOrFull,
 		"POST /me/totp/enable":            setupOrFull,
 		"DELETE /me/totp":                 rbac.Authenticated().WithSudo(),

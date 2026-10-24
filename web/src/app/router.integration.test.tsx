@@ -45,6 +45,18 @@ describe('app router with the real guards', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/setup-2fa'))
   })
 
+  it('moves a session that must change its password onto /change-password without looping (SEC-45)', async () => {
+    const queryClient = createTestQueryClient()
+    applyMe(queryClient, loginAs('alice')) // cached as full; the backend derives `password` from the flag
+    db.users.find((u) => u.username === 'alice')!.mustChangePassword = true
+    const { router } = await mountApp('/', queryClient)
+
+    expect(await screen.findByRole('heading', { name: 'Neues Passwort wählen' })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/change-password')
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    expect(router.state.location.pathname).toBe('/change-password')
+  })
+
   it('does not trust a stale cached full Me when opening /setup-2fa directly', async () => {
     const queryClient = createTestQueryClient()
     applyMe(queryClient, loginAs('newadmin', { stage: 'setup' }))
