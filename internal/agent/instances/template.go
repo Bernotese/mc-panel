@@ -29,6 +29,12 @@ const (
 	LabelName     = "mcpanel.name"
 	LabelFQDN     = "mcpanel.fqdn"
 	LabelRouter   = "mcpanel.router"
+	// LabelTemplate carries InstanceTemplateHash of the container; a missing or different
+	// value (agent upgrade) makes the instance "restart required", and a recreate fixes it.
+	// LabelType and LabelJava are its inputs besides the host settings.
+	LabelTemplate = "mcpanel.template"
+	LabelType     = "mcpanel.type"
+	LabelJava     = "mcpanel.java"
 	// LabelRouterTemplate carries the SHA-256 of the router's container template; a
 	// different value (agent upgrade) replaces the router container.
 	LabelRouterTemplate = "mcpanel.router-template"
@@ -55,6 +61,12 @@ const (
 	memoryNumerator   = 5 // Memory = memory_mib × 1.25 MiB: heap plus JVM/native overhead
 	memoryDenominator = 4
 )
+
+// TemplateEpoch is part of every instance template hash. InstanceTemplateHash only sees the
+// template for canonical spec values; bump it for a template change that shows only for
+// other values (e.g. a new variable for one property value), so existing containers are
+// marked outdated as well.
+const TemplateEpoch = 1
 
 // Host holds the agent-side settings the templates need; none of them come from the panel.
 type Host struct {
@@ -173,6 +185,38 @@ func InstanceContainer(h Host, req agentapi.EnsureRequest) (docker.ContainerConf
 		},
 		NetworkingConfig: network(InstanceNetwork(req.ID)),
 	}, nil
+}
+
+// canonicalRequest is a valid request for the template of type t with java j: fixed name,
+// version, memory and default properties, so the hash covers the template, not the spec
+// values (the revision covers those).
+func canonicalRequest(id int64, t instancespec.Type, j instancespec.Java) agentapi.EnsureRequest {
+	s := instancespec.Spec{Type: t, Version: "LATEST", Java: j, MemoryMiB: instancespec.MinMemoryMiB}
+	if t.IsModpack() {
+		pack := "template"
+		s.Version, s.Modpack = "", &pack
+	}
+	if t == instancespec.TypeCurseForge {
+		key := "template"
+		s.CurseForgeAPIKey = &key
+	}
+	return agentapi.EnsureRequest{ID: id, Name: "template", FQDN: "template.mcpanel.invalid", Revision: 1, Spec: s}
+}
+
+// InstanceTemplateHash is the template hash of instance id with type t and java j on host h
+// (LabelTemplate). It covers everything InstanceContainer fixes (image, user, mounts, limits,
+// hardening, the shape of the environment) except the labels; an invalid type or java (no
+// container can have it) is an error.
+func InstanceTemplateHash(h Host, id int64, t instancespec.Type, j instancespec.Java) (string, error) {
+	cfg, err := InstanceContainer(h, canonicalRequest(id, t, j))
+	if err != nil {
+		return "", err
+	}
+	cfg.Labels = nil
+	return templateHash(struct {
+		Epoch     int
+		Container docker.ContainerConfig
+	}{TemplateEpoch, cfg})
 }
 
 // RouterContainer builds the mc-router container: the only container with a
