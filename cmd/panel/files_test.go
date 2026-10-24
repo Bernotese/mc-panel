@@ -105,8 +105,7 @@ func TestFilesEndToEnd(t *testing.T) {
 	admin.must(200, "PUT", fmt.Sprintf("/users/%d/permissions", int64(u["id"].(float64))), map[string]any{
 		"grants": []map[string]any{{"server_id": id, "permissions": []string{"server.view"}}},
 	})
-	friend := e.client("")
-	friend.must(200, "POST", "/auth/login", map[string]string{"username": "friend", "password": "another long secret 42"})
+	friend := signInNewUser(e, "friend", "another long secret 42")
 	if code, out := friend.do("GET", fmt.Sprintf("/servers/%d/files", id), nil); code != 403 {
 		t.Fatalf("friend files = %d %v", code, out)
 	}

@@ -228,18 +228,19 @@ type Setting struct {
 }
 
 type User struct {
-	ID                int64
-	Username          string
-	PasswordHash      string
-	Role              string
-	Locale            string
-	WebauthnHandle    []byte
-	TotpSecretEnc     []byte
-	TotpEnabled       int64
-	TotpLastStep      int64
-	PasswordChangedAt int64
-	CreatedAt         int64
-	UpdatedAt         int64
+	ID                 int64
+	Username           string
+	PasswordHash       string
+	Role               string
+	Locale             string
+	WebauthnHandle     []byte
+	TotpSecretEnc      []byte
+	TotpEnabled        int64
+	TotpLastStep       int64
+	PasswordChangedAt  int64
+	CreatedAt          int64
+	UpdatedAt          int64
+	MustChangePassword int64
 }
 
 type UserID struct {
