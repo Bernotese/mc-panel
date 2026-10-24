@@ -51,6 +51,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   'forbidden',
   'sudo_required',
   'setup_2fa_required',
+  'password_change_required',
   'csrf_invalid',
   'not_found',
   'conflict',

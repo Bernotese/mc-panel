@@ -65,9 +65,16 @@ export function UsersPage() {
       id: 'username',
       header: t('users.col.username'),
       cell: (u) => (
-        <span className="font-medium">
-          {u.username}
-          {u.id === me?.id ? ` ${t('users.you')}` : ''}
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="font-medium">
+            {u.username}
+            {u.id === me?.id ? ` ${t('users.you')}` : ''}
+          </span>
+          {u.must_change_password ? (
+            <Badge variant="outline" className="text-foreground transition-none">
+              {t('users.must_change_password')}
+            </Badge>
+          ) : null}
         </span>
       ),
     },

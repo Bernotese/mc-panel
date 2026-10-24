@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
+import { Route as ChangePasswordRouteImport } from './routes/change-password'
 import { Route as Setup2faRouteImport } from './routes/setup-2fa'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
@@ -33,6 +34,11 @@ import { Route as AppUsersIdPermissionsRouteImport } from './routes/_app/users/$
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChangePasswordRoute = ChangePasswordRouteImport.update({
+  id: '/change-password',
+  path: '/change-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const Setup2faRoute = Setup2faRouteImport.update({
@@ -138,6 +144,7 @@ const AppUsersIdPermissionsRoute = AppUsersIdPermissionsRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
+  '/change-password': typeof ChangePasswordRoute
   '/setup-2fa': typeof Setup2faRoute
   '/audit': typeof AppAuditRoute
   '/profile': typeof AppProfileRoute
@@ -159,6 +166,7 @@ export interface FileRoutesByFullPath {
   '/servers/$id/': typeof AppServersIdIndexRoute
 }
 export interface FileRoutesByTo {
+  '/change-password': typeof ChangePasswordRoute
   '/setup-2fa': typeof Setup2faRoute
   '/audit': typeof AppAuditRoute
   '/profile': typeof AppProfileRoute
@@ -182,6 +190,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
+  '/change-password': typeof ChangePasswordRoute
   '/setup-2fa': typeof Setup2faRoute
   '/_app/audit': typeof AppAuditRoute
   '/_app/profile': typeof AppProfileRoute
@@ -207,6 +216,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/change-password'
     | '/setup-2fa'
     | '/audit'
     | '/profile'
@@ -228,6 +238,7 @@ export interface FileRouteTypes {
     | '/servers/$id/'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/change-password'
     | '/setup-2fa'
     | '/audit'
     | '/profile'
@@ -250,6 +261,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_app'
+    | '/change-password'
     | '/setup-2fa'
     | '/_app/audit'
     | '/_app/profile'
@@ -274,6 +286,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
+  ChangePasswordRoute: typeof ChangePasswordRoute
   Setup2faRoute: typeof Setup2faRoute
   Login2faRoute: typeof Login2faRoute
   LoginIndexRoute: typeof LoginIndexRoute
@@ -286,6 +299,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/change-password': {
+      id: '/change-password'
+      path: '/change-password'
+      fullPath: '/change-password'
+      preLoaderRoute: typeof ChangePasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/setup-2fa': {
@@ -485,6 +505,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
+  ChangePasswordRoute: ChangePasswordRoute,
   Setup2faRoute: Setup2faRoute,
   Login2faRoute: Login2faRoute,
   LoginIndexRoute: LoginIndexRoute,

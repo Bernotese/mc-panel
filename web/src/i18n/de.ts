@@ -35,6 +35,7 @@ export const de = {
     forbidden: 'Dafür fehlt dir die Berechtigung.',
     sudo_required: 'Diese Aktion muss bestätigt werden.',
     setup_2fa_required: 'Bitte richte zuerst die Zwei-Faktor-Anmeldung ein.',
+    password_change_required: 'Bitte ändere zuerst dein Passwort.',
     csrf_invalid: 'Sitzung abgelaufen. Bitte lade die Seite neu.',
     not_found: 'Nicht gefunden.',
     conflict: 'Konflikt mit dem aktuellen Zustand',
@@ -151,6 +152,11 @@ export const de = {
     tab_passkey: 'Passkey',
     codes_title: 'Fast geschafft',
     finish: 'Weiter zum Panel',
+  },
+  change_password: {
+    title: 'Neues Passwort wählen',
+    description: 'Angemeldet als {{username}}. Ein Administrator hat dein Passwort festgelegt. Wähle ein eigenes, bevor du das Panel nutzt.',
+    submit: 'Passwort ändern und weiter',
   },
   totp_setup: {
     intro: 'Verknüpfe eine Authenticator-App (z. B. Aegis, 2FAS oder Google Authenticator) mit deinem Konto.',
@@ -1272,6 +1278,7 @@ export const de = {
     username_invalid: 'Der Benutzername entspricht nicht den Regeln.',
     password: 'Initiales Passwort',
     password_hint: 'Mindestens 12 Zeichen.',
+    password_must_change: 'Der Benutzer muss das Passwort bei der nächsten Anmeldung ändern.',
     password_invalid: 'Das Passwort muss 12 bis 256 Zeichen lang sein.',
     role_label: 'Rolle',
     role: {
@@ -1283,6 +1290,7 @@ export const de = {
     created: 'Benutzer {{name}} angelegt.',
     deleted: 'Benutzer {{name}} gelöscht.',
     you: '(du)',
+    must_change_password: 'Muss Passwort ändern',
     never: 'noch nie',
     col: {
       username: 'Benutzername',
@@ -1552,6 +1560,7 @@ export const de = {
       hint: 'Mindestens 12 Zeichen. Alle anderen Sitzungen werden abgemeldet.',
       too_short: 'Das neue Passwort muss 12 bis 256 Zeichen lang sein.',
       mismatch: 'Die Passwörter stimmen nicht überein.',
+      same: 'Das neue Passwort muss sich vom aktuellen unterscheiden.',
       wrong_current: 'Das aktuelle Passwort ist falsch.',
       submit: 'Passwort ändern',
       changed: 'Passwort geändert. Andere Sitzungen wurden abgemeldet.',

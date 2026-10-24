@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { apiHandlers } from '@/api/handlers'
 import { meKey } from '@/features/auth/me'
 import { isSudoOpen, settleSudo } from '@/features/sudo/sudo-store'
-import { loginAs } from '@/mocks/db'
+import { db, loginAs } from '@/mocks/db'
 import { wireApi } from './wire-api'
 
 function fakeNavigator(path: string) {
@@ -42,6 +42,17 @@ describe('wireApi', () => {
     wireApi(new QueryClient(), nav)
     await apiHandlers().onSetupRequired()
     expect(nav.push).toHaveBeenCalledWith('/setup-2fa')
+  })
+
+  it('sends users who must change their password to /change-password after refreshing Me', async () => {
+    const qc = new QueryClient()
+    db.users.find((u) => u.username === 'alice')!.mustChangePassword = true
+    qc.setQueryData(meKey, { ...loginAs('alice'), stage: 'full' })
+    const stageAtPush: Array<string | undefined> = []
+    const nav = { currentPath: () => '/', push: vi.fn((path: string) => stageAtPush.push(`${path} ${qc.getQueryData<{ stage: string }>(meKey)?.stage}`)) }
+    wireApi(qc, nav)
+    await apiHandlers().onPasswordChangeRequired()
+    expect(stageAtPush).toEqual(['/change-password password'])
   })
 
   it('refreshes a cached full-stage Me before navigating to /setup-2fa', async () => {
