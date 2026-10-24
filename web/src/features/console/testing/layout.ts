@@ -9,8 +9,11 @@ export function stubLogViewport(): void {
     }
     return original.call(this)
   })
-  // @tanstack/virtual-core measures the scroll element via offsetWidth/offsetHeight.
+  // @tanstack/virtual-core measures the scroll element via clientWidth/clientHeight (offsetWidth/offsetHeight up to
+  // virtual-core 3.19.4); stub both so the rows render with either.
   for (const [prop, size] of [
+    ['clientWidth', 800],
+    ['clientHeight', 600],
     ['offsetWidth', 800],
     ['offsetHeight', 600],
   ] as const) {
