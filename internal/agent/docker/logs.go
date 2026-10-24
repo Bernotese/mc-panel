@@ -17,6 +17,9 @@ type LogsOptions struct {
 	// Tail is the number of lines from the end; < 0 means all.
 	Tail int
 	// Since is a Docker timestamp in nanoseconds since the Unix epoch (inclusive); 0 means none.
+	// Docker skips entries only up to the first one at or after Since in file order and sends
+	// everything after it, also older entries (stdout and stderr can be out of order there),
+	// so a reader that must not repeat lines drops older ones itself (the panel's console does).
 	Since int64
 }
 
