@@ -67,6 +67,7 @@ ops_doctor_healthy() {
   doc_probe_web_ports() { :; }
   doc_probe_web_table() { return 1; }
   doc_probe_web_catchall() { echo 000; } # TLS handshake fails: no certificate
+  doc_probe_audit_verify() { echo 0; }
   mkdir -p "$ROOT$ETC_PANEL" "$ROOT$ETC_FILES" "$ROOT$INSTANCES_DIR/backups/keys" "$ROOT$CADDY_DIR"
   printf 'nameserver 127.0.0.53\noptions edns0 trust-ad\n' >"$ROOT/etc/resolv.conf"
   printf '%s\n' 'listen = "unix:/run/mc-panel-web/panel.sock"' 'public_url = "https://panel.example.com"' \
@@ -115,7 +116,7 @@ test_ops_doctor_healthy_system_is_ok() {
   local out
   out="$(cat "$WORK/out")"
   assert_contains "$out" "✓ all mc-panel services are running"
-  assert_contains "$out" "34 checks: 0 failed, 0 warnings"
+  assert_contains "$out" "35 checks: 0 failed, 0 warnings"
   assert_not_contains "$out" "✗"
   assert_not_called 'systemctl'
 }
@@ -426,7 +427,7 @@ test_ops_doctor_json_is_valid_and_complete() {
   assert_not_contains "$out" "==>"
   local id
   for id in services sockets files_process versions update_available release_signature update_state config permissions \
-    caddy_config caddy_import caddy_package caddy_admin certificate dns firewall docker docker_version \
+    audit_journal caddy_config caddy_import caddy_package caddy_admin certificate dns firewall docker docker_version \
     docker_live_restore docker_isolation docker_dns restic tzdata time_sync upgrades reboot_required storage_fs storage_free \
     backup_keys ssh_password ssh_root ssh_kbdinteractive web_router web_catchall; do
     assert_contains "$out" "\"id\":\"$id\""
@@ -436,7 +437,7 @@ test_ops_doctor_json_is_valid_and_complete() {
 import json, sys
 d = json.load(sys.stdin)
 assert d["status"] == "warn"
-assert len(d["checks"]) == 34
+assert len(d["checks"]) == 35
 for c in d["checks"]:
     assert set(c) == {"id", "status", "message", "hint"}, c
     assert c["status"] in ("ok", "warn", "fail"), c
@@ -567,6 +568,70 @@ test_ops_doctor_release_signature_needs_root() {
   JSON=1
   cmd_doctor >"$WORK/out" 2>&1 || true
   assert_contains "$(cat "$WORK/out")" '{"id":"release_signature","status":"warn","message":"release_signature: skipped (needs root)"'
+}
+
+# --- audit journal (SEC-17, F11) -------------------------------------------------------------
+
+test_ops_doctor_audit_journal_states() {
+  ops_doctor_healthy
+  JSON=1
+  OPS_AUDIT_RC=0
+  doc_probe_audit_verify() { echo "$OPS_AUDIT_RC"; }
+  cmd_doctor >"$WORK/out" 2>&1 || true
+  assert_contains "$(cat "$WORK/out")" '{"id":"audit_journal","status":"ok","message":"audit chain and journal anchors match"'
+  # changed or missing entries: the only failure
+  OPS_AUDIT_RC=1
+  assert_exit 2 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" '{"id":"audit_journal","status":"fail","message":"audit log changed or entries missing'
+  assert_contains "$(cat "$WORK/out")" 'panel audit verify -config /etc/mc-panel/panel.toml -journal - prints the report'
+  # only a later anchor: expected after a database restore, never a failure
+  OPS_AUDIT_RC=3
+  assert_exit 1 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" '{"id":"audit_journal","status":"warn","message":"audit entries match only a later anchor (database restored?)"'
+  assert_contains "$(cat "$WORK/out")" '--since \"<restore time>\"'
+  OPS_AUDIT_RC=124
+  assert_exit 1 cmd_doctor
+  assert_contains "$(cat "$WORK/out")" '{"id":"audit_journal","status":"warn","message":"audit verify could not run (no result within 300 s)"'
+  # journalctl failed, the panel binary is missing, a usage error, or the probe printed nothing
+  local rc
+  for rc in 125 127 2 ''; do
+    OPS_AUDIT_RC="$rc"
+    assert_exit 1 cmd_doctor
+    assert_contains "$(cat "$WORK/out")" "{\"id\":\"audit_journal\",\"status\":\"warn\",\"message\":\"audit verify could not run (exit ${rc:-?})\""
+  done
+}
+
+test_ops_doctor_audit_journal_needs_root() {
+  ops_doctor_healthy
+  doc_probe_euid() { echo 1000; }
+  doc_probe_audit_verify() { fail "audit verify must not run without root"; }
+  JSON=1
+  cmd_doctor >"$WORK/out" 2>&1 || true
+  assert_contains "$(cat "$WORK/out")" '{"id":"audit_journal","status":"warn","message":"audit_journal: skipped (needs root)"'
+}
+
+# The real probe hands the journal to the panel on stdin and reports the panel's exit code; a
+# failed journalctl must not pass for a journal without anchors.
+test_ops_doctor_audit_probe_exit_codes() {
+  # shellcheck disable=SC2016 # bodies are code for the stubs, expanded when they run
+  {
+    stub journalctl 'echo "anchor line"; return "${OPS_JOURNAL_RC:-0}"'
+    stub timeout 'shift; "$@"'
+    stub runuser 'printf "%s\n" "$*" >"$WORK/runuser.args"; pwd >"$WORK/runuser.cwd"; cat >"$WORK/runuser.stdin"; return "${OPS_PANEL_RC:-0}"'
+  }
+  # mcpanel cannot enter the caller's directory (a home is 0750), and the panel needs its own
+  mkdir -p "$WORK/home"
+  cd "$WORK/home" || fail "cd $WORK/home"
+  assert_eq 0 "$(doc_probe_audit_verify)"
+  assert_file_eq "$WORK/runuser.cwd" /
+  assert_eq "$WORK/home" "$(pwd)"
+  assert_file_eq "$WORK/runuser.args" "-u mcpanel -- /usr/local/bin/panel audit verify -config /etc/mc-panel/panel.toml -journal -"
+  assert_file_eq "$WORK/runuser.stdin" "anchor line"
+  assert_eq 3 "$(OPS_PANEL_RC=3 doc_probe_audit_verify)"
+  assert_eq 1 "$(OPS_PANEL_RC=1 doc_probe_audit_verify)"
+  assert_eq 124 "$(OPS_PANEL_RC=124 doc_probe_audit_verify)"
+  assert_eq 125 "$(OPS_JOURNAL_RC=1 doc_probe_audit_verify)"
+  assert_eq 125 "$(OPS_JOURNAL_RC=1 OPS_PANEL_RC=1 doc_probe_audit_verify)"
 }
 
 # --- web interfaces (web ports spec §5) ------------------------------------------------------

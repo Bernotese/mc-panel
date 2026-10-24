@@ -85,6 +85,25 @@ func TestCommonFlagsDefaultConfigPath(t *testing.T) {
 	}
 }
 
+// An operator runs `sudo runuser -u mcpanel -- panel …` from a home directory mcpanel cannot
+// enter: the working directory matters only for -dev (DevPanel), so a production config loads.
+func TestCommonFlagsWithoutReadableWorkingDir(t *testing.T) {
+	old := getwd
+	t.Cleanup(func() { getwd = old })
+	getwd = func() (string, error) { return "", errors.New("stat .: permission denied") }
+
+	cfgFile := filepath.Join(t.TempDir(), "panel.toml")
+	if err := os.WriteFile(cfgFile, []byte("listen = \"127.0.0.1:9997\"\npublic_url = \"https://panel.example.com\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _, err := commonFlags([]string{"-config", cfgFile}); err != nil || cfg.Listen != "127.0.0.1:9997" {
+		t.Fatalf("production config: listen=%q err=%v", cfg.Listen, err)
+	}
+	if _, _, err := commonFlags([]string{"-dev"}); err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("-dev: err = %v, want the getwd error", err)
+	}
+}
+
 func TestUsageMentionsDefaultConfig(t *testing.T) {
 	if !strings.Contains(usageText, "/etc/mc-panel/panel.toml") {
 		t.Fatalf("usage does not document the default config path:\n%s", usageText)
