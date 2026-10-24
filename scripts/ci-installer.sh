@@ -3,7 +3,8 @@
 # 1-5 without Let's Encrypt): builds three staging directories in the format of --from-dir
 # (v1 0.0.1-ci, v2 0.0.2-ci, broken 0.0.3-ci whose panel exits at once), then runs the whole
 # lifecycle of install.sh as root: install (tls internal, firewall on), doctor without
-# failures, a second install that changes nothing, sign-in through Caddy, update to v2,
+# failures, a second install that changes nothing, sign-in through Caddy, doctor's audit
+# check (ok, then fail for a changed audit entry), update to v2,
 # update to the broken build (health check fails, automatic rollback to v2 with the same
 # database), update to a signed release downloaded over HTTPS (a local release server with a
 # throwaway key, through the hand-over; a release whose checksums.txt was changed after signing
@@ -185,6 +186,30 @@ doctor_fails() {
     fail "doctor --json: $(cat "$work/doctor.err") $(cat "$work/doctor.json")"
 }
 
+# doctor_check ID: the status of one doctor check (doctor --json).
+doctor_check() {
+  "$v1/install.sh" doctor --json >"$work/doctor.json" 2>"$work/doctor.err" || true
+  python3 -I -c 'import json, sys; d = json.load(open(sys.argv[1])); print([c["status"] for c in d["checks"] if c["id"] == sys.argv[2]][0])' "$work/doctor.json" "$1" ||
+    fail "doctor --json: $(cat "$work/doctor.err") $(cat "$work/doctor.json")"
+}
+
+# audit_tamper EXPR: sets actor_name of the first audit entry to EXPR the way an attacker with
+# the database could (the append-only trigger dropped and created again from its own SQL, in
+# one transaction). Run as mcpanel, like db_fingerprint.
+audit_tamper() {
+  local trig
+  trig="$(runuser -u mcpanel -- sqlite3 /var/lib/mc-panel/panel.db "SELECT sql FROM sqlite_master WHERE name = 'audit_log_no_update'")"
+  [ -n "$trig" ] || fail "no trigger audit_log_no_update"
+  runuser -u mcpanel -- sqlite3 -bail /var/lib/mc-panel/panel.db <<EOF || fail "audit_tamper $1"
+.timeout 10000
+BEGIN IMMEDIATE;
+DROP TRIGGER audit_log_no_update;
+UPDATE audit_log SET actor_name = $1 WHERE id = (SELECT min(id) FROM audit_log);
+$trig;
+COMMIT;
+EOF
+}
+
 # db_fingerprint: users and schema version, stable across restarts. Read as mcpanel, so root
 # never creates a -shm or -wal file in the panel's data directory.
 db_fingerprint() {
@@ -268,6 +293,17 @@ wait_health
 login_ok
 grep -q '"uri":"/api/auth/login"' /var/log/caddy/mc-panel.log || fail "the login is not in the access log /var/log/caddy/mc-panel.log"
 echo "OK: panel reachable through Caddy, admin signs in, access log written"
+
+echo "== doctor checks the audit log against the journal"
+# the sign-in above wrote audit entries, and the panel logged their anchors to its journal
+[ "$(runuser -u mcpanel -- sqlite3 -readonly /var/lib/mc-panel/panel.db 'SELECT count(*) FROM audit_log')" -gt 0 ] ||
+  fail "no audit entries after the sign-in"
+[ "$(doctor_check audit_journal)" = ok ] || fail "doctor audit_journal: $(cat "$work/doctor.json")"
+audit_tamper "actor_name || '~'"
+[ "$(doctor_check audit_journal)" = fail ] || fail "doctor audit_journal after a changed entry: $(cat "$work/doctor.json")"
+audit_tamper "substr(actor_name, 1, length(actor_name) - 1)"
+[ "$(doctor_check audit_journal)" = ok ] || fail "doctor audit_journal after undoing the change: $(cat "$work/doctor.json")"
+echo "OK: doctor audit_journal is ok and fails for a changed entry"
 
 echo "== update to 0.0.2-ci"
 before="$(db_fingerprint)"
