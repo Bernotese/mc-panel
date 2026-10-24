@@ -111,7 +111,7 @@ func (h *Handler) restart(ctx context.Context, s store.Server, in store.Instance
 		return errForeignContainer
 	case st.State == agentapi.StateMissing:
 		return nil
-	case st.Revision >= in.Revision:
+	case !needsRecreate(in.Revision, st):
 		return h.inst.Power(ctx, in.ServerID, agentapi.PowerRestart)
 	}
 	set, err := h.loadSettings(ctx)

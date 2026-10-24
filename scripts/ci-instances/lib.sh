@@ -765,6 +765,11 @@ papi POST "/servers/$psrv/power" "$po/power.json" '{"action": "start"}'
 [ "$pcode" = 202 ] || fail "start: HTTP $pcode $(cat "$po/power.json")"
 pwait_for 900 "plugins server running (reconcile, image, Paper download)" p_running
 pwait_for 300 "rcon on the plugins server" p_rcon_ready
+# F10: a server the panel just created must not show "restart required" (template hash stable
+# between create and status).
+papi GET "/servers/$psrv" "$po/server-get.json"
+[ "$pcode" = 200 ] || fail "get server: HTTP $pcode $(cat "$po/server-get.json")"
+jcheck "$po/server-get.json" "fresh server without restart_required" 'd["status"]["state"] == "running" and d["status"]["restart_required"] is False'
 echo "OK: server $psrv (ciplugins, Paper 1.21.11) running"
 }
 

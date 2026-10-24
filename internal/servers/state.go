@@ -85,7 +85,7 @@ func deriveStatus(name string, in *store.Instance, snap Snapshot) statusJSON {
 		st.LastError = snap.PanelErrors[in.ServerID] // the reconcile loop failed before reaching the agent
 	}
 	out.State = containerState(st, desired)
-	out.RestartRequired = isUp(st.State) && st.Revision < in.Revision
+	out.RestartRequired = isUp(st.State) && needsRecreate(in.Revision, st)
 	out.Operation = string(st.Operation)
 	out.LastError = st.LastError
 	out.StartedAt = st.StartedAt
