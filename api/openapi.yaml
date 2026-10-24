@@ -1723,7 +1723,7 @@ components:
         | container exited/created, desired_state running, exit_code != 0 or last_error set | error |
         | container exited/created | stopped |
 
-        `restart_required`: the container exists, runs, and its label revision is older than the stored revision.
+        `restart_required`: the container exists, runs, and its label revision is older than the stored revision or it was created from an older container template (agent upgrade); a restart recreates it.
       required: [state, desired_state, restart_required, operation, last_error, started_at, memory_bytes, memory_limit_bytes, cpu_percent]
       properties:
         state: { $ref: '#/components/schemas/ServerState' }
