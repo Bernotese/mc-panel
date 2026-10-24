@@ -617,9 +617,14 @@ test_ops_doctor_audit_probe_exit_codes() {
   {
     stub journalctl 'echo "anchor line"; return "${OPS_JOURNAL_RC:-0}"'
     stub timeout 'shift; "$@"'
-    stub runuser 'printf "%s\n" "$*" >"$WORK/runuser.args"; cat >"$WORK/runuser.stdin"; return "${OPS_PANEL_RC:-0}"'
+    stub runuser 'printf "%s\n" "$*" >"$WORK/runuser.args"; pwd >"$WORK/runuser.cwd"; cat >"$WORK/runuser.stdin"; return "${OPS_PANEL_RC:-0}"'
   }
+  # mcpanel cannot enter the caller's directory (a home is 0750), and the panel needs its own
+  mkdir -p "$WORK/home"
+  cd "$WORK/home" || fail "cd $WORK/home"
   assert_eq 0 "$(doc_probe_audit_verify)"
+  assert_file_eq "$WORK/runuser.cwd" /
+  assert_eq "$WORK/home" "$(pwd)"
   assert_file_eq "$WORK/runuser.args" "-u mcpanel -- /usr/local/bin/panel audit verify -config /etc/mc-panel/panel.toml -journal -"
   assert_file_eq "$WORK/runuser.stdin" "anchor line"
   assert_eq 3 "$(OPS_PANEL_RC=3 doc_probe_audit_verify)"

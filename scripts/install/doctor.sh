@@ -139,10 +139,12 @@ doc_probe_web_catchall() {
 # timeout); 125 when journalctl failed (the panel would then see no anchors at all).
 doc_probe_audit_verify() {
   local -a st=()
+  # From /: the panel reads its working directory (os.Getwd), and mcpanel cannot enter the
+  # caller's (a home directory is 0750), which would end in exit 1 like a changed entry.
   {
     journalctl -u mcpanel-panel -o cat 2>/dev/null </dev/null |
-      timeout 300 runuser -u mcpanel -- "$BIN_DIR/panel" audit verify -config "$ETC_PANEL/panel.toml" -journal - \
-        >/dev/null 2>&1
+      (cd / && timeout 300 runuser -u mcpanel -- "$BIN_DIR/panel" audit verify -config "$ETC_PANEL/panel.toml" -journal - \
+        >/dev/null 2>&1)
     st=("${PIPESTATUS[@]}")
   } || true
   # 141: SIGPIPE, the panel stopped reading early (its exit code tells why)
