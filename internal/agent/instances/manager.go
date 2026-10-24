@@ -265,11 +265,26 @@ func labelRevision(labels map[string]string) int64 {
 	return r
 }
 
+// templateOutdated reports whether a managed container's template label differs from the
+// template this agent would create for it now (also: no label, unknown type or java).
+func (m *Manager) templateOutdated(id int64, labels map[string]string) bool {
+	want, err := InstanceTemplateHash(m.host, id, instancespec.Type(labels[LabelType]), instancespec.Java(labels[LabelJava]))
+	return err != nil || labels[LabelTemplate] != want
+}
+
 func (m *Manager) ensure(ctx context.Context, req agentapi.EnsureRequest) error {
 	cfg, err := InstanceContainer(m.host, req)
 	if err != nil {
 		return err
 	}
+	// Hashed before Customize: Status recomputes it from the labels alone.
+	template, err := InstanceTemplateHash(m.host, req.ID, req.Spec.Type, req.Spec.Java)
+	if err != nil {
+		return err
+	}
+	cfg.Labels[LabelTemplate] = template
+	cfg.Labels[LabelType] = string(req.Spec.Type)
+	cfg.Labels[LabelJava] = string(req.Spec.Java)
 	name := ContainerName(req.ID)
 	if m.customize != nil {
 		m.customize(name, &cfg)
@@ -287,8 +302,9 @@ func (m *Manager) ensure(ctx context.Context, req agentapi.EnsureRequest) error 
 			return err
 		}
 		// Never downgrade: an older revision (a stale or replayed request) is a no-op,
-		// even with recreate.
-		if have := labelRevision(info.Config.Labels); have >= req.Revision || !req.Recreate {
+		// even with recreate. The same revision is recreated only for an outdated template.
+		have := labelRevision(info.Config.Labels)
+		if !req.Recreate || have > req.Revision || (have == req.Revision && !m.templateOutdated(req.ID, info.Config.Labels)) {
 			if have > req.Revision {
 				m.log.Info("ensure with an older revision ignored", "id", req.ID, "revision", req.Revision, "container_revision", have)
 			}
@@ -654,10 +670,12 @@ func (m *Manager) syncEgress(ctx context.Context) error {
 	return err
 }
 
-// templateHash is the SHA-256 of the router template's canonical JSON
-// (encoding/json: fixed field order, sorted map keys).
-func templateHash(cfg docker.ContainerConfig) (string, error) {
-	b, err := json.Marshal(cfg)
+// templateHash is the SHA-256 of a container template's canonical JSON (encoding/json:
+// fixed field order, sorted map keys). The router, mcpanel-web and the instance containers
+// (InstanceTemplateHash) carry it as a label; a different value replaces the router and
+// mcpanel-web and marks an instance "restart required".
+func templateHash(v any) (string, error) {
+	b, err := json.Marshal(v)
 	if err != nil {
 		return "", err
 	}
@@ -796,6 +814,7 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 		}
 		st := agentapi.InstanceStatus{
 			ID: id, Name: c.Labels[LabelName], Revision: labelRevision(c.Labels), State: mapState(c.State),
+			TemplateOutdated: m.templateOutdated(id, c.Labels),
 		}
 		info, err := m.dc.Inspect(ctx, ContainerName(id))
 		switch {
