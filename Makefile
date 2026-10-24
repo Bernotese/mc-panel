@@ -78,10 +78,11 @@ sign-release:
 	scripts/sign-release.sh $(if $(SKIP_BUILD_CHECK),--skip-build-check) "$(TAG)" $(if $(KEY),"$(KEY)")
 
 # Rebuilds the release TAG from its tagged commit (temp dir, Node of .node-version via fnm or
-# PATH) and compares it with the draft's tarballs; sign-release runs it, too.
+# PATH; NODE_VERSION= for tags before .node-version) and compares it with the draft's tarballs;
+# sign-release runs it, too.
 verify-release-build:
-	@test -n "$(TAG)" || { echo "usage: make verify-release-build TAG=vX.Y.Z"; exit 2; }
-	scripts/verify-release-build.sh "$(TAG)"
+	@test -n "$(TAG)" || { echo "usage: make verify-release-build TAG=vX.Y.Z [NODE_VERSION=X.Y.Z]"; exit 2; }
+	scripts/verify-release-build.sh $(if $(NODE_VERSION),--node-version "$(NODE_VERSION)") "$(TAG)"
 
 # Builds REF on the internal test VM from GitHub and (re)deploys it there (docs/dev/README.md, "Test VM").
 TESTVM ?= claude@192.168.1.117

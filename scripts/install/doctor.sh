@@ -7,7 +7,7 @@
 # need root report "warn: skipped".
 #
 # Check ids (stable): services sockets files_process versions update_available release_signature update_state
-# config permissions caddy_config caddy_import caddy_package caddy_admin certificate dns firewall
+# config permissions audit_journal caddy_config caddy_import caddy_package caddy_admin certificate dns firewall
 # docker docker_version docker_live_restore docker_isolation docker_dns restic tzdata time_sync upgrades reboot_required
 # storage_fs storage_free backup_keys ssh_password ssh_root ssh_kbdinteractive web_router web_catchall
 
@@ -133,6 +133,26 @@ doc_probe_web_table() { nft list table bridge mcpanel_web >/dev/null 2>&1 </dev/
 doc_probe_web_catchall() {
   curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve doctor-check.invalid:443:127.0.0.1 \
     https://doctor-check.invalid/ 2>/dev/null </dev/null || true
+}
+# doc_probe_audit_verify: the exit code of `panel audit verify` against the anchors in the
+# panel's journal (SEC-17; 0 match, 1 changed or missing entries, 3 only a later anchor, 124
+# timeout); 125 when journalctl failed (the panel would then see no anchors at all).
+doc_probe_audit_verify() {
+  local -a st=()
+  # From /: the panel reads its working directory (os.Getwd), and mcpanel cannot enter the
+  # caller's (a home directory is 0750), which would end in exit 1 like a changed entry.
+  {
+    journalctl -u mcpanel-panel -o cat 2>/dev/null </dev/null |
+      (cd / && timeout 300 runuser -u mcpanel -- "$BIN_DIR/panel" audit verify -config "$ETC_PANEL/panel.toml" -journal - \
+        >/dev/null 2>&1)
+    st=("${PIPESTATUS[@]}")
+  } || true
+  # 141: SIGPIPE, the panel stopped reading early (its exit code tells why)
+  if [[ ${st[0]} != 0 && ${st[0]} != 141 ]]; then
+    echo 125
+  else
+    echo "${st[1]}"
+  fi
 }
 
 # --- helpers -------------------------------------------------------------------------------
@@ -403,6 +423,25 @@ doc_chk_permissions() {
   else
     doc_result fail permissions "${bad//$'\n'/; }" "install.sh install with your --domain/--email (resets owners and modes)"
   fi
+}
+
+# doc_chk_audit_journal (SEC-17): the audit hash chain in the database against the anchors the
+# panel writes to its root-owned journal. A journal without anchors (rotated, or entries of the
+# CLI) is fine; entries matching only a later anchor are expected after a database restore (a
+# warning). Changed or missing entries fail: doctor cannot tell a restore from a deletion.
+doc_chk_audit_journal() {
+  doc_need_root audit_journal || return 0
+  local rc cmd="sudo journalctl -u mcpanel-panel -o cat | sudo runuser -u mcpanel -- $BIN_DIR/panel audit verify -config $ETC_PANEL/panel.toml -journal -"
+  rc="$(doc_probe_audit_verify)" || rc=""
+  case "$rc" in
+  0) doc_result ok audit_journal "audit chain and journal anchors match" ;;
+  1) doc_result fail audit_journal "audit log changed or entries missing (the database disagrees with its hash chain or the journal)" \
+    "$cmd prints the report; after a database restore or an update rollback the entries newer than the copy are missing, too: add --since \"<restore time>\" to journalctl (docs/install.md, Troubleshooting: Audit log integrity)" ;;
+  3) doc_result warn audit_journal "audit entries match only a later anchor (database restored?)" \
+    "expected after restoring the database: add --since \"<restore time>\" to journalctl in: $cmd" ;;
+  124) doc_result warn audit_journal "audit verify could not run (no result within 300 s)" "$cmd" ;;
+  *) doc_result warn audit_journal "audit verify could not run (exit ${rc:-?})" "$cmd" ;;
+  esac
 }
 
 doc_chk_caddy() {
@@ -826,6 +865,7 @@ cmd_doctor() {
   doc_chk_update_state
   doc_chk_config
   doc_chk_permissions
+  doc_chk_audit_journal
   doc_chk_caddy
   doc_chk_firewall
   doc_chk_system

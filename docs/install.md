@@ -59,6 +59,16 @@ The key line above must match the one in this guide on GitHub and in `scripts/in
 
 The `grep` line matters: a signature only says that the maintainer signed *some* `checksums.txt`. Checking that it lists this version's archive makes sure you did not get the signed file of another (older) release.
 
+**Build provenance (optional).** Releases after v0.6.0 also have a build provenance attestation from GitHub for every asset (the tarballs, `install.sh` and `checksums.txt`). With the [GitHub CLI](https://cli.github.com/) you can check that an asset was built by this repository's release workflow from the tag `$v` (as in the commands above):
+
+```bash
+gh attestation verify install.sh --repo Bernotese/mc-panel \
+  --signer-workflow Bernotese/mc-panel/.github/workflows/release.yml \
+  --source-ref "refs/tags/$v"                                # likewise mc-panel_*.tar.gz and checksums.txt
+```
+
+This is an extra check, not a replacement for the signature: an attestation comes from GitHub, so someone who controls the GitHub account could produce one, too. `install.sh` checks only the signature, and that stays the gate.
+
 **Updating from v0.4.x or older.** The `install.sh` of those releases checks no signatures, and `update` hands over to the target's `install.sh` only after its own (unsigned) checks. So do not run `update` with the old script: download the `install.sh` of v0.5.0 or later, verify it as above, and run its `update`:
 
 ```bash
@@ -247,7 +257,9 @@ sudo bash install.sh doctor          # human-readable: ✓ ok, ! warning, ✗ fa
 sudo bash install.sh doctor --json   # {"status": "ok|warn|fail", "checks": [{"id", "status", "message", "hint"}]}
 ```
 
-Exit code 0 means all ok, 1 warnings, 2 failures. Without root the checks that need root report "skipped". The checks: `services`, `sockets`, `files_process`, `versions`, `update_available`, `release_signature`, `update_state`, `config`, `permissions`, `caddy_config`, `caddy_import`, `caddy_package`, `caddy_admin`, `certificate`, `dns`, `firewall`, `docker`, `docker_version`, `docker_live_restore`, `docker_isolation`, `docker_dns`, `restic`, `tzdata`, `time_sync`, `upgrades`, `reboot_required`, `storage_fs`, `storage_free`, `backup_keys`, `ssh_password`, `ssh_root`, `ssh_kbdinteractive`, `web_router`, `web_catchall`.
+Exit code 0 means all ok, 1 warnings, 2 failures. Without root the checks that need root report "skipped". The checks: `services`, `sockets`, `files_process`, `versions`, `update_available`, `release_signature`, `update_state`, `config`, `permissions`, `audit_journal`, `caddy_config`, `caddy_import`, `caddy_package`, `caddy_admin`, `certificate`, `dns`, `firewall`, `docker`, `docker_version`, `docker_live_restore`, `docker_isolation`, `docker_dns`, `restic`, `tzdata`, `time_sync`, `upgrades`, `reboot_required`, `storage_fs`, `storage_free`, `backup_keys`, `ssh_password`, `ssh_root`, `ssh_kbdinteractive`, `web_router`, `web_catchall`.
+
+`audit_journal` runs `panel audit verify` against the audit anchors in the panel's journal (`journalctl -u mcpanel-panel`, root-owned, see [Troubleshooting](#troubleshooting)); on a large audit log it can take a while (at most 300 s). It fails only when entries were changed or are missing: unless you just restored the database or an `update` rolled it back (then the entries newer than the copy are missing; check with `--since "<restore time>"` as in the hint), someone with write access to the database edited the audit log, so treat it as an incident. Entries without an anchor (written by the CLI, or older than the journal keeps) are fine.
 
 Common warnings:
 
@@ -263,6 +275,7 @@ Common warnings:
 | `docker_isolation` | Servers of an older version still share the network `mcpanel-mc` with each other (see [Containers and their network](#containers-and-their-network)); restart them once in the panel. Or `mcpanel-mc` has IPv6 enabled (from the daemon's defaults when an older version created it): the hint recreates it IPv4-only. |
 | `reboot_required` | A kernel or library update waits for a reboot (with its age and the packages). `unattended-upgrades` never reboots on its own, because the Minecraft servers would stop; plan a reboot. |
 | `update_available` | A newer release is available. |
+| `audit_journal` | Audit entries match only a later anchor of their id, which is expected after you restored the database (or after an `update` rolled it back): run the command from the hint with `--since "<restore time>"` added to `journalctl`. The check also warns when `panel audit verify` could not run (panel binary missing, journal unreadable, no result within 300 s). |
 | `web_router` | The container `mcpanel-web` of the [web interfaces](#web-interfaces) is not running, publishes on another address than 127.0.0.1, or its port restriction (table `bridge mcpanel_web`) is missing; without published web ports there is no container and the check is ok. A container `mcpanel-web` without the agent's label is someone else's: the agent leaves it alone, and web ports cannot work until it is renamed or removed. |
 | `web_catchall` | The Caddyfile does not import `mc-panel-web.caddy` (a Caddyfile of your own; add the two snippets from [Web interfaces](#web-interfaces)), imports it without the ask of `mcpanel-web` (Caddy would request certificates for any name), or Caddy answers a name nobody published with 200. |
 | `ssh_password`, `ssh_root`, `ssh_kbdinteractive` | SSH allows password logins, root logins with a password, or password logins through PAM (`KbdInteractiveAuthentication yes` with `UsePAM yes`). The installer never changes SSH. |
@@ -341,7 +354,7 @@ Services: `mcpanel-panel.service` (+ `.socket`), `mcpanel-agent.service`, `mcpan
 - **Health check by hand:** the panel only accepts requests with `X-Forwarded-For` on its socket: `curl --unix-socket /run/mc-panel-web/panel.sock -H 'X-Forwarded-For: 127.0.0.1' http://panel/api/health`.
 - **A service fails:** `journalctl -u mcpanel-panel` (or `-agent`, `-files`). If the agent is down, the panel answers `503 agent_unavailable` for server actions; logins and in-app jails keep working.
 - **Locked out** (jail, admin-login allowlist, country filter): `sudo runuser -u mcpanel -- panel admin unlock -config /etc/mc-panel/panel.toml` lifts all active jails, turns off "Admin access only from the allowlist" and clears the country filter (audited). A 2FA lockout (10 wrong codes in 15 minutes) ends after 15 minutes or with a panel restart.
-- **Audit log integrity:** `sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml`. To compare the database with the anchors in the root-owned journal: `sudo journalctl -u mcpanel-panel -o cat | sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml -journal -` (exit 1: changed or missing entries; exit 3: entries match only a later anchor, which is expected after restoring the database; then pass `--since "<restore time>"` to `journalctl`). Entries written by the CLI, and entries older than the journal keeps, show as "without anchor". The panel itself checks the chain every 24 h, without the journal, and notifies `audit.chain_broken`.
+- **Audit log integrity:** `sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml`. To compare the database with the anchors in the root-owned journal: `sudo journalctl -u mcpanel-panel -o cat | sudo runuser -u mcpanel -- panel audit verify -config /etc/mc-panel/panel.toml -journal -` (exit 1: changed or missing entries; exit 3: entries match only a later anchor, which is expected after restoring the database; then pass `--since "<restore time>"` to `journalctl`). Entries written by the CLI, and entries older than the journal keeps, show as "without anchor". The panel itself checks the chain every 24 h, without the journal, and notifies `audit.chain_broken`. `doctor` runs the comparison with the journal (`audit_journal`); there is no timer for it, so run `doctor` now and then, for example after an update.
 - **Admin allowlist:** with "Admin access only from the allowlist" every admin request from another network is refused (`403`; logging out still works), and saving the setting ends admin sessions from outside it. `panel admin unlock` turns it off.
 - **Update exit code 3 or 4:** see [Rollback](#rollback); the details are in `/var/log/mc-panel-install.log`.
 - **A restore is stuck** ("the files service is busy for this server"): follow the runbook in [`docs/dev/README.md`](dev/README.md) ("Backups").
