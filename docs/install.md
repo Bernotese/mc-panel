@@ -59,6 +59,16 @@ The key line above must match the one in this guide on GitHub and in `scripts/in
 
 The `grep` line matters: a signature only says that the maintainer signed *some* `checksums.txt`. Checking that it lists this version's archive makes sure you did not get the signed file of another (older) release.
 
+**Build provenance (optional).** Releases after v0.6.0 also have a build provenance attestation from GitHub for every asset (the tarballs, `install.sh` and `checksums.txt`). With the [GitHub CLI](https://cli.github.com/) you can check that an asset was built by this repository's release workflow from the tag `$v` (as in the commands above):
+
+```bash
+gh attestation verify install.sh --repo Bernotese/mc-panel \
+  --signer-workflow Bernotese/mc-panel/.github/workflows/release.yml \
+  --source-ref "refs/tags/$v"                                # likewise mc-panel_*.tar.gz and checksums.txt
+```
+
+This is an extra check, not a replacement for the signature: an attestation comes from GitHub, so someone who controls the GitHub account could produce one, too. `install.sh` checks only the signature, and that stays the gate.
+
 **Updating from v0.4.x or older.** The `install.sh` of those releases checks no signatures, and `update` hands over to the target's `install.sh` only after its own (unsigned) checks. So do not run `update` with the old script: download the `install.sh` of v0.5.0 or later, verify it as above, and run its `update`:
 
 ```bash
