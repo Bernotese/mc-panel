@@ -87,9 +87,12 @@ func (rt *Router) enforce(rule Rule, h http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if !slices.Contains(rule.stages, p.Stage) {
-			if p.Stage == principal.StageSetup {
+			switch p.Stage {
+			case principal.StageSetup:
 				httpx.WriteError(w, r, http.StatusForbidden, httpx.CodeSetupRequired, "two-factor setup required")
-			} else {
+			case principal.StagePassword:
+				httpx.WriteError(w, r, http.StatusForbidden, httpx.CodePasswordChangeRequired, "password change required")
+			default:
 				httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeUnauthorized, "authentication incomplete")
 			}
 			return

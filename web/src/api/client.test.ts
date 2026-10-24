@@ -110,6 +110,17 @@ describe('api client', () => {
     expect(hits).toBe(2)
   })
 
+  it('reports password_change_required', async () => {
+    db.users.find((u) => u.username === 'alice')!.mustChangePassword = true
+    const me = loginAs('alice')
+    expect(me.stage).toBe('password')
+    setCsrfToken(me.csrf_token)
+    const onPasswordChangeRequired = vi.fn()
+    configureApiHandlers({ onPasswordChangeRequired })
+    await expect(unwrap(api.GET('/servers'))).rejects.toMatchObject({ code: 'password_change_required' })
+    expect(onPasswordChangeRequired).toHaveBeenCalledTimes(1)
+  })
+
   it('reports setup_2fa_required', async () => {
     const me = loginAs('newadmin', { stage: 'setup' })
     setCsrfToken(me.csrf_token)

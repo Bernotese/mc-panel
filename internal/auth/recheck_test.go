@@ -22,6 +22,10 @@ func TestRecheck(t *testing.T) {
 	alice := storetest.CreateUser(t, db, "alice", "user")
 	bob := storetest.CreateUser(t, db, "bob", "user")
 	root := storetest.CreateUser(t, db, "root", "admin") // admin without 2FA → effective stage setup
+	dave := storetest.CreateUser(t, db, "dave", "user")  // must change the password → effective stage password
+	if _, err := db.Exec(`UPDATE users SET must_change_password = 1 WHERE id = ?`, dave); err != nil {
+		t.Fatal(err)
+	}
 
 	_, full := mustCreate(t, s, alice, principal.StageFull)
 	u, err := s.Recheck(ctx, full.ID, alice)
@@ -30,6 +34,7 @@ func TestRecheck(t *testing.T) {
 	}
 	_, pre := mustCreate(t, s, alice, principal.StagePreAuth)
 	_, adminSess := mustCreate(t, s, root, principal.StageFull)
+	_, daveSess := mustCreate(t, s, dave, principal.StageFull)
 	_, revoked := mustCreate(t, s, alice, principal.StageFull)
 	if err := s.Revoke(ctx, revoked.ID); err != nil {
 		t.Fatal(err)
@@ -42,6 +47,7 @@ func TestRecheck(t *testing.T) {
 		{"other user's session", full.ID, bob},
 		{"pre-auth stage", pre.ID, alice},
 		{"admin without 2FA (setup)", adminSess.ID, root},
+		{"forced password change (password)", daveSess.ID, dave},
 		{"revoked", revoked.ID, alice},
 	} {
 		if _, err := s.Recheck(ctx, tc.sessID, tc.user); !errors.Is(err, ErrNoSession) {

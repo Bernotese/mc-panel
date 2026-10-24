@@ -153,7 +153,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	setSessionCookie(w, tok)
 	if stage != principal.StagePreAuth {
 		h.auditLog(ctx, user.ID, user.Username, audit.ActionLogin, user.Username, audit.ResultSuccess,
-			map[string]any{"method": "password", "stage": string(stage)})
+			map[string]any{"method": "password", "stage": string(passwordStage(user, stage))})
 	}
 	h.writeMe(w, r, user, sess)
 }

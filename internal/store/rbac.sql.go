@@ -65,20 +65,21 @@ func (q *Queries) RbacCreateServer(ctx context.Context, arg RbacCreateServerPara
 }
 
 const rbacCreateUser = `-- name: RbacCreateUser :one
-INSERT INTO users (id, username, password_hash, role, webauthn_handle, password_changed_at, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, username, password_hash, role, locale, webauthn_handle, totp_secret_enc, totp_enabled, totp_last_step, password_changed_at, created_at, updated_at
+INSERT INTO users (id, username, password_hash, role, webauthn_handle, must_change_password, password_changed_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, username, password_hash, role, locale, webauthn_handle, totp_secret_enc, totp_enabled, totp_last_step, password_changed_at, created_at, updated_at, must_change_password
 `
 
 type RbacCreateUserParams struct {
-	ID                int64
-	Username          string
-	PasswordHash      string
-	Role              string
-	WebauthnHandle    []byte
-	PasswordChangedAt int64
-	CreatedAt         int64
-	UpdatedAt         int64
+	ID                 int64
+	Username           string
+	PasswordHash       string
+	Role               string
+	WebauthnHandle     []byte
+	MustChangePassword int64
+	PasswordChangedAt  int64
+	CreatedAt          int64
+	UpdatedAt          int64
 }
 
 func (q *Queries) RbacCreateUser(ctx context.Context, arg RbacCreateUserParams) (User, error) {
@@ -88,6 +89,7 @@ func (q *Queries) RbacCreateUser(ctx context.Context, arg RbacCreateUserParams) 
 		arg.PasswordHash,
 		arg.Role,
 		arg.WebauthnHandle,
+		arg.MustChangePassword,
 		arg.PasswordChangedAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -106,6 +108,7 @@ func (q *Queries) RbacCreateUser(ctx context.Context, arg RbacCreateUserParams) 
 		&i.PasswordChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
@@ -184,7 +187,7 @@ func (q *Queries) RbacGetServerByName(ctx context.Context, name string) (Server,
 }
 
 const rbacGetUser = `-- name: RbacGetUser :one
-SELECT id, username, password_hash, role, locale, webauthn_handle, totp_secret_enc, totp_enabled, totp_last_step, password_changed_at, created_at, updated_at FROM users WHERE id = ?
+SELECT id, username, password_hash, role, locale, webauthn_handle, totp_secret_enc, totp_enabled, totp_last_step, password_changed_at, created_at, updated_at, must_change_password FROM users WHERE id = ?
 `
 
 func (q *Queries) RbacGetUser(ctx context.Context, id int64) (User, error) {
@@ -203,12 +206,13 @@ func (q *Queries) RbacGetUser(ctx context.Context, id int64) (User, error) {
 		&i.PasswordChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
 
 const rbacGetUserByUsername = `-- name: RbacGetUserByUsername :one
-SELECT id, username, password_hash, role, locale, webauthn_handle, totp_secret_enc, totp_enabled, totp_last_step, password_changed_at, created_at, updated_at FROM users WHERE username = ?
+SELECT id, username, password_hash, role, locale, webauthn_handle, totp_secret_enc, totp_enabled, totp_last_step, password_changed_at, created_at, updated_at, must_change_password FROM users WHERE username = ?
 `
 
 func (q *Queries) RbacGetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -227,6 +231,7 @@ func (q *Queries) RbacGetUserByUsername(ctx context.Context, username string) (U
 		&i.PasswordChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
@@ -370,7 +375,7 @@ func (q *Queries) RbacListUserServerPermissions(ctx context.Context, arg RbacLis
 
 const rbacListUsers = `-- name: RbacListUsers :many
 
-SELECT id, username, password_hash, role, locale, webauthn_handle, totp_secret_enc, totp_enabled, totp_last_step, password_changed_at, created_at, updated_at FROM users ORDER BY username
+SELECT id, username, password_hash, role, locale, webauthn_handle, totp_secret_enc, totp_enabled, totp_last_step, password_changed_at, created_at, updated_at, must_change_password FROM users ORDER BY username
 `
 
 // Stream D: users, servers, permissions. All query names start with "Rbac".
@@ -396,6 +401,7 @@ func (q *Queries) RbacListUsers(ctx context.Context) ([]User, error) {
 			&i.PasswordChangedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MustChangePassword,
 		); err != nil {
 			return nil, err
 		}
@@ -488,19 +494,21 @@ func (q *Queries) RbacRevokeUserSessionsExcept(ctx context.Context, arg RbacRevo
 }
 
 const rbacUpdateUserPassword = `-- name: RbacUpdateUserPassword :exec
-UPDATE users SET password_hash = ?, password_changed_at = ?, updated_at = ? WHERE id = ?
+UPDATE users SET password_hash = ?, must_change_password = ?, password_changed_at = ?, updated_at = ? WHERE id = ?
 `
 
 type RbacUpdateUserPasswordParams struct {
-	PasswordHash      string
-	PasswordChangedAt int64
-	UpdatedAt         int64
-	ID                int64
+	PasswordHash       string
+	MustChangePassword int64
+	PasswordChangedAt  int64
+	UpdatedAt          int64
+	ID                 int64
 }
 
 func (q *Queries) RbacUpdateUserPassword(ctx context.Context, arg RbacUpdateUserPasswordParams) error {
 	_, err := q.db.ExecContext(ctx, rbacUpdateUserPassword,
 		arg.PasswordHash,
+		arg.MustChangePassword,
 		arg.PasswordChangedAt,
 		arg.UpdatedAt,
 		arg.ID,

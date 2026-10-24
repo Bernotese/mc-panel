@@ -114,7 +114,7 @@ func (h *Handler) Sessions() *Sessions { return h.sessions }
 
 // Routes registers all stream-A endpoints with the rules from the OpenAPI table.
 func (h *Handler) Routes(api *rbac.Router) {
-	anyStage := rbac.Authenticated().AllowStages(principal.StagePreAuth, principal.StageSetup, principal.StageFull)
+	anyStage := rbac.Authenticated().AllowStages(principal.StagePreAuth, principal.StageSetup, principal.StagePassword, principal.StageFull)
 	api.Post("/auth/login", rbac.Public(), h.login)
 	api.Get("/auth/me", anyStage, h.getMe)
 	api.Post("/auth/logout", anyStage, h.logout)
@@ -135,7 +135,8 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Post("/auth/sudo/webauthn/begin", rbac.Authenticated(), h.beginSudoWebAuthn)
 	api.Post("/auth/sudo/webauthn/finish", rbac.Authenticated(), h.finishSudoWebAuthn)
 	api.Patch("/me", rbac.Authenticated(), h.updateMe)
-	api.Post("/me/password", rbac.Authenticated(), h.changePassword)
+	// The only route of the password stage besides /auth/me and the logout (SEC-45).
+	api.Post("/me/password", rbac.Authenticated().AllowStages(principal.StagePassword, principal.StageFull), h.changePassword)
 	api.Post("/me/recovery-codes", rbac.Authenticated().WithSudo(), h.regenerateRecoveryCodes)
 	api.Get("/me/sessions", rbac.Authenticated(), h.listMySessions)
 	api.Delete("/me/sessions/{id}", rbac.Authenticated(), h.revokeMySession)
@@ -255,8 +256,9 @@ func (h *Handler) writeMe(w http.ResponseWriter, r *http.Request, u store.User, 
 		httpx.Internal(w, r, err)
 		return
 	}
+	stage := passwordStage(u, principal.Stage(sess.Stage)) // login and second factor report the forced change too
 	httpx.WriteJSON(w, http.StatusOK, meResponse{
-		ID: u.ID, Username: u.Username, Role: u.Role, Stage: sess.Stage, Locale: u.Locale,
+		ID: u.ID, Username: u.Username, Role: u.Role, Stage: string(stage), Locale: u.Locale,
 		TOTPEnabled: f.totp, PasskeyCount: f.passkeys, RecoveryCodesRemaining: f.recovery,
 		SecondFactors: f.secondFactors(), TwoFactorReason: reason, SudoUntil: sudo, CSRFToken: sess.CsrfToken,
 	})
