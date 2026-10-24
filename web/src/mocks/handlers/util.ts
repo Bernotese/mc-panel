@@ -1,11 +1,11 @@
 import { HttpResponse, type HttpHandler } from 'msw'
 import type { ErrorCode, Permission, Stage } from '@/api/types'
 import { ALL_PERMISSIONS } from '@/api/types'
-import { currentSession, db, findUser, hasSecondFactor, twoFactorMandatory, type MockSession, type MockUser } from '../db'
+import { currentSession, db, effectiveStage, findUser, hasSecondFactor, twoFactorMandatory, type MockSession, type MockUser } from '../db'
 
 /** Wildcard origin: matches in jsdom (http://localhost:3000) and in the browser worker. */
 export const API = '*/api'
-export const ALL_STAGES: Stage[] = ['preauth', 'setup', 'full']
+export const ALL_STAGES: Stage[] = ['preauth', 'setup', 'password', 'full']
 
 export interface MockOperation {
   operationId: string
@@ -47,10 +47,11 @@ export function guard(request: Request, opts: GuardOptions = {}): Authed | Error
     session.stage = 'setup'
   }
   const stages = opts.stages ?? ['full']
-  if (!stages.includes(session.stage)) {
-    return session.stage === 'setup'
-      ? apiError(403, 'setup_2fa_required', 'two-factor setup required')
-      : apiError(401, 'unauthorized', 'authentication incomplete')
+  const stage = effectiveStage(user, session)
+  if (!stages.includes(stage)) {
+    if (stage === 'setup') return apiError(403, 'setup_2fa_required', 'two-factor setup required')
+    if (stage === 'password') return apiError(403, 'password_change_required', 'password change required')
+    return apiError(401, 'unauthorized', 'authentication incomplete')
   }
   if (opts.admin && user.role !== 'admin') return apiError(403, 'forbidden', 'admin role required')
   if (opts.sudo && !(session.sudoUntil > Date.now())) return apiError(403, 'sudo_required', 're-authentication required')

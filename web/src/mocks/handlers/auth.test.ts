@@ -48,6 +48,39 @@ describe('mock auth flow', () => {
     expect(field(me.body, 'csrf_token')).not.toBe(csrf)
   })
 
+  it('limits a user whose password an admin set to changing it, then continues by stage (SEC-45)', async () => {
+    findUserByName('newadmin')!.mustChangePassword = true
+    const login = await callApi('POST', '/auth/login', { body: { username: 'newadmin', password: MOCK_PASSWORD } })
+    expect(field(login.body, 'stage')).toBe('password')
+    const csrf = String(field(login.body, 'csrf_token'))
+
+    for (const [method, path] of [['GET', '/servers'], ['GET', '/me/passkeys'], ['POST', '/me/totp/setup']] as const) {
+      const blocked = await callApi(method, path, { csrf })
+      expect(blocked.status).toBe(403)
+      expect(field(blocked.body, 'error')).toBe('password_change_required')
+    }
+    const same = await callApi('POST', '/me/password', { body: { current_password: MOCK_PASSWORD, new_password: MOCK_PASSWORD }, csrf })
+    expect(field(same.body, 'error')).toBe('validation_failed')
+
+    const changed = await callApi('POST', '/me/password', { body: { current_password: MOCK_PASSWORD, new_password: 'a brand new passphrase' }, csrf })
+    expect(changed.status).toBe(204)
+    const me = await callApi('GET', '/auth/me')
+    expect(field(me.body, 'stage')).toBe('setup') // an admin without a factor: the 2FA setup comes next
+    expect(field(me.body, 'csrf_token')).toBe(csrf)
+    expect(findUserByName('newadmin')!.mustChangePassword).toBe(false)
+  })
+
+  it('forces a change of passwords an admin set for others, not of their own', async () => {
+    const me = loginAs('admin', { sudo: true })
+    const created = await callApi('POST', '/users', { body: { username: 'carol', password: 'long-enough-password', role: 'user' }, csrf: me.csrf_token })
+    expect(field(created.body, 'must_change_password')).toBe(true)
+    const alice = findUserByName('alice')!
+    const other = await callApi('PATCH', `/users/${alice.id}`, { body: { password: 'another-long-password' }, csrf: me.csrf_token })
+    expect(field(other.body, 'must_change_password')).toBe(true)
+    const own = await callApi('PATCH', '/users/1', { body: { password: 'another-long-password' }, csrf: me.csrf_token })
+    expect(field(own.body, 'must_change_password')).toBe(false)
+  })
+
   it('requires sudo for sensitive actions and rotates the token on sudo', async () => {
     const me = loginAs('admin')
     const denied = await callApi('DELETE', '/me/totp', { csrf: me.csrf_token })

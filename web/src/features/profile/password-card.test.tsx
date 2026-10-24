@@ -23,6 +23,13 @@ describe('PasswordCard', () => {
     expect(screen.getByRole('button', { name: 'Passwort ändern' })).toBeDisabled()
   })
 
+  it('refuses to keep the current password', async () => {
+    await renderWithProviders(<PasswordCard />, { me: loginAs('admin') })
+    await fill(MOCK_PASSWORD, MOCK_PASSWORD, MOCK_PASSWORD)
+    expect(screen.getByText('Das neue Passwort muss sich vom aktuellen unterscheiden.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Passwort ändern' })).toBeDisabled()
+  })
+
   it('explains a wrong current password', async () => {
     await renderWithProviders(<PasswordCard />, { me: loginAs('admin') })
     const user = await fill('not-the-password', 'brand-new-password', 'brand-new-password')

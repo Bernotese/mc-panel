@@ -88,11 +88,16 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
               onChange={(e) => setPassword(e.target.value)}
               maxLength={256}
               aria-invalid={passwordInvalid || undefined}
-              aria-describedby={`${id}-password-hint`}
+              aria-describedby={password !== '' ? `${id}-password-hint ${id}-password-change` : `${id}-password-hint`}
             />
             <p id={`${id}-password-hint`} className={cn('text-sm', passwordInvalid ? 'text-destructive' : 'text-muted-foreground')}>
               {passwordInvalid ? t('users.password_invalid') : t('users.password_hint')}
             </p>
+            {password !== '' ? (
+              <p id={`${id}-password-change`} className="text-muted-foreground text-sm">
+                {t('users.password_must_change')}
+              </p>
+            ) : null}
           </div>
           <div className="space-y-2">
             <Label htmlFor={`${id}-role`}>{t('users.role_label')}</Label>
