@@ -47,8 +47,9 @@ func isValidationError(err error) bool {
 }
 
 // newUser validates the input, hashes the password and inserts the user with a fresh 32-byte
-// WebAuthn user handle. Shared by POST /users and `panel admin create`.
-func newUser(ctx context.Context, q *store.Queries, now time.Time, username, pw, role string) (store.User, error) {
+// WebAuthn user handle. Shared by POST /users and `panel admin create`. mustChange makes the
+// user change the password at the next sign-in (SEC-45: an admin chose it for them).
+func newUser(ctx context.Context, q *store.Queries, now time.Time, username, pw, role string, mustChange bool) (store.User, error) {
 	if err := ValidateUsername(username); err != nil {
 		return store.User{}, err
 	}
@@ -78,10 +79,17 @@ func newUser(ctx context.Context, q *store.Queries, now time.Time, username, pw,
 	ms := now.UnixMilli()
 	u, err := q.RbacCreateUser(ctx, store.RbacCreateUserParams{
 		ID: id, Username: username, PasswordHash: hash, Role: role, WebauthnHandle: handle,
-		PasswordChangedAt: ms, CreatedAt: ms, UpdatedAt: ms,
+		MustChangePassword: boolInt(mustChange), PasswordChangedAt: ms, CreatedAt: ms, UpdatedAt: ms,
 	})
 	if store.IsUniqueViolation(err) {
 		return store.User{}, ErrUsernameTaken
 	}
 	return u, err
+}
+
+func boolInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }

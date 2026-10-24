@@ -16,6 +16,7 @@ const (
 	CodeForbidden               = "forbidden"
 	CodeSudoRequired            = "sudo_required"
 	CodeSetupRequired           = "setup_2fa_required"
+	CodePasswordChangeRequired  = "password_change_required"
 	CodeCSRF                    = "csrf_invalid"
 	CodeNotFound                = "not_found"
 	CodeConflict                = "conflict"
