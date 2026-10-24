@@ -17,15 +17,15 @@ WHERE id = 1
 RETURNING last_id;
 
 -- name: RbacCreateUser :one
-INSERT INTO users (id, username, password_hash, role, webauthn_handle, password_changed_at, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO users (id, username, password_hash, role, webauthn_handle, must_change_password, password_changed_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: RbacUpdateUserRole :exec
 UPDATE users SET role = ?, updated_at = ? WHERE id = ?;
 
 -- name: RbacUpdateUserPassword :exec
-UPDATE users SET password_hash = ?, password_changed_at = ?, updated_at = ? WHERE id = ?;
+UPDATE users SET password_hash = ?, must_change_password = ?, password_changed_at = ?, updated_at = ? WHERE id = ?;
 
 -- name: RbacDeleteUser :execrows
 DELETE FROM users WHERE id = ?;

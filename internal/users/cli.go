@@ -30,7 +30,8 @@ func RunAdminCreate(ctx context.Context, db *sql.DB, c clock.Clock, rec audit.Re
 	if err != nil {
 		return fmt.Errorf("admin create: %w", err)
 	}
-	u, err := newUser(ctx, store.New(db), c.Now(), username, pw, string(principal.RoleAdmin))
+	// The operator chose this password for themselves: no forced change.
+	u, err := newUser(ctx, store.New(db), c.Now(), username, pw, string(principal.RoleAdmin), false)
 	if err != nil {
 		return fmt.Errorf("admin create: %w", err)
 	}

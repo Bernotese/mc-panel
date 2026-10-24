@@ -11,6 +11,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/password"
+	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
 
@@ -84,6 +85,10 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 	if !h.verifyCurrentPassword(w, r, user, req.CurrentPassword) {
 		return
 	}
+	if req.NewPassword == req.CurrentPassword { // a forced change must not keep the password the admin knows
+		httpx.WriteError(w, r, http.StatusBadRequest, httpx.CodeValidation, "new_password must differ from the current password")
+		return
+	}
 	if err := password.Validate(req.NewPassword, user.Username); err != nil {
 		httpx.WriteError(w, r, http.StatusBadRequest, httpx.CodeValidation, passwordPolicyMessage(err))
 		return
@@ -97,27 +102,52 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
+	sess, err := h.presentedSession(ctx, p)
+	if err != nil {
+		sessionError(w, r, err)
+		return
+	}
 	now := h.clock.Now().UnixMilli()
-	// The new password and the revocation of every other session commit together: a failure
-	// must not leave a changed password with the old sessions still alive (or vice versa).
-	var revoked int64
+	// The new password, the end of a forced change and the revocation of every other session commit
+	// together: a failure must not leave a changed password with the old sessions still alive (or
+	// vice versa). A forced change (SEC-45) also rotates this session's token, because the session
+	// leaves the password stage; the stored stage stays and decides about a pending 2FA setup.
+	var (
+		revoked int64
+		forced  bool
+		tok     string
+	)
 	err = h.withTx(ctx, func(q *store.Queries) error {
+		cur, err := q.AuthGetUserByID(ctx, user.ID)
+		if err != nil {
+			return err
+		}
+		forced = cur.MustChangePassword == 1
 		if err := q.AuthChangePassword(ctx, store.AuthChangePasswordParams{PasswordHash: hash, Now: now, ID: user.ID}); err != nil {
 			return err
 		}
-		var err error
 		revoked, err = q.AuthRevokeOtherSessions(ctx, store.AuthRevokeOtherSessionsParams{
 			RevokedAt: sql.NullInt64{Int64: now, Valid: true}, UserID: user.ID, KeepID: p.SessionID,
 		})
+		if err != nil || !forced {
+			return err
+		}
+		tok, _, err = h.sessions.withQueries(q).Rotate(ctx, sess, Rotation{Stage: principal.Stage(sess.Stage)})
 		return err
 	})
 	if err != nil {
-		httpx.Internal(w, r, err)
+		sessionError(w, r, err)
 		return
 	}
+	if forced {
+		setSessionCookie(w, tok)
+	}
 	h.ResetSecondFactorLockout(user.ID) // spec §7.2: a password change lifts the 2FA lockout
-	h.auditLog(ctx, user.ID, user.Username, audit.ActionPasswordChange, user.Username, audit.ResultSuccess,
-		map[string]any{"revoked_sessions": revoked})
+	details := map[string]any{"revoked_sessions": revoked}
+	if forced {
+		details["forced"] = true
+	}
+	h.auditLog(ctx, user.ID, user.Username, audit.ActionPasswordChange, user.Username, audit.ResultSuccess, details)
 	h.notifySecurity(ctx, notify.EventPasswordChanged, "Password changed",
 		user.Username+" changed their password"+h.fromWhere(ctx)+".", user.Username)
 	w.WriteHeader(http.StatusNoContent)

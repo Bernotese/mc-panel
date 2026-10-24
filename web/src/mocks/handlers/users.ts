@@ -54,9 +54,10 @@ export const userOperations: MockOperation[] = [
         recoveryCodes: [],
         createdAt: Date.now(),
         lastLoginAt: null,
+        mustChangePassword: true, // SEC-45: the admin chose the password
       }
       db.users.push(user)
-      recordAudit(g.user, 'user.create', `user:${username}`)
+      recordAudit(g.user, 'user.create', `user:${username}`, 'success', { must_change_password: true })
       return HttpResponse.json<User>(toUser(user), { status: 201 })
     }),
   ),
@@ -86,7 +87,12 @@ export const userOperations: MockOperation[] = [
       }
       if (body?.role === 'user' && user.role === 'admin' && adminCount() === 1) return apiError(409, 'conflict', 'cannot demote the last admin')
       if (isRole(body?.role)) user.role = body.role
-      if (body?.password !== undefined) user.password = body.password
+      if (body?.password !== undefined) {
+        user.password = body.password
+        // A password an admin sets for someone else must be changed at the next sign-in; their own is not forced.
+        user.mustChangePassword = user.id !== g.user.id
+        db.sessions = db.sessions.filter((s) => s.userId !== user.id || s.id === g.session.id)
+      }
       recordAudit(g.user, 'user.update', `user:${user.username}`, 'success', { role: user.role })
       return HttpResponse.json<User>(toUser(user))
     }),

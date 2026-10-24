@@ -82,6 +82,8 @@ export interface MockUser {
   recoveryCodes: string[]
   createdAt: number
   lastLoginAt: number | null
+  /** An admin set the password; the sessions are limited to changing it (stage `password`, SEC-45). */
+  mustChangePassword: boolean
 }
 
 export interface MockSession {
@@ -550,6 +552,7 @@ function seed(now: number): MockDb {
         recoveryCodes: [...MOCK_RECOVERY_CODES],
         createdAt: now - 30 * DAY,
         lastLoginAt: now - DAY,
+        mustChangePassword: false,
       },
       {
         id: 2,
@@ -563,6 +566,7 @@ function seed(now: number): MockDb {
         recoveryCodes: [],
         createdAt: now - 10 * DAY,
         lastLoginAt: now - 3 * DAY,
+        mustChangePassword: false,
       },
       {
         id: 3,
@@ -576,6 +580,7 @@ function seed(now: number): MockDb {
         recoveryCodes: [],
         createdAt: now - HOUR,
         lastLoginAt: null,
+        mustChangePassword: false,
       },
       {
         id: 4,
@@ -589,6 +594,7 @@ function seed(now: number): MockDb {
         recoveryCodes: MOCK_RECOVERY_CODES.slice(0, 5),
         createdAt: now - 5 * DAY,
         lastLoginAt: now - 4 * DAY,
+        mustChangePassword: false,
       },
     ],
     sessions: [
@@ -766,12 +772,17 @@ function secondFactorsOf(u: MockUser): SecondFactor[] {
   return factors
 }
 
+/** Like passwordStage in internal/auth: a forced password change comes before the 2FA setup, after the second factor. */
+export function effectiveStage(u: MockUser, s: MockSession): Stage {
+  return u.mustChangePassword && (s.stage === 'full' || s.stage === 'setup') ? 'password' : s.stage
+}
+
 export function toMe(u: MockUser, s: MockSession): Me {
   return {
     id: u.id,
     username: u.username,
     role: u.role,
-    stage: s.stage,
+    stage: effectiveStage(u, s),
     locale: u.locale,
     totp_enabled: u.totpEnabled,
     passkey_count: u.passkeys.length,
@@ -792,6 +803,7 @@ export function toUser(u: MockUser): User {
     passkey_count: u.passkeys.length,
     created_at: u.createdAt,
     last_login_at: u.lastLoginAt,
+    must_change_password: u.mustChangePassword,
   }
 }
 

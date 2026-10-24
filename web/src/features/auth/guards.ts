@@ -1,10 +1,11 @@
 import type { Me, Stage } from '@/api/types'
 
-export type AuthPath = '/' | '/login' | '/login/2fa' | '/setup-2fa'
+export type AuthPath = '/' | '/login' | '/login/2fa' | '/setup-2fa' | '/change-password'
 
 export function pathForStage(stage: Stage): AuthPath {
   if (stage === 'preauth') return '/login/2fa'
   if (stage === 'setup') return '/setup-2fa'
+  if (stage === 'password') return '/change-password'
   return '/'
 }
 
@@ -19,7 +20,7 @@ export function adminGuard(me: Me | null): AuthPath | null {
   return me.role === 'admin' ? null : '/'
 }
 
-/** The login page stays reachable in preauth/setup so a user can switch accounts. */
+/** The login page stays reachable in preauth/setup/password so a user can switch accounts. */
 export function loginGuard(me: Me | null): AuthPath | null {
   return me?.stage === 'full' ? '/' : null
 }
@@ -32,4 +33,9 @@ export function secondFactorGuard(me: Me | null): AuthPath | null {
 export function setupGuard(me: Me | null): AuthPath | null {
   if (!me) return '/login'
   return me.stage === 'setup' ? null : pathForStage(me.stage)
+}
+
+export function changePasswordGuard(me: Me | null): AuthPath | null {
+  if (!me) return '/login'
+  return me.stage === 'password' ? null : pathForStage(me.stage)
 }

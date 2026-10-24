@@ -155,7 +155,7 @@ CREATE TABLE instance_settings (
 
 - sqlc queries in `internal/store/queries/servers.sql`, prefix `Servers…`.
 - A server without an `instances` row (stub from sub-project 1) is called "not set up" in the UI and can only be deleted.
-- `revision` starts at 1. The container carries the revision as a label; a mismatch = "restart required".
+- `revision` starts at 1. The container carries the revision as a label; a mismatch = "restart required" (as does an outdated template label, §5.3).
 - Server IDs are never reused (counter table from migration `00003`): otherwise a new server could inherit the container and world of a deleted server whose removal failed.
 - `base_domain`: valid DNS name made of labels matching `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`, at least two labels, ≤ 200 characters in total, stored in lower case. A server's FQDN = `<name>.<base_domain>` (≤ 253 characters).
 
@@ -228,6 +228,7 @@ A loop runs every 10 s (through `clock.Clock`) and additionally right after ever
 | any | `operation != ""` | nothing (agent is working) |
 
 - "Restart" by a user: if the revision is current → `power restart`; otherwise `ensure` with `recreate: true` (this starts it again because the container was running before).
+- Template (Now, issue #123 F10): besides the revision, every container carries `mcpanel.template`, the SHA-256 over `TemplateEpoch` and the agent's container template for a canonical spec of its type and Java (`InstanceTemplateHash` in `internal/agent/instances`: image, user, mounts, limits, hardening, the shape of the environment; labels and spec values excluded), plus `mcpanel.type` and `mcpanel.java`. The agent reports `template_outdated` when the label is missing or differs from what it would create now (agent upgrade, changed host settings). The panel treats such a container like an older revision in the same revision: running → `restart_required = true`; not running → `ensure` with `recreate: true` before it starts; "Restart" → `ensure` with `recreate: true`, which the agent accepts for the same revision only when the template is outdated (an older revision stays a no-op). A container with a newer revision than the panel's (restored database) is never recreated for its template. A template change that shows only for non-canonical spec values bumps `TemplateEpoch`.
 - Containers with a `mcpanel.instance` label that the DB does not know: log warning and shown in the settings; no automatic deletion.
 - Agent errors (unreachable, `docker_unavailable`) abort the pass and are logged; the next pass tries again.
 - If a pass triggered something, the next one follows immediately (e.g. `ensure`, then `start`). If the same action repeats for an instance without success (persistent `last_error`), the reconcile loop backs off exponentially: 10 s, 20 s, 40 s … at most 5 min.
