@@ -114,7 +114,7 @@ func TestMustChangePasswordLimitsSession(t *testing.T) {
 		t.Fatalf("other sessions must be revoked, got %d", res.code)
 	}
 	en := e.lastEntry(audit.ActionPasswordChange)
-	if en.Details["forced"] != true {
+	if forced, _ := en.Details["forced"].(bool); !forced {
 		t.Fatalf("audit details = %v, want forced: true", en.Details)
 	}
 }
