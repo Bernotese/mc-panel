@@ -132,4 +132,15 @@ type userResp struct {
 	PasskeyCount int    `json:"passkey_count"`
 	CreatedAt    int64  `json:"created_at"`
 	LastLoginAt  *int64 `json:"last_login_at"`
+	// MustChange is a pointer so that a missing field fails the tests.
+	MustChange *bool `json:"must_change_password"`
+}
+
+func mustChangePassword(t *testing.T, db *sql.DB, id int64) int64 {
+	t.Helper()
+	var v int64
+	if err := db.QueryRow(`SELECT must_change_password FROM users WHERE id = ?`, id).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	return v
 }

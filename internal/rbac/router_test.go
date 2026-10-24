@@ -37,6 +37,7 @@ func setup(t *testing.T) (http.Handler, *rbac.Router) {
 	rt.Route("/api", func(api *rbac.Router) {
 		api.Get("/health", rbac.Public(), ok)
 		api.Get("/me", rbac.Authenticated().AllowStages(principal.StagePreAuth, principal.StageSetup, principal.StageFull), ok)
+		api.Post("/me/password", rbac.Authenticated().AllowStages(principal.StagePassword, principal.StageFull), ok)
 		api.Get("/servers", rbac.Authenticated(), ok)
 		api.Post("/users", rbac.Admin().WithSudo(), ok)
 		api.Post("/servers/{id}/power", rbac.Server(rbac.PermServerPower, "id"), ok)
@@ -65,6 +66,7 @@ func TestEnforcement(t *testing.T) {
 	other := &principal.Principal{UserID: 3, Role: principal.RoleUser, Stage: principal.StageFull}
 	pre := &principal.Principal{UserID: 2, Role: principal.RoleUser, Stage: principal.StagePreAuth}
 	setupStage := &principal.Principal{UserID: 1, Role: principal.RoleAdmin, Stage: principal.StageSetup}
+	passwordStage := &principal.Principal{UserID: 1, Role: principal.RoleAdmin, Stage: principal.StagePassword, SudoUntil: now.Add(time.Minute)}
 
 	cases := []struct {
 		name, method, path string
@@ -77,6 +79,11 @@ func TestEnforcement(t *testing.T) {
 		{"preauth cannot use full route", "GET", "/api/servers", pre, 401, "unauthorized"},
 		{"setup stage gets setup error", "GET", "/api/servers", setupStage, 403, "setup_2fa_required"},
 		{"preauth allowed on /me", "GET", "/api/me", pre, 204, ""},
+		{"password stage gets password error", "GET", "/api/servers", passwordStage, 403, "password_change_required"},
+		{"password stage on a route of the other stages", "GET", "/api/me", passwordStage, 403, "password_change_required"},
+		{"password stage on an admin route even with sudo", "POST", "/api/users", passwordStage, 403, "password_change_required"},
+		{"password stage may change the password", "POST", "/api/me/password", passwordStage, 204, ""},
+		{"setup stage cannot use the password route", "POST", "/api/me/password", setupStage, 403, "setup_2fa_required"},
 		{"user on admin route", "POST", "/api/users", user, 403, "forbidden"},
 		{"admin without sudo", "POST", "/api/users", admin, 403, "sudo_required"},
 		{"admin with expired sudo", "POST", "/api/users", adminSudoExpired, 403, "sudo_required"},
@@ -100,7 +107,7 @@ func TestEnforcement(t *testing.T) {
 func TestRoutesRegistry(t *testing.T) {
 	_, rt := setup(t)
 	routes := rt.Routes()
-	if len(routes) != 5 {
+	if len(routes) != 6 {
 		t.Fatalf("len(routes) = %d", len(routes))
 	}
 	found := false

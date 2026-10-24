@@ -80,8 +80,7 @@ func TestConsoleEndToEnd(t *testing.T) {
 	admin.must(200, "PUT", fmt.Sprintf("/users/%d/permissions", int64(u["id"].(float64))), map[string]any{
 		"grants": []map[string]any{{"server_id": id, "permissions": []string{"server.power"}}},
 	})
-	friend := e.client("")
-	friend.must(200, "POST", "/auth/login", map[string]string{"username": "friend", "password": "another long secret 42"})
+	friend := signInNewUser(e, "friend", "another long secret 42")
 	friend.must(200, "GET", fmt.Sprintf("/servers/%d/players", id), nil)
 	for _, tc := range []struct{ method, path string }{
 		{"POST", fmt.Sprintf("/servers/%d/console", id)},

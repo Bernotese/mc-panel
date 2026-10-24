@@ -11,7 +11,8 @@ UPDATE users SET password_hash = sqlc.arg(password_hash), updated_at = sqlc.arg(
 WHERE id = sqlc.arg(id);
 
 -- name: AuthChangePassword :exec
-UPDATE users SET password_hash = sqlc.arg(password_hash), password_changed_at = sqlc.arg(now), updated_at = sqlc.arg(now)
+-- The user's own change; it also ends a forced change (must_change_password, SEC-45).
+UPDATE users SET password_hash = sqlc.arg(password_hash), must_change_password = 0, password_changed_at = sqlc.arg(now), updated_at = sqlc.arg(now)
 WHERE id = sqlc.arg(id);
 
 -- name: AuthUpdateLocale :exec

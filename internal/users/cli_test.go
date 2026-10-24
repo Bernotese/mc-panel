@@ -25,15 +25,18 @@ func TestRunAdminCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunAdminCreate: %v", err)
 	}
-	var id int64
+	var id, mustChange int64
 	var role, hash string
 	var handle []byte
-	if err := db.QueryRow(`SELECT id, role, password_hash, webauthn_handle FROM users WHERE username = 'jannes'`).
-		Scan(&id, &role, &hash, &handle); err != nil {
+	if err := db.QueryRow(`SELECT id, role, password_hash, webauthn_handle, must_change_password FROM users WHERE username = 'jannes'`).
+		Scan(&id, &role, &hash, &handle, &mustChange); err != nil {
 		t.Fatal(err)
 	}
 	if ok, _, err := password.Verify(goodPassword, hash); role != "admin" || !ok || err != nil || len(handle) != 32 {
 		t.Fatalf("role=%q verify=%v err=%v handle=%d", role, ok, err, len(handle))
+	}
+	if mustChange != 0 {
+		t.Fatal("the operator chose this password: no forced change (SEC-45)")
 	}
 	if !strings.Contains(out.String(), `created admin user "jannes"`) {
 		t.Fatalf("stdout = %q", out.String())

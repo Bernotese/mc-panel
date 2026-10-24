@@ -51,15 +51,23 @@ export const meOperations: MockOperation[] = [
   op(
     'changePassword',
     http.post(`${API}/me/password`, async ({ request }) => {
-      const g = guard(request)
+      const g = guard(request, { stages: ['password', 'full'] })
       if (g instanceof Response) return g
       const body = await readJson<{ current_password?: string; new_password?: string }>(request)
       if (body?.current_password !== g.user.password) return apiError(401, 'invalid_credentials', 'current password is wrong')
       const next = body.new_password ?? ''
+      if (next === g.user.password) return apiError(400, 'validation_failed', 'new_password must differ from the current password')
       if (next.length < 12 || next.length > 256) return apiError(400, 'validation_failed', 'password must be 12-256 characters')
+      const forced = g.user.mustChangePassword
       g.user.password = next
+      g.user.mustChangePassword = false
       db.sessions = db.sessions.filter((s) => s.userId !== g.user.id || s.id === g.session.id)
-      recordAudit(g.user, 'auth.password.change', g.user.username)
+      if (forced) {
+        // Like the panel: a forced change rotates the session token (the cookie) and keeps the CSRF token.
+        g.session.id = nextId()
+        db.currentSessionId = g.session.id
+      }
+      recordAudit(g.user, 'auth.password_change', g.user.username, 'success', forced ? { forced: true } : {})
       return noContent()
     }),
   ),

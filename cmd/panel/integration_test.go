@@ -178,6 +178,24 @@ func loginAdminWithTOTP(e *env) (*client, string) {
 	return c, secret
 }
 
+// signInNewUser signs in a user whose password an admin set and makes the forced password
+// change (SEC-45): until then the session can only reach /auth/me, the logout and /me/password.
+func signInNewUser(e *env, username, pw string) *client {
+	e.t.Helper()
+	c := e.client("")
+	if me := c.must(200, "POST", "/auth/login", map[string]string{"username": username, "password": pw}); me["stage"] != "password" {
+		e.t.Fatalf("%s must land in stage password, got %v", username, me["stage"])
+	}
+	if code, out := c.do("GET", "/servers", nil); code != 403 || out["error"] != "password_change_required" {
+		e.t.Fatalf("GET /servers in stage password = %d %v", code, out)
+	}
+	c.must(204, "POST", "/me/password", map[string]string{"current_password": pw, "new_password": pw + " renewed"})
+	if me := c.refresh(); me["stage"] == "password" {
+		e.t.Fatalf("%s still in stage password after the change", username)
+	}
+	return c
+}
+
 func sudo(e *env, c *client, secret string) {
 	e.clk.Advance(30 * time.Second) // next TOTP step (replay protection)
 	c.must(200, "POST", "/auth/sudo/totp", map[string]string{"code": totpCode(e, secret)})
@@ -227,9 +245,9 @@ func TestFullFlowPermissionsAndAudit(t *testing.T) {
 	})
 
 	// acceptance criterion 4: user sees only server A, 403 on B
-	maxUser := e.client("")
-	if me := maxUser.must(200, "POST", "/auth/login", map[string]string{"username": "maxUser", "password": "another long secret 42"}); me["stage"] != "full" {
-		t.Fatalf("user without enforced 2FA should be full, got %v", me["stage"])
+	maxUser := signInNewUser(e, "maxUser", "another long secret 42")
+	if me := maxUser.refresh(); me["stage"] != "full" {
+		t.Fatalf("user without enforced 2FA should be full after the password change, got %v", me["stage"])
 	}
 	code, list := maxUser.doList("GET", "/servers")
 	if code != 200 || len(list) != 1 || int64(list[0]["id"].(float64)) != srvA {
@@ -258,6 +276,49 @@ func TestFullFlowPermissionsAndAudit(t *testing.T) {
 		if !seen[want] {
 			t.Errorf("audit log misses %s (have %v)", want, seen)
 		}
+	}
+}
+
+// TestAdminSetPasswordForcesChange: a password an admin sets for another user must be changed at
+// the next sign-in (SEC-45); the admin's own password set the same way is not forced.
+func TestAdminSetPasswordForcesChange(t *testing.T) {
+	e := newEnv(t)
+	admin, secret := loginAdminWithTOTP(e)
+	sudo(e, admin, secret)
+	u := admin.must(201, "POST", "/users", map[string]string{"username": "maxUser", "password": "another long secret 42", "role": "user"})
+	uid := int64(u["id"].(float64))
+	if !isTrue(u["must_change_password"]) {
+		t.Fatalf("created user: %v", u)
+	}
+	signInNewUser(e, "maxUser", "another long secret 42")
+	if got := admin.must(200, "GET", fmt.Sprintf("/users/%d", uid), nil); isTrue(got["must_change_password"]) {
+		t.Fatalf("flag after the change: %v", got)
+	}
+
+	// The admin resets it: the open session is revoked and the next sign-in is limited again.
+	admin.must(200, "PATCH", fmt.Sprintf("/users/%d", uid), map[string]string{"password": "a password from the admin 7"})
+	c := e.client("")
+	if me := c.must(200, "POST", "/auth/login", map[string]string{"username": "maxUser", "password": "a password from the admin 7"}); me["stage"] != "password" {
+		t.Fatalf("stage = %v, want password", me["stage"])
+	}
+	for _, rt := range []struct{ method, path string }{{"GET", "/servers"}, {"GET", "/about"}, {"GET", "/me/sessions"}} {
+		if code, out := c.do(rt.method, rt.path, nil); code != 403 || out["error"] != "password_change_required" {
+			t.Fatalf("%s %s = %d %v", rt.method, rt.path, code, out)
+		}
+	}
+	c.must(204, "POST", "/auth/logout", nil)
+	c.must(401, "GET", "/auth/me", nil)
+
+	// Own password through the user management: no forced change.
+	me := admin.refresh()
+	admin.must(200, "PATCH", fmt.Sprintf("/users/%d", int64(me["id"].(float64))), map[string]string{"password": "my very own fresh pw 9"})
+	again := e.client("")
+	if me := again.must(200, "POST", "/auth/login", map[string]string{"username": "admin", "password": "my very own fresh pw 9"}); me["stage"] != "preauth" {
+		t.Fatalf("admin with TOTP = %v, want preauth", me["stage"])
+	}
+	e.clk.Advance(30 * time.Second)
+	if me := again.must(200, "POST", "/auth/2fa/totp", map[string]string{"code": totpCode(e, secret)}); me["stage"] != "full" {
+		t.Fatalf("admin after the code = %v, want full", me["stage"])
 	}
 }
 

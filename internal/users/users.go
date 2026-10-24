@@ -30,6 +30,8 @@ type userJSON struct {
 	PasskeyCount int64  `json:"passkey_count"`
 	CreatedAt    int64  `json:"created_at"`
 	LastLoginAt  *int64 `json:"last_login_at"`
+	// MustChangePassword: an admin set the password; the user must change it at the next sign-in.
+	MustChangePassword bool `json:"must_change_password"`
 }
 
 func toUserJSON(ctx context.Context, q *store.Queries, u store.User) (userJSON, error) {
@@ -39,7 +41,7 @@ func toUserJSON(ctx context.Context, q *store.Queries, u store.User) (userJSON, 
 	}
 	out := userJSON{
 		ID: u.ID, Username: u.Username, Role: u.Role, TotpEnabled: u.TotpEnabled != 0,
-		PasskeyCount: n, CreatedAt: u.CreatedAt,
+		PasskeyCount: n, CreatedAt: u.CreatedAt, MustChangePassword: u.MustChangePassword != 0,
 	}
 	ts, err := q.RbacLastLogin(ctx, sql.NullInt64{Int64: u.ID, Valid: true})
 	switch {
@@ -82,7 +84,7 @@ func (h *Handler) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
-	u, err := newUser(ctx, h.q, h.clock.Now(), req.Username, req.Password, req.Role)
+	u, err := newUser(ctx, h.q, h.clock.Now(), req.Username, req.Password, req.Role, true)
 	switch {
 	case errors.Is(err, ErrUsernameTaken):
 		writeConflict(w, r, err.Error())
@@ -98,7 +100,7 @@ func (h *Handler) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.record(ctx, audit.ActionUserCreate, userTarget(u.ID), audit.ResultSuccess,
-		map[string]any{"username": u.Username, "role": u.Role})
+		map[string]any{"username": u.Username, "role": u.Role, "must_change_password": true})
 	h.emit(r, notify.EventUserCreated, "User created",
 		fmt.Sprintf("%s created user %s with role %s", callerName(r), u.Username, u.Role), u.Username)
 	out, err := toUserJSON(ctx, h.q, u)

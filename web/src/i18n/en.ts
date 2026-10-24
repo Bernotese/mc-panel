@@ -37,6 +37,7 @@ export const en: Messages = {
     forbidden: 'You do not have permission for this.',
     sudo_required: 'This action needs to be confirmed.',
     setup_2fa_required: 'Please set up two-factor authentication first.',
+    password_change_required: 'Please change your password first.',
     csrf_invalid: 'Session expired. Please reload the page.',
     not_found: 'Not found.',
     conflict: 'Conflicts with the current state',
@@ -153,6 +154,11 @@ export const en: Messages = {
     tab_passkey: 'Passkey',
     codes_title: 'Almost done',
     finish: 'Continue to the panel',
+  },
+  change_password: {
+    title: 'Choose a new password',
+    description: 'Signed in as {{username}}. An administrator set your password. Choose your own before you use the panel.',
+    submit: 'Change password and continue',
   },
   totp_setup: {
     intro: 'Link an authenticator app (e.g. Aegis, 2FAS or Google Authenticator) to your account.',
@@ -1273,6 +1279,7 @@ export const en: Messages = {
     username_invalid: 'The username does not match the rules.',
     password: 'Initial password',
     password_hint: 'At least 12 characters.',
+    password_must_change: 'The user must change this password at their next sign-in.',
     password_invalid: 'The password must be 12 to 256 characters long.',
     role_label: 'Role',
     role: {
@@ -1284,6 +1291,7 @@ export const en: Messages = {
     created: 'User {{name}} created.',
     deleted: 'User {{name}} deleted.',
     you: '(you)',
+    must_change_password: 'Must change password',
     never: 'never',
     col: {
       username: 'Username',
@@ -1553,6 +1561,7 @@ export const en: Messages = {
       hint: 'At least 12 characters. All other sessions will be signed out.',
       too_short: 'The new password must be 12 to 256 characters long.',
       mismatch: 'The passwords do not match.',
+      same: 'The new password must differ from the current one.',
       wrong_current: 'The current password is wrong.',
       submit: 'Change password',
       changed: 'Password changed. Other sessions have been signed out.',
