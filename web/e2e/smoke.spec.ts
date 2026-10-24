@@ -36,6 +36,34 @@ test('sensitive actions ask for sudo once and then succeed', async ({ page }) =>
   await expect(sudo).toBeHidden()
 })
 
+test('a user whose password an admin set must change it at the first sign-in (SEC-45)', async ({ page }) => {
+  await signInAsAdmin(page)
+  await page.getByRole('link', { name: 'Benutzer', exact: true }).click()
+  await page.getByRole('button', { name: 'Benutzer anlegen' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Benutzer anlegen' })
+  await dialog.getByLabel('Benutzername').fill('carol')
+  await dialog.getByLabel('Initiales Passwort').fill('long-enough-password')
+  await expect(dialog.getByText('Der Benutzer muss das Passwort bei der nächsten Anmeldung ändern.')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Anlegen' }).click()
+  const sudo = page.getByRole('dialog', { name: 'Aktion bestätigen' })
+  await sudo.getByLabel('Code aus der Authenticator-App').fill('123456')
+  await sudo.getByRole('button', { name: 'Bestätigen' }).click()
+  await expect(page.getByRole('row', { name: /carol/ }).getByText('Muss Passwort ändern')).toBeVisible()
+  await page.getByRole('button', { name: 'Abmelden', exact: true }).click()
+  await expect(page).toHaveURL(/\/login$/)
+
+  // The mock state lives in the page, so carol signs in without a reload.
+  await page.getByLabel('Benutzername').fill('carol')
+  await page.getByLabel('Passwort').fill('long-enough-password')
+  await page.getByRole('button', { name: 'Anmelden' }).click()
+  await expect(page).toHaveURL(/\/change-password$/)
+  await page.getByLabel('Aktuelles Passwort').fill('long-enough-password')
+  await page.getByLabel('Neues Passwort', { exact: true }).fill('carols own passphrase')
+  await page.getByLabel('Neues Passwort wiederholen').fill('carols own passphrase')
+  await page.getByRole('button', { name: 'Passwort ändern und weiter' }).click()
+  await expect(page.getByRole('heading', { name: 'Server', level: 1 })).toBeVisible()
+})
+
 test('granting file access makes 2FA mandatory for the user (SEC-10)', async ({ page }) => {
   await signInAsAdmin(page)
   await page.getByRole('link', { name: 'Benutzer', exact: true }).click()

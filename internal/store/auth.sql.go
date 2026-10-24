@@ -29,7 +29,7 @@ func (q *Queries) AuthAdvanceTOTPStep(ctx context.Context, arg AuthAdvanceTOTPSt
 }
 
 const authChangePassword = `-- name: AuthChangePassword :exec
-UPDATE users SET password_hash = ?1, password_changed_at = ?2, updated_at = ?2
+UPDATE users SET password_hash = ?1, must_change_password = 0, password_changed_at = ?2, updated_at = ?2
 WHERE id = ?3
 `
 
@@ -39,6 +39,7 @@ type AuthChangePasswordParams struct {
 	ID           int64
 }
 
+// The user's own change; it also ends a forced change (must_change_password, SEC-45).
 func (q *Queries) AuthChangePassword(ctx context.Context, arg AuthChangePasswordParams) error {
 	_, err := q.db.ExecContext(ctx, authChangePassword, arg.PasswordHash, arg.Now, arg.ID)
 	return err
@@ -289,7 +290,7 @@ func (q *Queries) AuthGetSessionByTokenHash(ctx context.Context, tokenHash []byt
 }
 
 const authGetUserByID = `-- name: AuthGetUserByID :one
-SELECT id, username, password_hash, role, locale, webauthn_handle, totp_secret_enc, totp_enabled, totp_last_step, password_changed_at, created_at, updated_at FROM users WHERE id = ?1
+SELECT id, username, password_hash, role, locale, webauthn_handle, totp_secret_enc, totp_enabled, totp_last_step, password_changed_at, created_at, updated_at, must_change_password FROM users WHERE id = ?1
 `
 
 func (q *Queries) AuthGetUserByID(ctx context.Context, id int64) (User, error) {
@@ -308,13 +309,14 @@ func (q *Queries) AuthGetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.PasswordChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
 
 const authGetUserByUsername = `-- name: AuthGetUserByUsername :one
 
-SELECT id, username, password_hash, role, locale, webauthn_handle, totp_secret_enc, totp_enabled, totp_last_step, password_changed_at, created_at, updated_at FROM users WHERE username = ?1
+SELECT id, username, password_hash, role, locale, webauthn_handle, totp_secret_enc, totp_enabled, totp_last_step, password_changed_at, created_at, updated_at, must_change_password FROM users WHERE username = ?1
 `
 
 // Stream A (auth). All query names carry the prefix "Auth".
@@ -334,6 +336,7 @@ func (q *Queries) AuthGetUserByUsername(ctx context.Context, username string) (U
 		&i.PasswordChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MustChangePassword,
 	)
 	return i, err
 }

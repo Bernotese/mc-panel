@@ -158,7 +158,18 @@ func sameOrigin(r *http.Request, origin string) bool {
 	return true
 }
 
-// effectiveStage downgrades a stored full session to setup when 2FA is mandatory for the user
+// passwordStage applies a forced password change (SEC-45): a signed-in session of a user whose
+// password an admin set is limited to changing it, before any 2FA setup. A preauth session stays
+// preauth: the second factor comes first.
+func passwordStage(user store.User, stage principal.Stage) principal.Stage {
+	if user.MustChangePassword == 1 && (stage == principal.StageFull || stage == principal.StageSetup) {
+		return principal.StagePassword
+	}
+	return stage
+}
+
+// effectiveStage first applies passwordStage. Otherwise it downgrades a stored full session to
+// setup when 2FA is mandatory for the user
 // (admin, full-trust permission or enforcement) but the user has no method: a user promoted to
 // admin, granted such a permission or newly under enforcement must set up 2FA before using the
 // panel. The other way round, a stored setup session of a user without a method continues as
@@ -166,6 +177,9 @@ func sameOrigin(r *http.Request, origin string) bool {
 // a full session at that point too.
 func (s *Sessions) effectiveStage(ctx context.Context, user store.User, sess store.Session) (principal.Stage, error) {
 	stage := principal.Stage(sess.Stage)
+	if passwordStage(user, stage) == principal.StagePassword {
+		return principal.StagePassword, nil
+	}
 	if (stage != principal.StageFull && stage != principal.StageSetup) || user.TotpEnabled == 1 {
 		return stage, nil
 	}

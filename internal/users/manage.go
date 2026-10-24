@@ -116,6 +116,10 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	now := h.clock.Now().UnixMilli()
 	oldRole := u.Role
+	// A password an admin sets for someone else must be changed at the next sign-in (SEC-45); an
+	// admin setting their own password here is not forced.
+	caller, _ := principal.From(ctx)
+	forceChange := req.Password != nil && caller.UserID != id
 	var revoked int64
 	err = h.inTx(ctx, func(q *store.Queries) error {
 		cur, err := getUser(ctx, q, id)
@@ -133,9 +137,8 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			// A privilege change ends the target's sessions (spec §4.3: new session after every
 			// privilege change). The caller's own session stays, so an admin who demotes
 			// themselves is not logged out in the middle of the request.
-			p, _ := principal.From(ctx)
 			n, err := q.RbacRevokeUserSessionsExcept(ctx, store.RbacRevokeUserSessionsExceptParams{
-				RevokedAt: sql.NullInt64{Int64: now, Valid: true}, UserID: id, KeepID: p.SessionID,
+				RevokedAt: sql.NullInt64{Int64: now, Valid: true}, UserID: id, KeepID: caller.SessionID,
 			})
 			if err != nil {
 				return err
@@ -144,7 +147,7 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Password != nil {
 			if err := q.RbacUpdateUserPassword(ctx, store.RbacUpdateUserPasswordParams{
-				PasswordHash: newHash, PasswordChangedAt: now, UpdatedAt: now, ID: id,
+				PasswordHash: newHash, MustChangePassword: boolInt(forceChange), PasswordChangedAt: now, UpdatedAt: now, ID: id,
 			}); err != nil {
 				return err
 			}
@@ -180,6 +183,9 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Password != nil {
 		details["password_changed"] = true
+	}
+	if forceChange {
+		details["must_change_password"] = true
 	}
 	h.record(ctx, audit.ActionUserUpdate, userTarget(id), audit.ResultSuccess, details)
 	if req.Password != nil && h.passwordSet != nil {
