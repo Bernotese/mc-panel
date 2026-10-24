@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/go-chi/chi/v5 v5.4.0
+	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/google/nftables v0.3.0
 	github.com/oschwald/maxminddb-golang/v2 v2.8.0
