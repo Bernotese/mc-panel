@@ -77,14 +77,15 @@ func TestServerHealthReportsDocker(t *testing.T) {
 func TestServerInstanceEndpoints(t *testing.T) {
 	st := &stubInstances{docker: agentapi.DockerOK, status: agentapi.InstancesResponse{
 		Docker:    agentapi.DockerOK,
-		Instances: []agentapi.InstanceStatus{{ID: 1, Name: "survival", Revision: 2, State: agentapi.StateRunning, CPUPercent: 12.5}},
+		Instances: []agentapi.InstanceStatus{{ID: 1, Name: "survival", Revision: 2, State: agentapi.StateRunning, CPUPercent: 12.5, TemplateOutdated: true}},
 		Router:    agentapi.RouterStatus{State: agentapi.StateRunning},
 	}}
 	srv := newInstanceServer(st)
 
 	rec := serve(srv, http.MethodGet, agentapi.PathInstances, "", "")
 	want := `{"docker":"ok","instances":[{"id":1,"name":"survival","revision":2,"state":"running","exit_code":0,` +
-		`"restart_count":0,"started_at":0,"memory_bytes":0,"memory_limit_bytes":0,"cpu_percent":12.5,"operation":"","last_error":""}],` +
+		`"restart_count":0,"started_at":0,"memory_bytes":0,"memory_limit_bytes":0,"cpu_percent":12.5,"operation":"","last_error":"",` +
+		`"template_outdated":true}],` +
 		`"router":{"state":"running","last_error":""}}` + "\n"
 	if rec.Code != http.StatusOK || rec.Body.String() != want {
 		t.Fatalf("GET instances: %d %s", rec.Code, rec.Body)
