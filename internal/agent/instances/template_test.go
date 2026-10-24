@@ -257,3 +257,67 @@ func TestPaths(t *testing.T) {
 		t.Fatal("paths changed")
 	}
 }
+
+func isHexHash(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	return !strings.ContainsFunc(s, func(r rune) bool { return !strings.ContainsRune("0123456789abcdef", r) })
+}
+
+// TestCanonicalRequestValidForAllTypes: every type × java a container can have gets a
+// template hash; curseforge with java8 is rejected by the spec, so no container has it.
+func TestCanonicalRequestValidForAllTypes(t *testing.T) {
+	for _, typ := range instancespec.Types {
+		for _, java := range instancespec.Javas {
+			h, err := instances.InstanceTemplateHash(testHost(), 7, typ, java)
+			if typ == instancespec.TypeCurseForge && java == instancespec.Java8 {
+				if !errors.Is(err, instancespec.ErrInvalid) {
+					t.Errorf("%s/%s: err = %v, want ErrInvalid", typ, java, err)
+				}
+				continue
+			}
+			if err != nil || !isHexHash(h) {
+				t.Errorf("%s/%s: hash = %q, err = %v", typ, java, h, err)
+			}
+		}
+	}
+	if _, err := instances.InstanceTemplateHash(testHost(), 7, "bukkit", instancespec.Java21); !errors.Is(err, instancespec.ErrInvalid) {
+		t.Errorf("unknown type: err = %v", err)
+	}
+}
+
+// TestInstanceTemplateHashSensitivity: the hash covers the host settings, the image (java)
+// and the type, and nothing random.
+func TestInstanceTemplateHashSensitivity(t *testing.T) {
+	hash := func(h instances.Host, typ instancespec.Type, java instancespec.Java) string {
+		t.Helper()
+		s, err := instances.InstanceTemplateHash(h, 7, typ, java)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	base := hash(testHost(), instancespec.TypePaper, instancespec.Java21)
+	if again := hash(testHost(), instancespec.TypePaper, instancespec.Java21); again != base {
+		t.Fatalf("hash not deterministic: %s vs %s", base, again)
+	}
+	cpus := testHost()
+	cpus.NanoCPUs = 1e9
+	uid := testHost()
+	uid.UID = 1000
+	for name, got := range map[string]string{
+		"nano_cpus": hash(cpus, instancespec.TypePaper, instancespec.Java21),
+		"uid":       hash(uid, instancespec.TypePaper, instancespec.Java21),
+		"type":      hash(testHost(), instancespec.TypeFabric, instancespec.Java21),
+		"java":      hash(testHost(), instancespec.TypePaper, instancespec.Java25),
+	} {
+		if got == base {
+			t.Errorf("a different %s gives the same hash", name)
+		}
+	}
+	other, err := instances.InstanceTemplateHash(testHost(), 8, instancespec.TypePaper, instancespec.Java21)
+	if err != nil || other == base {
+		t.Errorf("a different id gives the same hash (err %v)", err)
+	}
+}
