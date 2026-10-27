@@ -1,7 +1,6 @@
 import type { DevInstance, Server, UpdateDevRequest } from '@/api/types'
 import { minutesToTime, timeToMinutes } from '@/features/backups/model'
 import { validateIntInRange, type FieldError } from '@/features/servers/validation'
-import { formatDateTime, formatTime } from '@/lib/format'
 
 /** Dev instances spec §2: the dev of <name> is always dev-<name>, and names have at most 32 characters. */
 export const DEV_PREFIX = 'dev-'
@@ -46,17 +45,29 @@ export function withDevsAfterSources<T extends TreeServer>(servers: readonly T[]
   return serverTreeEntries(servers).flatMap((e) => (e.dev ? [e.server, e.dev] : [e.server]))
 }
 
-function localDay(ms: number): number {
-  const d = new Date(ms)
-  return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86_400_000
+export interface SyncWhenOptions {
+  now?: number
+  /** Zone to format in: the panel's backup_timezone when known (the sync time is set there), else the browser's. */
+  timeZone?: string | null
+  /** The browser's zone: a different formatting zone is named, so "05:00" is never read as local time. */
+  localZone?: string | null
 }
 
-/** "heute 05:00", "morgen 05:00" (or "today/tomorrow" in English); further away the full date. */
-export function formatSyncWhen(ms: number, locale: string, now: number = Date.now()): string {
-  const days = localDay(ms) - localDay(now)
-  if (Math.abs(days) > 1) return formatDateTime(ms, locale)
-  const day = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(days, 'day')
-  return `${day} ${formatTime(ms, locale)}`
+function dayIndex(ms: number, timeZone: string | undefined): number {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(new Date(ms))
+  const get = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === type)?.value ?? 0)
+  return Date.UTC(get('year'), get('month') - 1, get('day')) / 86_400_000
+}
+
+/** "heute 05:00", "morgen 05:00" (or "today/tomorrow" in English), further away the full date; plus the zone if not local. */
+export function formatSyncWhen(ms: number, locale: string, { now = Date.now(), timeZone = null, localZone = null }: SyncWhenOptions = {}): string {
+  const zone = timeZone ?? undefined
+  const days = dayIndex(ms, zone) - dayIndex(now, zone)
+  const text =
+    Math.abs(days) > 1
+      ? new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short', timeZone: zone }).format(ms)
+      : `${new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(days, 'day')} ${new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', timeZone: zone }).format(ms)}`
+  return timeZone && timeZone !== localZone ? `${text} (${timeZone})` : text
 }
 
 /** Form state of the dev settings: numbers stay strings while the user types. */
