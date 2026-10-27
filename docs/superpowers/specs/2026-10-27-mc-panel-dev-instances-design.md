@@ -28,6 +28,8 @@ The host is small. The motivating case is a 16 GiB VPS with an 8–10 GiB prod s
 
 ### 1.3 Non-goals
 
+- Isolating dev from external services that prod's plugins and mods use. Dev copies their configs whole, including credentials (a shared MySQL database for LuckPerms or CoreProtect, a Discord bot token), and containers may reach public hosts, so dev can change state that prod shares. The create section of the UI warns about it.
+
 - Promoting dev to prod, syncing dev → prod, or copying single files/mods back. Changes on dev that should go to prod are made again on prod by hand.
 - More than one dev per prod, a dev of a dev, dev instances of servers on other hosts.
 - Partial syncs (only mods, only the world).
@@ -107,7 +109,7 @@ The files service does not know which server is a dev; the panel enforces that t
 ### 4.3 Impact on prod
 
 - Prod is touched only through the snapshot of step 1, which is the same operation as a normal backup. When a fresh scheduled backup exists, prod is not touched at all.
-- Restore I/O happens on dev's directory; the files service runs restic and the extraction at reduced CPU and I/O priority if the platform allows it *(builder decides how; must not need new privileges)*.
+- Restore I/O happens on dev's directory. The `restic dump` of prod's repository runs at nice 10 and the idle I/O class (the thread that starts it lowers its own priority first, so restic inherits it from its first instruction). The extraction into dev's directory runs inside the files service at normal priority: lowering it would need a separate process or would lower the whole service; it only writes to dev's directory.
 - Disk: dev doubles the disk use of prod. The existing reserve check (`507 insufficient_storage`) and the `host.disk_low` alert cover it; the create dialog shows prod's current size.
 - Acceptance proves it (§9): prod's data directory is byte-for-byte unchanged by a sync except what prod itself wrote, and prod stays reachable during it.
 
@@ -130,6 +132,7 @@ mc-router's own auto-start would need the Docker socket, which the router delibe
 - It speaks just enough of the Minecraft protocol: handshake, status (server list shows the MOTD "Dev sleeps – connect to wake it", version text, 0 players) and login start, answered with a disconnect message "Dev is starting, reconnect in about a minute".
 - A login attempt (not a status ping) asks the panel to wake the dev: the panel sets `desired_state = running`, clears `sleeping`, records `last_wake_at` and the reconcile loop starts it. Wakes are rate-limited (at most one per dev per 2 minutes, plus a global cap) and ignored while the data gate is held. The waker cannot know about a running sync, so its one disconnect text covers both cases ("Dev is starting (or being synced), reconnect in about a minute").
 - Any connection may wake dev (the waker cannot check the whitelist before login). The whitelist still decides who can join.
+- Known limit: every connection reaches the waker from mc-router's address, so the waker cannot limit per player. Its total cap (64 connections, 5-s deadline each) plus mc-router's `-connection-rate-limit` bound abuse; someone who keeps the cap full can delay wakes of dev instances, never prod.
 - Once dev runs, the route points back to the dev container.
 - Today the agent builds mc-router's routes from container labels alone. The agent API therefore gains a way for the panel to say which dev hostnames are asleep and must point to the waker's fixed address (validated in `agentapi` like every request: hostnames of existing dev containers only, the waker address from `agent.toml`, never from the panel).
 
