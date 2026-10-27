@@ -101,8 +101,8 @@ func (h *Handler) queueClaimed(ctx context.Context, d dev, trigger string) error
 	}
 	err = h.syncer.QueueDevSync(ctx, backups.DevSync{
 		DevID: id, SourceID: d.row.SourceID, DevName: d.name, SourceName: d.sourceName, Trigger: trigger,
-		Apply: func(ctx context.Context) error { return h.servers.ApplyDevSpec(ctx, id) },
-		Done:  func(snapshot string, err error) { h.syncDone(ctx, id, trigger, snapshot, err) },
+		Apply: func(ctx context.Context) error { return h.applySynced(ctx, id) },
+		Done:  func(snapshot string, err error) { h.syncDone(ctx, id, trigger, snapshot, err, old) },
 	})
 	if err != nil {
 		h.writeMu.Lock()
@@ -171,7 +171,7 @@ func (h *Handler) runDelayed(ctx context.Context) {
 		}
 		if err != nil {
 			h.claim(s.devID) // syncDone releases it again
-			h.syncDone(s.ctx, s.devID, s.trigger, "", err)
+			h.syncDone(s.ctx, s.devID, s.trigger, "", err, store.DevInstance{})
 		}
 	}
 }
@@ -199,19 +199,48 @@ func (h *Handler) location(ctx context.Context) (*time.Location, string) {
 	return loc, name
 }
 
+// applySynced runs after a successful restore, before the gate opens: prod's spec plus the
+// overrides, and the dev stays asleep (the job stops it only through the agent, so without
+// this the reconcile after the gate would start it again).
+func (h *Handler) applySynced(ctx context.Context, devID int64) error {
+	if err := h.servers.ApplyDevSpec(ctx, devID); err != nil {
+		return err
+	}
+	return h.servers.SetDevSleeping(ctx, devID, true, h.clock.Now())
+}
+
 // syncDone records the end of a sync (backups.DevSync.Done): the result (a failure keeps the
 // last successful sync and snapshot), the next slot, the audit entry and, on failure, the
-// throttled dev.sync_failed notification. A deleted dev leaves nothing to record.
-func (h *Handler) syncDone(ctx context.Context, devID int64, trigger, snapshot string, syncErr error) {
+// throttled dev.sync_failed notification. A deleted dev leaves nothing to record. A canceled
+// job (dropped, dev deleted, shutdown) is no failure: prev's status comes back and a due
+// scheduled sync stays due.
+func (h *Handler) syncDone(ctx context.Context, devID int64, trigger, snapshot string, syncErr error, prev store.DevInstance) {
 	defer h.release(devID)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), callTimeout)
 	defer cancel()
 	now := h.clock.Now()
+	canceled := errors.Is(syncErr, context.Canceled)
 	h.writeMu.Lock()
 	row, err := h.q.DevGet(ctx, devID)
 	if errors.Is(err, sql.ErrNoRows) {
 		h.writeMu.Unlock()
 		h.log.InfoContext(ctx, "devinst: sync of a deleted dev ended", "server_id", devID, "err", syncErr)
+		return
+	}
+	if canceled {
+		if err == nil {
+			err = h.q.DevSetSyncResult(ctx, store.DevSetSyncResultParams{
+				LastSyncStatus: prev.LastSyncStatus, LastSyncError: prev.LastSyncError, LastSyncSnapshot: prev.LastSyncSnapshot,
+				LastSyncAt: prev.LastSyncAt, UpdatedAt: now.UnixMilli(), ServerID: devID,
+			})
+		}
+		h.writeMu.Unlock()
+		if err != nil {
+			h.log.ErrorContext(ctx, "devinst: restore the sync status", "server_id", devID, "err", err)
+		}
+		h.record(ctx, audit.ActionDevSync, devID, audit.ResultFailure, map[string]any{
+			"trigger": trigger, "source_id": row.SourceID, "error": "canceled",
+		})
 		return
 	}
 	if err == nil {

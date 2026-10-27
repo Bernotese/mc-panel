@@ -1,6 +1,7 @@
 package devinst_test
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -36,6 +37,10 @@ func TestCreateDevQueuesInitialSync(t *testing.T) {
 	// Apply is the spec copy of servers; Done records the result.
 	if err := s.Apply(e.ctx()); err != nil || e.servers.appliedCount() != 1 {
 		t.Fatalf("Apply = %v, applied %d", err, e.servers.appliedCount())
+	}
+	// The sync stops dev only through the agent: Apply keeps it asleep (desired stopped).
+	if c := e.servers.sleepCalls(); len(c) != 1 || c[0].ID != devID || !c[0].Sleeping {
+		t.Fatalf("sleep calls after Apply %+v", c)
 	}
 	e.clk.Advance(3 * time.Minute)
 	s.Done("snap1", nil)
@@ -314,5 +319,37 @@ func TestDevDeletedDuringSync(t *testing.T) {
 	}
 	if _, err := e.q.DevGet(e.ctx(), devID); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("row back: %v", err)
+	}
+}
+
+func TestApplyFailsWhenSleepFails(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	e.must(202, "POST", path(devID, "/sync"), nil, e.admin())
+	e.servers.errs["sleep"] = errors.New("db locked")
+	if err := e.syncer.last(t).Apply(e.ctx()); err == nil {
+		t.Fatal("Apply ignored a failed SetDevSleeping")
+	}
+}
+
+func TestSyncCanceledIsNoFailure(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	mustExec(t, e.db, `UPDATE dev_instances SET last_sync_status = 'ok', last_sync_at = 5, last_sync_snapshot = 'old' WHERE server_id = ?`, devID)
+	e.clk.Set(fiveAM)
+	devinst.Tick(e.ctx(), e.h)
+	e.syncer.last(t).Done("", fmt.Errorf("job dropped: %w", context.Canceled))
+	r := e.row(devID)
+	if r.LastSyncStatus.String != "ok" || r.LastSyncError.Valid || r.LastSyncSnapshot.String != "old" || r.LastSyncAt.Int64 != 5 {
+		t.Fatalf("status after a canceled sync %+v", r)
+	}
+	if r.NextSyncAt.Int64 != fiveAM.UnixMilli() {
+		t.Fatalf("next sync moved to %v: a canceled scheduled sync must stay due", r.NextSyncAt)
+	}
+	if len(e.notes.Events) != 0 {
+		t.Fatalf("notified %+v", e.notes.Events)
+	}
+	if d := e.get(devID); d.SyncPending {
+		t.Fatal("still pending")
 	}
 }
