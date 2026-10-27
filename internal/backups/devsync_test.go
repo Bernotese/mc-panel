@@ -277,7 +277,10 @@ func TestDevSyncHoldsGate(t *testing.T) {
 		t.Fatal("queued: the gate must hold the dev and only the dev")
 	}
 	release()
-	eventually(t, "restoring", func() bool { st, _, _ := backups.JobOf(e.h, e.dev); return st == "running" && e.files.count("restore-from") == 1 })
+	eventually(t, "restoring", func() bool {
+		st, _, _ := backups.JobOf(e.h, e.dev)
+		return st == "running" && e.files.count("restore-from") == 1
+	})
 	if !e.h.DataJobRunning(ctx, e.dev) || e.h.DataJobRunning(ctx, e.prod) {
 		t.Fatal("running: the gate must hold the dev and only the dev")
 	}
