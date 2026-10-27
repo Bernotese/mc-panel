@@ -147,6 +147,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			RouterConnectionRateLimit: cfg.RouterConnectionRateLimit,
 			WebProxyPort:              cfg.WebProxyPort,
 			WebAskPort:                cfg.WebAskPort,
+
+			AgentBinary:  agentBinary(log),
+			AgentVersion: version,
 		})
 		// The layout of instances_dir (instances/ root:<mc gid> 0750 for the files service)
 		// is enforced before serving, also when Docker is down and no Ensure follows.
@@ -174,7 +177,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			<-runDone
 			mgr.Close()
 		}
-		opts = append(opts, agent.WithInstances(mgr), agent.WithConsole(mgr), agent.WithWeb(mgr))
+		opts = append(opts, agent.WithInstances(mgr), agent.WithConsole(mgr), agent.WithWeb(mgr), agent.WithWaker(mgr))
 	}
 
 	srv := agent.NewServer(fw, version, log, opts...)
@@ -276,6 +279,20 @@ func checkImages(imgs config.Images) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// agentBinary is the resolved path of this binary, which mcpanel-waker runs in its waker
+// mode; "" (logged) leaves dev instances without a waker.
+func agentBinary(log *slog.Logger) string {
+	p, err := os.Executable()
+	if err == nil {
+		p, err = filepath.EvalSymlinks(p)
+	}
+	if err != nil {
+		log.Warn("agent binary not found; dev instances cannot be woken", "err", err)
+		return ""
+	}
+	return p
 }
 
 func uidFromConfig(uid int) (uint32, error) {
