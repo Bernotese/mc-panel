@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-14
 - **Status:** implemented (PRs #93, #94, 2026-10-15)
-- **Author:** Jannes Göbel (with Claude)
+- **Author:** Jannes (with Claude)
 - **Builds on:** `2026-10-12-mc-panel-plugins-design.md` (sub-project 3c)
 
 ## 1. Goal

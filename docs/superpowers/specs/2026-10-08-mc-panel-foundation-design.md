@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-08
 - **Status:** implemented (PR #1, 2026-10-10)
-- **Author:** Jannes Göbel (with Claude)
+- **Author:** Jannes (with Claude)
 
 ## 1. Goal and context
 

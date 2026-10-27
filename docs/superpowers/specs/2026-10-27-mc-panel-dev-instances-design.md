@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-27
 - **Status:** implemented (2026-10-27, PR #163)
-- **Author:** Jannes Göbel (with Claude)
+- **Author:** Jannes (with Claude)
 - **Builds on:** instances (`2026-10-10-…-instances-design.md`), console and players (`2026-10-11-…-console-players-design.md`), backups (`2026-10-12-…-backups-design.md`), monitoring (`2026-10-13-…-monitoring-design.md`). Everything there stays in force unless this document changes it.
 
 ## 1. Goal and context

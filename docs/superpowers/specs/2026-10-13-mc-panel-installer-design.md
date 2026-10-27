@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-13
 - **Status:** implemented (PRs #69, #71, #72, #75, 2026-10-14)
-- **Author:** Jannes Göbel (with Claude)
+- **Author:** Jannes (with Claude)
 - **Builds on:** all previous specs (sub-projects 1–5); collects their requirements "for the installer (sub-project 6)"
 
 ## 1. Goal and context

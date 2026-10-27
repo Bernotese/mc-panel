@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-14
 - **Status:** implemented (PRs #80, #81, #82, 2026-10-14)
-- **Author:** Jannes Göbel (with Claude)
+- **Author:** Jannes (with Claude)
 - **Builds on:** all sub-projects 1–6; changes only the frontend (`web/`)
 
 ## 1. Goal and context

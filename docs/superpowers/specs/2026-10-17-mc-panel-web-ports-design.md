@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-17
 - **Status:** design approved, not implemented
-- **Author:** Jannes Göbel (with Claude)
+- **Author:** Jannes (with Claude)
 - **Builds on:**
   - `2026-10-10-mc-panel-instances-design.md` (instances, mc-router, per-server networks)
   - `2026-10-13-mc-panel-installer-design.md` (Caddy, installer)

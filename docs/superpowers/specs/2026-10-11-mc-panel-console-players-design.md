@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-11
 - **Status:** implemented (PRs #18–#24, 2026-10-11)
-- **Author:** Jannes Göbel (with Claude)
+- **Author:** Jannes (with Claude)
 - **Builds on:** `2026-10-08-mc-panel-foundation-design.md` (sub-project 1), `2026-10-10-mc-panel-instances-design.md` (sub-project 2)
 
 ## 1. Goal and context

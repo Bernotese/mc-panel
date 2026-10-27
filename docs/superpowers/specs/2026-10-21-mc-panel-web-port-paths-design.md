@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-21
 - **Status:** implemented
-- **Author:** Jannes Göbel (with Claude)
+- **Author:** Jannes (with Claude)
 - **Addendum to:** `2026-10-17-mc-panel-web-ports-design.md` (web ports). Everything there stays in force unless this document changes it. Section numbers like "WP §4.2" refer to that spec.
 
 ## 1. Goal
