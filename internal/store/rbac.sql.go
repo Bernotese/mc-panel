@@ -237,7 +237,12 @@ func (q *Queries) RbacGetUserByUsername(ctx context.Context, username string) (U
 }
 
 const rbacHasPermission = `-- name: RbacHasPermission :one
-SELECT count(*) FROM permissions WHERE user_id = ? AND server_id = ? AND permission = ?
+SELECT count(*) FROM permissions
+WHERE permissions.user_id = ?1
+  AND permissions.server_id = COALESCE((SELECT d.source_id FROM dev_instances d WHERE d.server_id = ?2), ?2)
+  AND permissions.permission = ?3
+  AND NOT (permissions.permission = 'server.backups'
+           AND EXISTS (SELECT 1 FROM dev_instances d WHERE d.server_id = ?2))
 `
 
 type RbacHasPermissionParams struct {
@@ -246,6 +251,8 @@ type RbacHasPermissionParams struct {
 	Permission string
 }
 
+// On a dev instance the permissions of its source apply, except server.backups (a dev has no
+// backups); a dev never has permission rows of its own.
 func (q *Queries) RbacHasPermission(ctx context.Context, arg RbacHasPermissionParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, rbacHasPermission, arg.UserID, arg.ServerID, arg.Permission)
 	var count int64
@@ -309,8 +316,50 @@ func (q *Queries) RbacListServers(ctx context.Context) ([]Server, error) {
 	return items, nil
 }
 
-const rbacListUserPermissions = `-- name: RbacListUserPermissions :many
+const rbacListUserGrants = `-- name: RbacListUserGrants :many
 SELECT server_id, permission FROM permissions WHERE user_id = ? ORDER BY server_id, permission
+`
+
+type RbacListUserGrantsRow struct {
+	ServerID   int64
+	Permission string
+}
+
+// The stored permission rows of a user (the user editor); RbacListUserPermissions adds the
+// permissions a user has on dev instances through their sources.
+func (q *Queries) RbacListUserGrants(ctx context.Context, userID int64) ([]RbacListUserGrantsRow, error) {
+	rows, err := q.db.QueryContext(ctx, rbacListUserGrants, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RbacListUserGrantsRow{}
+	for rows.Next() {
+		var i RbacListUserGrantsRow
+		if err := rows.Scan(&i.ServerID, &i.Permission); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const rbacListUserPermissions = `-- name: RbacListUserPermissions :many
+SELECT server_id, permission FROM (
+    SELECT p.server_id AS server_id, p.permission AS permission
+    FROM permissions p WHERE p.user_id = ?1
+    UNION ALL
+    SELECT d.server_id AS server_id, p.permission AS permission
+    FROM dev_instances d JOIN permissions p ON p.server_id = d.source_id
+    WHERE p.user_id = ?1 AND p.permission <> 'server.backups'
+)
+ORDER BY server_id, permission
 `
 
 type RbacListUserPermissionsRow struct {
@@ -318,6 +367,8 @@ type RbacListUserPermissionsRow struct {
 	Permission string
 }
 
+// The effective permissions of a user per server: the stored rows plus, for every dev
+// instance, the rows of its source without server.backups (see RbacHasPermission).
 func (q *Queries) RbacListUserPermissions(ctx context.Context, userID int64) ([]RbacListUserPermissionsRow, error) {
 	rows, err := q.db.QueryContext(ctx, rbacListUserPermissions, userID)
 	if err != nil {
@@ -342,7 +393,12 @@ func (q *Queries) RbacListUserPermissions(ctx context.Context, userID int64) ([]
 }
 
 const rbacListUserServerPermissions = `-- name: RbacListUserServerPermissions :many
-SELECT permission FROM permissions WHERE user_id = ? AND server_id = ? ORDER BY permission
+SELECT permissions.permission FROM permissions
+WHERE permissions.user_id = ?1
+  AND permissions.server_id = COALESCE((SELECT d.source_id FROM dev_instances d WHERE d.server_id = ?2), ?2)
+  AND NOT (permissions.permission = 'server.backups'
+           AND EXISTS (SELECT 1 FROM dev_instances d WHERE d.server_id = ?2))
+ORDER BY permission
 `
 
 type RbacListUserServerPermissionsParams struct {
@@ -350,6 +406,7 @@ type RbacListUserServerPermissionsParams struct {
 	ServerID int64
 }
 
+// The effective permissions of a user on one server (see RbacHasPermission).
 func (q *Queries) RbacListUserServerPermissions(ctx context.Context, arg RbacListUserServerPermissionsParams) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, rbacListUserServerPermissions, arg.UserID, arg.ServerID)
 	if err != nil {
@@ -418,10 +475,13 @@ func (q *Queries) RbacListUsers(ctx context.Context) ([]User, error) {
 
 const rbacListViewableServers = `-- name: RbacListViewableServers :many
 SELECT id, name, created_at FROM servers
-WHERE id IN (SELECT server_id FROM permissions WHERE user_id = ? AND permission = 'server.view')
+WHERE id IN (SELECT g.server_id FROM permissions g WHERE g.user_id = ?1 AND g.permission = 'server.view')
+   OR id IN (SELECT d.server_id FROM dev_instances d JOIN permissions p ON p.server_id = d.source_id
+             WHERE p.user_id = ?1 AND p.permission = 'server.view')
 ORDER BY name
 `
 
+// A dev instance has no permission rows of its own: it is viewable when its source is.
 func (q *Queries) RbacListViewableServers(ctx context.Context, userID int64) ([]Server, error) {
 	rows, err := q.db.QueryContext(ctx, rbacListViewableServers, userID)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 // so nothing else can ever reach Docker.
 type ContainerConfig struct {
 	Image            string              `json:"Image"`
+	Entrypoint       []string            `json:"Entrypoint,omitempty"` // replaces the image's entrypoint (mcpanel-waker only)
 	Cmd              []string            `json:"Cmd,omitempty"`
 	User             string              `json:"User,omitempty"`
 	Env              []string            `json:"Env,omitempty"`

@@ -14,20 +14,44 @@ import (
 
 // RestoreBackup checks the snapshot and the free space synchronously and starts a restore job
 // (spec 4 §4.3). The panel stops the server before; the service does not check that.
+//
+// With req.SourceID set, the snapshot comes from the repository of server SourceID and is
+// restored into the data directory of req.ID (dev instances spec §4.2: a dev sync). The source's
+// repository is only listed and dumped (no unlock, no write) and its data directory is never
+// opened; everything else is the restore of ID (reserve, hidden entries, journal under ID). The
+// source must have no job, and keeps a reader until the restore ends so no forget, pin or purge
+// of it can start meanwhile.
 func (s *Service) RestoreBackup(ctx context.Context, req filesapi.SnapshotRequest) (filesapi.Job, error) {
 	if !filesapi.ValidSnapshotID(req.Snapshot) {
 		return filesapi.Job{}, fmt.Errorf("%w: snapshot id must be 64 hex characters", filesapi.ErrInvalid)
 	}
+	repo := req.ID
+	switch {
+	case req.SourceID < 0:
+		return filesapi.Job{}, fmt.Errorf("%w: source_id must be > 0", filesapi.ErrInvalid)
+	case req.SourceID == req.ID:
+		return filesapi.Job{}, fmt.Errorf("%w: source_id must name another server than id", filesapi.ErrInvalid)
+	case req.SourceID > 0:
+		repo = req.SourceID
+	}
 	if err := s.requireBackups(req.ID); err != nil {
 		return filesapi.Job{}, err
 	}
-	if err := s.jobs.acquire(req.ID, filesapi.JobRestore); err != nil {
+	releaseSource := func() {}
+	if repo != req.ID {
+		rel, err := s.jobs.acquireFrom(req.ID, repo)
+		if err != nil {
+			return filesapi.Job{}, err
+		}
+		releaseSource = rel
+	} else if err := s.jobs.acquire(req.ID, filesapi.JobRestore); err != nil {
 		return filesapi.Job{}, err
 	}
 	ownSlot := true
 	defer func() {
 		if ownSlot {
 			s.jobs.release(req.ID)
+			releaseSource()
 		}
 	}()
 	root, err := s.open(req.ID)
@@ -43,7 +67,7 @@ func (s *Service) RestoreBackup(ctx context.Context, req filesapi.SnapshotReques
 	if j, ok := s.readJournals(false)[req.ID]; ok && j.Phase == phaseStuck {
 		return filesapi.Job{}, fmt.Errorf("%w: a previous restore of this server could not be completed; its old state is kept in a hidden folder - see the files service log", filesapi.ErrBusy)
 	}
-	snap, err := s.findSnapshot(ctx, req.ID, req.Snapshot)
+	snap, err := s.findSnapshot(ctx, repo, req.Snapshot)
 	if err != nil {
 		return filesapi.Job{}, err
 	}
@@ -58,25 +82,31 @@ func (s *Service) RestoreBackup(ctx context.Context, req filesapi.SnapshotReques
 	ownSlot = false
 	job, err := s.jobs.start(req.ID, jobSpec{kind: filesapi.JobRestore, snapshot: snap.ID, totalBytes: snap.Bytes}, s.clock.Now,
 		func(jctx context.Context) error {
+			defer releaseSource()
 			defer root.Close()
 			defer res.release()
-			err := s.runRestore(jctx, root, req.ID, snap.ID, res)
+			err := s.runRestore(jctx, root, req.ID, repo, snap.ID, res)
 			if err != nil {
-				s.log.Warn("files: restore failed", "id", req.ID, "snapshot", snap.ID, "err", err)
+				s.log.Warn("files: restore failed", "id", req.ID, "source", repo, "snapshot", snap.ID, "err", err)
 			}
 			return err
 		})
 	if err != nil {
 		res.release()
+		releaseSource()
 		return filesapi.Job{}, err
 	}
 	handedOver = true
 	return job, nil
 }
 
-func (s *Service) runRestore(ctx context.Context, root *os.Root, id int64, sid string, res *reservation) error {
-	if _, err := s.restic(ctx, id, nil, "unlock"); err != nil {
-		return s.ctxErr(ctx, err)
+// runRestore restores snapshot sid of repository repo into the data directory of server id
+// (root). Only the server's own repository is unlocked; another one (a dev sync) is only dumped.
+func (s *Service) runRestore(ctx context.Context, root *os.Root, id, repo int64, sid string, res *reservation) error {
+	if repo == id {
+		if _, err := s.restic(ctx, id, nil, "unlock"); err != nil {
+			return s.ctxErr(ctx, err)
+		}
 	}
 	// The container may have made its folders read-only (the service owns them): u+rwx on the
 	// data directory, so the temp folder can be created and entries moved.
@@ -114,7 +144,7 @@ func (s *Service) runRestore(ctx context.Context, root *os.Root, id int64, sid s
 	if err := root.Mkdir(tmp+"/new", dirMode); err != nil { //nolint:gosec // G301: see above
 		return fsErr(err)
 	}
-	err = s.dump(ctx, id, sid, func(r io.Reader) error {
+	err = s.dump(ctx, repo, sid, repo != id, func(r io.Reader) error {
 		return extractBackupTar(ctx, root, tmp+"/new", r, s.cfg.Limits, res, func(n int64) { s.jobs.progress(id, n) })
 	})
 	if err != nil {
@@ -151,10 +181,11 @@ func (s *Service) runRestore(ctx context.Context, root *os.Root, id int64, sid s
 // dump streams snapshot sid of server id (`restic dump <id> /data.tar`) into consume. When
 // consume fails, restic is killed; when it succeeds, the rest of the stream is drained so restic
 // can finish, and restic's own exit decides. A failure of restic itself wins over the damaged
-// stream it causes.
-func (s *Service) dump(ctx context.Context, id int64, sid string, consume func(io.Reader) error) error {
+// stream it causes. low runs restic at a low CPU and I/O priority (a dev sync reads the
+// repository of a running server, whose disk keeps priority).
+func (s *Service) dump(ctx context.Context, id int64, sid string, low bool, consume func(io.Reader) error) error {
 	pr, pw := io.Pipe()
-	p, err := s.runner.Start(ctx, resticCmd{Args: []string{"--no-cache", "dump", sid, "/" + stdinFilename}, Env: s.resticEnv(id), Stdout: pw})
+	p, err := s.runner.Start(ctx, resticCmd{Args: []string{"--no-cache", "dump", sid, "/" + stdinFilename}, Env: s.resticEnv(id), Stdout: pw, LowPriority: low})
 	if err != nil {
 		_ = pw.Close()
 		return s.startErr(err)

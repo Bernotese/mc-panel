@@ -569,3 +569,70 @@ func TestServerRemindersNeedKnownUngatedServers(t *testing.T) {
 		t.Fatalf("reminder = %+v", ev)
 	}
 }
+
+// aMakeDev turns id into the dev instance of source (dev instances spec: a dev_instances row).
+func (e *alertEnv) aMakeDev(id, source int64) {
+	e.t.Helper()
+	if _, err := e.db.ExecContext(context.Background(), `INSERT INTO dev_instances (server_id, source_id, property_overrides,
+		created_at, updated_at) VALUES (?, ?, '{}', 0, 0)`, id, source); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// A dev that should run but is down (for example while it wakes up) never alerts; a firing
+// state it may have is dropped without "recovered".
+func TestNoDownAlertForDev(t *testing.T) {
+	e := newAlertEnv(t)
+	prod := e.server("survival")
+	dev := e.server("dev-survival")
+	for m := 0; m <= 3; m++ {
+		e.pass(time.Duration(m)*time.Minute, aExited(aSample(dev, "dev-survival")))
+	}
+	aWantEvents(t, e.events(), notify.EventServerDown) // not a dev yet
+	e.aMakeDev(dev, prod)
+	for m := 4; m <= 20; m++ {
+		e.pass(time.Duration(m)*time.Minute, aExited(aSample(dev, "dev-survival")))
+	}
+	e.pass(21*time.Minute, aWithUp(aSample(dev, "dev-survival"), true))
+	aWantEvents(t, e.events(), notify.EventServerDown)
+	if got := e.stateKeys(); len(got) != 0 {
+		t.Fatalf("state = %v", got)
+	}
+}
+
+func TestNoCrashLoopForDev(t *testing.T) {
+	e := newAlertEnv(t)
+	prod := e.server("survival")
+	dev := e.server("dev-survival")
+	e.aMakeDev(dev, prod)
+	for m, c := range []int{0, 1, 2, 3, 4, 5} {
+		s := aCrashing(dev, c)
+		s.Name = "dev-survival"
+		e.pass(time.Duration(m)*time.Minute, s)
+	}
+	aWantEvents(t, e.events())
+	if got := e.stateKeys(); len(got) != 0 {
+		t.Fatalf("state = %v", got)
+	}
+}
+
+// The source of a dev keeps its alerts.
+func TestProdAlertsUnchanged(t *testing.T) {
+	e := newAlertEnv(t)
+	prod := e.server("survival")
+	dev := e.server("dev-survival")
+	e.aMakeDev(dev, prod)
+	for m := 0; m <= 3; m++ {
+		e.pass(time.Duration(m)*time.Minute, aExited(aSample(prod, "survival")), aExited(aSample(dev, "dev-survival")))
+	}
+	aWantEvents(t, e.events(), notify.EventServerDown)
+	if ev := e.notes.Events[0]; ev.Title != "Server down: survival" {
+		t.Fatalf("title = %q", ev.Title)
+	}
+	e.pass(4*time.Minute, aWithUp(aSample(prod, "survival"), true), aExited(aSample(dev, "dev-survival")))
+	aWantEvents(t, e.events(), notify.EventServerDown, notify.EventServerRecovered)
+	for m, c := range []int{0, 1, 2, 3} {
+		e.pass(time.Duration(5+m)*time.Minute, aCrashing(prod, c))
+	}
+	aWantEvents(t, e.events(), notify.EventServerDown, notify.EventServerRecovered, notify.EventServerCrashLoop)
+}
