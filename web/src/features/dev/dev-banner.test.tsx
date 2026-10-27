@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { db } from '@/mocks/db'
 import { renderServerTab } from '@/test/render-section'
@@ -19,8 +19,11 @@ describe('DevBanner', () => {
   it('names the source, the next overwrite, the last sync and that the dev sleeps', async () => {
     const b = await banner()
     expect(within(b).getByRole('link', { name: 'survival' })).toHaveAttribute('href', '/servers/1')
-    expect(b).toHaveTextContent(/Kopie von survival – Änderungen werden beim nächsten Sync überschrieben \((heute|morgen) \d\d:\d\d\)\./)
-    expect(b).toHaveTextContent(/Letzter Sync: (heute|gestern) \d\d:\d\d/)
+    // In the panel zone (Europe/Berlin), like the sync time of the settings: 05:00, named when the browser is elsewhere.
+    await waitFor(() =>
+      expect(b).toHaveTextContent(/Kopie von survival – Änderungen werden beim nächsten Sync überschrieben \((heute|morgen) 05:00( \(Europe\/Berlin\))?\)\./),
+    )
+    expect(b).toHaveTextContent(/Letzter Sync: (heute|gestern) 05:03/)
     expect(within(b).getByText('Schläft – auf dev-survival.mc.example.com verbinden zum Aufwecken.')).toBeInTheDocument()
     expect(within(b).getByRole('switch', { name: 'Sync pausieren' })).not.toBeChecked()
     expect(within(b).getByRole('button', { name: 'Jetzt syncen' })).toBeEnabled()

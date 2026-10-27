@@ -13,7 +13,7 @@ import { SLOW_POLL_MS } from '@/features/servers/status'
 import { useErrorToast } from '@/lib/error-message'
 import { useFormat } from '@/lib/format'
 import { DEV_PENDING_POLL_MS, devKey, devQueryOptions, syncDev, updateDev } from './api'
-import { formatSyncWhen } from './model'
+import { useSyncWhen } from './use-sync-when'
 
 /**
  * Spec §8: in the header of every area of a dev: which prod it copies, when it is overwritten next (or that the sync
@@ -22,6 +22,7 @@ import { formatSyncWhen } from './model'
 export function DevBanner({ server, dev }: { server: Server; dev: DevSummary }) {
   const { t } = useTranslation()
   const fmt = useFormat()
+  const syncWhen = useSyncWhen()
   const id = useId()
   const queryClient = useQueryClient()
   const notifyError = useErrorToast()
@@ -54,7 +55,7 @@ export function DevBanner({ server, dev }: { server: Server; dev: DevSummary }) 
   let status: string
   if (dev.sync_pending) status = t(dev.last_sync_status === 'running' ? 'dev.banner.syncing' : 'dev.banner.sync_waiting')
   else if (dev.sync_paused) status = pausedAt !== null ? t('dev.banner.paused_since', { when: fmt.date(pausedAt) }) : t('dev.banner.paused')
-  else if (dev.next_sync_at !== null) status = t('dev.banner.overwritten', { when: formatSyncWhen(dev.next_sync_at, fmt.locale) })
+  else if (dev.next_sync_at !== null) status = t('dev.banner.overwritten', { when: syncWhen(dev.next_sync_at) })
   else status = t('dev.banner.overwritten_unscheduled')
 
   return (
@@ -105,9 +106,9 @@ export function DevBanner({ server, dev }: { server: Server; dev: DevSummary }) 
 
 function LastSync({ status, at, error, pending }: { status: DevSummary['last_sync_status']; at: number | null; error: string | null; pending: boolean }) {
   const { t } = useTranslation()
-  const fmt = useFormat()
+  const syncWhen = useSyncWhen()
   if (at === null) return pending ? null : <p className="text-muted-foreground">{t('dev.banner.never_synced')}</p>
-  const when = formatSyncWhen(at, fmt.locale)
+  const when = syncWhen(at)
   if (status === 'failed') {
     return (
       <p role="alert" className="text-status-error">

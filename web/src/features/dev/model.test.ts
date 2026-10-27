@@ -54,13 +54,27 @@ describe('dev rules', () => {
 })
 
 describe('formatSyncWhen', () => {
-  it('names today and tomorrow, else the date', () => {
-    const now = new Date(2026, 9, 27, 14, 0).getTime()
-    expect(formatSyncWhen(new Date(2026, 9, 27, 18, 30).getTime(), 'de', now)).toBe('heute 18:30')
-    expect(formatSyncWhen(new Date(2026, 9, 28, 5, 0).getTime(), 'de', now)).toBe('morgen 05:00')
-    expect(formatSyncWhen(new Date(2026, 9, 26, 5, 3).getTime(), 'de', now)).toBe('gestern 05:03')
-    expect(formatSyncWhen(new Date(2026, 9, 28, 5, 0).getTime(), 'en', now)).toMatch(/^tomorrow /)
-    expect(formatSyncWhen(new Date(2026, 9, 30, 5, 0).getTime(), 'de', now)).not.toMatch(/morgen/)
+  // 2026-10-27 14:00 in Berlin (CET, UTC+1 after the switch on 25 October)
+  const now = Date.UTC(2026, 9, 27, 13, 0)
+  const berlin = { now, timeZone: 'Europe/Berlin', localZone: 'Europe/Berlin' }
+
+  it('names today and tomorrow in the panel zone, else the date', () => {
+    expect(formatSyncWhen(Date.UTC(2026, 9, 27, 17, 30), 'de', berlin)).toBe('heute 18:30')
+    expect(formatSyncWhen(Date.UTC(2026, 9, 28, 4, 0), 'de', berlin)).toBe('morgen 05:00')
+    expect(formatSyncWhen(Date.UTC(2026, 9, 26, 4, 3), 'de', berlin)).toBe('gestern 05:03')
+    expect(formatSyncWhen(Date.UTC(2026, 9, 28, 4, 0), 'en', berlin)).toBe('tomorrow 05:00 AM')
+    expect(formatSyncWhen(Date.UTC(2026, 9, 30, 4, 0), 'de', berlin)).not.toMatch(/morgen/)
+    // 23:30 UTC is already the next day in Berlin
+    expect(formatSyncWhen(Date.UTC(2026, 9, 27, 23, 30), 'de', berlin)).toBe('morgen 00:30')
+  })
+
+  it('names the panel zone when the browser is elsewhere', () => {
+    expect(formatSyncWhen(Date.UTC(2026, 9, 28, 4, 0), 'de', { now, timeZone: 'Europe/Berlin', localZone: 'UTC' })).toBe('morgen 05:00 (Europe/Berlin)')
+  })
+
+  it('falls back to the browser zone without a name', () => {
+    const local = new Date(2026, 9, 27, 14, 0).getTime()
+    expect(formatSyncWhen(new Date(2026, 9, 28, 5, 0).getTime(), 'de', { now: local })).toBe('morgen 05:00')
   })
 })
 

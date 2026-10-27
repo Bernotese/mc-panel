@@ -7,7 +7,7 @@ import { Sparkline } from '@/components/charts/sparkline'
 import { PingBars } from '@/components/ping-bars'
 import { PixelIcon } from '@/components/pixel-icon'
 import { DevBadge } from '@/features/dev/dev-badge'
-import { formatSyncWhen } from '@/features/dev/model'
+import { useSyncWhen } from '@/features/dev/use-sync-when'
 import { alertKey, formatDecimal, reachability } from '@/features/monitoring/model'
 import { AddressLine } from '@/features/servers/address-line'
 import { describeInstance, formatCpu, formatGiB } from '@/features/servers/format'
@@ -37,6 +37,7 @@ function Fact({ label, children, className }: { label?: string; children: ReactN
 export function ServerRow({ server, metrics }: { server: Server; metrics?: OverviewServer }) {
   const { t } = useTranslation()
   const fmt = useFormat()
+  const syncWhen = useSyncWhen()
   const headingId = useId()
   const { instance, status } = server
   const canPower = server.permissions.includes('server.power')
@@ -115,7 +116,7 @@ export function ServerRow({ server, metrics }: { server: Server; metrics?: Overv
                 {server.dev.sync_paused
                   ? t('dev.row.paused', { source: server.dev.source_name })
                   : server.dev.next_sync_at !== null
-                    ? t('dev.row.next_sync', { source: server.dev.source_name, when: formatSyncWhen(server.dev.next_sync_at, fmt.locale) })
+                    ? t('dev.row.next_sync', { source: server.dev.source_name, when: syncWhen(server.dev.next_sync_at) })
                     : t('dev.row.copy_of', { source: server.dev.source_name })}
               </Fact>
             ) : null}
