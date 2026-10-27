@@ -331,6 +331,65 @@ func (h *Handler) ApplyDevSpec(ctx context.Context, devID int64) error {
 	return nil
 }
 
+// UpdateDevOverrides re-applies the stored overrides (view and simulation distance) to the
+// dev's own current properties and bumps its revision. Unlike ApplyDevSpec it copies nothing
+// from prod: type, version, loader, modpack, java, memory, motd and plugin_installs stay as the
+// last sync left them, so the spec keeps matching the data directory. Errors: ErrNotDev,
+// ErrNoInstance and validation errors.
+func (h *Handler) UpdateDevOverrides(ctx context.Context, devID int64) error {
+	set, err := h.loadSettings(ctx)
+	if err != nil {
+		return err
+	}
+	h.reconcile.mu.Lock()
+	defer h.reconcile.mu.Unlock()
+	err = h.inTx(ctx, func(q *store.Queries) error {
+		d, err := q.DevGet(ctx, devID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotDev
+		}
+		if err != nil {
+			return err
+		}
+		cur, err := q.ServersGetInstance(ctx, devID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNoInstance
+		}
+		if err != nil {
+			return err
+		}
+		c, err := configFromInstance(cur)
+		if err != nil {
+			return err
+		}
+		ov, err := ParseDevOverrides(d.PropertyOverrides)
+		if err != nil {
+			return err
+		}
+		vd, sd := ov.ViewDistance, ov.SimulationDistance
+		c.Properties.ViewDistance, c.Properties.SimulationDistance = &vd, &sd
+		if err := c.validate(set.CurseForgeKey); err != nil {
+			return err
+		}
+		propsJSON, err := c.propertiesJSON()
+		if err != nil {
+			return err
+		}
+		_, err = q.ServersUpdateDevProperties(ctx, store.ServersUpdateDevPropertiesParams{
+			Properties: propsJSON, UpdatedAt: h.clock.Now().UnixMilli(), ServerID: devID,
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotDev
+		}
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	h.Trigger()
+	return nil
+}
+
 // SetDevSleeping sets dev_instances.sleeping and desired_state (sleeping → stopped, awake →
 // running) under the reconcile lock, then triggers a reconcile pass. Waking records now as
 // last_wake_at; falling asleep keeps it. Errors: ErrNotDev, ErrNoInstance.
