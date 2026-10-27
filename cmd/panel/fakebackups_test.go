@@ -94,6 +94,15 @@ func (f *fakeBackups) RestoreBackup(_ context.Context, id int64, snap string) (f
 	return f.start(id, filesapi.JobRestore, "restore")
 }
 
+func (f *fakeBackups) RestoreFrom(_ context.Context, target, source int64, snap string) (filesapi.Job, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.has(source, snap) {
+		return filesapi.Job{}, filesapi.ErrNotFound
+	}
+	return f.start(target, filesapi.JobRestore, "restore")
+}
+
 func (f *fakeBackups) ForgetBackups(_ context.Context, req filesapi.ForgetRequest) (filesapi.Job, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -5,7 +5,7 @@ export type ServerSection = 'overview' | 'monitoring' | 'console' | 'players' | 
 
 export const SECTION_ORDER: readonly ServerSection[] = ['overview', 'monitoring', 'console', 'players', 'files', 'plugins', 'backups', 'settings']
 
-type SectionServer = Pick<Server, 'permissions' | 'instance'>
+type SectionServer = Pick<Server, 'permissions' | 'instance' | 'dev'>
 
 /** Spec §4.3: the only place that decides which areas of a server a user sees (tree, drawer and route guards). */
 export function serverSections(server: SectionServer, isAdmin: boolean): ServerSection[] {
@@ -19,7 +19,8 @@ export function serverSections(server: SectionServer, isAdmin: boolean): ServerS
   if (has('server.files')) allowed.add('files')
   // vanilla and modpacks get no plugins section, so the UI never meets 409 plugins_unsupported.
   if (has('server.plugins') && pluginKindOf(server.instance.type) !== null) allowed.add('plugins')
-  if (has('server.backups')) allowed.add('backups')
+  // A dev has no backups (dev instances spec §1.3): its data is overwritten from its source's snapshots.
+  if (has('server.backups') && !server.dev) allowed.add('backups')
   if (isAdmin) allowed.add('settings')
   return SECTION_ORDER.filter((s) => allowed.has(s))
 }

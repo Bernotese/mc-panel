@@ -9,6 +9,45 @@ import (
 	"context"
 )
 
+const pluginsCopyInstalls = `-- name: PluginsCopyInstalls :exec
+INSERT INTO plugin_installs (server_id, filename, sha512, source, project_id, project_slug, title,
+                             version_id, version_name, channel, installed_at)
+SELECT ?1, p.filename, p.sha512, p.source, p.project_id, p.project_slug, p.title,
+       p.version_id, p.version_name, p.channel, p.installed_at
+FROM plugin_installs p
+WHERE p.server_id = ?2
+  AND EXISTS (SELECT 1 FROM dev_instances d WHERE d.server_id = ?1 AND d.source_id = ?2)
+ON CONFLICT (server_id, filename) DO UPDATE SET
+    sha512 = excluded.sha512, source = excluded.source, project_id = excluded.project_id,
+    project_slug = excluded.project_slug, title = excluded.title, version_id = excluded.version_id,
+    version_name = excluded.version_name, channel = excluded.channel, installed_at = excluded.installed_at
+`
+
+type PluginsCopyInstallsParams struct {
+	TargetID int64
+	SourceID int64
+}
+
+// Dev instances: copies the origins of prod's jars to its dev after a sync. Only writes rows of
+// target_id when it is the dev of source_id.
+func (q *Queries) PluginsCopyInstalls(ctx context.Context, arg PluginsCopyInstallsParams) error {
+	_, err := q.db.ExecContext(ctx, pluginsCopyInstalls, arg.TargetID, arg.SourceID)
+	return err
+}
+
+const pluginsDeleteDevInstalls = `-- name: PluginsDeleteDevInstalls :exec
+DELETE FROM plugin_installs
+WHERE plugin_installs.server_id = ?1
+  AND plugin_installs.server_id IN (SELECT d.server_id FROM dev_instances d)
+`
+
+// Dev instances: forgets the origins of a dev's jars before PluginsCopyInstalls. Only matches a
+// dev, never prod.
+func (q *Queries) PluginsDeleteDevInstalls(ctx context.Context, serverID int64) error {
+	_, err := q.db.ExecContext(ctx, pluginsDeleteDevInstalls, serverID)
+	return err
+}
+
 const pluginsDeleteInstall = `-- name: PluginsDeleteInstall :exec
 DELETE FROM plugin_installs WHERE server_id = ? AND filename = ?
 `

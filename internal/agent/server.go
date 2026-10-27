@@ -58,6 +58,7 @@ type Server struct {
 	fw      agentapi.Firewall
 	inst    Instances
 	web     Web
+	waker   Waker
 	console Console
 	version string
 	log     *slog.Logger
@@ -75,7 +76,7 @@ type Server struct {
 
 func NewServer(fw agentapi.Firewall, version string, log *slog.Logger, opts ...Option) *Server {
 	s := &Server{
-		fw: fw, inst: noInstances{}, web: noWeb{}, console: noConsole{}, version: version, log: log,
+		fw: fw, inst: noInstances{}, web: noWeb{}, waker: noWaker{}, console: noConsole{}, version: version, log: log,
 		streams: make(chan struct{}, MaxLogStreams), playerReads: make(chan struct{}, MaxParallelPlayers), readTimeout: 5 * time.Second, writeTimeout: 10 * time.Second,
 		streamWriteTimeout: streamWriteTimeout,
 	}
@@ -97,6 +98,7 @@ func NewServer(fw agentapi.Firewall, version string, log *slog.Logger, opts ...O
 		agentapi.PathInstanceRcon:    {method: http.MethodPost, handler: s.rcon},
 		agentapi.PathInstancePlayers: {method: http.MethodPost, handler: s.players},
 		agentapi.PathWebRoutes:       {method: http.MethodPut, handler: s.webRoutes},
+		agentapi.PathWaker:           {method: http.MethodPut, handler: s.setWaker},
 	}
 	s.srv = &http.Server{
 		Handler:           s,

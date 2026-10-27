@@ -66,6 +66,9 @@ type serverJSON struct {
 	WebStatus string          `json:"web_status"`
 	WebRoutes *[]webRouteJSON `json:"web_routes,omitempty"`
 	WebError  string          `json:"web_error,omitempty"`
+	// Dev instances: Dev only on a dev, DevID only on a server that has a dev (devData.apply).
+	Dev   *devSummaryJSON `json:"dev,omitempty"`
+	DevID *int64          `json:"dev_id,omitempty"`
 }
 
 // webRouteJSON is the OpenAPI schema WebRoute; url is absent without base domain.
@@ -82,6 +85,7 @@ type viewData struct {
 	webRoutes  map[int64][]agentapi.WebTarget
 	snap       Snapshot
 	downAlerts map[int64]bool // server_alerts rows (missing = on)
+	dev        devData
 }
 
 func (h *Handler) loadViewData(ctx context.Context) (viewData, error) {
@@ -110,6 +114,9 @@ func (h *Handler) loadViewData(ctx context.Context) (viewData, error) {
 	for _, a := range alerts {
 		d.downAlerts[a.ServerID] = a.DownAlerts != 0
 	}
+	if d.dev, err = h.loadDevData(ctx); err != nil {
+		return viewData{}, err
+	}
 	return d, nil
 }
 
@@ -127,6 +134,7 @@ func (d viewData) server(s store.Server, perms []rbac.Permission) (serverJSON, e
 		on = true
 	}
 	out.DownAlerts = &on
+	d.dev.apply(&out)
 	return out, nil
 }
 

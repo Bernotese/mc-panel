@@ -50,6 +50,32 @@ type BackupSchedule struct {
 	UpdatedAt      int64
 }
 
+type DevInstance struct {
+	ServerID          int64
+	SourceID          int64
+	SyncPaused        int64
+	PausedAt          sql.NullInt64
+	SyncTime          int64
+	IdleMinutes       int64
+	PropertyOverrides string
+	NextSyncAt        sql.NullInt64
+	DeferredSince     sql.NullInt64
+	LastSyncAt        sql.NullInt64
+	LastSyncStatus    sql.NullString
+	LastSyncError     sql.NullString
+	LastSyncSnapshot  sql.NullString
+	Sleeping          int64
+	LastWakeAt        sql.NullInt64
+	CreatedAt         int64
+	UpdatedAt         int64
+}
+
+type DevOp struct {
+	ServerID  int64
+	Name      string
+	CreatedAt int64
+}
+
 type Instance struct {
 	ServerID      int64
 	Type          string

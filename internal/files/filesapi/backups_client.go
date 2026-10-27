@@ -53,6 +53,20 @@ func (c *UnixClient) RestoreBackup(ctx context.Context, id int64, snapshot strin
 	return out, err
 }
 
+// RestoreFrom restores snapshot of server sourceID's repository into the data directory of
+// targetID (dev instances spec §4.2); the service refuses targetID == sourceID.
+func (c *UnixClient) RestoreFrom(ctx context.Context, targetID, sourceID int64, snapshot string) (Job, error) {
+	if err := checkSnapshot(sourceID, snapshot); err != nil {
+		return Job{}, err
+	}
+	if targetID <= 0 || targetID == sourceID {
+		return Job{}, fmt.Errorf("%w: target %d must be a server other than the source %d", ErrInvalid, targetID, sourceID)
+	}
+	var out Job
+	err := c.call(ctx, c.backupTimeout, http.MethodPost, PathBackupsRestore, SnapshotRequest{ID: targetID, Snapshot: snapshot, SourceID: sourceID}, &out)
+	return out, err
+}
+
 // ForgetBackups starts a forget job (retention policy or explicit IDs; restic forget --prune).
 func (c *UnixClient) ForgetBackups(ctx context.Context, req ForgetRequest) (Job, error) {
 	if err := req.Validate(); err != nil {

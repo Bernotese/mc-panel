@@ -5,6 +5,7 @@ import { auditOperations } from './handlers/audit'
 import { authOperations } from './handlers/auth'
 import { backupOperations } from './handlers/backups'
 import { consoleOperations } from './handlers/console'
+import { devOperations } from './handlers/dev'
 import { filesOperations } from './handlers/files'
 import { meOperations } from './handlers/me'
 import { monitoringOperations } from './handlers/monitoring'
@@ -24,6 +25,7 @@ export const operations: MockOperation[] = [
   ...filesOperations,
   ...pluginsOperations,
   ...backupOperations,
+  ...devOperations,
   ...monitoringOperations,
   ...auditOperations,
   ...securityOperations,

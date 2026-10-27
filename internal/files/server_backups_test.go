@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -123,5 +124,29 @@ func TestServerForgetPinPurgeDownload(t *testing.T) {
 	waitJob(t, s, 1)
 	if status, b = postJSON(t, ts, filesapi.PathBackupsPurge, filesapi.IDRequest{ID: 1}); status != http.StatusNoContent {
 		t.Fatalf("purge: %d %s", status, b)
+	}
+}
+
+func TestServerRestoreFrom(t *testing.T) {
+	s, src, f := newBackupService(t)
+	put(t, src, "a.txt", "prod")
+	sid := snapshotOf(t, s, f, makeTar(t, reg("a.txt", "snap")))
+	dev := filepath.Join(filepath.Dir(src), "2")
+	put(t, dev, "a.txt", "dev")
+	ts := startHTTP(t, NewServer(s, "test", discardLog()))
+	status, body := postJSON(t, ts, filesapi.PathBackupsRestore, filesapi.SnapshotRequest{ID: 2, Snapshot: sid, SourceID: 2})
+	if status != http.StatusBadRequest || errCode(t, body) != filesapi.CodeInvalid {
+		t.Fatalf("source = target: %d %s", status, body)
+	}
+	status, body = postJSON(t, ts, filesapi.PathBackupsRestore, filesapi.SnapshotRequest{ID: 2, Snapshot: sid, SourceID: 1})
+	if status != http.StatusAccepted {
+		t.Fatalf("restore-from: %d %s", status, body)
+	}
+	waitJob(t, s, 2)
+	if got, _ := get(t, dev, "a.txt"); got != "snap" {
+		t.Fatalf("dev a.txt = %q", got)
+	}
+	if got, _ := get(t, src, "a.txt"); got != "prod" {
+		t.Fatalf("source a.txt = %q", got)
 	}
 }

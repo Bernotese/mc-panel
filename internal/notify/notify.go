@@ -23,6 +23,7 @@ const (
 	EventPasswordChanged    EventType = "auth.password_changed"
 	EventAuditChainBroken   EventType = "audit.chain_broken"
 	EventBackupFailed       EventType = "backup.failed"
+	EventDevSyncFailed      EventType = "dev.sync_failed"
 	EventServerDown         EventType = "server.down"
 	EventServerRecovered    EventType = "server.recovered"
 	EventServerCrashLoop    EventType = "server.crash_loop"

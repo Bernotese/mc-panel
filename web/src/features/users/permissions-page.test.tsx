@@ -26,6 +26,13 @@ describe('UserPermissionsPage', () => {
     expect(screen.getByRole('button', { name: 'Speichern' })).toBeDisabled()
   })
 
+  it('leaves dev instances out: they follow their prod', async () => {
+    await renderWithProviders(<UserPermissionsPage userId={2} />, { me: loginAs('admin', { sudo: true }) })
+    expect(await screen.findByRole('checkbox', { name: 'survival: Ansehen' })).toBeChecked()
+    expect(screen.queryByRole('checkbox', { name: 'dev-survival: Ansehen' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Dev-Instanzen fehlen hier/)).toBeInTheDocument()
+  })
+
   it('notes that full-trust permissions require 2FA', async () => {
     await renderWithProviders(<UserPermissionsPage userId={2} />, { me: loginAs('admin', { sudo: true }) })
     await screen.findByRole('heading', { name: 'Rechte von alice' })

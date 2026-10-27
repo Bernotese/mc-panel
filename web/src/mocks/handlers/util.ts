@@ -84,7 +84,10 @@ export function paginate<T>(items: T[], url: URL): { items: T[]; next_cursor: st
   return { items: items.slice(offset, offset + limit), next_cursor: next }
 }
 
+/** Like rbac: a dev has no permission rows, it resolves to its prod's, and server.backups grants nothing on it. */
 export function serverPermissions(user: MockUser, serverId: number): Permission[] {
+  const dev = db.servers.find((s) => s.id === serverId)?.dev
+  if (dev && user.role !== 'admin') return serverPermissions(user, dev.sourceId).filter((p) => p !== 'server.backups')
   if (user.role === 'admin') return [...ALL_PERMISSIONS]
   return db.grants.get(user.id)?.find((g) => g.server_id === serverId)?.permissions ?? []
 }

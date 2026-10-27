@@ -191,6 +191,10 @@ func (h *Handler) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		writeValidation(w, r, "name must match ^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$")
 		return
 	}
+	if reservedName(req.Name) {
+		writeValidation(w, r, "names starting with dev- are reserved for dev instances")
+		return
+	}
 	if !req.EulaAccepted {
 		writeValidation(w, r, "eula_accepted must be true (https://aka.ms/MinecraftEULA)")
 		return
@@ -332,6 +336,16 @@ func (h *Handler) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	dev, err := isDev(ctx, h.q, s.ID)
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	if dev && req.setsMoreThanMemory() {
+		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeDevManaged,
+			"a dev instance follows its source server: only memory_mib can be changed here, dev settings go through /servers/{id}/dev")
+		return
+	}
 	cur, err := configFromInstance(in)
 	if err != nil {
 		httpx.Internal(w, r, err)
@@ -375,11 +389,18 @@ func (h *Handler) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 			httpx.Internal(w, r, err)
 			return
 		}
-		in, err = h.q.ServersUpdateInstance(ctx, store.ServersUpdateInstanceParams{
-			Version: next.Version, LoaderVersion: toNullString(next.LoaderVersion), Modpack: toNullString(next.Modpack),
-			Java: string(next.Java), MemoryMib: int64(next.MemoryMiB), Properties: propsJSON,
-			UpdatedAt: h.clock.Now().UnixMilli(), ServerID: s.ID,
-		})
+		if dev {
+			// Only the memory: the rest of the row may have been replaced by a sync meanwhile.
+			in, err = h.q.ServersUpdateDevMemory(ctx, store.ServersUpdateDevMemoryParams{
+				MemoryMib: int64(next.MemoryMiB), UpdatedAt: h.clock.Now().UnixMilli(), ServerID: s.ID,
+			})
+		} else {
+			in, err = h.q.ServersUpdateInstance(ctx, store.ServersUpdateInstanceParams{
+				Version: next.Version, LoaderVersion: toNullString(next.LoaderVersion), Modpack: toNullString(next.Modpack),
+				Java: string(next.Java), MemoryMib: int64(next.MemoryMiB), Properties: propsJSON,
+				UpdatedAt: h.clock.Now().UnixMilli(), ServerID: s.ID,
+			})
+		}
 		if errors.Is(err, sql.ErrNoRows) { // deleted concurrently
 			writeNotFound(w, r)
 			return
@@ -416,7 +437,20 @@ func (h *Handler) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out.DownAlerts = &on
+	dd, err := h.loadDevData(ctx)
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	dd.apply(&out)
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// setsMoreThanMemory reports whether the request sets a field a dev instance takes from its
+// source (dev instances spec §2: only memory_mib is the dev's own).
+func (req updateServerRequest) setsMoreThanMemory() bool {
+	return req.Version.Set || req.LoaderVersion.Set || req.Modpack.Set || req.Java.Set ||
+		req.Properties.Set || req.WebRoutes.Set
 }
 
 // webRoutes returns the requested web routes sorted by path (root first), validated with the
@@ -549,6 +583,20 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 		writeConflict(w, r, "a file or backup job is running for this server; try again when it is done")
 		return
 	}
+	// Answered before the agent is asked; deleteServerRows checks again in its transaction.
+	if _, err := h.q.DevGetBySource(ctx, s.ID); err == nil {
+		writeDevExists(w, r)
+		return
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		httpx.Internal(w, r, err)
+		return
+	}
+	dev, err := h.q.DevGet(ctx, s.ID)
+	wasDev := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		httpx.Internal(w, r, err)
+		return
+	}
 	configured, ok := h.deleteServerRows(w, r, s)
 	if !ok {
 		return
@@ -574,6 +622,10 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.record(ctx, audit.ActionServerDelete, serverTarget(s.ID), audit.ResultSuccess, details)
+	if wasDev {
+		h.record(ctx, audit.ActionDevDelete, serverTarget(s.ID), audit.ResultSuccess,
+			map[string]any{"name": s.Name, "source_id": dev.SourceID})
+	}
 	h.Trigger() // the next pass drops the server's web route
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -610,6 +662,15 @@ func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s sto
 		return false, false
 	}
 	defer func() { _ = tx.Rollback() }()
+	// A dev created since the check in handleDeleteServer: its source stays (dev_instances has no
+	// cascade on source_id).
+	if _, err := h.q.WithTx(tx).DevGetBySource(ctx, s.ID); err == nil {
+		writeDevExists(w, r)
+		return false, false
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		httpx.Internal(w, r, err)
+		return false, false
+	}
 	n, err := h.q.WithTx(tx).RbacDeleteServer(ctx, s.ID)
 	if err != nil {
 		httpx.Internal(w, r, err)
@@ -657,6 +718,10 @@ func deleteMonitoring(ctx context.Context, q *store.Queries, id int64) error {
 		}
 	}
 	return nil
+}
+
+func writeDevExists(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteError(w, r, http.StatusConflict, httpx.CodeDevExists, "the server has a dev instance: delete the dev instance first")
 }
 
 // isForeign asks the agent whether the container with the server's ID belongs to another
