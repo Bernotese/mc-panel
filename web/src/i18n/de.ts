@@ -1154,6 +1154,8 @@ export const de = {
       point_sleep: 'Schläft, wenn niemand spielt, und startet beim ersten Verbinden.',
       point_ops: 'Eigene Ops-Liste: Ops wechseln selbst mit /gamemode creative.',
       disk_warning: 'Die Dev-Instanz belegt etwa so viel Speicherplatz wie {{source}}.',
+      services_warning:
+        'Plugins und Mods mit externen Diensten (z. B. eine gemeinsame MySQL-Datenbank oder ein Discord-Bot) laufen auf der Dev-Instanz mit denselben Zugangsdaten und können dort Daten von {{source}} ändern.',
       submit: '{{name}} anlegen',
       created: '{{name}} angelegt. Der erste Sync läuft.',
       exists: 'Dieser Server hat eine Dev-Instanz:',
