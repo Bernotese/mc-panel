@@ -2,7 +2,8 @@
 // validated JSON API on a Unix socket that only the panel user (and root) may
 // connect to, manages the nftables jail sets and is the only Docker client
 // (Minecraft containers and mc-router), whose new connections into private
-// networks it filters (container_egress_deny).
+// networks it filters (container_egress_deny). "agent waker" is a different, unprivileged
+// mode: the Minecraft wake listener inside the mcpanel-waker container (internal/waker).
 package main
 
 import (
@@ -49,6 +50,9 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "waker" {
+		return runWaker(ctx, args[1:], stdout, stderr)
+	}
 	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "", "path to agent.toml (default "+defaultConfigPath+" unless -dev)")
