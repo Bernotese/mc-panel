@@ -74,7 +74,7 @@ cleanup() {
     ip netns del mcpcitest 2>/dev/null || true
     ip link del mcpcit0 2>/dev/null || true
   fi
-  ids="$(docker ps -aq --filter label=mcpanel.instance; docker ps -aq --filter label=mcpanel.router)"
+  ids="$(docker ps -aq --filter label=mcpanel.instance; docker ps -aq --filter label=mcpanel.router; docker ps -aq --filter label=mcpanel.waker)"
   if [ -n "$ids" ]; then
     # shellcheck disable=SC2086 # one container id per word
     docker rm -f $ids >/dev/null 2>&1 || true

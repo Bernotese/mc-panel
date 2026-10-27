@@ -11,6 +11,8 @@
 #   monitoring-alerts  server.down/recovered, server.crash_loop, the down-alerts switch
 #   backups            backup, restore, download, schedule, pin, delete, purge with restic
 #   web                web ports: host Caddy with the catch-all site, mcpanel-web, isolation (web.sh)
+#   dev                dev instance: syncs that leave the prod untouched, overrides, dev ops, sleep,
+#                      the waker and wake on login (dev.sh)
 #
 # MCPANEL_ACCEPTANCE_TIMESCALE=<n> (a panel built with -tags acceptance, see internal/timescale)
 # makes the monitoring passes, alert windows and the backup tick n times faster; the shards
@@ -24,7 +26,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-shards="core plugins monitoring-metrics monitoring-alerts backups web"
+shards="core plugins monitoring-metrics monitoring-alerts backups web dev"
 if [ "$#" -ne 4 ] || ! [[ " $shards " == *" $1 "* ]]; then
   echo "usage: scripts/ci-instances.sh SHARD AGENT_BINARY FILES_BINARY PANEL_BINARY (SHARD: ${shards// /, })" >&2
   exit 2
