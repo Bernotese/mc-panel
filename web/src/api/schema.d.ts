@@ -1093,6 +1093,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/servers/{id}/dev": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Settings and sync state of dev instance {id} */
+        get: operations["getDevInstance"];
+        put?: never;
+        /**
+         * Create the dev instance dev-<name> of server {id} (admin, sudo; audited)
+         * @description The dev starts asleep and gets its first sync queued at once. Prod is only read, through a restic snapshot.
+         */
+        post: operations["createDevInstance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Pause or resume the sync, change sync time, idle time and the dev overrides (audited) */
+        patch: operations["updateDevInstance"];
+        trace?: never;
+    };
+    "/servers/{id}/dev/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync dev instance {id} from its source now (players on dev get a 60 s warning; audited) */
+        post: operations["syncDevInstance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/dev/ops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The dev's own ops list (kept across syncs) */
+        get: operations["listDevOps"];
+        put?: never;
+        /** Add a player to the dev's ops list (sent as op <name> when the dev runs; audited) */
+        post: operations["addDevOp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/{id}/dev/ops/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a player from the dev's ops list (sent as deop <name> when the dev runs; audited) */
+        delete: operations["removeDevOp"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/servers/{id}/backups": {
         parameters: {
             query?: never;
@@ -1540,7 +1614,7 @@ export interface components {
     schemas: {
         Error: {
             /** @enum {string} */
-            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "password_change_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "files_unavailable" | "file_exists" | "file_modified" | "not_text" | "not_regular" | "instance_running" | "insufficient_storage" | "plugins_unsupported" | "plugin_source_unavailable" | "plugin_not_downloadable" | "plugin_incompatible" | "mrpack_incompatible" | "mrpack_version_mismatch" | "backups_unavailable" | "backup_running" | "internal";
+            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "password_change_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "files_unavailable" | "file_exists" | "file_modified" | "not_text" | "not_regular" | "instance_running" | "insufficient_storage" | "plugins_unsupported" | "plugin_source_unavailable" | "plugin_not_downloadable" | "plugin_incompatible" | "mrpack_incompatible" | "mrpack_version_mismatch" | "backups_unavailable" | "backup_running" | "dev_exists" | "not_dev" | "dev_managed" | "internal";
             message: string;
             request_id?: string;
         };
@@ -1790,6 +1864,87 @@ export interface components {
             web_routes?: components["schemas"]["WebRoute"][];
             /** @description The agent's reason for web_status error, sanitized like last_error; admins only, absent when there is none */
             web_error?: string;
+            /** @description Present only when the server is a dev instance */
+            dev?: components["schemas"]["DevSummary"];
+            /**
+             * Format: int64
+             * @description Present only when the server has a dev instance: its id
+             */
+            dev_id?: number;
+        };
+        DevSummary: {
+            /** Format: int64 */
+            source_id: number;
+            source_name: string;
+            sync_paused: boolean;
+            /**
+             * Format: int64
+             * @description Unix ms; null while paused
+             */
+            next_sync_at: number | null;
+            /**
+             * Format: int64
+             * @description Unix ms
+             */
+            last_sync_at: number | null;
+            last_sync_status: components["schemas"]["DevSyncStatus"] | null;
+            /** @description A sync is waiting for players to leave, queued or running */
+            sync_pending: boolean;
+            /** @description Stopped; a connection attempt to its address wakes it */
+            sleeping: boolean;
+        };
+        /** @enum {string} */
+        DevSyncStatus: "ok" | "failed" | "running";
+        DevInstance: {
+            /** Format: int64 */
+            server_id: number;
+            /** Format: int64 */
+            source_id: number;
+            source_name: string;
+            sync_paused: boolean;
+            /**
+             * Format: int64
+             * @description Unix ms
+             */
+            paused_at: number | null;
+            /** @description Minutes after midnight in ServerSettings.backup_timezone */
+            sync_time: number;
+            /** @description The dev falls asleep after this long without players */
+            idle_minutes: number;
+            view_distance: number;
+            simulation_distance: number;
+            /**
+             * Format: int64
+             * @description Unix ms; null while paused
+             */
+            next_sync_at: number | null;
+            /**
+             * Format: int64
+             * @description Unix ms
+             */
+            last_sync_at: number | null;
+            last_sync_status: components["schemas"]["DevSyncStatus"] | null;
+            last_sync_error: string | null;
+            sync_pending: boolean;
+            sleeping: boolean;
+        };
+        CreateDevRequest: {
+            /** @description Default 2048 (3072 for mod loaders and modpacks), at most max_mib of GET /servers/memory */
+            memory_mib?: number;
+        };
+        /** @description Omitted fields stay unchanged. */
+        UpdateDevRequest: {
+            sync_paused?: boolean;
+            sync_time?: number;
+            idle_minutes?: number;
+            view_distance?: number;
+            simulation_distance?: number;
+        };
+        DevOps: {
+            names: string[];
+        };
+        DevOpRequest: {
+            name: string;
         };
         WebRoute: {
             /** @description "" = the root (https://<fqdn>/); otherwise one segment published at https://<fqdn>/<path>/, with the prefix stripped before forwarding */
@@ -2347,7 +2502,7 @@ export interface components {
             ignored_files: number;
         };
         /** @enum {string} */
-        BackupKind: "scheduled" | "manual" | "pre-restore";
+        BackupKind: "scheduled" | "manual" | "pre-restore" | "dev-sync";
         BackupSnapshot: {
             id: string;
             short_id: string;
@@ -5306,6 +5461,271 @@ export interface operations {
             429: components["responses"]["TooManyRequests"];
             502: components["responses"]["PluginSourceUnavailable"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getDevInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DevInstance"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description not_dev (the server is not a dev instance) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createDevInstance: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDevRequest"];
+            };
+        };
+        responses: {
+            /** @description Created (the dev server) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Server"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description dev_exists (the server already has a dev), conflict (the server is a dev, has no instance, or the name dev-<name> is taken) or base_domain_missing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateDevInstance: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateDevRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DevInstance"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description not_dev (the server is not a dev instance) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    syncDevInstance: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DevInstance"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description not_dev (the server is not a dev instance) or backup_running (a sync, backup or restore of the dev is queued or running) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listDevOps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DevOps"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description not_dev (the server is not a dev instance) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    addDevOp: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DevOpRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DevOps"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description not_dev (the server is not a dev instance) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    removeDevOp: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DevOps"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description not_dev (the server is not a dev instance) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getBackups: {

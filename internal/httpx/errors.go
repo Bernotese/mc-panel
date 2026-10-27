@@ -45,6 +45,9 @@ const (
 	CodeMrpackVersionMismatch   = "mrpack_version_mismatch"
 	CodeBackupsUnavailable      = "backups_unavailable"
 	CodeBackupRunning           = "backup_running"
+	CodeDevExists               = "dev_exists"
+	CodeNotDev                  = "not_dev"
+	CodeDevManaged              = "dev_managed"
 	CodeInternal                = "internal"
 )
 

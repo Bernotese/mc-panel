@@ -45,6 +45,9 @@ const ERROR_CODES = [
   'mrpack_version_mismatch',
   'backups_unavailable',
   'backup_running',
+  'dev_exists',
+  'not_dev',
+  'dev_managed',
   'internal',
 ]
 

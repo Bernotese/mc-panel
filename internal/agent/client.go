@@ -189,6 +189,21 @@ func (c *Client) WebRoutes(ctx context.Context, req agentapi.WebRoutesRequest) (
 	return out, nil
 }
 
+var _ agentapi.WakerClient = (*Client)(nil)
+
+// Waker sends the complete list of sleeping dev instances (PUT /v1/waker) and returns the ids
+// of those a player tried to join since the last call (dev instances spec §6.2).
+func (c *Client) Waker(ctx context.Context, req agentapi.WakerRequest) (agentapi.WakerResponse, error) {
+	if err := req.Validate(); err != nil {
+		return agentapi.WakerResponse{}, err
+	}
+	var out agentapi.WakerResponse
+	if err := c.do(ctx, http.MethodPut, agentapi.PathWaker, req, &out); err != nil {
+		return agentapi.WakerResponse{}, err
+	}
+	return out, nil
+}
+
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
 	return c.doTimeout(ctx, c.timeout, method, path, in, out)
 }

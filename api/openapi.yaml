@@ -17,6 +17,7 @@ tags:
   - { name: files, description: 'File browser of a server: list, edit, upload, download, manage, extract' }
   - { name: plugins, description: 'Plugins and mods of a server: inventory, search in Modrinth and Hangar, install, update, toggle, remove' }
   - { name: backups, description: 'Backups of a server: restic snapshots, schedule and retention, restore, download' }
+  - { name: dev, description: 'Dev instances: a nightly copy of a server that sleeps when empty' }
   - { name: monitoring, description: 'Monitoring: live values and history of servers and host, alert settings' }
   - { name: audit, description: 'Audit log' }
   - { name: security, description: 'Security center: attempts, jails, IP rules, settings, notifiers, agent' }
@@ -1096,6 +1097,114 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '502': { $ref: '#/components/responses/PluginSourceUnavailable' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/dev:
+    post:
+      operationId: createDevInstance
+      tags: [dev]
+      summary: Create the dev instance dev-<name> of server {id} (admin, sudo; audited)
+      description: 'The dev starts asleep and gets its first sync queued at once. Prod is only read, through a restic snapshot.'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateDevRequest' } } }
+      responses:
+        '201': { description: Created (the dev server), content: { application/json: { schema: { $ref: '#/components/schemas/Server' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'dev_exists (the server already has a dev), conflict (the server is a dev, has no instance, or the name dev-<name> is taken) or base_domain_missing', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    get:
+      operationId: getDevInstance
+      tags: [dev]
+      summary: Settings and sync state of dev instance {id}
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DevInstance' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'not_dev (the server is not a dev instance)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    patch:
+      operationId: updateDevInstance
+      tags: [dev]
+      summary: Pause or resume the sync, change sync time, idle time and the dev overrides (audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateDevRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DevInstance' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'not_dev (the server is not a dev instance)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/{id}/dev/sync:
+    post:
+      operationId: syncDevInstance
+      tags: [dev]
+      summary: Sync dev instance {id} from its source now (players on dev get a 60 s warning; audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/DevInstance' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'not_dev (the server is not a dev instance) or backup_running (a sync, backup or restore of the dev is queued or running)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/{id}/dev/ops:
+    get:
+      operationId: listDevOps
+      tags: [dev]
+      summary: The dev's own ops list (kept across syncs)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DevOps' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'not_dev (the server is not a dev instance)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    post:
+      operationId: addDevOp
+      tags: [dev]
+      summary: Add a player to the dev's ops list (sent as op <name> when the dev runs; audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DevOpRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DevOps' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'not_dev (the server is not a dev instance)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/{id}/dev/ops/{name}:
+    delete:
+      operationId: removeDevOp
+      tags: [dev]
+      summary: Remove a player from the dev's ops list (sent as deop <name> when the dev runs; audited)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+        - { name: name, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z0-9_]{3,16}$' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DevOps' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'not_dev (the server is not a dev instance)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /servers/{id}/backups:
     get:
       operationId: getBackups
@@ -1551,7 +1660,7 @@ components:
       type: object
       required: [error, message]
       properties:
-        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, password_change_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, files_unavailable, file_exists, file_modified, not_text, not_regular, instance_running, insufficient_storage, plugins_unsupported, plugin_source_unavailable, plugin_not_downloadable, plugin_incompatible, mrpack_incompatible, mrpack_version_mismatch, backups_unavailable, backup_running, internal] }
+        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, password_change_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, files_unavailable, file_exists, file_modified, not_text, not_regular, instance_running, insufficient_storage, plugins_unsupported, plugin_source_unavailable, plugin_not_downloadable, plugin_incompatible, mrpack_incompatible, mrpack_version_mismatch, backups_unavailable, backup_running, dev_exists, not_dev, dev_managed, internal] }
         message: { type: string }
         request_id: { type: string }
     Role: { type: string, enum: [admin, user] }
@@ -1764,6 +1873,66 @@ components:
           items: { $ref: '#/components/schemas/WebRoute' }
           description: 'Stored web routes, sorted by path (root first); admins only, absent for other users. [] when none are stored; also listed while web_status is off for lack of a base domain.'
         web_error: { type: string, description: "The agent's reason for web_status error, sanitized like last_error; admins only, absent when there is none" }
+        dev: { $ref: '#/components/schemas/DevSummary', description: 'Present only when the server is a dev instance' }
+        dev_id: { type: integer, format: int64, description: 'Present only when the server has a dev instance: its id' }
+    DevSummary:
+      type: object
+      required: [source_id, source_name, sync_paused, next_sync_at, last_sync_at, last_sync_status, sync_pending, sleeping]
+      properties:
+        source_id: { type: integer, format: int64 }
+        source_name: { type: string }
+        sync_paused: { type: boolean }
+        next_sync_at: { type: [integer, 'null'], format: int64, description: Unix ms; null while paused }
+        last_sync_at: { type: [integer, 'null'], format: int64, description: Unix ms }
+        last_sync_status: { anyOf: [{ $ref: '#/components/schemas/DevSyncStatus' }, { type: 'null' }] }
+        sync_pending: { type: boolean, description: 'A sync is waiting for players to leave, queued or running' }
+        sleeping: { type: boolean, description: 'Stopped; a connection attempt to its address wakes it' }
+    DevSyncStatus: { type: string, enum: [ok, failed, running] }
+    DevInstance:
+      type: object
+      required: [server_id, source_id, source_name, sync_paused, paused_at, sync_time, idle_minutes, view_distance, simulation_distance, next_sync_at, last_sync_at, last_sync_status, last_sync_error, sync_pending, sleeping]
+      properties:
+        server_id: { type: integer, format: int64 }
+        source_id: { type: integer, format: int64 }
+        source_name: { type: string }
+        sync_paused: { type: boolean }
+        paused_at: { type: [integer, 'null'], format: int64, description: Unix ms }
+        sync_time: { type: integer, minimum: 0, maximum: 1439, description: 'Minutes after midnight in ServerSettings.backup_timezone' }
+        idle_minutes: { type: integer, minimum: 5, maximum: 120, description: 'The dev falls asleep after this long without players' }
+        view_distance: { type: integer, minimum: 3, maximum: 32 }
+        simulation_distance: { type: integer, minimum: 3, maximum: 32 }
+        next_sync_at: { type: [integer, 'null'], format: int64, description: Unix ms; null while paused }
+        last_sync_at: { type: [integer, 'null'], format: int64, description: Unix ms }
+        last_sync_status: { anyOf: [{ $ref: '#/components/schemas/DevSyncStatus' }, { type: 'null' }] }
+        last_sync_error: { type: [string, 'null'] }
+        sync_pending: { type: boolean }
+        sleeping: { type: boolean }
+    CreateDevRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        memory_mib: { type: integer, minimum: 1024, maximum: 32768, multipleOf: 256, description: 'Default 2048 (3072 for mod loaders and modpacks), at most max_mib of GET /servers/memory' }
+    UpdateDevRequest:
+      type: object
+      additionalProperties: false
+      description: Omitted fields stay unchanged.
+      properties:
+        sync_paused: { type: boolean }
+        sync_time: { type: integer, minimum: 0, maximum: 1439 }
+        idle_minutes: { type: integer, minimum: 5, maximum: 120 }
+        view_distance: { type: integer, minimum: 3, maximum: 32 }
+        simulation_distance: { type: integer, minimum: 3, maximum: 32 }
+    DevOps:
+      type: object
+      required: [names]
+      properties:
+        names: { type: array, items: { type: string } }
+    DevOpRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, pattern: '^[A-Za-z0-9_]{3,16}$' }
     WebRoute:
       type: object
       required: [path, port]
@@ -2310,7 +2479,7 @@ components:
         entries: { type: array, items: { $ref: '#/components/schemas/MrpackPlanEntry' }, description: 'One per mod of the pack, in pack order' }
         kept: { type: array, items: { type: string }, description: 'Jars in mods/ (with .disabled) that no entry matches or replaces; they stay installed' }
         ignored_files: { type: integer, description: 'Files of the pack outside mods/<name>.jar (configs, resource packs, ...)' }
-    BackupKind: { type: string, enum: [scheduled, manual, pre-restore] }
+    BackupKind: { type: string, enum: [scheduled, manual, pre-restore, dev-sync] }
     BackupSnapshot:
       type: object
       required: [id, short_id, time, kind, pinned, note, bytes]

@@ -173,6 +173,25 @@ func (f *fakeFiles) CreateBackup(_ context.Context, req filesapi.CreateBackupReq
 	return j.job, nil
 }
 
+func (f *fakeFiles) RestoreFrom(_ context.Context, target, source int64, snapshot string) (filesapi.Job, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fmt.Sprintf("restore-from %d %d %s", target, source, short(snapshot)))
+	if err := f.errFor("restore"); err != nil {
+		return filesapi.Job{}, err
+	}
+	if !slices.ContainsFunc(f.snaps[source], func(s filesapi.Snapshot) bool { return s.ID == snapshot }) {
+		return filesapi.Job{}, filesapi.ErrNotFound
+	}
+	j, err := f.start(target, filesapi.JobRestore, "restore")
+	if err != nil {
+		return filesapi.Job{}, err
+	}
+	j.restoreOf = snapshot
+	j.job.Snapshot = snapshot
+	return j.job, nil
+}
+
 func (f *fakeFiles) RestoreBackup(_ context.Context, id int64, snapshot string) (filesapi.Job, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
