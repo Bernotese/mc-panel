@@ -457,3 +457,27 @@ func TestDevSyncManualAlwaysFresh(t *testing.T) {
 		t.Fatalf("create: done = %+v, calls = %v", r, e2.files.callLog())
 	}
 }
+
+// TestDevSyncKeepsPinned: older dev-sync snapshots of the source are forgotten after a sync,
+// a pinned one is kept.
+func TestDevSyncKeepsPinned(t *testing.T) {
+	e := newDevEnv(t)
+	e.clk.Set(t0.Add(-8 * time.Hour))
+	pinned := e.files.add(e.prod, filesapi.SnapshotDevSync, true, "")
+	old := e.files.add(e.prod, filesapi.SnapshotDevSync, false, "")
+	e.clk.Set(t0)
+	r := e.wait(e.queue(nil))
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	if got := e.log.all(); got[len(got)-1] != fmt.Sprintf("forget %d %s", e.prod, short(old)) {
+		t.Fatalf("calls = %v", got)
+	}
+	var ids []string
+	for _, s := range e.files.list(e.prod) {
+		ids = append(ids, s.ID)
+	}
+	if !slices.Contains(ids, pinned) || slices.Contains(ids, old) || !slices.Contains(ids, r.snap) {
+		t.Fatalf("prod snapshots after the sync: %v (pinned %s, old %s, new %s)", ids, short(pinned), short(old), short(r.snap))
+	}
+}

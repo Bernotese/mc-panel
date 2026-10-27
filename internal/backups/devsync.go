@@ -198,7 +198,8 @@ func (h *Handler) devOf(ctx context.Context, s DevSync) (store.DevInstance, erro
 }
 
 // forgetOldDevSync forgets the source's dev-sync snapshots that are older than the one just
-// used (dev instances spec §4.1). It only logs a failure: the sync itself succeeded.
+// used (dev instances spec §4.1); pinned ones are kept like everywhere else (backups spec). It
+// only logs a failure: the sync itself succeeded.
 func (h *Handler) forgetOldDevSync(ctx context.Context, j *job, sourceID int64, used filesapi.Snapshot) {
 	err := func() error {
 		list, err := h.files.Snapshots(ctx, sourceID)
@@ -212,7 +213,7 @@ func (h *Handler) forgetOldDevSync(ctx context.Context, j *job, sourceID int64, 
 		}
 		var old []string
 		for _, sn := range list {
-			if sn.Kind == filesapi.SnapshotDevSync && sn.ID != used.ID && sn.Time <= used.Time && len(old) < filesapi.MaxForgetIDs {
+			if sn.Kind == filesapi.SnapshotDevSync && !sn.Pinned && sn.ID != used.ID && sn.Time <= used.Time && len(old) < filesapi.MaxForgetIDs {
 				old = append(old, sn.ID)
 			}
 		}
