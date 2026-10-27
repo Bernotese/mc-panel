@@ -1124,7 +1124,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Sync dev instance {id} from its source now (players on dev get a 60 s warning; audited) */
+        /** Sync dev instance {id} from its source now (players on dev get a 60 s warning; at most one per 10 minutes; audited) */
         post: operations["syncDevInstance"];
         delete?: never;
         options?: never;
@@ -5613,6 +5613,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
         };
     };
     listDevOps: {
