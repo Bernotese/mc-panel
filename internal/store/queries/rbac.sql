@@ -62,8 +62,11 @@ LIMIT 1;
 SELECT * FROM servers ORDER BY name;
 
 -- name: RbacListViewableServers :many
+-- A dev instance has no permission rows of its own: it is viewable when its source is.
 SELECT * FROM servers
-WHERE id IN (SELECT server_id FROM permissions WHERE user_id = ? AND permission = 'server.view')
+WHERE id IN (SELECT g.server_id FROM permissions g WHERE g.user_id = sqlc.arg(user_id) AND g.permission = 'server.view')
+   OR id IN (SELECT d.server_id FROM dev_instances d JOIN permissions p ON p.server_id = d.source_id
+             WHERE p.user_id = sqlc.arg(user_id) AND p.permission = 'server.view')
 ORDER BY name;
 
 -- name: RbacGetServer :one
@@ -80,7 +83,14 @@ RETURNING *;
 DELETE FROM servers WHERE id = ?;
 
 -- name: RbacHasPermission :one
-SELECT count(*) FROM permissions WHERE user_id = ? AND server_id = ? AND permission = ?;
+-- On a dev instance the permissions of its source apply, except server.backups (a dev has no
+-- backups); a dev never has permission rows of its own.
+SELECT count(*) FROM permissions
+WHERE permissions.user_id = sqlc.arg(user_id)
+  AND permissions.server_id = COALESCE((SELECT d.source_id FROM dev_instances d WHERE d.server_id = sqlc.arg(server_id)), sqlc.arg(server_id))
+  AND permissions.permission = sqlc.arg(permission)
+  AND NOT (permissions.permission = 'server.backups'
+           AND EXISTS (SELECT 1 FROM dev_instances d WHERE d.server_id = sqlc.arg(server_id)));
 
 -- name: RbacUserHasAnyPermission :one
 -- Whether the user holds one of the given permissions on any server (mandatory 2FA, SEC-10).
@@ -88,11 +98,32 @@ SELECT EXISTS (
   SELECT 1 FROM permissions WHERE user_id = sqlc.arg(user_id) AND permission IN (sqlc.slice(perms))
 );
 
--- name: RbacListUserPermissions :many
+-- name: RbacListUserGrants :many
+-- The stored permission rows of a user (the user editor); RbacListUserPermissions adds the
+-- permissions a user has on dev instances through their sources.
 SELECT server_id, permission FROM permissions WHERE user_id = ? ORDER BY server_id, permission;
 
+-- name: RbacListUserPermissions :many
+-- The effective permissions of a user per server: the stored rows plus, for every dev
+-- instance, the rows of its source without server.backups (see RbacHasPermission).
+SELECT server_id, permission FROM (
+    SELECT p.server_id AS server_id, p.permission AS permission
+    FROM permissions p WHERE p.user_id = sqlc.arg(user_id)
+    UNION ALL
+    SELECT d.server_id AS server_id, p.permission AS permission
+    FROM dev_instances d JOIN permissions p ON p.server_id = d.source_id
+    WHERE p.user_id = sqlc.arg(user_id) AND p.permission <> 'server.backups'
+)
+ORDER BY server_id, permission;
+
 -- name: RbacListUserServerPermissions :many
-SELECT permission FROM permissions WHERE user_id = ? AND server_id = ? ORDER BY permission;
+-- The effective permissions of a user on one server (see RbacHasPermission).
+SELECT permissions.permission FROM permissions
+WHERE permissions.user_id = sqlc.arg(user_id)
+  AND permissions.server_id = COALESCE((SELECT d.source_id FROM dev_instances d WHERE d.server_id = sqlc.arg(server_id)), sqlc.arg(server_id))
+  AND NOT (permissions.permission = 'server.backups'
+           AND EXISTS (SELECT 1 FROM dev_instances d WHERE d.server_id = sqlc.arg(server_id)))
+ORDER BY permission;
 
 -- name: RbacDeleteUserPermissions :exec
 DELETE FROM permissions WHERE user_id = ?;
