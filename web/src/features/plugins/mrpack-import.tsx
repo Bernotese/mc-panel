@@ -129,7 +129,7 @@ function MrpackDialog({ server, file, token, busy, onClose, onStarted }: MrpackD
   // The file is read locally (spec §2); a query keeps the result for the dialog's lifetime only.
   const read = useQuery({
     queryKey: ['plugin-mrpack-file', server.id, token],
-    queryFn: async () => toRequestIndex(await readMrpackIndex(file)),
+    queryFn: async ({ signal }) => toRequestIndex(await readMrpackIndex(file, signal)),
     staleTime: Infinity,
     gcTime: 0,
     retry: false,
