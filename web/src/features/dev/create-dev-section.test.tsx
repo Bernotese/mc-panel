@@ -26,6 +26,11 @@ describe('CreateDevSection', () => {
     const { user, router } = await overview(4)
     const section = await screen.findByRole('region', { name: 'Dev-Instanz' })
     expect(within(section).getByText(/belegt etwa so viel Speicherplatz wie modded/)).toBeInTheDocument()
+    expect(
+      within(section).getByText(
+        'Plugins und Mods mit externen Diensten (z. B. eine gemeinsame MySQL-Datenbank oder ein Discord-Bot) laufen auf der Dev-Instanz mit denselben Zugangsdaten und können dort Daten von modded ändern.',
+      ),
+    ).toBeInTheDocument()
     await waitFor(() => expect(within(section).getByRole('spinbutton', { name: 'Arbeitsspeicher (GiB)' })).toHaveValue(3))
     await user.click(within(section).getByRole('button', { name: 'dev-modded anlegen' }))
     expect(await screen.findByText('dev-modded angelegt. Der erste Sync läuft.')).toBeInTheDocument()

@@ -96,6 +96,10 @@ function CreateDevForm({ server }: { server: Server }) {
           <p role="note" className="text-status-starting text-sm">
             {t('dev.create.disk_warning', { source: server.name })}
           </p>
+          {/* The copy includes plugin and mod configs with their credentials: dev reaches the same external state. */}
+          <p role="note" className="text-status-starting text-sm">
+            {t('dev.create.services_warning', { source: server.name })}
+          </p>
           {create.error && !isSudoCancelled(create.error) ? (
             <p role="alert" className="text-destructive text-sm">
               {errorMessage(create.error, t)}
