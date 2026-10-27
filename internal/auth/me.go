@@ -117,14 +117,25 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		forced  bool
 		tok     string
 	)
+	// The change is only written while the session that verified the current password is active and
+	// that password is still the stored one.
 	err = h.withTx(ctx, func(q *store.Queries) error {
+		if err := h.requireActiveSession(ctx, q, p); err != nil {
+			return err
+		}
 		cur, err := q.AuthGetUserByID(ctx, user.ID)
 		if err != nil {
 			return err
 		}
 		forced = cur.MustChangePassword == 1
-		if err := q.AuthChangePassword(ctx, store.AuthChangePasswordParams{PasswordHash: hash, Now: now, ID: user.ID}); err != nil {
+		n, err := q.AuthChangePassword(ctx, store.AuthChangePasswordParams{
+			PasswordHash: hash, Now: now, ID: user.ID, OldPasswordHash: user.PasswordHash,
+		})
+		if err != nil {
 			return err
+		}
+		if n != 1 {
+			return errCredentialChanged
 		}
 		revoked, err = q.AuthRevokeOtherSessions(ctx, store.AuthRevokeOtherSessionsParams{
 			RevokedAt: sql.NullInt64{Int64: now, Valid: true}, UserID: user.ID, KeepID: p.SessionID,
@@ -154,7 +165,7 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) regenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
-	_, user, ok := h.current(w, r)
+	p, user, ok := h.current(w, r)
 	if !ok {
 		return
 	}
@@ -162,12 +173,15 @@ func (h *Handler) regenerateRecoveryCodes(w http.ResponseWriter, r *http.Request
 	now := h.clock.Now().UnixMilli()
 	var codes []string
 	err := h.withTx(ctx, func(q *store.Queries) error {
+		if err := h.requireActiveSession(ctx, q, p); err != nil {
+			return err
+		}
 		var err error
 		codes, err = h.replaceRecoveryCodes(ctx, q, user.ID, now)
 		return err
 	})
 	if err != nil {
-		httpx.Internal(w, r, err)
+		sessionError(w, r, err)
 		return
 	}
 	h.auditLog(ctx, user.ID, user.Username, audit.ActionRecoveryRegenerate, user.Username, audit.ResultSuccess, nil)
@@ -198,30 +212,34 @@ func (h *Handler) verifyCurrentPassword(w http.ResponseWriter, r *http.Request, 
 		httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeInvalidCredentials, "current password is incorrect")
 		return false
 	}
+	if h.afterPasswordCheck != nil {
+		h.afterPasswordCheck()
+	}
 	return true
 }
 
 // confirmFirstFactor implements SEC-15: enrolling the first second factor locks out every
 // other session and hands the enrolling session the recovery codes, so it needs the current
 // password (a hijacked password-only session must not be able to take over the account). Once
-// a factor exists, adding another one needs sudo instead (guardAddFactor). It returns whether
-// the password was verified; ok is false when an error response was written.
-func (h *Handler) confirmFirstFactor(w http.ResponseWriter, r *http.Request, user store.User, pw string) (verified, ok bool) {
+// a factor exists, adding another one needs sudo instead (guardAddFactor). It returns the
+// hash the password was verified against ("" if none was needed); ok is false when an error
+// response was written.
+func (h *Handler) confirmFirstFactor(w http.ResponseWriter, r *http.Request, user store.User, pw string) (verifiedHash string, ok bool) {
 	f, err := h.factors(r.Context(), h.q, user)
 	if err != nil {
 		httpx.Internal(w, r, err)
-		return false, false
+		return "", false
 	}
 	if f.has2FA() {
-		return false, true
+		return "", true
 	}
 	if pw == "" || utf8.RuneCountInString(pw) > password.MaxLength {
 		httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeInvalidCredentials,
 			"current_password is required to set up the first two-factor method")
-		return false, false
+		return "", false
 	}
 	if !h.verifyCurrentPassword(w, r, user, pw) {
-		return false, false
+		return "", false
 	}
-	return true, true
+	return user.PasswordHash, true
 }

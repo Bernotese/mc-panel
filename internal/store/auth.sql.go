@@ -28,21 +28,31 @@ func (q *Queries) AuthAdvanceTOTPStep(ctx context.Context, arg AuthAdvanceTOTPSt
 	return result.RowsAffected()
 }
 
-const authChangePassword = `-- name: AuthChangePassword :exec
+const authChangePassword = `-- name: AuthChangePassword :execrows
 UPDATE users SET password_hash = ?1, must_change_password = 0, password_changed_at = ?2, updated_at = ?2
-WHERE id = ?3
+WHERE id = ?3 AND password_hash = ?4
 `
 
 type AuthChangePasswordParams struct {
-	PasswordHash string
-	Now          int64
-	ID           int64
+	PasswordHash    string
+	Now             int64
+	ID              int64
+	OldPasswordHash string
 }
 
-// The user's own change; it also ends a forced change (must_change_password, SEC-45).
-func (q *Queries) AuthChangePassword(ctx context.Context, arg AuthChangePasswordParams) error {
-	_, err := q.db.ExecContext(ctx, authChangePassword, arg.PasswordHash, arg.Now, arg.ID)
-	return err
+// The user's own change; it also ends a forced change (must_change_password, SEC-45). Compare-and-swap
+// on the hash the current password was verified against.
+func (q *Queries) AuthChangePassword(ctx context.Context, arg AuthChangePasswordParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, authChangePassword,
+		arg.PasswordHash,
+		arg.Now,
+		arg.ID,
+		arg.OldPasswordHash,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const authClearWebAuthnState = `-- name: AuthClearWebAuthnState :execrows
@@ -568,20 +578,30 @@ func (q *Queries) AuthPruneSessions(ctx context.Context, cutoff int64) (int64, e
 	return result.RowsAffected()
 }
 
-const authRehashPassword = `-- name: AuthRehashPassword :exec
+const authRehashPassword = `-- name: AuthRehashPassword :execrows
 UPDATE users SET password_hash = ?1, updated_at = ?2
-WHERE id = ?3
+WHERE id = ?3 AND password_hash = ?4
 `
 
 type AuthRehashPasswordParams struct {
-	PasswordHash string
-	Now          int64
-	ID           int64
+	PasswordHash    string
+	Now             int64
+	ID              int64
+	OldPasswordHash string
 }
 
-func (q *Queries) AuthRehashPassword(ctx context.Context, arg AuthRehashPasswordParams) error {
-	_, err := q.db.ExecContext(ctx, authRehashPassword, arg.PasswordHash, arg.Now, arg.ID)
-	return err
+// Compare-and-swap on the hash that was verified: an upgrade never replaces a password set meanwhile.
+func (q *Queries) AuthRehashPassword(ctx context.Context, arg AuthRehashPasswordParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, authRehashPassword,
+		arg.PasswordHash,
+		arg.Now,
+		arg.ID,
+		arg.OldPasswordHash,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const authRevokeOtherSessions = `-- name: AuthRevokeOtherSessions :execrows
@@ -677,6 +697,33 @@ func (q *Queries) AuthRotateSession(ctx context.Context, arg AuthRotateSessionPa
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const authSessionActiveWithRole = `-- name: AuthSessionActiveWithRole :one
+SELECT count(*) FROM sessions s JOIN users u ON u.id = s.user_id
+WHERE s.id = ?1 AND s.user_id = ?2 AND s.revoked_at IS NULL
+  AND s.expires_at > ?3 AND u.role = ?4
+`
+
+type AuthSessionActiveWithRoleParams struct {
+	ID     int64
+	UserID int64
+	Now    int64
+	Role   string
+}
+
+// Whether the session is neither revoked nor expired and belongs to the user, who still has the role.
+// Write transactions that act for an admin re-check their authorization with it.
+func (q *Queries) AuthSessionActiveWithRole(ctx context.Context, arg AuthSessionActiveWithRoleParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, authSessionActiveWithRole,
+		arg.ID,
+		arg.UserID,
+		arg.Now,
+		arg.Role,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const authSetPendingTOTP = `-- name: AuthSetPendingTOTP :execrows

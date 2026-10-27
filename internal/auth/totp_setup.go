@@ -22,6 +22,8 @@ var (
 	errNotFound         = errors.New("auth: not found")
 	errSudoRequired     = errors.New("auth: sudo required to add another second factor")
 	errPasswordRequired = errors.New("auth: current password required for the first second factor")
+	// errCredentialChanged: the password a request was verified with is no longer the stored one.
+	errCredentialChanged = errors.New("auth: credential changed meanwhile")
 )
 
 // pendingTOTPTTL is how long a secret from POST /me/totp/setup can be activated.
@@ -134,21 +136,18 @@ func (h *Handler) promoteSetupBestEffort(w http.ResponseWriter, r *http.Request,
 // even a stored "full" session may only look harmless (the loader downgrades it to setup when 2FA
 // is mandatory), so it must not regain access without presenting a second factor.
 //
-// passwordVerified reports whether the request presented the correct current password
-// (confirmFirstFactor). The first factor needs it; it is checked here again, inside the
-// transaction, because another method may have been removed since confirmFirstFactor looked.
-func (h *Handler) guardAddFactor(ctx context.Context, q *store.Queries, p principal.Principal, userID int64, passwordVerified bool) error {
+// verifiedHash is the stored hash the request's current password was verified against
+// (confirmFirstFactor), "" if none was presented. The first factor needs it, and it must still be
+// the stored hash; both are checked here, inside the transaction, because another method may have
+// been removed and the password may have been changed since confirmFirstFactor looked.
+func (h *Handler) guardAddFactor(ctx context.Context, q *store.Queries, p principal.Principal, userID int64, verifiedHash string) error {
 	// The enrolling session must still be active: a session revoked (or expired) after the loader
 	// authenticated the request must not be able to establish a permanent factor.
-	sess, err := q.AuthGetSessionByID(ctx, p.SessionID)
-	if errors.Is(err, sql.ErrNoRows) {
+	if p.UserID != userID {
 		return ErrNoSession
 	}
-	if err != nil {
+	if err := h.requireActiveSession(ctx, q, p); err != nil {
 		return err
-	}
-	if sess.UserID != userID || !h.sessions.valid(sess) {
-		return ErrNoSession
 	}
 	u, err := q.AuthGetUserByID(ctx, userID)
 	if err != nil {
@@ -164,8 +163,11 @@ func (h *Handler) guardAddFactor(ctx context.Context, q *store.Queries, p princi
 		}
 		return nil
 	}
-	if !passwordVerified {
+	if verifiedHash == "" {
 		return errPasswordRequired
+	}
+	if u.PasswordHash != verifiedHash {
+		return errCredentialChanged
 	}
 	_, err = q.AuthRevokeOtherSessions(ctx, store.AuthRevokeOtherSessionsParams{
 		RevokedAt: sql.NullInt64{Int64: h.clock.Now().UnixMilli(), Valid: true}, UserID: userID, KeepID: p.SessionID,
@@ -177,6 +179,8 @@ func (h *Handler) factorRemovalError(w http.ResponseWriter, r *http.Request, err
 	switch {
 	case err == nil:
 		return false
+	case errors.Is(err, ErrNoSession):
+		sessionGone(w, r)
 	case errors.Is(err, errLastSecondFactor):
 		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "cannot remove the last two-factor method")
 	case errors.Is(err, errNotEnabled):
@@ -256,7 +260,7 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "no TOTP setup pending")
 		return
 	}
-	pwVerified, ok := h.confirmFirstFactor(w, r, user, req.CurrentPassword)
+	verifiedHash, ok := h.confirmFirstFactor(w, r, user, req.CurrentPassword)
 	if !ok {
 		return
 	}
@@ -287,7 +291,7 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 	now := h.clock.Now().UnixMilli()
 	var codes []string
 	err = h.withTx(ctx, func(q *store.Queries) error {
-		if err := h.guardAddFactor(ctx, q, p, user.ID, pwVerified); err != nil {
+		if err := h.guardAddFactor(ctx, q, p, user.ID, verifiedHash); err != nil {
 			return err
 		}
 		n, err := q.AuthEnableTOTP(ctx, store.AuthEnableTOTPParams{
@@ -314,6 +318,10 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 		passwordRequired(w, r)
 		return
 	}
+	if errors.Is(err, errCredentialChanged) {
+		credentialChanged(w, r)
+		return
+	}
 	if errors.Is(err, errNotEnabled) {
 		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "no TOTP setup pending")
 		return
@@ -329,13 +337,16 @@ func (h *Handler) enableTOTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) disableTOTP(w http.ResponseWriter, r *http.Request) {
-	_, user, ok := h.current(w, r)
+	p, user, ok := h.current(w, r)
 	if !ok {
 		return
 	}
 	ctx := r.Context()
 	now := h.clock.Now().UnixMilli()
 	err := h.withTx(ctx, func(q *store.Queries) error {
+		if err := h.requireActiveSession(ctx, q, p); err != nil {
+			return err
+		}
 		u, err := q.AuthGetUserByID(ctx, user.ID)
 		if err != nil {
 			return err
