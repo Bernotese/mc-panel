@@ -97,7 +97,7 @@ jobs:
           # the job instances. Shared code runs every shard: cmd/, go.mod/sum, the dispatcher and
           # lib.sh, restic and any internal/ package that is not one shard's own (agent, config,
           # servers, store, auth, ...). The own packages pick their shards below.
-          own='^internal/(files|plugins|monitoring|notify|backups|timescale)/'
+          own='^internal/(files|plugins|monitoring|notify|backups|timescale|devinst|waker)/'
           shared="$(grep -E "^(cmd|internal)/|^scripts/(ci-instances\.sh|ci-instances/lib\.sh|install-restic\.sh)$|${gomod}" <<<"${files}" |
             grep -vE "${own}" || true)"
           shards=()
@@ -112,6 +112,7 @@ jobs:
           shard monitoring-alerts '^internal/(monitoring|notify|timescale)/'
           shard backups '^internal/(files|backups|timescale)/'
           shard web '^internal/agent/(instances|firewall)/|^internal/servers/|^deploy/caddy/|^scripts/install/'
+          shard dev '^internal/(devinst|waker|files|backups|timescale)/|^internal/agent/instances/waker|^scripts/mc-status\.py$'
           if [ "${main_push}" = true ]; then shards=(); fi # root job, see above
           json="$(printf '%s\n' "${shards[@]}" | jq -Rnc '[inputs | select(. != "")]')"
           echo "instances_shards=${json}" >> "${GITHUB_OUTPUT}"
@@ -454,9 +455,11 @@ jobs:
       # ViaBackwards + ViaVersion from Hangar, mrpack import), monitoring-metrics (history, live
       # and host values, RCON noise, host.disk_low/ok), monitoring-alerts (server.down/recovered
       # via nftables, server.crash_loop, the down-alerts switch) and backups (real restic:
-      # backup, restore, download, schedule, pin, delete, purge) and web (web ports: a host Caddy
+      # backup, restore, download, schedule, pin, delete, purge), web (web ports: a host Caddy
       # with the installer's catch-all site in front of mcpanel-web, a responder in the server,
-      # isolation, unpublish). The panel shards run the panel in production mode with TOTP
+      # isolation, unpublish) and dev (dev instance: two syncs with the prod's data directory
+      # checksummed and the prod pinged throughout, overrides, dev ops, sleep, the waker, wake on
+      # login). The panel shards run the panel in production mode with TOTP
       # sign-in and sudo.
       - name: Instance acceptance (${{ matrix.shard }})
         env:
