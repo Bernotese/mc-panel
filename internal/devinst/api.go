@@ -126,8 +126,8 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	s, err := h.servers.CreateDev(ctx, prod.ID, req.MemoryMiB)
 	if err != nil {
-		if status, code, ok := classifyCreate(err); ok {
-			httpx.WriteError(w, r, status, code, err.Error())
+		if status, code, msg, ok := classifyCreate(err); ok {
+			httpx.WriteError(w, r, status, code, msg)
 			return
 		}
 		h.record(ctx, audit.ActionDevCreate, prod.ID, audit.ResultFailure, map[string]any{"source_id": prod.ID, "source_name": prod.Name})
@@ -152,21 +152,24 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 // classifyCreate maps an error of Servers.CreateDev to its answer; ok is false for an
-// internal error.
-func classifyCreate(err error) (status int, code string, ok bool) {
+// internal error. Validation errors keep their text (it names the field), the others get a
+// fixed message.
+func classifyCreate(err error) (status int, code, msg string, ok bool) {
 	switch {
 	case errors.Is(err, errServerNotFound):
-		return http.StatusNotFound, httpx.CodeNotFound, true
+		return http.StatusNotFound, httpx.CodeNotFound, "server not found", true
 	case errors.Is(err, errDevExists):
-		return http.StatusConflict, httpx.CodeDevExists, true
+		return http.StatusConflict, httpx.CodeDevExists, "the server already has a dev instance or is one", true
 	case errors.Is(err, instancespec.ErrInvalid):
-		return http.StatusBadRequest, httpx.CodeValidation, true
-	case errors.Is(err, errNoInstance), errors.Is(err, errNameTaken):
-		return http.StatusConflict, httpx.CodeConflict, true
+		return http.StatusBadRequest, httpx.CodeValidation, err.Error(), true
+	case errors.Is(err, errNoInstance):
+		return http.StatusConflict, httpx.CodeConflict, "the server has no instance yet", true
+	case errors.Is(err, errNameTaken):
+		return http.StatusConflict, httpx.CodeConflict, "the name of the dev instance is taken by another server", true
 	case errors.Is(err, errBaseDomainMissing):
-		return http.StatusConflict, httpx.CodeBaseDomainMissing, true
+		return http.StatusConflict, httpx.CodeBaseDomainMissing, "no base domain configured: set one in the server settings", true
 	}
-	return 0, "", false
+	return 0, "", "", false
 }
 
 // updateRequest is UpdateDevRequest; omitted fields stay unchanged.
@@ -304,7 +307,7 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.queueClaimed(ctx, d, triggerManual); err != nil {
 		if errors.Is(err, errSyncBusy) {
-			httpx.WriteError(w, r, http.StatusConflict, httpx.CodeBackupRunning, errSyncBusy.Error())
+			httpx.WriteError(w, r, http.StatusConflict, httpx.CodeBackupRunning, "a sync of this dev is already queued or running")
 			return
 		}
 		httpx.Internal(w, r, err)
