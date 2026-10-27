@@ -6,14 +6,16 @@ SELECT * FROM users WHERE username = sqlc.arg(username);
 -- name: AuthGetUserByID :one
 SELECT * FROM users WHERE id = sqlc.arg(id);
 
--- name: AuthRehashPassword :exec
+-- name: AuthRehashPassword :execrows
+-- Compare-and-swap on the hash that was verified: an upgrade never replaces a password set meanwhile.
 UPDATE users SET password_hash = sqlc.arg(password_hash), updated_at = sqlc.arg(now)
-WHERE id = sqlc.arg(id);
+WHERE id = sqlc.arg(id) AND password_hash = sqlc.arg(old_password_hash);
 
--- name: AuthChangePassword :exec
--- The user's own change; it also ends a forced change (must_change_password, SEC-45).
+-- name: AuthChangePassword :execrows
+-- The user's own change; it also ends a forced change (must_change_password, SEC-45). Compare-and-swap
+-- on the hash the current password was verified against.
 UPDATE users SET password_hash = sqlc.arg(password_hash), must_change_password = 0, password_changed_at = sqlc.arg(now), updated_at = sqlc.arg(now)
-WHERE id = sqlc.arg(id);
+WHERE id = sqlc.arg(id) AND password_hash = sqlc.arg(old_password_hash);
 
 -- name: AuthUpdateLocale :exec
 UPDATE users SET locale = sqlc.arg(locale), updated_at = sqlc.arg(now)
@@ -109,6 +111,13 @@ SELECT webauthn_state FROM sessions WHERE id = sqlc.arg(id);
 -- "UPDATE ... RETURNING" cannot hand back the old state.)
 UPDATE sessions SET webauthn_state = NULL
 WHERE id = sqlc.arg(id) AND webauthn_state = sqlc.arg(state);
+
+-- name: AuthSessionActiveWithRole :one
+-- Whether the session is neither revoked nor expired and belongs to the user, who still has the role.
+-- Write transactions that act for an admin re-check their authorization with it.
+SELECT count(*) FROM sessions s JOIN users u ON u.id = s.user_id
+WHERE s.id = sqlc.arg(id) AND s.user_id = sqlc.arg(user_id) AND s.revoked_at IS NULL
+  AND s.expires_at > sqlc.arg(now) AND u.role = sqlc.arg(role);
 
 -- name: AuthRevokeSession :execrows
 UPDATE sessions SET revoked_at = sqlc.arg(revoked_at) WHERE id = sqlc.arg(id) AND revoked_at IS NULL;

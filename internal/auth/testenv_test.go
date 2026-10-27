@@ -85,6 +85,9 @@ type testEnv struct {
 	h      *Handler
 	router *rbac.Router
 	srv    http.Handler
+	// afterLoad, if set, runs after the session loader authenticated a request and before the
+	// handler: tests use it to change credential or session state in exactly that gap.
+	afterLoad func(*http.Request)
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -112,7 +115,14 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	e.h = h
 	mux := chi.NewRouter()
-	mux.Use(httpx.RealIP(nil), h.Sessions().Middleware, CSRF(cfg.Origin()))
+	mux.Use(httpx.RealIP(nil), h.Sessions().Middleware, func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if f := e.afterLoad; f != nil {
+				f(r)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}, CSRF(cfg.Origin()))
 	mux.Route("/api", func(sub chi.Router) {
 		e.router = rbac.NewRouter(sub, denyAll{}, clk)
 		h.Routes(e.router)

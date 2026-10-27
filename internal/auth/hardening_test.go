@@ -673,7 +673,7 @@ func TestEnrolmentRequiresActiveSession(t *testing.T) {
 		p := principal.Principal{UserID: uid, SessionID: c.sessionID(), Stage: principal.StageFull}
 		check := func() error {
 			return e.h.withTx(context.Background(), func(q *store.Queries) error {
-				return e.h.guardAddFactor(context.Background(), q, p, uid, true)
+				return e.h.guardAddFactor(context.Background(), q, p, uid, testPasswordHash())
 			})
 		}
 		if err := check(); err != nil {
@@ -681,7 +681,7 @@ func TestEnrolmentRequiresActiveSession(t *testing.T) {
 		}
 		// The first factor needs the verified password, also when a method vanished meanwhile.
 		if err := e.h.withTx(context.Background(), func(q *store.Queries) error {
-			return e.h.guardAddFactor(context.Background(), q, p, uid, false)
+			return e.h.guardAddFactor(context.Background(), q, p, uid, "")
 		}); !errors.Is(err, errPasswordRequired) {
 			t.Fatalf("first factor without password: err = %v, want errPasswordRequired", err)
 		}

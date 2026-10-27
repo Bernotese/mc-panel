@@ -306,10 +306,9 @@ func TestChangeRoleRevokesSessions(t *testing.T) {
 	e := newEnv(t)
 	second := storetest.CreateUser(t, e.db, "second", "admin")
 	secondSess := insertSession(t, e.db, second, sql.NullInt64{})
-	rootOwn := insertSession(t, e.db, e.rootID, sql.NullInt64{})
-	rootOther := insertSession(t, e.db, e.rootID, sql.NullInt64{})
 	admin := e.admin()
-	admin.SessionID = rootOwn
+	rootOwn := admin.SessionID
+	rootOther := insertSession(t, e.db, e.rootID, sql.NullInt64{})
 
 	rec := e.do(http.MethodPatch, fmt.Sprintf("/users/%d", e.rootID), map[string]string{"role": "user"}, &admin)
 	if rec.Code != http.StatusOK {
@@ -325,7 +324,8 @@ func TestChangeRoleRevokesSessions(t *testing.T) {
 		t.Fatal("other users' sessions must stay")
 	}
 
-	other := principal.Principal{UserID: second, Username: "second", Role: principal.RoleAdmin, Stage: principal.StageFull, SudoUntil: t0.Add(5 * time.Minute)}
+	other := principal.Principal{UserID: second, Username: "second", Role: principal.RoleAdmin, Stage: principal.StageFull,
+		SudoUntil: t0.Add(5 * time.Minute), SessionID: secondSess}
 	rec = e.do(http.MethodPatch, fmt.Sprintf("/users/%d", e.rootID), map[string]string{"role": "admin"}, &other)
 	if rec.Code != http.StatusOK || !sessionRevokedAt(t, e.db, rootOwn).Valid {
 		t.Fatalf("promote by another admin must end the target's sessions: %d %s", rec.Code, rec.Body)

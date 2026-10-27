@@ -102,7 +102,7 @@ func (h *Handler) finishPasskeyRegistration(w http.ResponseWriter, r *http.Reque
 		httpx.WriteError(w, r, http.StatusBadRequest, httpx.CodeValidation, "name (1-64 characters) and credential are required")
 		return
 	}
-	pwVerified, ok := h.confirmFirstFactor(w, r, user, req.CurrentPassword)
+	verifiedHash, ok := h.confirmFirstFactor(w, r, user, req.CurrentPassword)
 	if !ok {
 		return
 	}
@@ -140,7 +140,7 @@ func (h *Handler) finishPasskeyRegistration(w http.ResponseWriter, r *http.Reque
 	var row store.WebauthnCredential
 	var codes []string
 	err = h.withTx(ctx, func(q *store.Queries) error {
-		if err := h.guardAddFactor(ctx, q, p, user.ID, pwVerified); err != nil {
+		if err := h.guardAddFactor(ctx, q, p, user.ID, verifiedHash); err != nil {
 			return err
 		}
 		var err error
@@ -162,6 +162,9 @@ func (h *Handler) finishPasskeyRegistration(w http.ResponseWriter, r *http.Reque
 		return
 	case errors.Is(err, errPasswordRequired):
 		passwordRequired(w, r)
+		return
+	case errors.Is(err, errCredentialChanged):
+		credentialChanged(w, r)
 		return
 	case store.IsUniqueViolation(err):
 		httpx.WriteError(w, r, http.StatusBadRequest, httpx.CodeBadRequest, "this passkey is already registered")
@@ -194,7 +197,7 @@ func (h *Handler) listPasskeys(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) deletePasskey(w http.ResponseWriter, r *http.Request) {
-	_, user, ok := h.current(w, r)
+	p, user, ok := h.current(w, r)
 	if !ok {
 		return
 	}
@@ -206,6 +209,9 @@ func (h *Handler) deletePasskey(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var name string
 	err = h.withTx(ctx, func(q *store.Queries) error {
+		if err := h.requireActiveSession(ctx, q, p); err != nil {
+			return err
+		}
 		u, err := q.AuthGetUserByID(ctx, user.ID)
 		if err != nil {
 			return err

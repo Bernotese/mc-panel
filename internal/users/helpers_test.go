@@ -39,6 +39,8 @@ type env struct {
 	mux    http.Handler
 	h      *users.Handler
 	rootID int64
+	// rootSession is the session row behind admin() (created on first use).
+	rootSession int64
 }
 
 func newEnv(t *testing.T) *env { return newEnvWithRecorder(t, nil) }
@@ -61,11 +63,15 @@ func newEnvWithRecorder(t *testing.T, mk func(*sql.DB, clock.Clock) audit.Record
 	return e
 }
 
-// admin returns the principal of the seeded admin "root" with a valid sudo window.
+// admin returns the principal of the seeded admin "root" with a valid sudo window and an active
+// session (writes re-check that session).
 func (e *env) admin() principal.Principal {
+	if e.rootSession == 0 {
+		e.rootSession = insertSession(e.t, e.db, e.rootID, sql.NullInt64{})
+	}
 	return principal.Principal{
 		UserID: e.rootID, Username: "root", Role: principal.RoleAdmin,
-		Stage: principal.StageFull, SudoUntil: t0.Add(5 * time.Minute),
+		Stage: principal.StageFull, SudoUntil: t0.Add(5 * time.Minute), SessionID: e.rootSession,
 	}
 }
 
