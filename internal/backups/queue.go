@@ -25,6 +25,9 @@ type jobSpec struct {
 	snapshot string // restore/delete: the source snapshot
 	run      runFunc
 	after    func() // runs after the job has ended (the restore gate is open by then); may be nil
+	// ended (may be nil) runs exactly once with the job's result when it has ended in any way,
+	// also when it was dropped or the queue closed before it ran; never with q.mu held.
+	ended func(snapshot string, err error)
 }
 
 type job struct {
@@ -92,7 +95,7 @@ func (q *queue) add(base context.Context, s jobSpec) (jobView, error) {
 	case q.closed:
 		return jobView{}, errShuttingDown
 	case active(q.last[s.serverID]):
-		return jobView{}, errBackupRunning
+		return jobView{}, ErrBackupRunning
 	}
 	ctx, cancel := context.WithCancel(context.WithoutCancel(base))
 	j := &job{q: q, spec: s, ctx: ctx, cancel: cancel, done: make(chan struct{}), view: jobView{
@@ -147,13 +150,14 @@ func (q *queue) busy(serverID int64) bool {
 	return active(q.last[serverID])
 }
 
-// restoreHeld reports whether the server has a restore job that waits or runs: the gate closes
-// with the 202, not only when the worker picks the job up (another server's job may still run).
+// restoreHeld reports whether the server has a restore or dev sync job (keyed by the dev) that
+// waits or runs: the gate closes with the 202, not only when the worker picks the job up
+// (another server's job may still run).
 func (q *queue) restoreHeld(serverID int64) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	j := q.last[serverID]
-	return active(j) && j.spec.kind == kindRestore
+	return active(j) && (j.spec.kind == kindRestore || j.spec.kind == kindDevSync)
 }
 
 // idle reports whether no job waits or runs.
@@ -170,17 +174,22 @@ func (q *queue) work(ctx context.Context) {
 		if j == nil {
 			return
 		}
+		var snap string
+		var err error
 		if q.gone != nil && q.gone(j.ctx, j.spec.serverID) {
-			q.finish(j, "", errServerDeleted)
+			err = q.finish(j, "", errServerDeleted)
 		} else {
-			snap, err := j.spec.run(j.ctx, j)
+			snap, err = j.spec.run(j.ctx, j)
 			if err != nil && !errors.Is(err, errServerDeleted) && q.gone != nil && q.gone(j.ctx, j.spec.serverID) {
 				err = errServerDeleted // failed because its server went away: a cancel without log
 			}
-			q.finish(j, snap, err)
+			err = q.finish(j, snap, err)
 		}
 		if j.spec.after != nil {
 			j.spec.after()
+		}
+		if j.spec.ended != nil {
+			j.spec.ended(snap, err)
 		}
 	}
 }
@@ -209,7 +218,8 @@ func (q *queue) take(ctx context.Context) *job {
 	}
 }
 
-func (q *queue) finish(j *job, snapshot string, err error) {
+// finish records the job's result and returns its final error (a cancel for a dropped job).
+func (q *queue) finish(j *job, snapshot string, err error) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	j.view.FinishedAt = q.clock.Now().UnixMilli()
@@ -237,15 +247,26 @@ func (q *queue) finish(j *job, snapshot string, err error) {
 	}
 	j.cancel()
 	close(j.done)
+	return err
 }
 
-// cancelLocked ends a waiting job without running it; call with q.mu held.
+// cancelLocked ends a waiting job without running it; call with q.mu held and run
+// endWaiting for it after unlocking.
 func (q *queue) cancelLocked(j *job) {
 	code := codeCanceled
 	j.view.State, j.view.ErrorCode, j.view.Error = stateFailed, &code, msgCanceled
 	j.view.FinishedAt = q.clock.Now().UnixMilli()
 	j.cancel()
 	close(j.done)
+}
+
+// endWaiting runs the ended hooks of jobs that cancelLocked ended (without q.mu).
+func endWaiting(js ...*job) {
+	for _, j := range js {
+		if j.spec.ended != nil {
+			j.spec.ended("", context.Canceled)
+		}
+	}
 }
 
 // drop ends the server's job: a waiting one is removed and fails as canceled, a running one is
@@ -263,6 +284,7 @@ func (q *queue) drop(serverID int64, wait time.Duration) {
 		}
 		q.cancelLocked(j)
 		q.mu.Unlock()
+		endWaiting(j)
 		return
 	}
 	j.cancel()
@@ -280,7 +302,8 @@ func (q *queue) drop(serverID int64, wait time.Duration) {
 func (q *queue) close() {
 	q.mu.Lock()
 	q.closed = true
-	for _, j := range q.waiting {
+	waiting := q.waiting
+	for _, j := range waiting {
 		q.cancelLocked(j)
 	}
 	q.waiting = nil
@@ -288,6 +311,7 @@ func (q *queue) close() {
 		q.running.cancel()
 	}
 	q.mu.Unlock()
+	endWaiting(waiting...)
 	select {
 	case q.wake <- struct{}{}:
 	default:
