@@ -559,3 +559,58 @@ func TestServerViewsDevPermissions(t *testing.T) {
 		t.Fatalf("other server: %d", rec.Code)
 	}
 }
+
+// Changing the overrides touches only the dev's distances: nothing comes from prod's current
+// spec (it may be newer than the dev's data), and the motd keeps a single "[DEV] " prefix.
+func TestUpdateDevOverridesOnlyDistances(t *testing.T) {
+	e, prodID := devEnv(t)
+	devID := e.createDev(t, prodID)
+	admin := e.admin()
+	ins := `INSERT INTO plugin_installs (server_id, filename, sha512, source, project_id, project_slug, title,
+		version_id, version_name, channel, installed_at) VALUES (?, ?, 'aa', 'modrinth', 'p', 's', 't', 'v', 'vn', 'release', 1)`
+	mustExec(t, e.db, ins, prodID, "new.jar")
+	mustExec(t, e.db, ins, devID, "synced.jar")
+	// prod moves on after the last sync
+	if rec := e.do(http.MethodPatch, fmt.Sprintf("/servers/%d", prodID), map[string]any{
+		"version": "1.21.10", "properties": map[string]any{"motd": "New", "gamemode": "creative"},
+	}, &admin); rec.Code != http.StatusOK {
+		t.Fatalf("patch prod: %d %s", rec.Code, rec.Body)
+	}
+	mustExec(t, e.db, `UPDATE dev_instances SET property_overrides = '{"view_distance":9,"simulation_distance":6}' WHERE server_id = ?`, devID)
+	prodBefore, devBefore := instanceRow(t, e.db, prodID), instanceRow(t, e.db, devID)
+
+	for range 2 { // twice: the motd prefix is never doubled
+		if err := e.h.UpdateDevOverrides(context.Background(), devID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := instanceRow(t, e.db, prodID); got != prodBefore {
+		t.Fatalf("prod instance changed:\n%+v\n%+v", prodBefore, got)
+	}
+	dev := instanceRow(t, e.db, devID)
+	if dev.Version != devBefore.Version || dev.Type != devBefore.Type || dev.Java != devBefore.Java ||
+		dev.MemoryMib != devBefore.MemoryMib || dev.LoaderVersion != devBefore.LoaderVersion ||
+		dev.Modpack != devBefore.Modpack || dev.DesiredState != devBefore.DesiredState || dev.Revision != devBefore.Revision+2 {
+		t.Fatalf("dev = %+v (before %+v)", dev, devBefore)
+	}
+	for _, want := range []string{`"motd":"[DEV] Survival!"`, `"gamemode":"survival"`, `"view_distance":9`, `"simulation_distance":6`} {
+		if !strings.Contains(dev.Properties, want) {
+			t.Errorf("dev properties %s lack %s", dev.Properties, want)
+		}
+	}
+	rows, err := store.New(e.db).PluginsListInstalls(context.Background(), devID)
+	if err != nil || len(rows) != 1 || rows[0].Filename != "synced.jar" {
+		t.Fatalf("dev installs = %+v, %v", rows, err)
+	}
+	if err := e.h.UpdateDevOverrides(context.Background(), prodID); !errors.Is(err, servers.ErrNotDev) {
+		t.Fatalf("UpdateDevOverrides(prod) = %v", err)
+	}
+	if got := instanceRow(t, e.db, prodID); got != prodBefore {
+		t.Fatalf("prod changed by UpdateDevOverrides(prod): %+v", got)
+	}
+	if _, err := store.New(e.db).ServersUpdateDevProperties(context.Background(), store.ServersUpdateDevPropertiesParams{
+		Properties: "{}", ServerID: prodID,
+	}); err == nil {
+		t.Fatal("properties update of prod succeeded")
+	}
+}
