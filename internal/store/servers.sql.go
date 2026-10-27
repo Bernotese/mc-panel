@@ -325,6 +325,95 @@ func (q *Queries) ServersSetDesiredState(ctx context.Context, arg ServersSetDesi
 	return result.RowsAffected()
 }
 
+const serversUpdateDevInstance = `-- name: ServersUpdateDevInstance :one
+UPDATE instances
+SET type = ?1, version = ?2, loader_version = ?3,
+    modpack = ?4, java = ?5, properties = ?6,
+    revision = revision + 1, updated_at = ?7
+WHERE instances.server_id = ?8
+  AND instances.server_id IN (SELECT d.server_id FROM dev_instances d WHERE d.source_id = ?9)
+RETURNING server_id, type, version, loader_version, modpack, java, memory_mib, properties, desired_state, revision, created_at, updated_at
+`
+
+type ServersUpdateDevInstanceParams struct {
+	Type          string
+	Version       string
+	LoaderVersion sql.NullString
+	Modpack       sql.NullString
+	Java          string
+	Properties    string
+	UpdatedAt     int64
+	ServerID      int64
+	SourceID      int64
+}
+
+// Dev instances: copies a spec onto a dev's row and bumps its revision. The WHERE clause only
+// matches a server that is a dev of the given source, so this query can never write prod.
+func (q *Queries) ServersUpdateDevInstance(ctx context.Context, arg ServersUpdateDevInstanceParams) (Instance, error) {
+	row := q.db.QueryRowContext(ctx, serversUpdateDevInstance,
+		arg.Type,
+		arg.Version,
+		arg.LoaderVersion,
+		arg.Modpack,
+		arg.Java,
+		arg.Properties,
+		arg.UpdatedAt,
+		arg.ServerID,
+		arg.SourceID,
+	)
+	var i Instance
+	err := row.Scan(
+		&i.ServerID,
+		&i.Type,
+		&i.Version,
+		&i.LoaderVersion,
+		&i.Modpack,
+		&i.Java,
+		&i.MemoryMib,
+		&i.Properties,
+		&i.DesiredState,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const serversUpdateDevMemory = `-- name: ServersUpdateDevMemory :one
+UPDATE instances SET memory_mib = ?1, revision = revision + 1, updated_at = ?2
+WHERE instances.server_id = ?3
+  AND instances.server_id IN (SELECT d.server_id FROM dev_instances d)
+RETURNING server_id, type, version, loader_version, modpack, java, memory_mib, properties, desired_state, revision, created_at, updated_at
+`
+
+type ServersUpdateDevMemoryParams struct {
+	MemoryMib int64
+	UpdatedAt int64
+	ServerID  int64
+}
+
+// Dev instances: the only field of a dev an admin sets (PATCH /servers/{id}); everything else
+// follows its source (ServersUpdateDevInstance). Only matches a dev.
+func (q *Queries) ServersUpdateDevMemory(ctx context.Context, arg ServersUpdateDevMemoryParams) (Instance, error) {
+	row := q.db.QueryRowContext(ctx, serversUpdateDevMemory, arg.MemoryMib, arg.UpdatedAt, arg.ServerID)
+	var i Instance
+	err := row.Scan(
+		&i.ServerID,
+		&i.Type,
+		&i.Version,
+		&i.LoaderVersion,
+		&i.Modpack,
+		&i.Java,
+		&i.MemoryMib,
+		&i.Properties,
+		&i.DesiredState,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const serversUpdateInstance = `-- name: ServersUpdateInstance :one
 UPDATE instances
 SET version = ?, loader_version = ?, modpack = ?, java = ?, memory_mib = ?, properties = ?,
