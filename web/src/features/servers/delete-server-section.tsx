@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -25,24 +25,29 @@ export function DeleteServerSection({ server }: { server: Server }) {
   const [typed, setTyped] = useState('')
   const [purge, setPurge] = useState(false)
   const matches = typed.trim() === server.name
+  // Dev instances spec §2: a prod with a dev is not deleted (409 dev_exists); the dev goes first.
+  const blockedByDev = server.dev_id !== undefined
 
   const remove = useMutation({
     mutationFn: () => deleteServer(server.id, purge),
     onSuccess: () => {
       toast.success(t('servers.delete.deleted', { name: server.name }))
-      void navigate({ to: '/' })
+      // A deleted dev leads back to its source.
+      if (server.dev) void navigate({ to: '/servers/$id', params: { id: String(server.dev.source_id) } })
+      else void navigate({ to: '/' })
       queryClient.removeQueries({ queryKey: serverKey(server.id), exact: true })
       void queryClient.invalidateQueries({ queryKey: serversKey, exact: true })
     },
     onError: (err) => {
       // 409 conflict: an extract or a restore is rewriting the server's data; deleting has to wait for it.
       if (isApiError(err, 'conflict')) toast.error(t('servers.delete.busy'))
+      else if (isApiError(err, 'dev_exists')) toast.error(t('dev.delete.blocked'))
       else notifyError(err)
     },
   })
 
   return (
-    <Section title={t('servers.delete.title')} tone="danger">
+    <Section title={server.dev ? t('dev.delete.title') : t('servers.delete.title')} tone="danger">
       <form
         className="flex flex-col gap-4"
         noValidate
@@ -52,8 +57,20 @@ export function DeleteServerSection({ server }: { server: Server }) {
         }}
       >
         <p className="text-sm">
-          {server.instance ? t('servers.delete.description', { name: server.name }) : t('servers.delete.description_not_configured')}
+          {server.dev
+            ? t('dev.delete.description', { name: server.name, source: server.dev.source_name })
+            : server.instance
+              ? t('servers.delete.description', { name: server.name })
+              : t('servers.delete.description_not_configured')}
         </p>
+        {blockedByDev ? (
+          <p role="status" className="bevel-inset px-3 py-2 text-sm">
+            {t('dev.delete.blocked')}{' '}
+            <Link to="/servers/$id/settings" params={{ id: String(server.dev_id) }} className="text-primary underline underline-offset-4">
+              {t('dev.delete.blocked_link', { name: `dev-${server.name}` })}
+            </Link>
+          </p>
+        ) : null}
         <div className="space-y-2">
           <Label htmlFor={`${id}-confirm`}>{t('servers.delete.confirm_label', { name: server.name })}</Label>
           <Input
@@ -66,7 +83,7 @@ export function DeleteServerSection({ server }: { server: Server }) {
             onChange={(e) => setTyped(e.target.value)}
           />
         </div>
-        {server.instance ? (
+        {server.instance && !server.dev ? (
           <div className="space-y-1">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -88,8 +105,8 @@ export function DeleteServerSection({ server }: { server: Server }) {
             </p>
           </div>
         ) : null}
-        <Button type="submit" variant="destructive" disabled={!matches || remove.isPending}>
-          {t('servers.delete.submit')}
+        <Button type="submit" variant="destructive" disabled={!matches || remove.isPending || blockedByDev}>
+          {server.dev ? t('dev.delete.submit') : t('servers.delete.submit')}
         </Button>
       </form>
     </Section>

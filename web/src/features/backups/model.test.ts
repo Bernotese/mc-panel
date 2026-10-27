@@ -92,6 +92,7 @@ describe('jobs', () => {
   it('builds the translation keys', () => {
     expect(kindKey('pre-restore')).toBe('backups.kind.pre_restore')
     expect(kindKey('manual')).toBe('backups.kind.manual')
+    expect(kindKey('dev-sync')).toBe('backups.kind.dev_sync')
     expect(stepKey('backing_up')).toBe('backups.step.backing_up')
     expect(jobErrorKey('insufficient_storage')).toBe('backups.job_error.insufficient_storage')
     expect(jobTitleKey(job('running', { kind: 'restore' }))).toBe('backups.job.active.restore')

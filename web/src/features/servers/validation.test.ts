@@ -29,6 +29,12 @@ describe('server names (instancespec.ValidName)', () => {
     expectError(validateServerName(''), 'servers.validation.name_required')
     for (const n of ['a', '-x', 'Upper', 'a_b', 'a.b', 'a'.repeat(33)]) expectError(validateServerName(n), 'servers.validation.name_invalid')
   })
+
+  it('reserves the dev- prefix for dev instances', () => {
+    expectError(validateServerName('dev-survival'), 'servers.validation.name_dev_reserved')
+    expect(validateServerName('devsurvival')).toBeNull()
+    expect(validateServerName('my-dev-server')).toBeNull()
+  })
 })
 
 describe('base domain (instancespec.ValidBaseDomain)', () => {

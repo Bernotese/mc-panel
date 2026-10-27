@@ -54,7 +54,9 @@ export function hasLoader(type: InstanceType): boolean {
 
 export function validateServerName(name: string): FieldError | null {
   if (name === '') return fieldError('servers.validation.name_required')
-  return SERVER_NAME_RE.test(name) ? null : fieldError('servers.validation.name_invalid')
+  if (!SERVER_NAME_RE.test(name)) return fieldError('servers.validation.name_invalid')
+  // Dev instances spec §2: dev-<name> is the address of the dev of <name>.
+  return name.startsWith('dev-') ? fieldError('servers.validation.name_dev_reserved') : null
 }
 
 export function validateVersion(version: string): FieldError | null {

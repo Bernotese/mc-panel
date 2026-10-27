@@ -24,7 +24,8 @@ export function MonitoringTab({ server }: { server: Server }) {
           <MetricCharts serverId={server.id} range={range} tpsUnavailable={running && tpsSource === 'none'} />
         </div>
       </Section>
-      {me?.role === 'admin' ? <DownAlertsSwitch server={server} /> : null}
+      {/* Dev instances raise no down or crash alerts (dev instances spec §2): they sleep on purpose. */}
+      {me?.role === 'admin' && !server.dev ? <DownAlertsSwitch server={server} /> : null}
     </div>
   )
 }

@@ -31,6 +31,8 @@ function access(request: Request, params: Params, opts: { sudo?: boolean } = {})
   if (!serverPermissions(g.user, id).includes('server.backups')) return apiError(403, 'forbidden', 'missing permission server.backups')
   const server = db.servers.find((s) => s.id === id)
   if (!server) return apiError(404, 'not_found', 'server not found')
+  // Admins bypass permissions, so the panel refuses a dev in the handler itself.
+  if (server.dev) return apiError(409, 'dev_managed', 'dev instances have no backups')
   db.backups[id] ??= { available: true, snapshots: [], schedule: defaultBackupSchedule() }
   jobNow(id) // apply a finished job before anything reads the snapshots
   return { g, server, b: db.backups[id] }

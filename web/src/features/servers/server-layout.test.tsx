@@ -15,6 +15,11 @@ function mockServer(id: number) {
   return server
 }
 
+/** survival has the seeded dev-survival, which blocks deleting it (409 dev_exists): tests that delete it drop the dev. */
+function dropDevs() {
+  db.servers = db.servers.filter((s) => !s.dev)
+}
+
 function sectionList(name: string) {
   return screen.getByRole('list', { name: `Bereiche von ${name}` })
 }
@@ -236,6 +241,7 @@ describe('ServerLayout', () => {
   })
 
   it('deletes the server after typing its name', async () => {
+    dropDevs()
     const user = userEvent.setup()
     const { router } = await renderApp('/servers/1/settings', loginAs('admin', { sudo: true }))
     expect(await screen.findByText(/deleted\/survival-<Zeitpunkt>/)).toBeInTheDocument()
@@ -247,6 +253,16 @@ describe('ServerLayout', () => {
     expect(await screen.findByText('Server „survival“ gelöscht.')).toBeInTheDocument()
     await waitFor(() => expect(router.state.location.pathname).toBe('/'))
     expect(db.servers.some((s) => s.id === 1)).toBe(false)
+  })
+
+  it('blocks deleting a server with a dev and links the dev', async () => {
+    const user = userEvent.setup()
+    await renderApp('/servers/1/settings', loginAs('admin', { sudo: true }))
+    const danger = await screen.findByRole('region', { name: 'Server löschen' })
+    expect(within(danger).getByText('Dieser Server hat eine Dev-Instanz. Lösche zuerst sie.')).toBeInTheDocument()
+    expect(within(danger).getByRole('link', { name: 'Zu dev-survival' })).toHaveAttribute('href', '/servers/5/settings')
+    await user.type(within(danger).getByLabelText('Zum Bestätigen den Namen „survival“ eintippen'), 'survival')
+    expect(within(danger).getByRole('button', { name: 'Server löschen' })).toBeDisabled()
   })
 
   it('lets admins delete a server that was never set up', async () => {
@@ -382,6 +398,7 @@ describe('ServerLayout', () => {
   })
 
   it('deletes the backups too when the checkbox is set', async () => {
+    dropDevs()
     const user = userEvent.setup()
     let query: string | null = null
     server.use(
@@ -416,6 +433,7 @@ describe('ServerLayout', () => {
   })
 
   it('explains a 409 when the server cannot be deleted while a restore runs', async () => {
+    dropDevs()
     const user = userEvent.setup()
     server.use(
       http.delete('*/api/servers/:id', () =>
@@ -433,6 +451,7 @@ describe('ServerLayout', () => {
   })
 
   it('links the purge hint to the checkbox and says that the backups are being deleted', async () => {
+    dropDevs()
     const user = userEvent.setup()
     let release: () => void = () => undefined
     server.use(

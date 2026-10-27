@@ -87,7 +87,7 @@ const DYNAMIC_KEYS = [
     (c) => `plugins.step.error.${c}`,
   ),
   ...['no_compatible_version', 'client_only', 'not_downloadable', 'too_deep', 'too_many'].map((r) => `plugins.incompatible_reason.${r}`),
-  ...['scheduled', 'manual', 'pre_restore'].map((k) => `backups.kind.${k}`),
+  ...['scheduled', 'manual', 'pre_restore', 'dev_sync'].map((k) => `backups.kind.${k}`),
   ...['queued', 'saving', 'backing_up', 'resuming', 'pruning', 'stopping', 'pre_restore', 'restoring', 'deleting', 'done'].map(
     (s) => `backups.step.${s}`,
   ),

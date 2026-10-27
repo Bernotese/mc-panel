@@ -35,7 +35,9 @@ export function UserPermissionsPage({ userId }: { userId: number }) {
   })
   // Local edits only; the saved matrix is always derived from the query (no effect-based syncing).
   const [draft, setDraft] = useState<Matrix | null>(null)
-  const saved = permissions.data ? toMatrix(permissions.data.grants) : null
+  // Dev instances spec §2: a dev has no permission rows of its own (it follows its prod), so it is neither listed nor sent.
+  const devIds = new Set((servers.data ?? []).filter((s) => s.dev).map((s) => s.id))
+  const saved = permissions.data && servers.data ? toMatrix(permissions.data.grants.filter((g) => !devIds.has(g.server_id))) : null
   const current = draft ?? saved ?? {}
   const dirty = draft !== null && saved !== null && !sameMatrix(draft, saved)
 
@@ -114,7 +116,8 @@ export function UserPermissionsPage({ userId }: { userId: number }) {
       {filesWarning ? <Warning>{t('permissions.files_warning')}</Warning> : null}
       {pluginsWarning ? <Warning>{t('permissions.plugins_warning')}</Warning> : null}
       {backupsWarning ? <Warning>{t('permissions.backups_warning')}</Warning> : null}
-      <DataList items={servers.data} columns={columns} rowKey={(s) => s.id} caption={t('permissions.caption')} empty={t('permissions.no_servers')} />
+      {devIds.size > 0 ? <p className="text-muted-foreground mb-4 text-sm">{t('permissions.dev_note')}</p> : null}
+      <DataList items={servers.data.filter((s) => !s.dev)} columns={columns} rowKey={(s) => s.id} caption={t('permissions.caption')} empty={t('permissions.no_servers')} />
     </>
   )
 }

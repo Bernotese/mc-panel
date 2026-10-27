@@ -247,7 +247,7 @@ describe('mock behaviour', () => {
   it('shows a restricted user only the servers they hold permissions on', async () => {
     loginAs('alice')
     const list = (await callApi('GET', '/servers')).body as Array<{ name: string; permissions: string[] }>
-    expect(list.map((s) => s.name)).toEqual(['survival', 'creative'])
+    expect(list.map((s) => s.name)).toEqual(['survival', 'creative', 'dev-survival']) // the dev follows survival's grants
     expect(list[0].permissions).toContain('server.power')
     expect((await callApi('GET', '/servers/3')).status).toBe(403)
   })
@@ -333,8 +333,8 @@ describe('mock behaviour', () => {
   it('reports the memory limits of the mock host and enforces them', async () => {
     const me = loginAs('admin', { sudo: true })
     const limits = (await callApi('GET', '/servers/memory')).body
-    // (26624 − 1024) / 1.25 = 20480; three seeded servers with 4 + 2 + 4 GiB
-    expect(limits).toMatchObject({ min_mib: 1024, max_mib: 20480, step_mib: 256, host_total_mib: 26624, allocated_mib: 10240 })
+    // (26624 − 1024) / 1.25 = 20480; four seeded servers with 4 + 2 + 4 + 2 GiB (dev-survival)
+    expect(limits).toMatchObject({ min_mib: 1024, max_mib: 20480, step_mib: 256, host_total_mib: 26624, allocated_mib: 12288 })
     expect(field(limits, 'recommended_mib')).toMatchObject({ paper: 4096, fabric: 6144 })
     const body = { name: 'huge', type: 'paper', version: '1.21.11', memory_mib: 20736, eula_accepted: true }
     const res = await callApi('POST', '/servers', { body, csrf: me.csrf_token })
@@ -560,7 +560,7 @@ describe('mock behaviour', () => {
     const me = loginAs('admin')
     const overview = (await callApi('GET', '/servers/1/backups')).body as BackupOverview
     expect(overview.available).toBe(true)
-    expect(overview.snapshots.map((s) => s.kind)).toEqual(['scheduled', 'manual', 'scheduled', 'pre-restore', 'scheduled', 'scheduled'])
+    expect(overview.snapshots.map((s) => s.kind)).toEqual(['scheduled', 'manual', 'scheduled', 'dev-sync', 'pre-restore', 'scheduled', 'scheduled'])
     expect(overview.snapshots.filter((s) => s.pinned)).toHaveLength(1)
     expect(overview.snapshots[1].note).toBe('vor Update auf 1.21.11')
     expect(overview.schedule).toMatchObject({ mode: 'daily', time_of_day: 240, keep_last: 24, timezone: 'Europe/Berlin', last_status: 'ok' })
@@ -699,6 +699,8 @@ describe('mock behaviour', () => {
     // an empty value means no purge (like the panel)
     expect((await callApi('DELETE', '/servers/2?purge_backups=', { csrf: me.csrf_token })).status).toBe(204)
     expect(db.backups[2]).toBeDefined()
+    // survival's dev goes first (409 dev_exists otherwise)
+    expect((await callApi('DELETE', '/servers/5', { csrf: me.csrf_token })).status).toBe(204)
     expect((await callApi('DELETE', '/servers/1?purge_backups=1', { csrf: me.csrf_token })).status).toBe(204)
     expect(db.backups[1]).toBeUndefined()
     expect(db.audit.at(-1)).toMatchObject({ action: 'server.delete', details: { backups_purged: true } })
@@ -731,7 +733,7 @@ describe('mock behaviour', () => {
   it('filters the overview and hides host values from users', async () => {
     loginAs('admin')
     const ov = (await callApi('GET', '/monitoring/overview')).body as MonitoringOverview
-    expect(ov.servers.map((s) => s.id).sort()).toEqual([1, 2, 3, 4])
+    expect(ov.servers.map((s) => s.id).sort()).toEqual([1, 2, 3, 4, 5])
     expect(ov.servers.find((s) => s.id === 4)?.alerts).toEqual(['server.down'])
     expect(ov.host?.alerts).toEqual([])
     db.monitoring.diskLow = true
@@ -740,7 +742,7 @@ describe('mock behaviour', () => {
     loginAs('alice')
     const user = (await callApi('GET', '/monitoring/overview')).body as MonitoringOverview
     expect(user.host).toBeNull()
-    expect(user.servers.map((s) => s.id).sort()).toEqual([1, 2])
+    expect(user.servers.map((s) => s.id).sort()).toEqual([1, 2, 5]) // dev-survival follows survival
     expect((await callApi('GET', '/monitoring/host?range=1h')).status).toBe(403)
   })
 
