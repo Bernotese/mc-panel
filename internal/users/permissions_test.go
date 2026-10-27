@@ -169,3 +169,31 @@ func TestSetPermissionsRequiresGrantsAndPermissions(t *testing.T) {
 		t.Fatalf("explicit empty grants: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// A dev instance takes its permissions from its source (dev instances spec §2): no grant may
+// name it, and the grants of a user never list it.
+func TestUsersRefuseDevPermission(t *testing.T) {
+	e := newEnv(t)
+	admin := e.admin()
+	alice := storetest.CreateUser(t, e.db, "alice", "user")
+	prod := storetest.CreateServer(t, e.db, "survival")
+	dev := storetest.CreateServer(t, e.db, "dev-survival")
+	mustExec(t, e.db, `INSERT INTO dev_instances (server_id, source_id, property_overrides, created_at, updated_at)
+		VALUES (?, ?, '{}', 0, 0)`, dev, prod)
+	path := fmt.Sprintf("/users/%d/permissions", alice)
+	if rec := e.do(http.MethodPut, path, grantsBody(grant(prod, "server.files", "server.backups")), &admin); rec.Code != http.StatusOK {
+		t.Fatalf("grant on prod: %d %s", rec.Code, rec.Body)
+	}
+	rec := e.do(http.MethodPut, path, grantsBody(grant(prod, "server.files"), grant(dev, "server.view")), &admin)
+	if rec.Code != http.StatusBadRequest || errCode(t, rec) != "validation_failed" || !strings.Contains(rec.Body.String(), "dev instance") {
+		t.Fatalf("grant on dev: %d %s", rec.Code, rec.Body)
+	}
+	// Only the stored grant on prod is listed, not the permissions alice has on dev through it.
+	want := permsResp{Grants: []grantResp{{ServerID: prod, Permissions: []string{"server.view", "server.files", "server.backups"}}}}
+	if got := decode[permsResp](t, e.do(http.MethodGet, path, nil, &admin)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("grants = %+v, want %+v", got, want)
+	}
+	if n := countRows(t, e.db, `SELECT COUNT(*) FROM permissions WHERE server_id = ?`, dev); n != 0 {
+		t.Fatalf("%d permission rows stored for the dev", n)
+	}
+}

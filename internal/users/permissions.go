@@ -40,6 +40,14 @@ type unknownServerError struct{ id int64 }
 
 func (e unknownServerError) Error() string { return fmt.Sprintf("unknown server_id %d", e.id) }
 
+// devServerError refuses a grant on a dev instance: its permissions are those of its source
+// (dev instances spec §2), so it never has permission rows of its own.
+type devServerError struct{ id int64 }
+
+func (e devServerError) Error() string {
+	return fmt.Sprintf("server_id %d is a dev instance: grant the permissions on its source server", e.id)
+}
+
 func (h *Handler) permissionRoutes(api *rbac.Router) {
 	api.Get("/users/{id}/permissions", rbac.Admin(), h.handleGetPermissions)
 	api.Put("/users/{id}/permissions", rbac.Admin().WithSudo(), h.handleSetPermissions)
@@ -56,9 +64,10 @@ func orderedPerms(set map[rbac.Permission]bool) []rbac.Permission {
 	return out
 }
 
-// loadGrants returns the stored grants of a user, ascending by server id (never nil).
+// loadGrants returns the stored grants of a user, ascending by server id (never nil). The
+// permissions a user has on dev instances through their sources are not grants.
 func loadGrants(ctx context.Context, q *store.Queries, userID int64) ([]grantJSON, error) {
-	rows, err := q.RbacListUserPermissions(ctx, userID)
+	rows, err := q.RbacListUserGrants(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -176,6 +185,11 @@ func (h *Handler) handleSetPermissions(w http.ResponseWriter, r *http.Request) {
 			} else if err != nil {
 				return err
 			}
+			if _, err := q.DevGet(ctx, sid); err == nil {
+				return devServerError{id: sid}
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
 		}
 		if err := q.RbacDeleteUserPermissions(ctx, id); err != nil {
 			return err
@@ -192,13 +206,19 @@ func (h *Handler) handleSetPermissions(w http.ResponseWriter, r *http.Request) {
 		grants, err = loadGrants(ctx, q, id)
 		return err
 	})
-	var use unknownServerError
+	var (
+		use unknownServerError
+		dse devServerError
+	)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		writeNotFound(w, r, "user")
 		return
 	case errors.As(err, &use):
 		writeValidation(w, r, use.Error())
+		return
+	case errors.As(err, &dse):
+		writeValidation(w, r, dse.Error())
 		return
 	case err != nil:
 		httpx.Internal(w, r, err)

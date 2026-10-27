@@ -51,6 +51,56 @@ func TestDBChecker(t *testing.T) {
 	}
 }
 
+// A dev instance has no permission rows: every check resolves against its source (prod),
+// except server.backups, which grants nothing on a dev (dev instances spec §2).
+func TestDevPermissionsFollowProd(t *testing.T) {
+	db := storetest.Open(t)
+	alice := storetest.CreateUser(t, db, "alice", "user")
+	bob := storetest.CreateUser(t, db, "bob", "user")
+	prod := storetest.CreateServer(t, db, "survival")
+	dev := storetest.CreateServer(t, db, "dev-survival")
+	other := storetest.CreateServer(t, db, "creative")
+	if _, err := db.Exec(`INSERT INTO dev_instances (server_id, source_id, property_overrides, created_at, updated_at)
+		VALUES (?, ?, '{}', 0, 0)`, dev, prod); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO permissions (user_id, server_id, permission)
+		VALUES (?, ?, 'server.view'), (?, ?, 'server.files'), (?, ?, 'server.backups'), (?, ?, 'server.view')`,
+		alice, prod, alice, prod, alice, prod, bob, other); err != nil {
+		t.Fatal(err)
+	}
+	c := rbac.NewDBChecker(db)
+	cases := []struct {
+		name         string
+		user, server int64
+		perm         rbac.Permission
+		want         bool
+	}{
+		{"view on dev through prod", alice, dev, rbac.PermServerView, true},
+		{"files on dev through prod", alice, dev, rbac.PermServerFiles, true},
+		{"backups on dev never", alice, dev, rbac.PermServerBackups, false},
+		{"backups on prod unchanged", alice, prod, rbac.PermServerBackups, true},
+		{"not granted on prod", alice, dev, rbac.PermServerConsole, false},
+		{"other user", bob, dev, rbac.PermServerView, false},
+		{"rows of another server do not leak", bob, prod, rbac.PermServerView, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := c.HasServerPermission(context.Background(), tc.user, tc.server, tc.perm)
+			if err != nil || got != tc.want {
+				t.Fatalf("HasServerPermission = %v, %v; want %v", got, err, tc.want)
+			}
+		})
+	}
+	// A stray row on the dev id itself is ignored: the dev resolves to prod only.
+	if _, err := db.Exec(`INSERT INTO permissions (user_id, server_id, permission) VALUES (?, ?, 'server.view')`, bob, dev); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.HasServerPermission(context.Background(), bob, dev, rbac.PermServerView); err != nil || got {
+		t.Fatalf("row on the dev id = %v, %v; want false", got, err)
+	}
+}
+
 func TestDBCheckerThroughRouter(t *testing.T) {
 	db := storetest.Open(t)
 	alice := storetest.CreateUser(t, db, "alice", "user")
