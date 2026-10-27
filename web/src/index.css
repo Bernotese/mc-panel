@@ -55,6 +55,7 @@
     --color-status-offline: var(--status-offline);
     --color-status-starting: var(--status-starting);
     --color-status-error: var(--status-error);
+    --color-status-dev: var(--status-dev);
     --color-mc-0: var(--mc-0);
     --color-mc-1: var(--mc-1);
     --color-mc-2: var(--mc-2);
@@ -138,6 +139,8 @@
     --status-offline: #696a70;
     --status-starting: #8a5a00;
     --status-error: #b3261e;
+    /* Dev instances (badge, banner): its own hue, apart from the state colours. */
+    --status-dev: #7d3cb5;
 
     --console-bg: #0b0c0e;
     --console-fg: #c4c6cc;
@@ -218,6 +221,7 @@
     --status-offline: #8a8d96;
     --status-starting: #f5c451;
     --status-error: #ff6b6b;
+    --status-dev: #c99bff;
 
     --mc-0: #8a8d96;
     --mc-1: #7f8cff;

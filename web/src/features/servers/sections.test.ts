@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { InstanceConfig, Permission, Server } from '@/api/types'
+import type { DevSummary, InstanceConfig, Permission, Server } from '@/api/types'
 import { sectionForSwitch, sectionFromPath, serverIdFromPath, sectionHref, sectionLabelKey, serverSections } from './sections'
 
 function instance(type: InstanceConfig['type']): InstanceConfig {
   return { type, version: '1.21.11', loader_version: null, modpack: null, java: 'java21', memory_mib: 4096, properties: {} as InstanceConfig['properties'] }
 }
-function srv(perms: Permission[], type: InstanceConfig['type'] | null = 'paper'): Pick<Server, 'permissions' | 'instance'> {
+function srv(perms: Permission[], type: InstanceConfig['type'] | null = 'paper'): Pick<Server, 'permissions' | 'instance' | 'dev'> {
   return { permissions: perms, instance: type ? instance(type) : null }
 }
 
@@ -38,6 +38,12 @@ describe('serverSections', () => {
     expect(serverSections(srv(all), true)).toEqual(['overview', 'monitoring', 'console', 'players', 'files', 'plugins', 'backups', 'settings'])
     expect(serverSections(srv(all), false)).not.toContain('settings')
     expect(serverSections(srv([...all].reverse()), true)).toEqual(serverSections(srv(all), true))
+  })
+  it('never gives a dev instance a backups area, even to admins', () => {
+    const all: Permission[] = ['server.view', 'server.power', 'server.console', 'server.files', 'server.plugins', 'server.backups']
+    const dev: DevSummary = { source_id: 1, source_name: 'survival', sync_paused: false, next_sync_at: null, last_sync_at: null, last_sync_status: null, sync_pending: false, sleeping: true }
+    expect(serverSections({ ...srv(all), dev }, true)).toEqual(['overview', 'monitoring', 'console', 'players', 'files', 'plugins', 'settings'])
+    expect(sectionForSwitch('backups', { ...srv(all), dev }, true)).toBe('overview')
   })
   it('gives a server without instance only the overview', () => {
     expect(serverSections(srv(['server.view', 'server.console', 'server.files'], null), true)).toEqual(['overview'])

@@ -39,7 +39,7 @@ test('admin creates a paper server, changes the MOTD and restarts it', async ({ 
 test('a restricted user sees only permitted servers and no admin areas', async ({ page }) => {
   await signIn(page, 'alice', false)
 
-  await expect(page.getByRole('article', { name: 'survival' })).toBeVisible()
+  await expect(page.getByRole('article', { name: 'survival', exact: true })).toBeVisible()
   await expect(page.getByRole('article', { name: 'creative' })).toBeVisible()
   await expect(page.getByRole('article', { name: 'lobby' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Server anlegen' })).toHaveCount(0)
