@@ -53,6 +53,7 @@ type env struct {
 	agent  *fakeAgent
 	cat    *fakeCatalog
 	up     *fakeUp
+	deps   plugins.Deps
 	h      *plugins.Handler
 	mux    http.Handler
 	rootID int64
@@ -77,18 +78,34 @@ func newEnvWith(t *testing.T, opt func(*plugins.Deps)) *env {
 	if opt != nil {
 		opt(&d)
 	}
-	e.h = plugins.NewHandler(d)
-	mux := chi.NewRouter()
-	e.h.Routes(rbac.NewRouter(mux, rbac.NewDBChecker(db), e.clk))
-	e.mux = mux
+	e.deps = d
+	e.start()
 	e.rootID = storetest.CreateUser(t, db, "root", "admin")
+	return e
+}
+
+// start builds the handler from e.deps and runs it until the test ends.
+func (e *env) start() {
+	e.h = plugins.NewHandler(e.deps)
+	mux := chi.NewRouter()
+	e.h.Routes(rbac.NewRouter(mux, rbac.NewDBChecker(e.db), e.clk))
+	e.mux = mux
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { e.h.Run(ctx); close(done) }()
+	h := e.h
+	go func() { h.Run(ctx); close(done) }()
 	var once sync.Once
 	e.stop = func() { once.Do(func() { cancel(); <-done }) }
-	t.Cleanup(e.stop)
-	return e
+	e.t.Cleanup(e.stop)
+}
+
+// restartPanel replaces the handler with a new one on the same DB (a panel restart: memory gone,
+// the DB kept).
+func (e *env) restartPanel() {
+	e.t.Helper()
+	plugins.WaitJobs(e.h)
+	e.stop()
+	e.start()
 }
 
 func (e *env) admin() principal.Principal {
@@ -469,9 +486,10 @@ func (f *fakeFiles) Job(context.Context, int64) (*filesapi.Job, error) { return 
 
 // fakeAgent is an in-memory agentapi.InstancesClient for restart_needed.
 type fakeAgent struct {
-	mu   sync.Mutex
-	err  error
-	inst map[int64]agentapi.InstanceStatus
+	mu     sync.Mutex
+	err    error
+	docker string // "" = agentapi.DockerOK
+	inst   map[int64]agentapi.InstanceStatus
 }
 
 func newFakeAgent() *fakeAgent { return &fakeAgent{inst: map[int64]agentapi.InstanceStatus{}} }
@@ -479,6 +497,8 @@ func newFakeAgent() *fakeAgent { return &fakeAgent{inst: map[int64]agentapi.Inst
 func (f *fakeAgent) set(st agentapi.InstanceStatus) { f.mu.Lock(); f.inst[st.ID] = st; f.mu.Unlock() }
 
 func (f *fakeAgent) setErr(err error) { f.mu.Lock(); f.err = err; f.mu.Unlock() }
+
+func (f *fakeAgent) setDocker(s string) { f.mu.Lock(); f.docker = s; f.mu.Unlock() }
 
 func (f *fakeAgent) Instances(context.Context) (agentapi.InstancesResponse, error) {
 	f.mu.Lock()
@@ -491,6 +511,9 @@ func (f *fakeAgent) Instances(context.Context) (agentapi.InstancesResponse, erro
 		list = append(list, st)
 	}
 	slices.SortFunc(list, func(a, b agentapi.InstanceStatus) int { return cmp.Compare(a.ID, b.ID) })
+	if f.docker == agentapi.DockerUnavailable {
+		return agentapi.InstancesResponse{Docker: agentapi.DockerUnavailable, Instances: []agentapi.InstanceStatus{}}, nil
+	}
 	return agentapi.InstancesResponse{Docker: agentapi.DockerOK, Instances: list}, nil
 }
 

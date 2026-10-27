@@ -2,57 +2,62 @@ package plugins
 
 import (
 	"context"
-	"sync"
+	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // stateTimeout bounds the agent query of restart_needed.
 const stateTimeout = 2 * time.Second
 
-// restartTracker remembers the last plugin change per server (in memory: forgotten when the
-// panel restarts, spec §6.2).
-type restartTracker struct {
-	mu      sync.Mutex
-	changed map[int64]time.Time
+// markChanged records a plugin change of the server now (table plugin_changes, spec §6.2): it
+// survives a panel restart and is compared with the container's start time, so the first start
+// after the change clears the notice without resetting anything. Called as soon as the files
+// service confirmed a change on disk, also when a later step of the operation fails. A failure
+// is logged: the change itself has already happened.
+func (h *Handler) markChanged(ctx context.Context, serverID int64) {
+	ctx = context.WithoutCancel(ctx)
+	err := h.q.PluginsMarkChanged(ctx, store.PluginsMarkChangedParams{ServerID: serverID, ChangedAt: h.clock.Now().UnixMilli()})
+	if err != nil {
+		h.log.WarnContext(ctx, "plugins: record plugin change", "server_id", serverID, "err", err)
+	}
 }
 
-func newRestartTracker() *restartTracker { return &restartTracker{changed: map[int64]time.Time{}} }
-
-func (t *restartTracker) mark(id int64, at time.Time) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.changed[id] = at
-}
-
-func (t *restartTracker) since(id int64) (time.Time, bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	at, ok := t.changed[id]
-	return at, ok
-}
-
-// markChanged records a plugin change of the server now.
-func (h *Handler) markChanged(serverID int64) { h.restart.mark(serverID, h.clock.Now()) }
-
-// restartNeeded reports a running server whose container started before the last plugin change
-// of the panel (a start time of 0 counts as before). Without agent answer: false.
-func (h *Handler) restartNeeded(ctx context.Context, serverID int64) bool {
-	at, ok := h.restart.since(serverID)
-	if !ok {
-		return false
+// restartNeeded reports whether the server's running container started before the last plugin
+// change of the panel (a start time of 0 counts as before): true, false, or nil = unknown (agent
+// or Docker unavailable, DB error), which never claims that the new plugins are loaded. Without
+// a recorded change, or with a server that does not run (it loads the current plugins when it
+// starts), the answer is false.
+func (h *Handler) restartNeeded(ctx context.Context, serverID int64) *bool {
+	yes, no := true, false
+	changedAt, err := h.q.PluginsGetChanged(ctx, serverID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &no
+	}
+	if err != nil {
+		h.log.WarnContext(ctx, "plugins: read plugin change", "server_id", serverID, "err", err)
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, stateTimeout)
 	defer cancel()
 	resp, err := h.inst.Instances(ctx)
-	if err != nil {
-		return false
+	if err != nil || resp.Docker != agentapi.DockerOK {
+		return nil
 	}
 	for _, st := range resp.Instances {
-		if st.ID == serverID {
-			return st.State == agentapi.StateRunning && (st.StartedAt == 0 || at.UnixMilli() >= st.StartedAt)
+		if st.ID != serverID {
+			continue
 		}
+		if st.State != agentapi.StateRunning {
+			return &no
+		}
+		if st.StartedAt == 0 || changedAt >= st.StartedAt {
+			return &yes
+		}
+		return &no
 	}
-	return false
+	return &no // no container
 }

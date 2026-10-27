@@ -22,8 +22,8 @@ type fileRequest struct {
 }
 
 // changed records a plugin change: restart_needed and a new updates check.
-func (h *Handler) changed(serverID int64) {
-	h.markChanged(serverID)
+func (h *Handler) changed(ctx context.Context, serverID int64) {
+	h.markChanged(ctx, serverID)
 	h.updates.Delete(updatesKey(serverID))
 }
 
@@ -93,7 +93,7 @@ func (h *Handler) handleToggle(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
-	h.changed(srv.ID)
+	h.changed(ctx, srv.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -131,7 +131,7 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
-	h.changed(srv.ID)
+	h.changed(ctx, srv.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

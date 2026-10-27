@@ -37,7 +37,7 @@ func TestToggle(t *testing.T) {
 		t.Fatalf("files = %v", names)
 	}
 	inv := e.inventory(id)
-	if j := jarNamed(t, inv, "Tool.jar.disabled"); j.Enabled || !j.InstalledByPanel || !inv.RestartNeeded {
+	if j := jarNamed(t, inv, "Tool.jar.disabled"); j.Enabled || !j.InstalledByPanel || !isTrue(inv.RestartNeeded) {
 		t.Fatalf("inventory = %+v", inv)
 	}
 	if rows := e.rows(id); len(rows) != 1 || rows[0].Filename != "Tool.jar" {

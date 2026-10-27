@@ -116,6 +116,22 @@ describe('PluginsTab – installed', () => {
     expect(await screen.findByText('Neustart für „survival“ angefordert.')).toBeInTheDocument()
   })
 
+  it('says when it cannot tell whether a restart is needed, without claiming either', async () => {
+    mockInventory(inventory({ restart_needed: null }))
+    await openPlugins()
+    expect(await screen.findByText('Unklar, ob ein Neustart nötig ist')).toBeInTheDocument()
+    expect(screen.queryByText('Neustart nötig, damit die Änderungen wirken')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Jetzt neu starten' })).not.toBeInTheDocument()
+  })
+
+  it('shows no restart notice when none is needed', async () => {
+    mockInventory(inventory({ restart_needed: false }))
+    const { region } = await openPlugins()
+    await within(region).findByText('In plugins/ liegen noch keine Jars.')
+    expect(screen.queryByText('Neustart nötig, damit die Änderungen wirken')).not.toBeInTheDocument()
+    expect(screen.queryByText('Unklar, ob ein Neustart nötig ist')).not.toBeInTheDocument()
+  })
+
   it('shows no restart button without the power permission', async () => {
     enableTotp('alice') // full-trust permissions require 2FA (SEC-10)
     db.grants.set(2, [{ server_id: 1, permissions: ['server.view', 'server.plugins'] }])

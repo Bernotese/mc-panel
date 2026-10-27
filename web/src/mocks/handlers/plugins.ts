@@ -452,6 +452,13 @@ function step(title: string, file: string): PluginJobStep {
   return { title, file, state: 'pending', error_code: null, error: '' }
 }
 
+/** Like the panel: unknown (null) after a change while the actual state is unknown, else running and started before the change. */
+function restartNeeded(c: Ctx): boolean | null {
+  if (c.inv.changedAt === 0) return false
+  if (c.server.status.state === 'unknown') return null
+  return c.server.status.state === 'running' && c.inv.changedAt > c.server.status.started_at
+}
+
 function inventory(c: Ctx): PluginInventory {
   const jars = [...c.inv.jars].sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
   return {
@@ -461,7 +468,7 @@ function inventory(c: Ctx): PluginInventory {
     sources: sourcesOf(c.kind),
     jars: structuredClone(jars),
     truncated: false,
-    restart_needed: c.server.status.state === 'running' && c.inv.changedAt > c.server.status.started_at,
+    restart_needed: restartNeeded(c),
     source_errors: [],
   }
 }

@@ -192,6 +192,11 @@ type Permission struct {
 	Permission string
 }
 
+type PluginChange struct {
+	ServerID  int64
+	ChangedAt int64
+}
+
 type PluginInstall struct {
 	ServerID    int64
 	Filename    string

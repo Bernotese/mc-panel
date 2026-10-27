@@ -62,6 +62,17 @@ func (q *Queries) PluginsDeleteInstall(ctx context.Context, arg PluginsDeleteIns
 	return err
 }
 
+const pluginsGetChanged = `-- name: PluginsGetChanged :one
+SELECT changed_at FROM plugin_changes WHERE server_id = ?
+`
+
+func (q *Queries) PluginsGetChanged(ctx context.Context, serverID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, pluginsGetChanged, serverID)
+	var changed_at int64
+	err := row.Scan(&changed_at)
+	return changed_at, err
+}
+
 const pluginsListInstalls = `-- name: PluginsListInstalls :many
 
 SELECT server_id, filename, sha512, source, project_id, project_slug, title, version_id, version_name, channel, installed_at FROM plugin_installs WHERE server_id = ? ORDER BY filename
@@ -101,6 +112,22 @@ func (q *Queries) PluginsListInstalls(ctx context.Context, serverID int64) ([]Pl
 		return nil, err
 	}
 	return items, nil
+}
+
+const pluginsMarkChanged = `-- name: PluginsMarkChanged :exec
+INSERT INTO plugin_changes (server_id, changed_at) VALUES (?, ?)
+ON CONFLICT (server_id) DO UPDATE SET changed_at = max(plugin_changes.changed_at, excluded.changed_at)
+`
+
+type PluginsMarkChangedParams struct {
+	ServerID  int64
+	ChangedAt int64
+}
+
+// Never moves back: a clock step backwards must not hide an earlier change from the restart check.
+func (q *Queries) PluginsMarkChanged(ctx context.Context, arg PluginsMarkChangedParams) error {
+	_, err := q.db.ExecContext(ctx, pluginsMarkChanged, arg.ServerID, arg.ChangedAt)
+	return err
 }
 
 const pluginsUpsertInstall = `-- name: PluginsUpsertInstall :exec
