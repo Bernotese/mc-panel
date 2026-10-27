@@ -2,7 +2,13 @@ package files
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
+	"io/fs"
+	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -215,4 +221,211 @@ func TestCancelRestoreBeforeAndAfterCommit(t *testing.T) {
 	if got, _ := get(t, data, "a.txt"); got != "old" {
 		t.Fatalf("a.txt = %q", got)
 	}
+}
+
+// treeSums lists every entry below dir with its type, mode, size, mtime and (for files) sha256:
+// two equal listings mean nothing in dir was written, renamed or touched.
+func treeSums(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		line := fmt.Sprintf("%v %d %d", fi.Mode(), fi.Size(), fi.ModTime().UnixNano())
+		if fi.Mode().IsRegular() {
+			b, err := os.ReadFile(p) //nolint:gosec // G122: test fixture below t.TempDir()
+			if err != nil {
+				return err
+			}
+			line += fmt.Sprintf(" %x", sha256.Sum256(b))
+		}
+		rel, _ := filepath.Rel(dir, p)
+		out[rel] = line
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestRestoreFromRefusesSameID(t *testing.T) {
+	s, data, f := newBackupService(t)
+	put(t, data, "a.txt", "current")
+	sid := snapshotOf(t, s, f, makeTar(t, reg("a.txt", "old")))
+	for _, src := range []int64{1, -1} {
+		if _, err := s.RestoreBackup(context.Background(), filesapi.SnapshotRequest{ID: 1, Snapshot: sid, SourceID: src}); !errors.Is(err, filesapi.ErrInvalid) {
+			t.Fatalf("source %d: %v", src, err)
+		}
+	}
+	if s.Job(1) != nil || len(f.callsOf("dump")) != 0 {
+		t.Fatal("a refused restore-from started something")
+	}
+	if got, _ := get(t, data, "a.txt"); got != "current" {
+		t.Fatalf("a.txt = %q", got)
+	}
+}
+
+// TestRestoreFromOtherRepo (review focus #1): a snapshot of server 1 restored into server 2
+// leaves server 1's data directory byte-identical (it is not even readable meanwhile) and
+// its repository unwritten.
+func TestRestoreFromOtherRepo(t *testing.T) {
+	ctx := context.Background()
+	s, src, f := newBackupService(t)
+	put(t, src, "world/level.dat", "prod world, newer than the snapshot")
+	put(t, src, "server.properties", "motd=prod\nrcon.password=prodsecret\n")
+	put(t, src, ".rcon-cli.env", "password=prodsecret\n")
+	sid := snapshotOf(t, s, f, makeTar(t, dir("world/"), reg("world/level.dat", "prod world"),
+		reg("server.properties", "motd=prod\nrcon.password=********\n"), reg("mods/a.jar", "jar")))
+	dev := filepath.Join(filepath.Dir(src), "2")
+	put(t, dev, "world/level.dat", "dev world")
+	put(t, dev, "dev-only.txt", "gone after the sync")
+	put(t, dev, ".rcon-cli.env", "password=devsecret\n")
+	before := treeSums(t, src)
+
+	// The source's data directory cannot be opened at all while the restore runs.
+	if err := os.Chmod(src, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(src, 0o750) })
+	job, err := s.RestoreBackup(ctx, filesapi.SnapshotRequest{ID: 2, Snapshot: sid, SourceID: 1})
+	if err != nil || job.Kind != filesapi.JobRestore || job.Snapshot != sid {
+		t.Fatalf("restore-from = %+v %v", job, err)
+	}
+	if done := waitJob(t, s, 2); done.State != jobDone {
+		t.Fatalf("job = %+v", done)
+	}
+	if err := os.Chmod(src, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if after := treeSums(t, src); !maps.Equal(before, after) {
+		t.Fatalf("the source's data directory changed:\nbefore %v\nafter  %v", before, after)
+	}
+	if s.Job(1) != nil {
+		t.Fatalf("a job ran on the source: %+v", s.Job(1))
+	}
+
+	if got, _ := get(t, dev, "world/level.dat"); got != "prod world" {
+		t.Fatalf("dev level.dat = %q", got)
+	}
+	if got, _ := get(t, dev, "mods/a.jar"); got != "jar" {
+		t.Fatalf("dev mods/a.jar = %q", got)
+	}
+	if _, ok := get(t, dev, "dev-only.txt"); ok {
+		t.Fatal("an entry of the dev that is not in the snapshot survived")
+	}
+	if got, _ := get(t, dev, ".rcon-cli.env"); got != "password=devsecret\n" {
+		t.Fatalf("the dev's rcon file changed: %q", got)
+	}
+	if got, _ := get(t, dev, "server.properties"); strings.Contains(got, "prodsecret") {
+		t.Fatalf("the source's rcon password reached the dev: %q", got)
+	}
+	noTemp(t, dev)
+
+	// restic: the source's repository was dumped and nothing else; the dev got no repository.
+	dumps := f.callsOf("dump")
+	if len(dumps) != 1 || envOf(dumps[0].Env, "RESTIC_REPOSITORY") != s.repoDir(1) || envOf(dumps[0].Env, "RESTIC_PASSWORD_FILE") != s.keyFile(1) {
+		t.Fatalf("dump calls = %+v", dumps)
+	}
+	for _, c := range f.calls {
+		if cmd, _ := command(c.Args); cmd != "dump" && cmd != "snapshots" && cmd != "version" {
+			t.Fatalf("restic %s ran during a restore-from: %+v", cmd, c)
+		}
+	}
+	if _, err := os.Lstat(s.repoDir(2)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the dev got a repository: %v", err)
+	}
+	if len(f.snaps(s.repoDir(1))) != 1 {
+		t.Fatal("the source's snapshots changed")
+	}
+}
+
+// TestRestoreFromSourceBusy: a job on the source refuses the restore-from; while it reads the
+// source's snapshot, no forget, pin or purge of the source can start.
+func TestRestoreFromSourceBusy(t *testing.T) {
+	ctx := context.Background()
+	// Two restic jobs at a time, so only the source's reader refuses the forget below.
+	s, src, f := newBackupService(t, func(c *Config) { c.Limits.MaxBackupJobs = 2 })
+	put(t, src, "a.txt", "prod")
+	sid := snapshotOf(t, s, f, makeTar(t, reg("a.txt", "snap")))
+	dev := filepath.Join(filepath.Dir(src), "2")
+	put(t, dev, "a.txt", "dev")
+
+	f.gate = make(chan struct{})
+	if _, err := s.CreateBackup(ctx, filesapi.CreateBackupRequest{ID: 1, Kind: filesapi.SnapshotScheduled}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RestoreBackup(ctx, filesapi.SnapshotRequest{ID: 2, Snapshot: sid, SourceID: 1}); !errors.Is(err, filesapi.ErrBusy) {
+		t.Fatalf("restore-from while the source backs up: %v", err)
+	}
+	if s.Job(2) != nil {
+		t.Fatalf("a refused restore-from left a job: %+v", s.Job(2))
+	}
+	close(f.gate)
+	waitJob(t, s, 1)
+
+	f.gate = make(chan struct{})
+	if _, err := s.RestoreBackup(ctx, filesapi.SnapshotRequest{ID: 2, Snapshot: sid, SourceID: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ForgetBackups(ctx, filesapi.ForgetRequest{ID: 1, Snapshots: []string{sid}}); !errors.Is(err, filesapi.ErrBusy) {
+		t.Fatalf("forget of the source during a restore-from: %v", err)
+	}
+	if _, err := s.PinBackup(ctx, filesapi.PinRequest{ID: 1, Snapshot: sid, Pinned: true}); !errors.Is(err, filesapi.ErrBusy) {
+		t.Fatalf("pin of the source during a restore-from: %v", err)
+	}
+	if err := s.PurgeBackups(ctx, 1); !errors.Is(err, filesapi.ErrBusy) {
+		t.Fatalf("purge of the source during a restore-from: %v", err)
+	}
+	if _, err := s.RestoreBackup(ctx, filesapi.SnapshotRequest{ID: 2, Snapshot: sid, SourceID: 1}); !errors.Is(err, filesapi.ErrBusy) {
+		t.Fatalf("second restore-from into the same target: %v", err)
+	}
+	close(f.gate)
+	if job := waitJob(t, s, 2); job.State != jobDone {
+		t.Fatalf("job = %+v", job)
+	}
+	// The reader is gone with the job.
+	if _, err := s.ForgetBackups(ctx, filesapi.ForgetRequest{ID: 1, Snapshots: []string{sid}}); err != nil {
+		t.Fatalf("forget of the source after the restore-from: %v", err)
+	}
+	waitJob(t, s, 1)
+	if got, _ := get(t, src, "a.txt"); got != "prod" {
+		t.Fatalf("source a.txt = %q", got)
+	}
+}
+
+// TestRestoreFromMissingSourceRepo: a source without a repository (or without the snapshot)
+// is a clean not-found; the target stays as it is and its slot is free again.
+func TestRestoreFromMissingSourceRepo(t *testing.T) {
+	ctx := context.Background()
+	s, data, f := newBackupService(t)
+	put(t, data, "a.txt", "target")
+	before := treeSums(t, data)
+	if _, err := s.RestoreBackup(ctx, filesapi.SnapshotRequest{ID: 1, Snapshot: strings.Repeat("a", 64), SourceID: 3}); !errors.Is(err, filesapi.ErrNotFound) {
+		t.Fatalf("source without a repository: %v", err)
+	}
+	// A snapshot that exists only in the target's own repository is not found in the source's.
+	own := snapshotOf(t, s, f, makeTar(t, reg("a.txt", "own")))
+	if err := s.ensureKey(3); err != nil {
+		t.Fatal(err)
+	}
+	f.addSnap(t, s.repoDir(3), time.Now(), makeTar(t, reg("a.txt", "other")), "mcpanel", "kind=scheduled")
+	if _, err := s.RestoreBackup(ctx, filesapi.SnapshotRequest{ID: 1, Snapshot: own, SourceID: 3}); !errors.Is(err, filesapi.ErrNotFound) {
+		t.Fatalf("snapshot of another repository: %v", err)
+	}
+	if after := treeSums(t, data); !maps.Equal(before, after) {
+		t.Fatal("the target changed")
+	}
+	if len(f.callsOf("dump")) != 0 || s.Job(1) != nil {
+		t.Fatal("a refused restore-from started something")
+	}
+	if _, err := s.RestoreBackup(ctx, filesapi.SnapshotRequest{ID: 1, Snapshot: own}); err != nil {
+		t.Fatalf("the slot of the target was not given back: %v", err)
+	}
+	waitJob(t, s, 1)
 }
