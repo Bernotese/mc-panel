@@ -9,6 +9,7 @@ import (
 
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/devinst"
+	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/notify"
 )
 
@@ -17,6 +18,7 @@ const deferText = "say [mc-panel] Dev-Sync verschoben: es sind noch Spieler onli
 func TestScheduledSyncQueuesAtTime(t *testing.T) {
 	e := newEnv(t)
 	prodID, devID := e.dev("survival")
+	e.pass(stopped(devID)) // a monitoring pass: the dev is known to be empty
 	e.clk.Set(fiveAM.Add(-time.Minute))
 	devinst.Tick(e.ctx(), e.h)
 	if len(e.syncer.queued()) != 0 {
@@ -121,6 +123,7 @@ func TestScheduledSyncPlayersLeave(t *testing.T) {
 func TestPausedSkips(t *testing.T) {
 	e := newEnv(t)
 	_, devID := e.dev("survival")
+	e.pass(stopped(devID)) // a monitoring pass: the dev is known to be empty
 	e.must(200, "PATCH", path(devID, ""), map[string]any{"sync_paused": true}, e.admin())
 	for _, at := range []time.Time{fiveAM, fiveAM.Add(24 * time.Hour), fiveAM.Add(48 * time.Hour)} {
 		e.clk.Set(at)
@@ -143,6 +146,7 @@ func TestPausedSkips(t *testing.T) {
 func TestSyncFailedNotifiesOncePer6h(t *testing.T) {
 	e := newEnv(t)
 	_, devID := e.dev("survival")
+	e.pass(stopped(devID)) // a monitoring pass: the dev is known to be empty
 	fail := func() {
 		t.Helper()
 		e.must(202, "POST", path(devID, "/sync"), nil, e.admin())
@@ -170,8 +174,10 @@ func TestSyncFailedNotifiesOncePer6h(t *testing.T) {
 		t.Fatalf("%d notifications after 6 h, want 2", n)
 	}
 	// A success resets the throttle.
+	e.clk.Advance(10 * time.Minute) // manual sync cooldown
 	e.must(202, "POST", path(devID, "/sync"), nil, e.admin())
 	e.syncer.last(t).Done("snap", nil)
+	e.clk.Advance(10 * time.Minute)
 	fail()
 	if n := len(e.notes.Types()); n != 3 {
 		t.Fatalf("%d notifications after a success and a failure, want 3", n)
@@ -202,5 +208,175 @@ func TestTimezoneChangeMovesNextSync(t *testing.T) {
 	devinst.Tick(e.ctx(), e.h)
 	if want := time.Date(2026, 10, 13, 5, 0, 0, 0, time.UTC).UnixMilli(); e.row(devID).NextSyncAt.Int64 != want {
 		t.Fatalf("next sync %v, want 05:00 UTC", e.row(devID).NextSyncAt)
+	}
+}
+
+func TestSyncNowCooldown(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	e.pass(stopped(devID))
+	e.must(202, "POST", path(devID, "/sync"), nil, e.admin())
+	// While it is pending a second one is busy, not rate limited.
+	if rec := e.do("POST", path(devID, "/sync"), nil, ptr(e.admin())); rec.Code != 409 {
+		t.Fatalf("while pending: %d", rec.Code)
+	}
+	e.clk.Advance(5 * time.Minute)
+	e.syncer.last(t).Done("snap", nil) // ends at +5 min: the cooldown runs from here
+	e.clk.Advance(9*time.Minute + 30*time.Second)
+	rec := e.do("POST", path(devID, "/sync"), nil, ptr(e.admin()))
+	if rec.Code != 429 || errCode(t, rec) != httpx.CodeRateLimited || rec.Header().Get("Retry-After") != "30" {
+		t.Fatalf("within the cooldown: %d %s Retry-After %q", rec.Code, rec.Body, rec.Header().Get("Retry-After"))
+	}
+	e.clk.Advance(30 * time.Second)
+	e.must(202, "POST", path(devID, "/sync"), nil, e.admin())
+	if n := len(e.syncer.queued()); n != 2 {
+		t.Fatalf("%d syncs queued, want 2", n)
+	}
+}
+
+func TestSyncNowRefusedStartsNoCooldown(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	e.pass(stopped(devID))
+	e.syncer.err = devinst.ErrSyncBusy
+	e.must(409, "POST", path(devID, "/sync"), nil, e.admin())
+	e.syncer.err = nil
+	e.must(202, "POST", path(devID, "/sync"), nil, e.admin())
+}
+
+func TestSyncNowScheduledSyncsNoCooldown(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	e.pass(stopped(devID))
+	e.clk.Set(fiveAM)
+	devinst.Tick(e.ctx(), e.h)
+	e.syncer.last(t).Done("snap", nil)
+	e.must(202, "POST", path(devID, "/sync"), nil, e.admin())
+}
+
+func TestScheduledSyncWaitsForFirstPass(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	e.clk.Set(fiveAM)
+	devinst.Tick(e.ctx(), e.h)
+	if len(e.syncer.queued()) != 0 || len(e.console.sent()) != 0 {
+		t.Fatal("acted before the first monitoring pass")
+	}
+	if r := e.row(devID); r.DeferredSince.Valid || r.NextSyncAt.Int64 != fiveAM.UnixMilli() {
+		t.Fatalf("row changed before the first pass: %+v", r)
+	}
+	e.pass(stopped(devID))
+	devinst.Tick(e.ctx(), e.h)
+	if len(e.syncer.queued()) != 1 {
+		t.Fatal("not queued after the first pass")
+	}
+}
+
+func TestScheduledSyncDefersOnUnknownPlayers(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	e.clk.Set(fiveAM)
+	e.pass(running(devID, fiveAM.Add(-time.Hour), nil)) // running, ping failed
+	devinst.Tick(e.ctx(), e.h)
+	if len(e.syncer.queued()) != 0 {
+		t.Fatal("synced a running dev with an unknown player count")
+	}
+	if got := e.console.sent(); len(got) != 1 || got[0] != fmt.Sprintf("%d %s", devID, deferText) {
+		t.Fatalf("rcon %q", got)
+	}
+	if r := e.row(devID); r.DeferredSince.Int64 != fiveAM.UnixMilli() {
+		t.Fatalf("not deferred: %+v", r)
+	}
+}
+
+func TestSyncNowUnknownPlayersWarns(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	// No monitoring pass yet: someone may be online.
+	e.must(202, "POST", path(devID, "/sync"), nil, e.admin())
+	if len(e.syncer.queued()) != 0 || len(e.console.sent()) != 1 {
+		t.Fatalf("queued %d, rcon %q: want a warning and a wait", len(e.syncer.queued()), e.console.sent())
+	}
+	if !e.get(devID).SyncPending || !e.row(devID).DeferredSince.Valid {
+		t.Fatal("the wait is not shown as pending")
+	}
+}
+
+func TestPauseDuringWaitDropsSync(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	e.pass(running(devID, t0.Add(-time.Hour), ptr(2)))
+	e.must(202, "POST", path(devID, "/sync"), nil, e.admin())
+	e.must(200, "PATCH", path(devID, ""), map[string]any{"sync_paused": true}, e.admin())
+	if r := e.row(devID); r.DeferredSince.Valid {
+		t.Fatalf("deferred_since kept after the pause: %+v", r)
+	}
+	e.clk.Advance(time.Minute)
+	devinst.FastTick(e.ctx(), e.h)
+	if len(e.syncer.queued()) != 0 {
+		t.Fatal("queued after the dev was paused during the wait")
+	}
+	if e.get(devID).SyncPending {
+		t.Fatal("still pending after the dropped wait")
+	}
+}
+
+func TestSyncNowWhilePausedStillRuns(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	e.pass(running(devID, t0.Add(-time.Hour), ptr(2)))
+	e.must(200, "PATCH", path(devID, ""), map[string]any{"sync_paused": true}, e.admin())
+	e.must(202, "POST", path(devID, "/sync"), nil, e.admin())
+	e.clk.Advance(time.Minute)
+	devinst.FastTick(e.ctx(), e.h)
+	if len(e.syncer.queued()) != 1 {
+		t.Fatal("a sync requested while paused was dropped")
+	}
+}
+
+func TestDeletedDuringWaitDropsSync(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	e.pass(running(devID, t0.Add(-time.Hour), ptr(2)))
+	e.must(202, "POST", path(devID, "/sync"), nil, e.admin())
+	mustExec(t, e.db, `DELETE FROM servers WHERE id = ?`, devID)
+	e.clk.Advance(time.Minute)
+	devinst.FastTick(e.ctx(), e.h)
+	if len(e.syncer.queued()) != 0 || len(e.notes.Events) != 0 {
+		t.Fatalf("queued %d, events %+v", len(e.syncer.queued()), e.notes.Events)
+	}
+}
+
+func TestPauseClearsScheduledDeferral(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	e.clk.Set(fiveAM)
+	e.pass(running(devID, fiveAM.Add(-time.Hour), ptr(1)))
+	devinst.Tick(e.ctx(), e.h)
+	if !e.row(devID).DeferredSince.Valid {
+		t.Fatal("not deferred")
+	}
+	e.must(200, "PATCH", path(devID, ""), map[string]any{"sync_paused": true}, e.admin())
+	if r := e.row(devID); r.DeferredSince.Valid || r.NextSyncAt.Valid {
+		t.Fatalf("after pause %+v", r)
+	}
+}
+
+func TestRecoverClearsLostWait(t *testing.T) {
+	e := newEnv(t)
+	_, lost := e.dev("survival")
+	_, waiting := e.dev("creative")
+	// A "Sync now" wait lost with the process: requested at t0, slot tomorrow 05:00.
+	mustExec(t, e.db, `UPDATE dev_instances SET deferred_since = ? WHERE server_id = ?`, t0.UnixMilli(), lost)
+	// A scheduled sync waiting for players: slot 04:00, next try 04:30.
+	slot := t0.Add(-30 * time.Minute)
+	mustExec(t, e.db, `UPDATE dev_instances SET deferred_since = ?, next_sync_at = ? WHERE server_id = ?`,
+		slot.UnixMilli(), t0.Add(5*time.Minute).UnixMilli(), waiting)
+	devinst.Recover(e.ctx(), e.h)
+	if r := e.row(lost); r.DeferredSince.Valid || r.NextSyncAt.Int64 != fiveAM.UnixMilli() {
+		t.Fatalf("lost wait kept: %+v", r)
+	}
+	if r := e.row(waiting); r.DeferredSince.Int64 != slot.UnixMilli() {
+		t.Fatalf("scheduled deferral cleared: %+v", r)
 	}
 }
