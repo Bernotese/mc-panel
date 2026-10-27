@@ -49,6 +49,7 @@ type fakeJob struct {
 	note      string
 	forgetIDs []string
 	restoreOf string
+	polls     int // Job calls while it ran
 }
 
 func newFakeFiles(clk *clock.Fake) *fakeFiles {
@@ -324,6 +325,7 @@ func (f *fakeFiles) Job(_ context.Context, id int64) (*filesapi.Job, error) {
 		return nil, nil
 	}
 	if j.job.State == filesapi.JobRunning {
+		j.polls++
 		if !f.stall {
 			j.job.Bytes += 1024
 		}
@@ -357,6 +359,16 @@ func (f *fakeFiles) complete(id int64, j *fakeJob) {
 	case filesapi.JobForget:
 		f.snaps[id] = slices.DeleteFunc(f.snaps[id], func(s filesapi.Snapshot) bool { return slices.Contains(j.forgetIDs, s.ID) })
 	}
+}
+
+// polls returns how often the running (or last) service job of id was polled.
+func (f *fakeFiles) polls(id int64) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if j := f.jobs[id]; j != nil {
+		return j.polls
+	}
+	return 0
 }
 
 // runningJob seeds a running service job of kind (recovery tests); it stays running while
