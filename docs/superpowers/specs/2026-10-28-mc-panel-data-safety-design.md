@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-28
 - **Status:** draft (for review in #157)
-- **Author:** Jannes Göbel (with Claude)
+- **Author:** Jannes (with Claude)
 - **Issues:** #145 (A02 stuck restore), #146 (A03 unknown job state), #147 (A04 atomic coordination); reused by #149 (A06) and #153 (A10)
 - **Builds on:** files (`2026-10-11-…-files-design.md`), backups (`2026-10-12-…-backups-design.md`), dev instances (`2026-10-27-…-dev-instances-design.md`)
 
