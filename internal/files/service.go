@@ -129,7 +129,7 @@ func New(cfg Config) *Service {
 	}
 	s.runner, s.runnerWhy = cfg.runner, ""
 	if s.runner == nil {
-		s.runner, s.runnerWhy = newExecRunner(cfg.ResticBinary)
+		s.runner, s.runnerWhy = newExecRunner(cfg.ResticBinary, s.log)
 	}
 	if strings.ContainsRune(cfg.ResticBinary, '/') {
 		s.resticPaths = append(s.resticPaths, cfg.ResticBinary)

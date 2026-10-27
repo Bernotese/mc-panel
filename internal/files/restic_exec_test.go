@@ -14,7 +14,7 @@ import (
 
 // fakeBinary writes a shell script that stands in for restic: it records its argv and
 // environment next to itself and then acts according to its first argument after the record
-// prefix: "cat" copies stdin to stdout, "sleep" waits for SIGINT (exit 130), "fail" exits 12.
+// prefix: "cat" copies stdin to stdout, "sleep" waits for SIGINT (exit 130), "fail" exits 12, "prio" prints its nice value and I/O class (Linux).
 func fakeBinary(t *testing.T) (bin, record string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -28,6 +28,7 @@ case "$1" in
   sleep) trap 'echo interrupted >&2; exit 130' INT; while :; do sleep 0.05; done ;;
   fail) echo "Fatal: wrong password" >&2; exit 12 ;;
   version) echo "restic 0.19.1 compiled with go1.25.1 on linux/amd64" ;;
+  prio) cut -d' ' -f19 /proc/self/stat; if command -v ionice >/dev/null; then ionice -p $$; fi ;;
 esac
 `
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil { //nolint:gosec // G306: test script below t.TempDir()

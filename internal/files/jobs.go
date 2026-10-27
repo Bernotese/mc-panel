@@ -116,6 +116,32 @@ func (j *jobs) acquireLocked(id int64, kind filesapi.JobKind) error {
 	return nil
 }
 
+// acquireFrom takes the slot of instance id for a restore from the repository of instance
+// source (a dev sync): refused while source has a pre-check, a job or a lock. source then counts
+// a reader (like a backup download) until the returned func runs, so no forget, pin or purge of
+// it starts while its snapshot is read. The caller releases the slot of id as for acquire.
+func (j *jobs) acquireFrom(id, source int64) (func(), error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if !j.closed && j.busy[source] != "" {
+		return nil, fmt.Errorf("%w: the source server is busy: %s", filesapi.ErrBusy, busyText(j.busy[source]))
+	}
+	if err := j.acquireLocked(id, filesapi.JobRestore); err != nil {
+		return nil, err
+	}
+	j.readers[source]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			j.mu.Lock()
+			defer j.mu.Unlock()
+			if j.readers[source]--; j.readers[source] <= 0 {
+				delete(j.readers, source)
+			}
+		})
+	}, nil
+}
+
 // release gives back a slot that did not become a job (or a lock).
 func (j *jobs) release(id int64) {
 	j.mu.Lock()

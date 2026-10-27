@@ -322,14 +322,14 @@ func serviceJobCode(code string) string {
 	return codeInternal
 }
 
-// runBackup takes one snapshot of kind; a running server gets save-off/save-all flush before
-// and save-on after it, in every path (spec §5.4).
-func (h *Handler) runBackup(ctx context.Context, j *job, kind filesapi.SnapshotKind, note string) (snapshot string, err error) {
+// runBackup takes one snapshot of kind of server id (the job's own server, or the source of
+// a dev sync); a running server gets save-off/save-all flush before and save-on after it, in
+// every path (spec §5.4).
+func (h *Handler) runBackup(ctx context.Context, j *job, id int64, kind filesapi.SnapshotKind, note string) (snapshot string, err error) {
 	defer func() { err = canceledOr(ctx, err) }() // runs last: after save-on
 	if h.files == nil {
 		return "", errNoFiles
 	}
-	id := j.spec.serverID
 	running, err := h.containerRunning(ctx, id)
 	if err != nil {
 		return "", err
@@ -365,7 +365,7 @@ func (h *Handler) runBackup(ctx context.Context, j *job, kind filesapi.SnapshotK
 	}
 	j.serviceStarted = true
 	m := h.waitBackup()
-	if j.spec.trigger == triggerManual {
+	if j.spec.kind == kindBackup && j.spec.trigger == triggerManual {
 		// Scheduled runs notify every failure (retention.go); a manual one only this one, the
 		// user may have left the page meanwhile.
 		m.onLimit = func(msg string) { h.alert(ctx, id, j.spec.name, alertBackup, msg) }
@@ -414,7 +414,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	defer h.manual.mu.Unlock()
 	now := h.clock.Now()
 	if h.queue.busy(srv.ID) {
-		h.writeError(w, r, errBackupRunning)
+		h.writeError(w, r, ErrBackupRunning)
 		return
 	}
 	if wait := h.manual.waitLocked(srv.ID, now); wait > 0 {
@@ -427,7 +427,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	v, err := h.queue.add(ctx, jobSpec{
 		serverID: srv.ID, name: srv.Name, kind: kindBackup, trigger: triggerManual,
 		run: func(ctx context.Context, j *job) (string, error) {
-			snap, err := h.runBackup(ctx, j, filesapi.SnapshotManual, note)
+			snap, err := h.runBackup(ctx, j, srv.ID, filesapi.SnapshotManual, note)
 			if j.serviceStarted {
 				// The cooldown runs from the end of a backup that ran, also of one that failed
 				// (time limit, stall, restic): it could otherwise be restarted at once and keep

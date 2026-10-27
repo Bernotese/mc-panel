@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"regexp"
@@ -39,6 +40,8 @@ type resticCmd struct {
 	Env    []string  // the complete environment (nothing is inherited)
 	Stdin  bool      // Stdin() of the process is a pipe
 	Stdout io.Writer // nil = discarded
+	// LowPriority starts restic with nice 10 and the idle I/O class (Linux, best effort).
+	LowPriority bool
 }
 
 // resticProc is a started restic process.
@@ -62,7 +65,10 @@ func (e *resticExit) Error() string {
 }
 
 // execRunner runs the restic binary at bin.
-type execRunner struct{ bin string }
+type execRunner struct {
+	bin string
+	log *slog.Logger // nil = slog.Default()
+}
 
 func (r execRunner) Start(ctx context.Context, c resticCmd) (resticProc, error) {
 	cmd := exec.CommandContext(ctx, r.bin, c.Args...) //nolint:gosec // G204: the binary comes from files.toml; argv is built by the service from validated ids and fixed flags, no shell
@@ -84,9 +90,17 @@ func (r execRunner) Start(ctx context.Context, c resticCmd) (resticProc, error) 
 		}
 		p.stdin = w
 	}
-	if err := startProcess(cmd, p.done); err != nil {
+	prioErr, err := startProcess(cmd, p.done, c.LowPriority)
+	if err != nil {
 		close(p.done)
 		return nil, err
+	}
+	if prioErr != nil {
+		log := r.log
+		if log == nil {
+			log = slog.Default()
+		}
+		log.Warn("files: restic runs at normal priority", "err", prioErr)
 	}
 	return p, nil
 }
