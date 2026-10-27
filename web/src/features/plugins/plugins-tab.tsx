@@ -198,6 +198,12 @@ export function PluginsTab({ server, kind }: PluginsTabProps) {
           ) : null}
         </div>
       ) : null}
+      {inventory.data?.restart_needed === null ? (
+        <div role="status" className="bg-card flex flex-col gap-1 border p-4">
+          <p className="font-medium">{t('plugins.restart.unknown_title')}</p>
+          <p className="text-muted-foreground text-sm">{t('plugins.restart.unknown_description')}</p>
+        </div>
+      ) : null}
 
       {visibleJob ? <JobProgress job={visibleJob} onDismiss={() => setDismissed(visibleJob.id)} /> : null}
 

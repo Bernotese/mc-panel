@@ -780,6 +780,9 @@ export const en: Messages = {
       title: 'Restart required for the changes to take effect',
       description: 'Plugins and mods are only loaded when the server starts.',
       now: 'Restart now',
+      unknown_title: 'Unclear whether a restart is needed',
+      unknown_description:
+        "Plugins or mods were changed, but the server's state cannot be read right now. If it has been running since before the change, they only take effect after a restart.",
     },
     source: { modrinth: 'Modrinth', hangar: 'Hangar', manual: 'Manual' },
     channel: { release: 'Release', beta: 'Beta', alpha: 'Alpha' },

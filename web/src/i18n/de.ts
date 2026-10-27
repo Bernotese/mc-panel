@@ -779,6 +779,9 @@ export const de = {
       title: 'Neustart nötig, damit die Änderungen wirken',
       description: 'Plugins und Mods werden nur beim Start des Servers geladen.',
       now: 'Jetzt neu starten',
+      unknown_title: 'Unklar, ob ein Neustart nötig ist',
+      unknown_description:
+        'Plugins oder Mods wurden geändert, aber der Zustand des Servers ist gerade nicht abrufbar. Läuft er seit vor der Änderung, wirken sie erst nach einem Neustart.',
     },
     source: { modrinth: 'Modrinth', hangar: 'Hangar', manual: 'Manuell' },
     channel: { release: 'Release', beta: 'Beta', alpha: 'Alpha' },

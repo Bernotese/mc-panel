@@ -40,7 +40,7 @@ type Deps struct {
 	Clock     clock.Clock
 	Audit     audit.Recorder
 	Files     filesapi.Client          // nil = no service: inventory/jobs/toggle/delete answer 503 files_unavailable
-	Instances agentapi.InstancesClient // actual state for restart_needed; nil = treat as not running
+	Instances agentapi.InstancesClient // actual state for restart_needed; nil = unknown (restart_needed null after a change)
 	Catalog   Catalog                  // nil = catalog.New with the default upstreams
 	Upstream  *upstream.Client         // nil = upstream.New(upstream.Options{Clock, Version})
 	Version   string                   // panel version for the User-Agent; "" = "dev"
@@ -56,7 +56,6 @@ type Handler struct {
 	catalog Catalog
 	up      *upstream.Client
 	log     *slog.Logger
-	restart *restartTracker
 	limit   *userLimiter
 	jobs    *jobRegistry
 	updates *upstream.Cache[updatesResult]
@@ -89,7 +88,7 @@ func NewHandler(d Deps) *Handler {
 	}
 	return &Handler{
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, files: fc, inst: inst, catalog: cat, up: up, log: log,
-		restart: newRestartTracker(), limit: newUserLimiter(), jobs: newJobRegistry(d.Clock, maxJobs),
+		limit: newUserLimiter(), jobs: newJobRegistry(d.Clock, maxJobs),
 		updates: upstream.NewCache[updatesResult](d.Clock, updatesTTL, upstream.MaxCacheEntries),
 		icons:   newIconCache(d.Clock, up), busyBackoff: busyBackoff,
 	}
@@ -331,7 +330,7 @@ func (noFiles) Jars(context.Context, int64, string) (filesapi.JarsResponse, erro
 	return filesapi.JarsResponse{}, errNoFiles
 }
 
-// noAgent stands in for a missing agent client: no server counts as running.
+// noAgent stands in for a missing agent client: the actual state is unknown.
 type noAgent struct{}
 
 func (noAgent) Instances(context.Context) (agentapi.InstancesResponse, error) {

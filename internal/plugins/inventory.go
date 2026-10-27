@@ -63,7 +63,7 @@ type inventory struct {
 	Sources       []upstream.Source `json:"sources"`
 	Jars          []installedJar    `json:"jars"`
 	Truncated     bool              `json:"truncated"`
-	RestartNeeded bool              `json:"restart_needed"`
+	RestartNeeded *bool             `json:"restart_needed"`
 	SourceErrors  []upstream.Source `json:"source_errors"`
 }
 
