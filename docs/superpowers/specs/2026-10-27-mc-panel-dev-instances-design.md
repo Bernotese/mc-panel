@@ -128,7 +128,7 @@ A manual stop also sets `sleeping`. While sleeping, the sampler does not ping de
 mc-router's own auto-start would need the Docker socket, which the router deliberately does not get (`internal/agent/instances/template.go`, `RouterContainer`). Instead, while dev sleeps, the route of `dev-<name>.<base domain>` points to a **waker**:
 
 - It speaks just enough of the Minecraft protocol: handshake, status (server list shows the MOTD "Dev sleeps – connect to wake it", version text, 0 players) and login start, answered with a disconnect message "Dev is starting, reconnect in about a minute".
-- A login attempt (not a status ping) asks the panel to wake the dev: the panel sets `desired_state = running`, clears `sleeping`, records `last_wake_at` and the reconcile loop starts it. Wakes are rate-limited (at most one per dev per 2 minutes, plus a global cap) and ignored while the data gate is held (the disconnect then says "Dev is being synced").
+- A login attempt (not a status ping) asks the panel to wake the dev: the panel sets `desired_state = running`, clears `sleeping`, records `last_wake_at` and the reconcile loop starts it. Wakes are rate-limited (at most one per dev per 2 minutes, plus a global cap) and ignored while the data gate is held. The waker cannot know about a running sync, so its one disconnect text covers both cases ("Dev is starting (or being synced), reconnect in about a minute").
 - Any connection may wake dev (the waker cannot check the whitelist before login). The whitelist still decides who can join.
 - Once dev runs, the route points back to the dev container.
 - Today the agent builds mc-router's routes from container labels alone. The agent API therefore gains a way for the panel to say which dev hostnames are asleep and must point to the waker's fixed address (validated in `agentapi` like every request: hostnames of existing dev containers only, the waker address from `agent.toml`, never from the panel).
@@ -137,7 +137,7 @@ Constraints for the waker (how it is built is the builder's call):
 
 - It must not run in the root agent and must not get Docker access. It handles untrusted input from the internet with strict limits (packet sizes, timeouts, connections per IP, total connections).
 - It is reachable only from `mcpanel-router`, not from the internet directly.
-- Suggested shape: a listener in the panel process (unprivileged; its unit already allows `AF_INET`) on an address only the router network can reach, restricted by nftables to the router container. Wakes then do not cross a process boundary. Alternatives the builder may weigh: a separate unprivileged service, or the agent reporting failed router connections from mc-router's log without parsing client data itself.
+- Chosen shape (decided while planning): a container `mcpanel-waker` that runs the agent binary in an unprivileged `waker` mode (bind-mounted read-only into the pinned mc-router image, uid 65534, no capabilities, read-only root, 32 MiB, only on mc-router's network `mcpanel-mc`, no published port). It logs `wake <fqdn>` lines; the agent reads them from the container log, keeps only FQDNs of sleeping devs the panel named, and returns the server ids to the panel's 2-second poll (`PUT /v1/waker`). No host listener, no firewall change, no Docker access for the waker. A listener in the panel process was rejected because the router would need a path to the host through the host firewall.
 
 ## 7. API (sketch)
 
