@@ -295,6 +295,7 @@ func TestSyncNowWithoutPlayersQueuesAtOnce(t *testing.T) {
 func TestSyncNowQueueBusy(t *testing.T) {
 	e := newEnv(t)
 	_, devID := e.dev("survival")
+	e.pass(stopped(devID)) // a monitoring pass: the dev is known to be empty
 	mustExec(t, e.db, `UPDATE dev_instances SET last_sync_status = 'failed', last_sync_error = 'old' WHERE server_id = ?`, devID)
 	e.syncer.err = devinst.ErrSyncBusy
 	rec := e.must(409, "POST", path(devID, "/sync"), nil, e.admin())
@@ -310,6 +311,7 @@ func TestSyncNowQueueBusy(t *testing.T) {
 func TestDevDeletedDuringSync(t *testing.T) {
 	e := newEnv(t)
 	_, devID := e.dev("survival")
+	e.pass(stopped(devID)) // a monitoring pass: the dev is known to be empty
 	e.must(202, "POST", path(devID, "/sync"), nil, e.admin())
 	s := e.syncer.last(t)
 	mustExec(t, e.db, `DELETE FROM servers WHERE id = ?`, devID)
@@ -325,6 +327,7 @@ func TestDevDeletedDuringSync(t *testing.T) {
 func TestApplyFailsWhenSleepFails(t *testing.T) {
 	e := newEnv(t)
 	_, devID := e.dev("survival")
+	e.pass(stopped(devID)) // a monitoring pass: the dev is known to be empty
 	e.must(202, "POST", path(devID, "/sync"), nil, e.admin())
 	e.servers.errs["sleep"] = errors.New("db locked")
 	if err := e.syncer.last(t).Apply(e.ctx()); err == nil {
@@ -335,6 +338,7 @@ func TestApplyFailsWhenSleepFails(t *testing.T) {
 func TestSyncCanceledIsNoFailure(t *testing.T) {
 	e := newEnv(t)
 	_, devID := e.dev("survival")
+	e.pass(stopped(devID)) // a monitoring pass: the dev is known to be empty
 	mustExec(t, e.db, `UPDATE dev_instances SET last_sync_status = 'ok', last_sync_at = 5, last_sync_snapshot = 'old' WHERE server_id = ?`, devID)
 	e.clk.Set(fiveAM)
 	devinst.Tick(e.ctx(), e.h)

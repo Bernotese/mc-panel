@@ -34,6 +34,7 @@ func (h *Handler) OnPass(ctx context.Context, s monitoring.Snapshot) {
 	var sleep, ops []int64
 	var opsStart = map[int64]int64{}
 	h.mu.Lock()
+	h.passSeen = true
 	known := make(map[int64]bool, len(rows))
 	for _, row := range rows {
 		id := row.ServerID

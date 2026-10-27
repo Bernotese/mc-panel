@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
+	"strconv"
 
 	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
 	"github.com/Bernotese/mc-panel/internal/audit"
@@ -266,6 +268,9 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	if len(changed) > 0 {
 		err = h.q.DevUpdateSettings(ctx, p)
 	}
+	if err == nil && p.SyncPaused != 0 && row.SyncPaused == 0 {
+		err = h.clearDeferred(ctx, row.ServerID) // a waiting sync ends with the pause
+	}
 	h.writeMu.Unlock()
 	if len(changed) == 0 {
 		h.writeView(w, r, http.StatusOK, row.ServerID)
@@ -282,8 +287,10 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	h.writeView(w, r, http.StatusOK, row.ServerID)
 }
 
-// handleSync answers POST /servers/{id}/dev/sync. With players on the dev it warns them in
-// chat and queues the sync warnDelay later; otherwise it queues at once.
+// handleSync answers POST /servers/{id}/dev/sync. With players (or an unknown count) on the
+// dev it warns them in chat and queues the sync warnDelay later; otherwise it queues at once.
+// Each manual sync forces a fresh backup of prod, so they are at least manualCooldown apart
+// (429 with Retry-After).
 func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 	d, ok := h.loadDev(w, r)
 	if !ok {
@@ -291,14 +298,20 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := context.WithoutCancel(r.Context()) // the job outlives the request; actor and IP stay
 	id := d.row.ServerID
-	if !h.claim(id) {
+	ok, wait, prev := h.claimManual(id, h.clock.Now())
+	if !ok && wait > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "the last manual sync of this dev was less than 10 minutes ago")
+		return
+	}
+	if !ok {
 		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeBackupRunning, "a sync of this dev is already queued or running")
 		return
 	}
-	if h.players(id) > 0 {
+	if h.occupied(id) {
 		h.say(ctx, id, warnText(d.sourceName))
 		if err := h.delay(ctx, d, triggerManual); err != nil {
-			h.release(id)
+			h.unclaimManual(id, prev)
 			httpx.Internal(w, r, err)
 			return
 		}
@@ -306,6 +319,7 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.queueClaimed(ctx, d, triggerManual); err != nil {
+		h.unclaimManual(id, prev) // a refused sync does not start the cooldown
 		if errors.Is(err, errSyncBusy) {
 			httpx.WriteError(w, r, http.StatusConflict, httpx.CodeBackupRunning, "a sync of this dev is already queued or running")
 			return
