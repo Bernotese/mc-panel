@@ -106,15 +106,21 @@ type syncResult struct {
 	err  error
 }
 
-// queue queues a sync of the dev; apply (nil = success) runs as Apply. The channel gets Done's
-// arguments; a second Done call fails the test.
+// queue queues a scheduled sync of the dev; apply (nil = success) runs as Apply. The channel
+// gets Done's arguments; a second Done call fails the test.
 func (e *devEnv) queue(apply func() error) <-chan syncResult {
+	e.t.Helper()
+	return e.queueAs("scheduled", apply)
+}
+
+// queueAs is queue with the given trigger.
+func (e *devEnv) queueAs(trigger string, apply func() error) <-chan syncResult {
 	e.t.Helper()
 	done := make(chan syncResult, 1)
 	var calls sync.Mutex
 	n := 0
 	err := e.h.QueueDevSync(context.Background(), backups.DevSync{
-		DevID: e.dev, SourceID: e.prod, DevName: "dev-survival", SourceName: "survival", Trigger: "manual",
+		DevID: e.dev, SourceID: e.prod, DevName: "dev-survival", SourceName: "survival", Trigger: trigger,
 		Apply: func(context.Context) error {
 			e.log.add("apply %d", e.dev)
 			if apply != nil {
@@ -426,5 +432,28 @@ func TestBackupEndpointsRefuseDev(t *testing.T) {
 	}
 	if _, _, ok := backups.JobOf(e.h, e.dev); ok || e.files.count("create") != 0 {
 		t.Fatalf("the ticker queued a backup of the dev: %v", e.files.callLog())
+	}
+}
+
+// TestDevSyncManualAlwaysFresh: "Sync now" always takes a new dev-sync snapshot of the source;
+// the first sync of a new dev reuses a fresh scheduled one like a scheduled sync.
+func TestDevSyncManualAlwaysFresh(t *testing.T) {
+	e := newDevEnv(t)
+	fresh := e.snapAt(10*time.Minute, filesapi.SnapshotScheduled)
+	e.snapAt(5*time.Minute, filesapi.SnapshotDevSync)
+	r := e.wait(e.queueAs("manual", nil))
+	if r.err != nil || r.snap == fresh {
+		t.Fatalf("done = %+v", r)
+	}
+	if got := e.log.all(); len(got) < 2 || got[0] != fmt.Sprintf("backup %d dev-sync", e.prod) ||
+		got[1] != fmt.Sprintf("restore-from %d %d %s", e.dev, e.prod, short(r.snap)) {
+		t.Fatalf("calls = %v", got)
+	}
+
+	e2 := newDevEnv(t)
+	fresh = e2.snapAt(10*time.Minute, filesapi.SnapshotScheduled)
+	r = e2.wait(e2.queueAs("create", nil))
+	if r.err != nil || r.snap != fresh || e2.files.count("create") != 0 {
+		t.Fatalf("create: done = %+v, calls = %v", r, e2.files.callLog())
 	}
 }

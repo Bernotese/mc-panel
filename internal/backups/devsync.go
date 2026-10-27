@@ -130,10 +130,12 @@ func (h *Handler) runDevSync(ctx context.Context, j *job, s DevSync) (snapshot s
 	return used.ID, nil
 }
 
-// devSnapshot returns the snapshot of the source a dev sync restores: the newest scheduled or
-// dev-sync snapshot that is newer than the dev's last sync and at most devReuseMax old, or
-// else a new dev-sync snapshot (runBackup on the source). Manual and pre-restore snapshots are
-// never used: they may hold a state the operator did not want to keep.
+// devSnapshot returns the snapshot of the source a dev sync restores: for a scheduled sync or
+// the first one of a new dev, the newest scheduled or dev-sync snapshot that is newer than the
+// dev's last sync and at most devReuseMax old; else (and always for a manual "Sync now", which
+// wants the source's current state) a new dev-sync snapshot (runBackup on the source). Manual
+// and pre-restore snapshots are never used: they may hold a state the operator did not want to
+// keep.
 func (h *Handler) devSnapshot(ctx context.Context, j *job, s DevSync) (filesapi.Snapshot, error) {
 	dev, err := h.devOf(ctx, s)
 	if errors.Is(err, errNotDevOf) && h.serverGone(ctx, s.DevID) {
@@ -141,6 +143,9 @@ func (h *Handler) devSnapshot(ctx context.Context, j *job, s DevSync) (filesapi.
 	}
 	if err != nil {
 		return filesapi.Snapshot{}, err
+	}
+	if s.Trigger == triggerManual {
+		return h.newDevSnapshot(ctx, j, s)
 	}
 	list, err := h.files.Snapshots(ctx, s.SourceID)
 	if err != nil {
@@ -164,6 +169,11 @@ func (h *Handler) devSnapshot(ctx context.Context, j *job, s DevSync) (filesapi.
 	if best != nil {
 		return *best, nil
 	}
+	return h.newDevSnapshot(ctx, j, s)
+}
+
+// newDevSnapshot takes a new dev-sync snapshot of the source.
+func (h *Handler) newDevSnapshot(ctx context.Context, j *job, s DevSync) (filesapi.Snapshot, error) {
 	snap, err := h.runBackup(ctx, j, s.SourceID, filesapi.SnapshotDevSync, "")
 	if err != nil {
 		return filesapi.Snapshot{}, err
