@@ -37,7 +37,7 @@ func (s *Service) DownloadBackup(ctx context.Context, id int64, sid string, star
 		return err
 	}
 	defer releaseZip()
-	return s.dump(ctx, id, sn.ID, func(r io.Reader) error {
+	return s.dump(ctx, id, sn.ID, false, func(r io.Reader) error {
 		return tarToZip(ctx, r, w, s.cfg.Limits, start)
 	})
 }
