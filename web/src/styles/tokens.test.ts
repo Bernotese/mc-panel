@@ -36,6 +36,10 @@ const TEXT_PAIRS: [string, string, number][] = [
   ['status-offline', 'background', 4.5],
   ['status-starting', 'background', 4.5],
   ['status-error', 'background', 4.5],
+  ['status-dev', 'background', 4.5],
+  ['status-dev', 'card', 4.5],
+  ['status-dev', 'sidebar', 4.5],
+  ['status-dev', 'accent', 4.5],
   ['console-fg', 'console-bg', 4.5],
   ['ring', 'background', 3],
 ]

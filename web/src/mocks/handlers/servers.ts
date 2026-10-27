@@ -15,6 +15,7 @@ import { ALL_PERMISSIONS } from '@/api/types'
 import { javaFor } from '@/features/servers/java'
 import { db, emptyPlayers, nextId, recordAudit, resolveProperties, runningStatus, stoppedStatus, type MockServer } from '../db'
 import { restoreActive } from './backups'
+import { DEV_PREFIX, devOf, devSummary, settleDev } from './dev-model'
 import { API, apiError, guard, idParam, noContent, op, readJson, serverPermissions, type MockOperation } from './util'
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/
@@ -46,17 +47,17 @@ function recommendedMemoryMiB(type: InstanceType, hostMiB: number, allocatedMiB:
   return Math.min(Math.max(Math.min(base, half - (half % 256)), 1024), maxMemoryMiB(hostMiB))
 }
 
-function memoryLimits(): ServerMemoryLimits {
+export function memoryLimits(): ServerMemoryLimits {
   const allocated = db.servers.reduce((sum, s) => sum + (s.instance?.memory_mib ?? 0), 0)
   const recommended = Object.fromEntries(TYPES.map((t) => [t, recommendedMemoryMiB(t, MOCK_HOST_MIB, allocated)])) as ServerMemoryLimits['recommended_mib']
   return { min_mib: 1024, max_mib: maxMemoryMiB(MOCK_HOST_MIB), step_mib: 256, host_total_mib: MOCK_HOST_MIB, allocated_mib: allocated, recommended_mib: recommended }
 }
 
-function validMemory(m: unknown): m is number {
+export function validMemory(m: unknown): m is number {
   return typeof m === 'number' && Number.isInteger(m) && m >= 1024 && m <= maxMemoryMiB(MOCK_HOST_MIB) && m % 256 === 0
 }
 
-const MEMORY_MESSAGE = `memory_mib: must be 1024..${maxMemoryMiB(MOCK_HOST_MIB)} in steps of 256 on this host`
+export const MEMORY_MESSAGE = `memory_mib: must be 1024..${maxMemoryMiB(MOCK_HOST_MIB)} in steps of 256 on this host`
 
 /** Like filesapi.ValidTimezone: an exact IANA name the browser lists (or UTC), never an offset. */
 function validTimezone(tz: unknown): tz is string {
@@ -68,8 +69,9 @@ function settingsBody(): ServerSettings {
   return { ...db.serverSettings, unknown_containers: [] }
 }
 
-/** A new container comes up between two reads: "creating" becomes "running" on the next GET. */
+/** A new container comes up between two reads: "creating" becomes "running" on the next GET; a dev's sync ends. */
 function settle(s: MockServer): void {
+  settleDev(s)
   if (s.status.state === 'creating' && s.instance) {
     s.status = runningStatus(s.instance.memory_mib, Date.now())
     s.runningRevision = s.revision
@@ -154,7 +156,7 @@ function bumpRevision(s: MockServer): void {
  * Like the panel: only admins get the raw last_error, other users see the state only; the seed
  * only goes to admins and users with server.files.
  */
-function toServer(s: MockServer, permissions: Permission[], admin = true): Server {
+export function toServer(s: MockServer, permissions: Permission[], admin = true): Server {
   const base = db.serverSettings.base_domain
   let instance = s.instance
   if (instance && !admin && !permissions.includes('server.files')) {
@@ -171,7 +173,14 @@ function toServer(s: MockServer, permissions: Permission[], admin = true): Serve
     status: admin ? s.status : { ...s.status, last_error: '' },
     down_alerts: admin ? (db.monitoring.downAlerts[s.id] ?? true) : null,
     ...webFields(s, admin),
+    ...(s.dev ? { dev: devSummary(s.dev) } : {}),
+    ...withDevId(s.id),
   }
+}
+
+function withDevId(id: number): Pick<Server, 'dev_id'> {
+  const dev = devOf(id)
+  return dev ? { dev_id: dev.id } : {}
 }
 
 export const serverOperations: MockOperation[] = [
@@ -201,6 +210,7 @@ export const serverOperations: MockOperation[] = [
       if (!db.serverSettings.base_domain) return apiError(409, 'base_domain_missing', 'set a base domain in the server settings first')
       const name = body.name ?? ''
       if (!SERVER_NAME.test(name)) return apiError(400, 'validation_failed', 'name must match ^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$')
+      if (name.startsWith(DEV_PREFIX)) return apiError(400, 'validation_failed', 'names starting with dev- are reserved for dev instances')
       if (body.eula_accepted !== true) return apiError(400, 'validation_failed', 'eula_accepted must be true')
       if (!body.type || !TYPES.includes(body.type)) return apiError(400, 'validation_failed', 'type: unknown type')
       if (!validMemory(body.memory_mib)) return apiError(400, 'validation_failed', MEMORY_MESSAGE)
@@ -330,6 +340,10 @@ export const serverOperations: MockOperation[] = [
       if (!server.instance) return apiError(409, 'conflict', 'server is not configured (no instance)')
       const body = await readJson<UpdateServerRequest>(request)
       if (!body) return apiError(400, 'bad_request', 'invalid JSON body')
+      // A dev takes everything but its memory from its source at every sync.
+      if (server.dev && Object.keys(body).some((k) => k !== 'memory_mib')) {
+        return apiError(409, 'dev_managed', 'a dev instance only accepts memory_mib; everything else follows its source')
+      }
       if (body.memory_mib !== undefined && !validMemory(body.memory_mib)) {
         return apiError(400, 'validation_failed', MEMORY_MESSAGE)
       }
@@ -377,6 +391,7 @@ export const serverOperations: MockOperation[] = [
       const server = db.servers.find((s) => s.id === id)
       if (!server) return apiError(404, 'not_found', 'server not found')
       if (restoreActive(id)) return apiError(409, 'conflict', 'a file or backup job is running for this server; try again when it is done')
+      if (devOf(id)) return apiError(409, 'dev_exists', 'delete the dev instance of this server first')
       db.servers = db.servers.filter((s) => s.id !== id)
       for (const [userId, grants] of db.grants) db.grants.set(userId, grants.filter((gr) => gr.server_id !== id))
       const details: Record<string, unknown> = { name: server.name }
@@ -386,6 +401,7 @@ export const serverOperations: MockOperation[] = [
         details.backups_purged = true
       }
       recordAudit(g.user, 'server.delete', `server:${server.id}`, 'success', details)
+      if (server.dev) recordAudit(g.user, 'dev.delete', `server:${server.id}`, 'success', { name: server.name })
       return noContent()
     }),
   ),
@@ -403,6 +419,8 @@ export const serverOperations: MockOperation[] = [
       if (!body?.action || !ACTIONS.includes(body.action)) return apiError(400, 'validation_failed', 'action must be start, stop or restart')
       if (!server.instance) return apiError(409, 'conflict', 'server is not configured (no instance)')
       settle(server)
+      // A dev that is stopped by hand sleeps (its waker wakes it); a start wakes it.
+      if (server.dev) server.dev.sleeping = body.action === 'stop'
       if (body.action === 'stop') {
         server.status = stoppedStatus()
       } else if (body.action === 'start' && server.status.state === 'running') {

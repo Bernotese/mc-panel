@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import type { InstanceConfig, Server } from '@/api/types'
 import { Section } from '@/components/section'
+import { useMe } from '@/features/auth/me'
+import { CreateDevSection } from '@/features/dev/create-dev-section'
 import { OnlinePlayersCard } from '@/features/players/online-players-card'
 import { useFormat } from '@/lib/format'
 import { describeInstance, formatGiB, javaLabel } from './format'
@@ -10,6 +12,7 @@ import { WebMapLink } from './web-map-link'
 export function ServerOverview({ server, instance }: { server: Server; instance: InstanceConfig; extracting?: boolean }) {
   const { t } = useTranslation()
   const fmt = useFormat()
+  const isAdmin = useMe()?.role === 'admin'
   const { status } = server
   const running = status.state === 'running'
   return (
@@ -42,6 +45,7 @@ export function ServerOverview({ server, instance }: { server: Server; instance:
         </dl>
       </Section>
       <OnlinePlayersCard serverId={server.id} />
+      <CreateDevSection server={server} isAdmin={isAdmin} />
       {!server.permissions.includes('server.power') ? <p className="text-muted-foreground text-sm xl:col-span-2">{t('servers.no_power')}</p> : null}
     </div>
   )

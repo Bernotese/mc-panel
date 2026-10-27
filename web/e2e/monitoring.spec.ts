@@ -7,7 +7,7 @@ test('admin sees host and server values on the dashboard and explores the monito
   await expect(host.getByText(/GiB frei von/)).toBeVisible()
   await expect(page.getByRole('article', { name: 'modded' }).getByText('Server down')).toBeVisible()
 
-  const survival = page.getByRole('article', { name: 'survival' })
+  const survival = page.getByRole('article', { name: 'survival', exact: true })
   await expect(survival.getByTestId('server-metrics')).toBeVisible()
   await survival.getByRole('link', { name: 'survival', exact: true }).click()
   await openServerSection(page, 'survival', 'Monitoring')
@@ -45,6 +45,6 @@ test('admin changes an alert threshold with sudo', async ({ page }) => {
 
 test('a user without the admin role sees server values but no host card', async ({ page }) => {
   await signIn(page, 'alice', false)
-  await expect(page.getByRole('article', { name: 'survival' }).getByTestId('server-metrics')).toBeVisible()
+  await expect(page.getByRole('article', { name: 'survival', exact: true }).getByTestId('server-metrics')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Host' })).toHaveCount(0)
 })

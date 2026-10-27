@@ -65,14 +65,14 @@ describe('CreateServerPage', () => {
     expect(screen.getByText('Bitte korrigiere die markierten Felder.')).toBeInTheDocument()
     expect(screen.getByText('Ohne Zustimmung zur EULA kann kein Server angelegt werden.')).toBeInTheDocument()
     await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(db.servers).toHaveLength(4)
+    expect(db.servers).toHaveLength(5)
     expect(onCreated).not.toHaveBeenCalled()
   })
 
   it('suggests memory per type within the host limits and warns about overcommitting', async () => {
     const user = userEvent.setup()
     await renderWithProviders(<CreateServerPage onCreated={vi.fn()} />, { me: loginAs('admin') })
-    // mock host: 26 GiB RAM, limit 20 GiB, 10 GiB given to the seeded servers
+    // mock host: 26 GiB RAM, limit 20 GiB, 12 GiB given to the seeded servers
     expect(await screen.findByText(/Der Host hat 26 GiB RAM/)).toBeInTheDocument()
     expect(screen.getByText('Empfohlen: 4 GiB')).toBeInTheDocument()
     const memory = screen.getByRole('spinbutton', { name: 'Arbeitsspeicher (GiB)' })
@@ -83,7 +83,7 @@ describe('CreateServerPage', () => {
 
     await user.clear(memory)
     await user.type(memory, '20')
-    expect(screen.getByRole('status')).toHaveTextContent('Alle Server zusammen hätten 30 GiB, der Host hat 26 GiB RAM.')
+    expect(screen.getByRole('status')).toHaveTextContent('Alle Server zusammen hätten 32 GiB, der Host hat 26 GiB RAM.')
     // a changed value stays when the type changes
     await user.click(screen.getByRole('radio', { name: 'Paper' }))
     expect(memory).toHaveValue(20)

@@ -56,7 +56,7 @@ export function isJobActive(data: BackupJobResponse | undefined): boolean {
 }
 
 export function kindKey(kind: BackupKind): string {
-  return `backups.kind.${kind === 'pre-restore' ? 'pre_restore' : kind}`
+  return `backups.kind.${kind.replace('-', '_')}`
 }
 
 export function stepKey(step: BackupJobStep): string {

@@ -8,6 +8,7 @@ import { Section } from '@/components/section'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useMe } from '@/features/auth/me'
+import { DevOpsSection } from '@/features/dev/dev-ops-section'
 import { errorMessage } from '@/lib/error-message'
 import { ONLINE_POLL_MS, onlinePlayersQueryOptions, playerListsQueryOptions } from './api'
 import { BanDialog } from './ban-dialog'
@@ -134,6 +135,8 @@ export function PlayersTab({ server }: { server: Server }) {
 
       <Section title={t('players.online.title')}>{onlineList()}</Section>
 
+      {server.dev ? <DevOpsSection server={server} /> : null}
+
       <div className="grid gap-6 xl:grid-cols-2">
         <Section title={t('players.whitelist.title')}>
           <div className="space-y-3">
@@ -175,7 +178,7 @@ export function PlayersTab({ server }: { server: Server }) {
           </div>
         </Section>
 
-        <Section title={t('players.ops.title')}>
+        <Section title={t('players.ops.title')} description={server.dev ? t('dev.ops.ops_json_hint', { source: server.dev.source_name }) : undefined}>
           <div className="space-y-3">
             {fileError('ops.json')}
             <NameForm label={t('players.ops.add_label')} disabled={locked} onAdd={(name) => action.mutateAsync({ action: 'op', name })} />

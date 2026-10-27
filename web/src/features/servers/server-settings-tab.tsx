@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import type { InstanceConfig, Server, ServerState } from '@/api/types'
 import { useMe } from '@/features/auth/me'
+import { DevSettings } from '@/features/dev/dev-settings-section'
 import { serverKey, serversKey, updateServer } from './api'
 import { DeleteServerSection } from './delete-server-section'
 import { formFromInstance, type ServerFormResult } from './form-model'
@@ -34,6 +35,16 @@ export function ServerSettingsTab({ server, instance }: { server: Server; instan
       toast.success(updated.status.restart_required ? t('servers.settings.saved_restart') : t('servers.settings.saved'))
     },
   })
+
+  if (server.dev) {
+    // A dev takes its spec from its source at every sync: only its own settings, the memory and deleting it remain.
+    return (
+      <div className="flex flex-col gap-6">
+        <DevSettings server={server} />
+        <DeleteServerSection server={server} />
+      </div>
+    )
+  }
 
   return (
     <div className="@container/server-form flex flex-col gap-6">
