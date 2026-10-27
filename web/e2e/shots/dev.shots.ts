@@ -2,6 +2,8 @@ import { test } from '../test'
 import { shoot, signInMock } from './shoot'
 
 test('dev instances: dashboard, banner, settings, dev ops, create', async ({ page }) => {
+  // Seven pages, four shots each: more than the default 30 s.
+  test.setTimeout(120_000)
   await signInMock(page)
   await page.getByRole('article', { name: 'dev-survival', exact: true }).waitFor()
   await shoot(page, 'dev-dashboard')
@@ -24,11 +26,14 @@ test('dev instances: dashboard, banner, settings, dev ops, create', async ({ pag
   await page.getByText(/Sync pausiert seit/).waitFor()
   await shoot(page, 'dev-paused')
 
+  // Switching servers keeps the open section: go to the overview explicitly.
   await tree.getByRole('link', { name: 'survival', exact: true }).click()
-  await page.getByRole('link', { name: 'dev-survival', exact: true }).last().waitFor()
+  await tree.getByRole('list', { name: 'Bereiche von survival' }).getByRole('link', { name: 'Übersicht' }).click()
+  await page.getByRole('main').getByRole('link', { name: 'dev-survival', exact: true }).waitFor()
   await shoot(page, 'dev-prod-overview')
 
   await tree.getByRole('link', { name: 'modded', exact: true }).click()
+  await tree.getByRole('list', { name: 'Bereiche von modded' }).getByRole('link', { name: 'Übersicht' }).click()
   await page.getByRole('button', { name: 'dev-modded anlegen' }).waitFor()
   await shoot(page, 'dev-create')
 })
