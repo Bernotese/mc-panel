@@ -6,11 +6,13 @@ import type { OverviewServer, Server, ServerState } from '@/api/types'
 import { Sparkline } from '@/components/charts/sparkline'
 import { PingBars } from '@/components/ping-bars'
 import { PixelIcon } from '@/components/pixel-icon'
+import { DevBadge } from '@/features/dev/dev-badge'
+import { useSyncWhen } from '@/features/dev/use-sync-when'
 import { alertKey, formatDecimal, reachability } from '@/features/monitoring/model'
 import { AddressLine } from '@/features/servers/address-line'
 import { describeInstance, formatCpu, formatGiB } from '@/features/servers/format'
 import { PowerButtons } from '@/features/servers/power-buttons'
-import { StatusBadge } from '@/features/servers/status-badge'
+import { ServerStatusBadge } from '@/features/servers/status-badge'
 import { useFormat } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -35,6 +37,7 @@ function Fact({ label, children, className }: { label?: string; children: ReactN
 export function ServerRow({ server, metrics }: { server: Server; metrics?: OverviewServer }) {
   const { t } = useTranslation()
   const fmt = useFormat()
+  const syncWhen = useSyncWhen()
   const headingId = useId()
   const { instance, status } = server
   const canPower = server.permissions.includes('server.power')
@@ -64,7 +67,8 @@ export function ServerRow({ server, metrics }: { server: Server; metrics?: Overv
                 {server.name}
               </Link>
             </h2>
-            <StatusBadge state={status.state} />
+            {server.dev ? <DevBadge source={server.dev.source_name} /> : null}
+            <ServerStatusBadge server={server} />
             {instance ? <AddressLine address={server.address} /> : null}
             {metrics && instance ? (
               <span className="flex items-center gap-2 sm:ml-auto">
@@ -107,6 +111,15 @@ export function ServerRow({ server, metrics }: { server: Server; metrics?: Overv
               </Fact>
             ) : null}
             {status.restart_required ? <Fact className="text-mc-6">{t('servers.restart_required')}</Fact> : null}
+            {server.dev ? (
+              <Fact className="text-status-dev">
+                {server.dev.sync_paused
+                  ? t('dev.row.paused', { source: server.dev.source_name })
+                  : server.dev.next_sync_at !== null
+                    ? t('dev.row.next_sync', { source: server.dev.source_name, when: syncWhen(server.dev.next_sync_at) })
+                    : t('dev.row.copy_of', { source: server.dev.source_name })}
+              </Fact>
+            ) : null}
             {metrics?.alerts.map((kind) => (
               <Fact key={kind} className="text-destructive">
                 {t(alertKey(kind))}

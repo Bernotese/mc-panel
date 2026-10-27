@@ -8,6 +8,7 @@ import type {
   BackupSchedule,
   BackupSnapshot,
   Catalog,
+  DevSyncStatus,
   FileJob,
   InstalledJar,
   InstanceConfig,
@@ -127,6 +128,66 @@ export interface MockServer {
   /** The agent's answer for the route: pending until the next GET, like the reconcile after a change. */
   webState?: 'pending' | 'active' | 'error'
   webError?: string
+  /** Set only on a dev instance (dev instances spec §3.1): whether a server is a dev is decided by this alone. */
+  dev?: MockDev
+}
+
+/** The dev_instances row of a dev; its memory stays in instance.memory_mib, which a sync never overwrites. */
+export interface MockDev {
+  sourceId: number
+  syncPaused: boolean
+  pausedAt: number | null
+  syncTime: number // minutes after midnight in serverSettings.backup_timezone
+  idleMinutes: number
+  viewDistance: number
+  simulationDistance: number
+  nextSyncAt: number | null // null while paused
+  lastSyncAt: number | null
+  lastSyncStatus: DevSyncStatus | null
+  lastSyncError: string | null
+  /** When the queued or running sync started; the mock finishes it DEV_SYNC_MS later (handlers/dev-model.ts). */
+  syncSince: number | null
+  sleeping: boolean
+  ops: string[]
+}
+
+/** Offset of timeZone from UTC at the instant ms (east positive). */
+function zoneOffsetMs(ms: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  }).formatToParts(new Date(ms))
+  const get = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === type)?.value ?? 0)
+  return Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second')) - Math.floor(ms / 1000) * 1000
+}
+
+/** Next instant after now at `minutes` past midnight in timeZone, like backups.NextRun in daily mode (DST edges approximate). */
+export function nextDailyAt(minutes: number, timeZone: string, now: number): number {
+  const offset = zoneOffsetMs(now, timeZone)
+  const local = now + offset
+  const at = local - (((local % DAY) + DAY) % DAY) + minutes * MINUTE - offset
+  return at > now ? at : at + DAY
+}
+
+/** Like servers.ApplyDevOverrides: prod's spec with the dev's memory, distances and the fixed "[DEV] " MOTD prefix. */
+export function devInstanceConfig(prodName: string, prod: InstanceConfig, memoryMib: number, ov: { viewDistance: number; simulationDistance: number }): InstanceConfig {
+  const props = resolveProperties(prodName, prod.properties)
+  return {
+    ...prod,
+    memory_mib: memoryMib,
+    properties: {
+      ...props,
+      motd: [...`[DEV] ${props.motd}`].slice(0, 150).join(''),
+      view_distance: ov.viewDistance,
+      simulation_distance: ov.simulationDistance,
+    },
+  }
 }
 
 const MIB = 1024 * 1024
@@ -255,6 +316,8 @@ function seedBackups(now: number): Record<number, MockBackups> {
     snapshot(1, now - 8 * HOUR, 'scheduled'),
     snapshot(2, now - DAY - 3 * HOUR, 'manual', { note: 'vor Update auf 1.21.11' }),
     snapshot(3, now - DAY - 8 * HOUR, 'scheduled'),
+    // taken for dev-survival when no scheduled snapshot was fresh enough (dev instances spec §4.1)
+    snapshot(7, now - DAY - 20 * HOUR, 'dev-sync'),
     snapshot(4, now - 2 * DAY, 'pre-restore'),
     snapshot(5, now - 3 * DAY - 8 * HOUR, 'scheduled', { pinned: true, gib: 1.1 }),
     snapshot(6, now - 9 * DAY - 8 * HOUR, 'scheduled', { gib: 0.9 }),
@@ -537,6 +600,37 @@ function seedAudit(now: number): AuditEntry[] {
   })
 }
 
+/** dev-survival (V9): the sleeping dev of survival, synced last night at 05:00, with one dev op of its own. */
+function seedDev(now: number): MockServer {
+  const dev: MockDev = {
+    sourceId: 1,
+    syncPaused: false,
+    pausedAt: null,
+    syncTime: 300,
+    idleMinutes: 15,
+    viewDistance: 4,
+    simulationDistance: 3,
+    nextSyncAt: nextDailyAt(300, 'Europe/Berlin', now),
+    lastSyncAt: nextDailyAt(300, 'Europe/Berlin', now) - DAY + 3 * MINUTE,
+    lastSyncStatus: 'ok',
+    lastSyncError: null,
+    syncSince: null,
+    sleeping: true,
+    ops: ['Steve'],
+  }
+  const survival: InstanceConfig = { type: 'paper', version: '1.21.11', loader_version: null, modpack: null, java: 'java21', memory_mib: 4096, properties: resolveProperties('survival') }
+  return {
+    id: 5,
+    name: 'dev-survival',
+    instance: devInstanceConfig('survival', survival, 2048, dev),
+    status: stoppedStatus(),
+    revision: 1,
+    runningRevision: 1,
+    players: { ...emptyPlayers(), ops: [{ uuid: ALEX_UUID, name: 'Alex', level: 4 }], whitelist: [{ uuid: ALEX_UUID, name: 'Alex' }, { uuid: STEVE_UUID, name: 'Steve' }] },
+    dev,
+  }
+}
+
 function seed(now: number): MockDb {
   return {
     users: [
@@ -647,8 +741,9 @@ function seed(now: number): MockDb {
         runningRevision: 1,
         players: emptyPlayers(),
       },
+      seedDev(now),
     ],
-    files: { 1: mockTree(now, true), 2: mockTree(now, false) },
+    files: { 1: mockTree(now, true), 2: mockTree(now, false), 5: mockTree(now, false) },
     fileJobs: {},
     plugins: seedPlugins(now),
     pluginJobs: {},

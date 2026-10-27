@@ -165,6 +165,31 @@ describe('AppLayout', () => {
     expect(within(crumb).getByRole('link', { name: 'survival' })).toHaveAttribute('href', '/servers/1')
   })
 
+  it('lists a dev directly under its prod with a DEV badge, outside the link name', async () => {
+    await renderApp('/servers/5', loginAs('admin'))
+    const tree = await screen.findByRole('navigation', { name: 'Server' })
+    const devLink = await within(tree).findByRole('link', { name: 'dev-survival' })
+    expect(devLink).toHaveAttribute('aria-current', 'page')
+    expect(within(devLink).getByText('Dev')).toHaveAttribute('aria-hidden', 'true')
+    const nested = within(tree).getByRole('list', { name: 'Dev-Instanz von survival' })
+    expect(nested).toContainElement(devLink)
+    // nested inside the prod's entry, not at the top level
+    expect(within(tree).getByRole('link', { name: 'survival' }).closest('li')).toContainElement(nested)
+    // a dev has no backups area
+    const sections = within(tree).getByRole('list', { name: 'Bereiche von dev-survival' })
+    expect(within(sections).queryByRole('link', { name: 'Backups' })).not.toBeInTheDocument()
+    expect(within(sections).getByRole('link', { name: 'Spieler' })).toBeInTheDocument()
+  })
+
+  it('shows the prod and the DEV badge in the breadcrumb of a dev', async () => {
+    await renderApp('/servers/5/players', loginAs('admin'))
+    const crumb = await screen.findByRole('navigation', { name: 'Brotkrume' })
+    await waitFor(() => expect(crumb).toHaveTextContent('survival/dev-survivalDev/Spieler'))
+    expect(within(crumb).getByRole('link', { name: 'survival' })).toHaveAttribute('href', '/servers/1')
+    expect(within(crumb).getByRole('link', { name: 'dev-survival' })).toHaveAttribute('href', '/servers/5')
+    expect(within(crumb).getByTitle('Dev-Instanz: Kopie von survival')).toBeInTheDocument()
+  })
+
   it('shows a breadcrumb for other pages', async () => {
     await renderApp('/users/2/permissions', loginAs('admin'))
     const crumb = await screen.findByRole('navigation', { name: 'Brotkrume' })

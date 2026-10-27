@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { PixelIcon } from '@/components/pixel-icon'
 import { StatSlot } from '@/components/stat-slot'
 import { Button } from '@/components/ui/button'
+import { DevBadge } from '@/features/dev/dev-badge'
+import { DevBanner } from '@/features/dev/dev-banner'
 import { monitoringOverviewQueryOptions, OVERVIEW_POLL_MS } from '@/features/monitoring/api'
 import { formatDecimal } from '@/features/monitoring/model'
 import { useFormat } from '@/lib/format'
@@ -11,7 +13,7 @@ import { AddressLine } from './address-line'
 import { formatCpu, formatGiB } from './format'
 import { PowerButtons } from './power-buttons'
 import { useServerContext } from './server-context'
-import { StatusBadge } from './status-badge'
+import { ServerStatusBadge } from './status-badge'
 import { usePower } from './use-power'
 import { WebMapLink } from './web-map-link'
 
@@ -54,7 +56,8 @@ export function ServerHeader() {
               <h1 id={id} className="pixel-heading text-xl break-all md:text-2xl">
                 {server.name}
               </h1>
-              <StatusBadge state={status.state} />
+              {server.dev ? <DevBadge source={server.dev.source_name} /> : null}
+              <ServerStatusBadge server={server} />
             </div>
             {instance ? (
               <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
@@ -70,6 +73,7 @@ export function ServerHeader() {
           </div>
         ) : null}
       </div>
+      {server.dev ? <DevBanner server={server} dev={server.dev} /> : null}
       {instance ? (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-6">
           <StatSlot label={t('servers.header.players')} value={players} />

@@ -7,7 +7,7 @@ test('primitives: buttons, badges, dialogs, tables, tabs, toasts', async ({ page
 
   // Server list: buttons, badges; stop confirmation = destructive button in a dialog.
   await shoot(page, 'primitives-dashboard')
-  const survival = page.getByRole('article', { name: 'survival' })
+  const survival = page.getByRole('article', { name: 'survival', exact: true })
   await survival.getByRole('button', { name: 'Stoppen' }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
   await shoot(page, 'primitives-confirm-dialog')

@@ -107,7 +107,8 @@ function hostValues(now: number): Omit<HostSnapshot, 'alerts'> {
 }
 
 function serverAlerts(s: MockServer): AlertKind[] {
-  return scenario(s) === 'down' && (db.monitoring.downAlerts[s.id] ?? true) ? ['server.down'] : []
+  // A dev raises no down alerts: it sleeps on purpose (dev instances spec §2).
+  return scenario(s) === 'down' && !s.dev && (db.monitoring.downAlerts[s.id] ?? true) ? ['server.down'] : []
 }
 
 function firing(now: number): FiringAlert[] {
