@@ -78,7 +78,7 @@ func (h *Handler) checkTimezone(ctx context.Context, now time.Time) {
 }
 
 // enqueueDue queues a scheduled run for every due schedule; a server with a queued or running
-// job is skipped and checked again on the next tick.
+// job is skipped and checked again on the next tick, a dev instance always.
 func (h *Handler) enqueueDue(ctx context.Context, now time.Time) {
 	if h.files == nil {
 		return // no file service: nothing can run (the schedules stay due)
@@ -92,6 +92,9 @@ func (h *Handler) enqueueDue(ctx context.Context, now time.Time) {
 		s, err := h.q.RbacGetServer(ctx, r.ServerID)
 		if err != nil {
 			continue // deleted meanwhile (the row goes with it)
+		}
+		if dev, err := h.isDev(ctx, r.ServerID); dev || err != nil {
+			continue // a dev instance has no backups (its sync is queued by devinst)
 		}
 		_, err = h.queue.add(context.Background(), jobSpec{
 			serverID: r.ServerID, name: s.Name, kind: kindBackup, trigger: triggerScheduled, run: h.runScheduled,

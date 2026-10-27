@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,18 +20,18 @@ import (
 
 // newExecRunner resolves the configured binary: an absolute path is taken as is (a missing
 // file shows up in the version check), a bare name is looked up in PATH (dev).
-func newExecRunner(bin string) (resticRunner, string) {
+func newExecRunner(bin string, log *slog.Logger) (resticRunner, string) {
 	switch {
 	case bin == "":
 		return nil, "restic is not configured (restic_binary)"
 	case filepath.IsAbs(bin):
-		return execRunner{bin: bin}, ""
+		return execRunner{bin: bin, log: log}, ""
 	}
 	p, err := exec.LookPath(bin)
 	if err != nil {
 		return nil, "restic was not found in PATH"
 	}
-	return execRunner{bin: p}, ""
+	return execRunner{bin: p, log: log}, ""
 }
 
 // InitBackups checks the restic binary once (spec 4 §3.2: `restic version`, at most

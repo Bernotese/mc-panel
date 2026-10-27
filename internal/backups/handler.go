@@ -195,7 +195,7 @@ type server struct {
 }
 
 // loadServer returns the server of the {id} path parameter; it writes 404 for malformed ids
-// and unknown servers.
+// and unknown servers and 409 dev_managed for a dev instance (every backup route uses it).
 func (h *Handler) loadServer(w http.ResponseWriter, r *http.Request) (server, bool) {
 	ctx := r.Context()
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -210,6 +210,9 @@ func (h *Handler) loadServer(w http.ResponseWriter, r *http.Request) (server, bo
 	}
 	if err != nil {
 		httpx.Internal(w, r, err)
+		return server{}, false
+	}
+	if h.devManaged(w, r, id) {
 		return server{}, false
 	}
 	_, err = h.q.ServersGetInstance(ctx, id)
@@ -256,8 +259,11 @@ func (h *Handler) record(ctx context.Context, action string, serverID int64, res
 	}
 }
 
+// ErrBackupRunning: the server already has a queued or running job (409 backup_running); also
+// the answer of QueueDevSync for a dev whose sync waits or runs.
+var ErrBackupRunning = errors.New("a backup job is already queued or running for this server")
+
 var (
-	errBackupRunning    = errors.New("a backup job is already queued or running for this server")
 	errShuttingDown     = errors.New("the panel is shutting down")
 	errNoInstance       = errors.New("the server has no instance yet")
 	errSnapshotNotFound = errors.New("snapshot not found")
@@ -272,8 +278,8 @@ var (
 // classify maps an error to its API answer; ok is false for an internal error.
 func classify(err error) (status int, code, msg string, ok bool) {
 	switch {
-	case errors.Is(err, errBackupRunning):
-		return http.StatusConflict, httpx.CodeBackupRunning, errBackupRunning.Error(), true
+	case errors.Is(err, ErrBackupRunning):
+		return http.StatusConflict, httpx.CodeBackupRunning, ErrBackupRunning.Error(), true
 	case errors.Is(err, filesapi.ErrBusy):
 		// same code as a panel job (V3 knows no other 409 for pin), but a message that says why
 		return http.StatusConflict, httpx.CodeBackupRunning, errFilesBusy.Error(), true
@@ -297,7 +303,7 @@ func classify(err error) (status int, code, msg string, ok bool) {
 
 // rejected reports whether err refused a request (not audited) rather than a failed action.
 func rejected(err error) bool {
-	return errors.Is(err, errBackupRunning) || errors.Is(err, errNoInstance) || errors.Is(err, errSnapshotNotFound) ||
+	return errors.Is(err, ErrBackupRunning) || errors.Is(err, errNoInstance) || errors.Is(err, errSnapshotNotFound) ||
 		errors.Is(err, errTooManyDownloads) || errors.Is(err, filesapi.ErrBusy) || errors.Is(err, filesapi.ErrNotFound) ||
 		errors.Is(err, filesapi.ErrInvalid)
 }

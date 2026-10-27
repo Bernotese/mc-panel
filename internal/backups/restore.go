@@ -117,7 +117,7 @@ func (h *Handler) handleRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.queue.busy(srv.ID) {
-		h.writeError(w, r, errBackupRunning)
+		h.writeError(w, r, ErrBackupRunning)
 		return
 	}
 	s, err := h.findSnapshot(ctx, srv.ID, snap)
