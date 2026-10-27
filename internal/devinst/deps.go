@@ -2,10 +2,10 @@ package devinst
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/backups"
+	"github.com/Bernotese/mc-panel/internal/servers"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
 
@@ -27,15 +27,11 @@ type Syncer interface {
 
 // Errors of Servers.CreateDev and Syncer.QueueDevSync that map to their own API answers.
 // Validation errors (name too long, memory) wrap instancespec.ErrInvalid.
-// TODO(dev instances plan, Task 8 Step 4): bind them to servers.ErrServerNotFound,
-// servers.ErrDevExists, servers.ErrNoInstance, servers.ErrNameTaken,
-// servers.ErrBaseDomainMissing and backups.ErrBackupRunning once those are merged; until then
-// the fakes of the tests return these.
 var (
-	errServerNotFound    = errors.New("server not found")
-	errDevExists         = errors.New("the server already has a dev instance")
-	errNoInstance        = errors.New("the server has no instance yet")
-	errNameTaken         = errors.New("the name dev-<name> is taken by another server")
-	errBaseDomainMissing = errors.New("no base domain configured: set one in the server settings")
-	errSyncBusy          = errors.New("a sync, backup or restore of this server is already queued or running")
+	errServerNotFound    = servers.ErrServerNotFound
+	errDevExists         = servers.ErrDevExists
+	errNoInstance        = servers.ErrNoInstance
+	errNameTaken         = servers.ErrNameTaken
+	errBaseDomainMissing = servers.ErrBaseDomainMissing
+	errSyncBusy          = backups.ErrBackupRunning
 )

@@ -161,11 +161,22 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		// The per-server memory limit follows the host's installed memory (issue #79).
 		HostMemory: d.HostMemory,
 	})
+	// Dev instances (dev instances spec): the sync runs in the backup queue, the spec copy and
+	// the power state in servers; the waker endpoint is part of the same *agent.Client (a fake
+	// without it means no wake loop).
+	waker, _ := d.Instances.(agentapi.WakerClient)
+	devH := devinst.NewHandler(devinst.Deps{
+		DB: db, Clock: d.Clock, Audit: auditRec, Notifier: disp, Servers: serversH, Syncer: backupsH,
+		ServerView: func(ctx context.Context, id int64) (any, error) { return serversH.DevView(ctx, id) },
+		Waker:      waker, Console: d.Console, Gate: servers.AnyGate(backupsH, filesH),
+	})
 	// Monitoring reads the agent status, pings through mc-router and asks RCON for TPS; the
-	// data gates keep down alerts quiet while an extract or a restore holds the server.
+	// data gates keep down alerts quiet while an extract or a restore holds the server. Every
+	// pass also feeds the sleep detection of dev instances.
 	monitoringH := monitoring.NewHandler(monitoring.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Notifier: disp, Instances: d.Instances, Console: d.Console,
 		Gate: servers.AnyGate(backupsH, filesH), PingAddr: cfg.MonitoringPingAddr, InstancesDir: cfg.InstancesDir,
+		OnPass: devH.OnPass,
 	})
 	pluginsH := plugins.NewHandler(plugins.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Files: d.Files, Instances: d.Instances,
@@ -176,8 +187,6 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		DB: db, Clock: d.Clock, Audit: auditRec, Agent: d.Console,
 		Access: console.NewAccess(authH.Sessions(), checker),
 	})
-	// Dev instances (dev instances spec); the skeleton is wired with its real deps in plan Task 8.
-	devH := devinst.NewHandler(devinst.Deps{})
 	auditH := auditapi.NewHandler(db, d.Clock, disp)
 	defenseH := defense.NewHandler(svc)
 	notifyH := notify.NewHandler(notify.HandlerDeps{
@@ -231,7 +240,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 
 	run := func(ctx context.Context) {
 		var wg sync.WaitGroup
-		wg.Add(8)
+		wg.Add(9)
 		go func() { defer wg.Done(); disp.Run(ctx) }()
 		go func() { defer wg.Done(); auditH.Run(ctx, auditRec.LastWritten) }()
 		go func() { defer wg.Done(); svc.Run(ctx) }()
@@ -239,6 +248,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		go func() { defer wg.Done(); pluginsH.Run(ctx) }()
 		go func() { defer wg.Done(); backupsH.Run(ctx) }()
 		go func() { defer wg.Done(); monitoringH.Run(ctx) }()
+		go func() { defer wg.Done(); devH.Run(ctx) }()
 		go func() { defer wg.Done(); pruneSessionsLoop(ctx, authH.PruneSessions, sessionPruneInterval) }()
 		wg.Wait()
 	}

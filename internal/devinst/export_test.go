@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
+	"github.com/Bernotese/mc-panel/internal/servers"
 )
 
 // Sentinels the fakes return (deps.go).
@@ -16,8 +16,8 @@ var (
 	ErrBaseDomainMissing = errBaseDomainMissing
 	ErrSyncBusy          = errSyncBusy
 	// Validation errors of servers wrap instancespec.ErrInvalid.
-	ErrDevNameTooLong = fmt.Errorf("%w: the name of a dev instance would exceed 32 characters", instancespec.ErrInvalid)
-	ErrInvalid        = fmt.Errorf("%w: memory_mib: at most 1536 on this host", instancespec.ErrInvalid)
+	ErrDevNameTooLong = servers.ErrDevNameTooLong
+	ErrInvalid        = fmt.Errorf("%w: at most 1536 on this host", servers.ErrInvalidMemory)
 )
 
 // Tick runs one schedule tick (Run does it every minute).
