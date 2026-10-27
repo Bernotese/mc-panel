@@ -20,6 +20,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/config"
 	"github.com/Bernotese/mc-panel/internal/console"
 	"github.com/Bernotese/mc-panel/internal/defense"
+	"github.com/Bernotese/mc-panel/internal/devinst"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/hostinfo"
 	"github.com/Bernotese/mc-panel/internal/httpx"
@@ -175,6 +176,8 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		DB: db, Clock: d.Clock, Audit: auditRec, Agent: d.Console,
 		Access: console.NewAccess(authH.Sessions(), checker),
 	})
+	// Dev instances (dev instances spec); the skeleton is wired with its real deps in plan Task 8.
+	devH := devinst.NewHandler(devinst.Deps{})
 	auditH := auditapi.NewHandler(db, d.Clock, disp)
 	defenseH := defense.NewHandler(svc)
 	notifyH := notify.NewHandler(notify.HandlerDeps{
@@ -220,6 +223,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		filesH.Routes(api)
 		pluginsH.Routes(api)
 		backupsH.Routes(api)
+		devH.Routes(api)
 		monitoringH.Routes(api)
 		auditH.Routes(api)
 	})
