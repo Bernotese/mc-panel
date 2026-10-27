@@ -13,6 +13,9 @@ const (
 	kindBackup  = "backup"
 	kindRestore = "restore"
 	kindDelete  = "delete"
+	// kindDevSync is the sync of a dev instance (devsync.go), keyed by the dev; it never shows
+	// up in the API (the backup routes refuse a dev).
+	kindDevSync = "dev_sync"
 
 	triggerManual    = "manual"
 	triggerScheduled = "scheduled"
@@ -31,6 +34,9 @@ const (
 	stepPreRestore = "pre_restore"
 	stepRestoring  = "restoring"
 	stepDeleting   = "deleting"
+	stepSnapshot   = "snapshot" // dev sync: pick or take the snapshot of the source
+	stepApplying   = "applying" // dev sync: the source's spec onto the dev
+	stepForget     = "forget"   // dev sync: older dev-sync snapshots of the source
 	stepDone       = "done"
 
 	codeRcon        = "rcon_unavailable"
