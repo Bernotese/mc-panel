@@ -173,8 +173,10 @@ func TestPatchPauseAndOverrides(t *testing.T) {
 	if r := e.row(devID); r.PropertyOverrides != `{"view_distance":6,"simulation_distance":3}` {
 		t.Fatalf("overrides %s", r.PropertyOverrides)
 	}
-	if e.servers.appliedCount() != 1 {
-		t.Fatalf("ApplyDevSpec called %d times, want 1", e.servers.appliedCount())
+	// Only the overrides change: prod's current spec is not copied onto last night's data.
+	if e.servers.overridesCount() != 1 || e.servers.appliedCount() != 0 {
+		t.Fatalf("UpdateDevOverrides %d times, ApplyDevSpec %d times; want 1 and 0",
+			e.servers.overridesCount(), e.servers.appliedCount())
 	}
 	a := e.entries(audit.ActionDevSettingsUpdate)
 	if len(a) != 1 || a[0].Details["sync_paused"] != any(true) || a[0].Details["view_distance"] != 6 {
@@ -187,8 +189,8 @@ func TestPatchPauseAndOverrides(t *testing.T) {
 	if d.SyncPaused || d.PausedAt != nil || d.NextSyncAt == nil || *d.NextSyncAt != fiveAM.UnixMilli() || d.IdleMinutes != 30 {
 		t.Fatalf("after resume %+v", d)
 	}
-	if e.servers.appliedCount() != 1 {
-		t.Fatalf("ApplyDevSpec called again for a change without overrides")
+	if e.servers.overridesCount() != 1 {
+		t.Fatalf("UpdateDevOverrides called again for a change without overrides")
 	}
 
 	// A new sync time moves the next slot (06:30 Berlin = 04:30 UTC).
@@ -227,15 +229,15 @@ func TestPatchValidation(t *testing.T) {
 			t.Errorf("%v: %d %s", body, rec.Code, rec.Body)
 		}
 	}
-	if e.servers.appliedCount() != 0 || len(e.rec.Entries) != 0 {
+	if e.servers.overridesCount() != 0 || e.servers.appliedCount() != 0 || len(e.rec.Entries) != 0 {
 		t.Fatal("an invalid patch had an effect")
 	}
 }
 
-func TestPatchApplyFails(t *testing.T) {
+func TestPatchOverridesFail(t *testing.T) {
 	e := newEnv(t)
 	_, devID := e.dev("survival")
-	e.servers.errs["apply"] = errors.New("boom")
+	e.servers.errs["overrides"] = errors.New("boom")
 	e.must(500, "PATCH", path(devID, ""), map[string]any{"simulation_distance": 5}, e.admin())
 	if a := e.entries(audit.ActionDevSettingsUpdate); len(a) != 1 || a[0].Result != audit.ResultFailure {
 		t.Fatalf("entries %+v", a)

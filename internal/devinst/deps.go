@@ -14,8 +14,11 @@ import (
 type Servers interface {
 	// CreateDev writes server, instance and dev_instances row of the dev of prodID.
 	CreateDev(ctx context.Context, prodID int64, memoryMiB *int) (store.Server, error)
-	// ApplyDevSpec copies prod's spec onto the dev and applies the dev overrides.
+	// ApplyDevSpec copies prod's spec onto the dev and applies the dev overrides (after a sync).
 	ApplyDevSpec(ctx context.Context, devID int64) error
+	// UpdateDevOverrides re-applies the stored overrides to the dev's own spec and copies
+	// nothing from prod (a settings change between syncs).
+	UpdateDevOverrides(ctx context.Context, devID int64) error
 	// SetDevSleeping puts the dev to sleep (desired stopped) or wakes it (desired running).
 	SetDevSleeping(ctx context.Context, devID int64, sleeping bool, now time.Time) error
 }

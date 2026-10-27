@@ -246,10 +246,11 @@ type fakeServers struct {
 	clk *clock.Fake
 
 	mu       sync.Mutex
-	errs     map[string]error // by method: create, apply, sleep
+	errs     map[string]error // by method: create, apply, overrides, sleep
 	created  []int64          // prod ids
 	memory   []*int
 	applied  []int64
+	updated  []int64 // UpdateDevOverrides
 	sleeping []sleepCall
 }
 
@@ -289,6 +290,19 @@ func (f *fakeServers) ApplyDevSpec(_ context.Context, devID int64) error {
 	defer f.mu.Unlock()
 	f.applied = append(f.applied, devID)
 	return f.errs["apply"]
+}
+
+func (f *fakeServers) UpdateDevOverrides(_ context.Context, devID int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updated = append(f.updated, devID)
+	return f.errs["overrides"]
+}
+
+func (f *fakeServers) overridesCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.updated)
 }
 
 func (f *fakeServers) SetDevSleeping(ctx context.Context, devID int64, sleeping bool, now time.Time) error {
