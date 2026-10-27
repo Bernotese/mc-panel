@@ -79,6 +79,9 @@ type Config struct {
 	// WebAsk checks whether mcpanel-web serves fqdn; nil means wget against its ask server,
 	// run inside mcpanel-web through Docker exec. Tests set it.
 	WebAsk func(ctx context.Context, fqdn string) (bool, error)
+	// AgentBinary is the absolute path of the running agent binary, bind-mounted into
+	// mcpanel-waker; "" = no waker. AgentVersion is part of the waker's template hash.
+	AgentBinary, AgentVersion string
 }
 
 // EgressFilter is the firewall part that filters the containers' new connections
@@ -146,6 +149,8 @@ type Manager struct {
 	webStatus  map[int64]webRouteState
 	webErr     string // last general apply error, logged on change
 
+	waker wakerState // mcpanel-waker and the sleeping dev routes (waker_manager.go)
+
 	mu        sync.Mutex
 	idle      *sync.Cond
 	active    int // running workers
@@ -181,6 +186,7 @@ func New(cfg Config) *Manager {
 		webAsk:        cfg.WebAsk,
 		webWake:       make(chan struct{}, 1),
 		webStatus:     map[int64]webRouteState{},
+		waker:         wakerState{binary: cfg.AgentBinary, version: cfg.AgentVersion},
 	}
 	if m.webAsk == nil {
 		m.webAsk = m.askWeb
@@ -522,7 +528,7 @@ func (m *Manager) refreshRouter(ctx context.Context) ([]docker.ContainerSummary,
 	if err != nil {
 		return nil, err
 	}
-	data, err := RenderRoutes(Routes(list))
+	data, err := RenderRoutes(RoutesWith(list, m.sleepingSet()))
 	if err != nil {
 		return nil, err
 	}

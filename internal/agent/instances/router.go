@@ -65,6 +65,33 @@ func Routes(containers []docker.ContainerSummary) map[string]string {
 	return routes
 }
 
+// RoutesWith is Routes with the sleeping dev instances (FQDN → server id, from PUT
+// /v1/waker) sent to the waker: an FQDN is redirected only if Routes sends it to the
+// container of exactly that id and the container is not running (a running container is
+// never hidden behind the waker, e.g. right after a wake). nil means no waker routes.
+func RoutesWith(containers []docker.ContainerSummary, sleeping map[string]int64) map[string]string {
+	routes := Routes(containers)
+	if len(sleeping) == 0 {
+		return routes
+	}
+	for _, c := range containers {
+		id, ok := managedID(c.Labels, c.Names...)
+		if !ok {
+			continue
+		}
+		fqdn := c.Labels[LabelFQDN]
+		if want, ok := sleeping[fqdn]; !ok || want != id || routes[fqdn] != ContainerName(id)+":"+strconv.Itoa(MinecraftPort) {
+			continue
+		}
+		switch c.State {
+		case "running", "restarting", "paused":
+			continue
+		}
+		routes[fqdn] = WakerAddress
+	}
+	return routes
+}
+
 // RenderRoutes returns the mc-router routes file. encoding/json sorts map keys,
 // so equal mappings always give equal bytes.
 func RenderRoutes(mappings map[string]string) ([]byte, error) {
