@@ -121,7 +121,7 @@ func TestCreateDev(t *testing.T) {
 	e, prodID := devEnv(t)
 	e.agent.takeCalls()
 	prodBefore, prodSrvBefore := instanceRow(t, e.db, prodID), serverRow(t, e, prodID)
-	e.clk.Set(time.Date(2026, 10, 10, 6, 0, 0, 0, time.UTC)) // after today's 05:00
+	e.clk.Set(time.Date(2026, 10, 10, 6, 0, 0, 0, time.UTC)) // after today's 05:00 in Berlin
 	s, err := e.h.CreateDev(context.Background(), prodID, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +138,11 @@ func TestCreateDev(t *testing.T) {
 		t.Fatalf("dev properties = %s", in.Properties)
 	}
 	d := devRow(t, e, s.ID)
-	wantNext := time.Date(2026, 10, 11, 5, 0, 0, 0, time.UTC).UnixMilli() // backup time zone UTC
+	berlin, err := time.LoadLocation("Europe/Berlin") // the default backup time zone
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantNext := time.Date(2026, 10, 11, 5, 0, 0, 0, berlin).UnixMilli()
 	if d.SourceID != prodID || d.Sleeping != 1 || d.SyncTime != 300 || d.IdleMinutes != 15 || d.SyncPaused != 0 ||
 		d.NextSyncAt.Int64 != wantNext || d.PropertyOverrides != `{"view_distance":4,"simulation_distance":3}` {
 		t.Fatalf("dev row = %+v (next want %d)", d, wantNext)
