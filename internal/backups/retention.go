@@ -18,7 +18,7 @@ func (h *Handler) runScheduled(ctx context.Context, j *job) (string, error) {
 	if err := h.q.BackupsStartRun(ctx, store.BackupsStartRunParams{LastRunAt: nullTime(started), ServerID: id}); err != nil {
 		return "", err
 	}
-	snap, err := h.runBackup(ctx, j, filesapi.SnapshotScheduled, "")
+	snap, err := h.runBackup(ctx, j, id, filesapi.SnapshotScheduled, "")
 	err = h.deletedOr(ctx, id, err)
 	hint := ""
 	if err == nil {

@@ -43,6 +43,18 @@ func setFilesErr(e *env, op string, err error) {
 	e.files.errs[op] = err
 }
 
+// polled waits until the panel polled the server's running service job twice more than now
+// (at least twice in all): its waitService has then read the logic clock after every Advance
+// before this call (its start, stall and limit times), however slow the runner is. A fixed
+// sleep is not enough under load: an Advance before waitService took its start time moves the
+// time limit (seen as "timed out waiting for job end" in CI), and two Advances without a poll
+// in between look like a stall.
+func (e *env) polled(id int64) {
+	e.t.Helper()
+	want := e.files.polls(id) + 2
+	eventually(e.t, "two polls of the service job", func() bool { return e.files.polls(id) >= want })
+}
+
 // A service job whose byte count does not change for 10 minutes (logic clock) is cancelled
 // and fails; save-on follows as in every failure path.
 func TestStalledBackupFails(t *testing.T) {
@@ -54,8 +66,9 @@ func TestStalledBackupFails(t *testing.T) {
 	setStall(e, true)
 	e.create(id, map[string]any{})
 	e.waitStep(id, "backing_up")
+	e.polled(id)
 	e.clk.Advance(9 * time.Minute)
-	time.Sleep(50 * time.Millisecond) // some polls: not yet stalled
+	e.polled(id) // not yet stalled
 	if j := e.job(id); j.State != "running" {
 		t.Fatalf("failed before 10 minutes without progress: %+v", j)
 	}
@@ -79,9 +92,10 @@ func TestProgressResetsStallWatchdog(t *testing.T) {
 	release := e.files.holdPlan("manual")
 	e.create(id, map[string]any{})
 	e.waitStep(id, "backing_up")
+	e.polled(id)
 	for range 3 {
 		e.clk.Advance(8 * time.Minute)
-		time.Sleep(30 * time.Millisecond) // polls see new bytes
+		e.polled(id) // polls see new bytes
 	}
 	if j := e.job(id); j.State != "running" {
 		t.Fatalf("a job with progress stalled: %+v", j)
@@ -102,8 +116,9 @@ func TestForgetTimeLimit(t *testing.T) {
 	setStall(e, true)
 	e.must(http.StatusAccepted, http.MethodDelete, bPath(id, "/"+snap), nil, e.sudoAdmin())
 	e.waitStep(id, "deleting")
+	e.polled(id)
 	e.clk.Advance(time.Hour)
-	time.Sleep(50 * time.Millisecond) // some polls: no stall watchdog for a forget
+	e.polled(id) // no stall watchdog for a forget
 	if j := e.job(id); j.State != "running" {
 		t.Fatalf("forget ended after an hour without bytes: %+v", j)
 	}
@@ -126,6 +141,7 @@ func TestStalledRestoreKeepsGateUntilEnd(t *testing.T) {
 	defer release()
 	e.restore(id, snap)
 	e.waitStep(id, "restoring")
+	e.polled(id) // the restore's waitService runs
 	setStall(e, true)
 	setFilesErr(e, "cancel", errors.New("the swap has begun")) // the cancel does not stop it
 	e.clk.Advance(10 * time.Minute)
@@ -565,9 +581,11 @@ func TestBackupMaxDuration(t *testing.T) {
 	defer release()
 	e.create(id, map[string]any{})
 	e.waitStep(id, "backing_up")
+	// The time limit runs from the start of waitService.
+	e.polled(id)
 	for range 29 { // 3 h 52 min with progress: no stall, below the limit
 		e.clk.Advance(8 * time.Minute)
-		time.Sleep(20 * time.Millisecond)
+		e.polled(id)
 	}
 	if j := e.job(id); j.State != "running" {
 		t.Fatalf("ended before the limit: %+v", j)

@@ -76,21 +76,42 @@ func (h *Handler) handleServerPower(w http.ResponseWriter, r *http.Request) {
 	if req.Action == agentapi.PowerStop {
 		desired = desiredStopped
 	}
-	n, err := h.q.ServersSetDesiredState(ctx, store.ServersSetDesiredStateParams{
-		DesiredState: desired, UpdatedAt: h.clock.Now().UnixMilli(), ServerID: s.ID,
-	})
-	if err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
-	if n == 0 { // deleted concurrently
+	if err := h.setDesired(ctx, s.ID, desired); errors.Is(err, ErrNoInstance) { // deleted concurrently
 		writeNotFound(w, r)
+		return
+	} else if err != nil {
+		httpx.Internal(w, r, err)
 		return
 	}
 	h.record(ctx, audit.ActionServerPower, serverTarget(s.ID), audit.ResultSuccess,
 		map[string]any{"action": string(req.Action), "name": s.Name})
 	h.Trigger()
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+}
+
+// setDesired stores a user's power wish. On a dev instance a stop is falling asleep (the waker
+// takes its address) and a start or restart wakes it without counting as a wake by the waker
+// (dev instances spec §2); both are written with the desired state.
+func (h *Handler) setDesired(ctx context.Context, id int64, desired string) error {
+	now := h.clock.Now()
+	return h.inTx(ctx, func(q *store.Queries) error {
+		d, err := q.DevGet(ctx, id)
+		switch {
+		case err == nil && desired == desiredStopped:
+			return setDevState(ctx, q, id, desired, true, d.LastWakeAt, now)
+		case err == nil:
+			return setDevState(ctx, q, id, desired, false, sql.NullInt64{}, now)
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
+		n, err := q.ServersSetDesiredState(ctx, store.ServersSetDesiredStateParams{
+			DesiredState: desired, UpdatedAt: now.UnixMilli(), ServerID: id,
+		})
+		if err == nil && n == 0 {
+			return ErrNoInstance
+		}
+		return err
+	})
 }
 
 // restart applies a user's restart (spec §5.3); the caller holds the reconcile lock: a container in the current revision is

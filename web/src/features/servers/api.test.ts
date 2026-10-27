@@ -26,6 +26,7 @@ describe('servers api against the mock', () => {
       ['creative', 'stopped'],
       ['lobby', 'not_configured'],
       ['modded', 'stopped'],
+      ['dev-survival', 'stopped'],
     ])
     expect(servers[0].address).toBe('survival.mc.example.com')
     expect(servers[2].instance).toBeNull()

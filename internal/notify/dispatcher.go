@@ -49,7 +49,7 @@ func perUser(t EventType) bool {
 func operational(t EventType) bool {
 	s := string(t)
 	return strings.HasPrefix(s, "server.") || strings.HasPrefix(s, "host.") ||
-		t == EventBackupFailed || t == EventNewDeviceLogin
+		t == EventBackupFailed || t == EventDevSyncFailed || t == EventNewDeviceLogin
 }
 
 // DefaultBackoff are the delays between delivery attempts (1 attempt + 3 retries).

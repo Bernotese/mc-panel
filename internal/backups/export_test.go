@@ -52,3 +52,6 @@ func WaitFirstTick(h *Handler) bool {
 		return false
 	}
 }
+
+// Drop ends the server's job like a server delete does (queue.drop).
+func Drop(h *Handler, serverID int64) { h.queue.drop(serverID, 5*time.Second) }

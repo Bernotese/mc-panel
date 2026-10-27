@@ -91,7 +91,7 @@ func (h *Handler) handlePin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.queue.busy(srv.ID) {
-		h.writeError(w, r, errBackupRunning)
+		h.writeError(w, r, ErrBackupRunning)
 		return
 	}
 	s, err := h.files.PinBackup(ctx, srv.ID, snap, *req.Pinned)

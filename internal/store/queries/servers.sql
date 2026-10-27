@@ -62,3 +62,30 @@ RETURNING *;
 
 -- name: ServersBumpCurseForgeRevisions :exec
 UPDATE instances SET revision = revision + 1, updated_at = ? WHERE type = 'curseforge';
+
+-- name: ServersUpdateDevInstance :one
+-- Dev instances: copies a spec onto a dev's row and bumps its revision. The WHERE clause only
+-- matches a server that is a dev of the given source, so this query can never write prod.
+UPDATE instances
+SET type = sqlc.arg(type), version = sqlc.arg(version), loader_version = sqlc.arg(loader_version),
+    modpack = sqlc.arg(modpack), java = sqlc.arg(java), properties = sqlc.arg(properties),
+    revision = revision + 1, updated_at = sqlc.arg(updated_at)
+WHERE instances.server_id = sqlc.arg(server_id)
+  AND instances.server_id IN (SELECT d.server_id FROM dev_instances d WHERE d.source_id = sqlc.arg(source_id))
+RETURNING *;
+
+-- name: ServersUpdateDevMemory :one
+-- Dev instances: the only field of a dev an admin sets (PATCH /servers/{id}); everything else
+-- follows its source (ServersUpdateDevInstance). Only matches a dev.
+UPDATE instances SET memory_mib = sqlc.arg(memory_mib), revision = revision + 1, updated_at = sqlc.arg(updated_at)
+WHERE instances.server_id = sqlc.arg(server_id)
+  AND instances.server_id IN (SELECT d.server_id FROM dev_instances d)
+RETURNING *;
+
+-- name: ServersUpdateDevProperties :one
+-- Dev instances: replaces only the properties of a dev (its overrides changed) and bumps its
+-- revision; type, version, loader, modpack, java and memory stay. Only matches a dev.
+UPDATE instances SET properties = sqlc.arg(properties), revision = revision + 1, updated_at = sqlc.arg(updated_at)
+WHERE instances.server_id = sqlc.arg(server_id)
+  AND instances.server_id IN (SELECT d.server_id FROM dev_instances d)
+RETURNING *;

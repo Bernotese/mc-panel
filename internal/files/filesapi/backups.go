@@ -53,11 +53,13 @@ const (
 	SnapshotScheduled  SnapshotKind = "scheduled"
 	SnapshotManual     SnapshotKind = "manual"
 	SnapshotPreRestore SnapshotKind = "pre-restore"
+	// SnapshotDevSync is a snapshot a dev sync took of the dev's source (dev instances spec §4.1).
+	SnapshotDevSync SnapshotKind = "dev-sync"
 )
 
 func (k SnapshotKind) Valid() bool {
 	switch k {
-	case SnapshotScheduled, SnapshotManual, SnapshotPreRestore:
+	case SnapshotScheduled, SnapshotManual, SnapshotPreRestore, SnapshotDevSync:
 		return true
 	}
 	return false
@@ -95,6 +97,9 @@ type CreateBackupRequest struct {
 type SnapshotRequest struct {
 	ID       int64  `json:"id"`
 	Snapshot string `json:"snapshot"`
+	// SourceID names the repository the snapshot comes from when it is not ID's own: a dev
+	// sync restores a snapshot of the source into the dev (dev instances spec §4.2). 0 = ID.
+	SourceID int64 `json:"source_id,omitempty"`
 }
 
 // ForgetPolicy is the retention of the scheduled snapshots (restic forget --keep-*).
@@ -256,6 +261,7 @@ type BackupClient interface {
 	Snapshots(ctx context.Context, id int64) ([]Snapshot, error)
 	CreateBackup(ctx context.Context, req CreateBackupRequest) (Job, error)
 	RestoreBackup(ctx context.Context, id int64, snapshot string) (Job, error)
+	RestoreFrom(ctx context.Context, targetID, sourceID int64, snapshot string) (Job, error)
 	ForgetBackups(ctx context.Context, req ForgetRequest) (Job, error)
 	PinBackup(ctx context.Context, id int64, snapshot string, pinned bool) (Snapshot, error)
 	DownloadBackup(ctx context.Context, id int64, snapshot string) (Download, error)

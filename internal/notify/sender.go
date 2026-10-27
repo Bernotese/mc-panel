@@ -201,6 +201,7 @@ var defaultTitles = map[EventType]string{
 	Event2FAChanged:         "Two-factor authentication changed",
 	EventAuditChainBroken:   "Audit log chain is broken",
 	EventBackupFailed:       "Backup failed",
+	EventDevSyncFailed:      "Dev sync failed",
 	EventServerDown:         "Server down",
 	EventServerRecovered:    "Server back online",
 	EventServerCrashLoop:    "Crash loop",

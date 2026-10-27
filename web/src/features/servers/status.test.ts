@@ -53,6 +53,9 @@ describe('server status', () => {
     expect(pollInterval([server({}), server({ operation: 'creating', state: 'creating' })])).toBe(FAST_POLL_MS)
     // a published web port waits for the next reconcile
     expect(pollInterval([{ ...server({}), web_status: 'pending' }])).toBe(FAST_POLL_MS)
+    const dev = { source_id: 1, source_name: 'survival', sync_paused: false, next_sync_at: null, last_sync_at: null, last_sync_status: null, sleeping: true }
+    expect(pollInterval([{ ...server({}), dev: { ...dev, sync_pending: true } }])).toBe(FAST_POLL_MS)
+    expect(pollInterval([{ ...server({}), dev: { ...dev, sync_pending: false } }])).toBe(SLOW_POLL_MS)
   })
 
   it('allows only power actions that make sense in the current state', () => {

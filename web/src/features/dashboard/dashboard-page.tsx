@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/page-header'
 import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
 import { useMe } from '@/features/auth/me'
+import { withDevsAfterSources } from '@/features/dev/model'
 import { monitoringOverviewQueryOptions, OVERVIEW_POLL_MS } from '@/features/monitoring/api'
 import { HostCard } from '@/features/monitoring/host-card'
 import { serverSettingsQueryOptions, serversQueryOptions } from '@/features/servers/api'
@@ -41,7 +42,7 @@ export function DashboardPage() {
   } else {
     content = (
       <ul aria-label={t('dashboard.list_label')} className="space-y-2">
-        {servers.data.map((server) => (
+        {withDevsAfterSources(servers.data).map((server) => (
           <li key={server.id}>
             <ServerRow server={server} metrics={metricsById.get(server.id)} />
           </li>

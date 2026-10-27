@@ -413,7 +413,7 @@ interface MemoryFieldProps {
   onChange(text: string): void
 }
 
-function MemoryField({ id, text, error, limits, ownMiB, recommendedMiB, onChange }: MemoryFieldProps) {
+export function MemoryField({ id, text, error, limits, ownMiB, recommendedMiB, onChange }: MemoryFieldProps) {
   const { t } = useTranslation()
   const fmt = useFormat()
   const bounds: MemoryLimits = memoryLimitsFrom(limits)
