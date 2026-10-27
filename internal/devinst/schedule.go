@@ -56,16 +56,54 @@ func (h *Handler) isPending(devID int64) bool {
 	return st != nil && st.pending
 }
 
-// players is the player count of the last pass while devID runs (0 when it does not run or
-// the count is unknown).
-func (h *Handler) players(devID int64) int {
+// occupied reports whether players are or may be on devID: it runs with players, or with an
+// unknown count (failed ping), or no monitoring pass has arrived yet. Unknown is treated like
+// players online, so nobody is kicked without a warning.
+func (h *Handler) occupied(devID int64) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	st := h.devs[devID]
-	if st == nil || !st.running || st.players == nil {
-		return 0
+	if !h.passSeen {
+		return true
 	}
-	return *st.players
+	st := h.devs[devID]
+	if st == nil || !st.running {
+		return false
+	}
+	return st.players == nil || *st.players > 0
+}
+
+func (h *Handler) sawPass() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.passSeen
+}
+
+// claimManual claims a manual sync of devID unless one is pending (busy) or the last one
+// ended less than manualCooldown ago (wait > 0). prev is the cooldown mark to restore with
+// unclaimManual when the sync is refused after all.
+func (h *Handler) claimManual(devID int64, now time.Time) (ok bool, wait time.Duration, prev time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	st := h.state(devID)
+	if st.pending {
+		return false, 0, time.Time{}
+	}
+	if !st.lastManual.IsZero() {
+		if left := manualCooldown - now.Sub(st.lastManual); left > 0 {
+			return false, left, time.Time{}
+		}
+	}
+	prev = st.lastManual
+	st.pending, st.lastManual = true, now
+	return true, 0, prev
+}
+
+func (h *Handler) unclaimManual(devID int64, prev time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if st := h.devs[devID]; st != nil {
+		st.pending, st.lastManual = false, prev
+	}
 }
 
 // queueSync claims and queues a sync of devID now.
@@ -135,13 +173,15 @@ func (h *Handler) delay(ctx context.Context, d dev, trigger string) error {
 		return err
 	}
 	h.mu.Lock()
-	h.delayed = append(h.delayed, delayedSync{devID: d.row.ServerID, trigger: trigger, at: now.Add(warnDelay), ctx: ctx})
+	h.delayed = append(h.delayed, delayedSync{
+		devID: d.row.ServerID, trigger: trigger, at: now.Add(warnDelay), paused: d.row.SyncPaused != 0, ctx: ctx,
+	})
 	h.mu.Unlock()
 	return nil
 }
 
 // runDelayed queues the delayed syncs whose wait is over; one the queue refuses is recorded
-// as a failed sync.
+// as a failed sync. A dev deleted or paused during the wait drops its sync.
 func (h *Handler) runDelayed(ctx context.Context) {
 	now := h.clock.Now()
 	h.mu.Lock()
@@ -166,6 +206,10 @@ func (h *Handler) runDelayed(ctx context.Context) {
 			h.release(s.devID) // deleted meanwhile
 			continue
 		}
+		if err == nil && d.row.SyncPaused != 0 && !s.paused {
+			h.dropDelayed(s.ctx, d)
+			continue
+		}
 		if err == nil {
 			err = h.queueClaimed(s.ctx, d, s.trigger)
 		}
@@ -174,6 +218,30 @@ func (h *Handler) runDelayed(ctx context.Context) {
 			h.syncDone(s.ctx, s.devID, s.trigger, "", err, store.DevInstance{})
 		}
 	}
+}
+
+// dropDelayed ends the wait of a delayed sync without a sync (the dev was paused meanwhile).
+func (h *Handler) dropDelayed(ctx context.Context, d dev) {
+	id := d.row.ServerID
+	h.writeMu.Lock()
+	err := h.clearDeferred(ctx, id)
+	h.writeMu.Unlock()
+	if err != nil {
+		h.log.ErrorContext(ctx, "devinst: end the wait of a dropped sync", "server_id", id, "err", err)
+	}
+	h.release(id)
+	h.log.InfoContext(ctx, "devinst: sync dropped, the dev was paused during its wait", "server_id", id)
+}
+
+// clearDeferred clears deferred_since of devID and keeps next_sync_at; call with writeMu held.
+func (h *Handler) clearDeferred(ctx context.Context, devID int64) error {
+	row, err := h.q.DevGet(ctx, devID)
+	if err != nil || !row.DeferredSince.Valid {
+		return err
+	}
+	return h.q.DevSetDeferred(ctx, store.DevSetDeferredParams{
+		NextSyncAt: row.NextSyncAt, UpdatedAt: h.clock.Now().UnixMilli(), ServerID: devID,
+	})
 }
 
 // nextSync is the next daily slot at syncTime (minutes) in the panel time zone after now.
@@ -219,6 +287,11 @@ func (h *Handler) syncDone(ctx context.Context, devID int64, trigger, snapshot s
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), callTimeout)
 	defer cancel()
 	now := h.clock.Now()
+	if trigger == triggerManual {
+		h.mu.Lock()
+		h.state(devID).lastManual = now // the cooldown runs from the end
+		h.mu.Unlock()
+	}
 	canceled := errors.Is(syncErr, context.Canceled)
 	h.writeMu.Lock()
 	row, err := h.q.DevGet(ctx, devID)
@@ -314,6 +387,9 @@ func (h *Handler) tick(ctx context.Context) {
 	defer h.tickMu.Unlock()
 	now := h.clock.Now()
 	h.checkTimezone(ctx, now)
+	if !h.sawPass() {
+		return // player counts unknown: decide after the first monitoring pass
+	}
 	rows, err := h.q.DevListDue(ctx, nullTime(now))
 	if err != nil {
 		h.log.ErrorContext(ctx, "devinst: list due syncs", "err", err)
@@ -325,7 +401,7 @@ func (h *Handler) tick(ctx context.Context) {
 		if h.isPending(id) {
 			continue
 		}
-		if h.players(id) == 0 {
+		if !h.occupied(id) {
 			if err := h.queueSync(jobCtx, id, triggerScheduled); err != nil && !errors.Is(err, errSyncBusy) {
 				h.log.ErrorContext(ctx, "devinst: queue a scheduled sync", "server_id", id, "err", err)
 			}
@@ -387,7 +463,10 @@ func (h *Handler) checkTimezone(ctx context.Context, now time.Time) {
 }
 
 // recover runs when Run starts: no sync is queued yet, so a status still "running" belongs to
-// a sync the previous panel process did not finish.
+// a sync the previous panel process did not finish, and a deferred_since on a row that is not
+// due belongs to a "Sync now" wait that was lost with the process. A scheduled sync waiting for
+// players keeps it (its next try is at most deferStep away, inside the deferMax window), so
+// its 2-hour limit survives a restart.
 func (h *Handler) recover(ctx context.Context) {
 	rows, err := h.q.DevList(ctx)
 	if err != nil {
@@ -396,6 +475,13 @@ func (h *Handler) recover(ctx context.Context) {
 	}
 	now := h.clock.Now()
 	for _, r := range rows {
+		if r.DeferredSince.Valid && !scheduledDeferral(r.DeferredSince, r.NextSyncAt, now) {
+			if err := h.q.DevSetDeferred(ctx, store.DevSetDeferredParams{
+				NextSyncAt: r.NextSyncAt, UpdatedAt: now.UnixMilli(), ServerID: r.ServerID,
+			}); err != nil {
+				h.log.ErrorContext(ctx, "devinst: clear a lost sync wait", "server_id", r.ServerID, "err", err)
+			}
+		}
 		if r.LastSyncStatus.String != statusRunning {
 			continue
 		}
@@ -407,4 +493,16 @@ func (h *Handler) recover(ctx context.Context) {
 			h.log.ErrorContext(ctx, "devinst: reset an interrupted sync", "server_id", r.ServerID, "err", err)
 		}
 	}
+}
+
+// scheduledDeferral reports whether deferred_since/next_sync_at look like a scheduled sync
+// that waits for players: due now, or its next try within deferMax+deferStep of the slot.
+func scheduledDeferral(since, next sql.NullInt64, now time.Time) bool {
+	if !next.Valid {
+		return false
+	}
+	if next.Int64 <= now.UnixMilli() {
+		return true
+	}
+	return next.Int64-since.Int64 <= (deferMax + deferStep).Milliseconds()
 }

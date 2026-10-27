@@ -52,16 +52,19 @@ var (
 )
 
 const (
-	fastEvery   = 2 * time.Second  // wake loop and delayed syncs
-	deferStep   = 15 * time.Minute // retry of a scheduled sync while players are on dev
-	deferMax    = 2 * time.Hour    // after that the scheduled sync runs anyway
-	warnDelay   = 60 * time.Second // between the chat warning and the sync
-	wakeGap     = 2 * time.Minute  // per dev
-	wakeWindow  = time.Minute      // panel-wide cap window
-	wakeCap     = 10               // wakes per wakeWindow
-	alertEvery  = 6 * time.Hour    // dev.sync_failed per dev
-	callTimeout = 10 * time.Second // DB writes of callbacks, agent calls
-	rconTimeout = 15 * time.Second
+	fastEvery  = 2 * time.Second  // wake loop and delayed syncs
+	deferStep  = 15 * time.Minute // retry of a scheduled sync while players are on dev
+	deferMax   = 2 * time.Hour    // after that the scheduled sync runs anyway
+	warnDelay  = 60 * time.Second // between the chat warning and the sync
+	wakeGap    = 2 * time.Minute  // per dev
+	wakeWindow = time.Minute      // panel-wide cap window
+	wakeCap    = 10               // wakes per wakeWindow
+	// manualCooldown is the least time between two manual syncs of one dev, from the end of
+	// the previous one: each forces a fresh backup of prod and holds the panel-wide queue.
+	manualCooldown = 10 * time.Minute
+	alertEvery     = 6 * time.Hour    // dev.sync_failed per dev
+	callTimeout    = 10 * time.Second // DB writes of callbacks, agent calls
+	rconTimeout    = 15 * time.Second
 )
 
 // Sync triggers (backups.DevSync.Trigger, audit detail of dev.sync).
@@ -92,10 +95,11 @@ type Handler struct {
 	tickMu  sync.Mutex // serialises ticks (Run and tests)
 	lastTZ  string     // time zone of the previous tick ("" before the first; guarded by tickMu)
 
-	mu      sync.Mutex
-	devs    map[int64]*devState
-	delayed []delayedSync
-	wakes   []time.Time // panel-wide wakes within the last wakeWindow
+	mu       sync.Mutex
+	passSeen bool // a monitoring pass arrived (before it, player counts are unknown)
+	devs     map[int64]*devState
+	delayed  []delayedSync
+	wakes    []time.Time // panel-wide wakes within the last wakeWindow
 }
 
 // devState is what the handler remembers about one dev between passes and requests.
@@ -110,6 +114,7 @@ type devState struct {
 	pending    bool  // a sync is waiting (delayed) or queued; cleared by its Done
 	lastWake   time.Time
 	lastAlert  time.Time
+	lastManual time.Time // start of the last manual sync, its end once done (manualCooldown)
 }
 
 // delayedSync is a sync that waits warnDelay after its chat warning.
@@ -117,6 +122,7 @@ type delayedSync struct {
 	devID   int64
 	trigger string
 	at      time.Time
+	paused  bool            // sync_paused when the wait began: a pause during the wait drops it
 	ctx     context.Context // keeps actor and IP of the request for the audit entry
 }
 

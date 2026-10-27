@@ -1149,7 +1149,7 @@ paths:
     post:
       operationId: syncDevInstance
       tags: [dev]
-      summary: Sync dev instance {id} from its source now (players on dev get a 60 s warning; audited)
+      summary: Sync dev instance {id} from its source now (players on dev get a 60 s warning; at most one per 10 minutes; audited)
       parameters:
         - $ref: '#/components/parameters/IdPath'
         - $ref: '#/components/parameters/CSRF'
@@ -1159,6 +1159,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'not_dev (the server is not a dev instance) or backup_running (a sync, backup or restore of the dev is queued or running)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /servers/{id}/dev/ops:
     get:
       operationId: listDevOps
