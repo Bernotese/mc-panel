@@ -1155,6 +1155,8 @@ export const en: Messages = {
       point_sleep: 'Sleeps while nobody plays and starts on the first connection.',
       point_ops: 'Its own ops list: ops switch to /gamemode creative themselves.',
       disk_warning: 'The dev instance takes about as much disk space as {{source}}.',
+      services_warning:
+        'Plugins and mods that use external services (e.g. a shared MySQL database or a Discord bot) run on the dev instance with the same credentials and can change data of {{source}} there.',
       submit: 'Create {{name}}',
       created: '{{name}} created. The first sync is running.',
       exists: 'This server has a dev instance:',
