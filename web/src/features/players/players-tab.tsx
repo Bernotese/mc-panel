@@ -145,7 +145,12 @@ export function PlayersTab({ server }: { server: Server }) {
             ) : isAdmin ? (
               <div className="flex flex-wrap items-center gap-2">
                 <Muted>{t('players.whitelist.inactive')}</Muted>
-                <Link to="/servers/$id/settings" params={{ id: String(server.id) }} className="text-primary text-sm underline underline-offset-4">
+                {/* A dev takes whitelist_enabled from its source (dev instances spec §3.2). */}
+                <Link
+                  to="/servers/$id/settings"
+                  params={{ id: String(server.dev?.source_id ?? server.id) }}
+                  className="text-primary text-sm underline underline-offset-4"
+                >
                   {t('players.whitelist.open_settings')}
                 </Link>
               </div>
