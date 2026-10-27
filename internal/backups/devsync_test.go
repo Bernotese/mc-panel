@@ -260,9 +260,9 @@ func TestDevSyncOrder(t *testing.T) {
 // returned func releases it.
 func (e *devEnv) blockWorker() func() {
 	e.t.Helper()
-	other := e.instance("other")
+	other := e.instance("blocker")
 	release := e.files.holdPlan("manual")
-	e.create(other, nil)
+	e.create(other, map[string]any{})
 	e.waitStep(other, "backing_up")
 	return release
 }
