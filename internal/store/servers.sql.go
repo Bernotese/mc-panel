@@ -414,6 +414,41 @@ func (q *Queries) ServersUpdateDevMemory(ctx context.Context, arg ServersUpdateD
 	return i, err
 }
 
+const serversUpdateDevProperties = `-- name: ServersUpdateDevProperties :one
+UPDATE instances SET properties = ?1, revision = revision + 1, updated_at = ?2
+WHERE instances.server_id = ?3
+  AND instances.server_id IN (SELECT d.server_id FROM dev_instances d)
+RETURNING server_id, type, version, loader_version, modpack, java, memory_mib, properties, desired_state, revision, created_at, updated_at
+`
+
+type ServersUpdateDevPropertiesParams struct {
+	Properties string
+	UpdatedAt  int64
+	ServerID   int64
+}
+
+// Dev instances: replaces only the properties of a dev (its overrides changed) and bumps its
+// revision; type, version, loader, modpack, java and memory stay. Only matches a dev.
+func (q *Queries) ServersUpdateDevProperties(ctx context.Context, arg ServersUpdateDevPropertiesParams) (Instance, error) {
+	row := q.db.QueryRowContext(ctx, serversUpdateDevProperties, arg.Properties, arg.UpdatedAt, arg.ServerID)
+	var i Instance
+	err := row.Scan(
+		&i.ServerID,
+		&i.Type,
+		&i.Version,
+		&i.LoaderVersion,
+		&i.Modpack,
+		&i.Java,
+		&i.MemoryMib,
+		&i.Properties,
+		&i.DesiredState,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const serversUpdateInstance = `-- name: ServersUpdateInstance :one
 UPDATE instances
 SET version = ?, loader_version = ?, modpack = ?, java = ?, memory_mib = ?, properties = ?,

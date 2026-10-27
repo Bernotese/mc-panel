@@ -81,3 +81,11 @@ UPDATE instances SET memory_mib = sqlc.arg(memory_mib), revision = revision + 1,
 WHERE instances.server_id = sqlc.arg(server_id)
   AND instances.server_id IN (SELECT d.server_id FROM dev_instances d)
 RETURNING *;
+
+-- name: ServersUpdateDevProperties :one
+-- Dev instances: replaces only the properties of a dev (its overrides changed) and bumps its
+-- revision; type, version, loader, modpack, java and memory stay. Only matches a dev.
+UPDATE instances SET properties = sqlc.arg(properties), revision = revision + 1, updated_at = sqlc.arg(updated_at)
+WHERE instances.server_id = sqlc.arg(server_id)
+  AND instances.server_id IN (SELECT d.server_id FROM dev_instances d)
+RETURNING *;
