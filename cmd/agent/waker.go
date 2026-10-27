@@ -50,11 +50,14 @@ func runWaker(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		return fmt.Errorf("waker: %w", err)
 	}
 	return waker.Serve(ctx, ln, waker.Config{
-		Listen:    *listen,
-		MOTD:      wakerMOTD,
-		Kick:      wakerKick,
-		MaxConns:  64,
-		MaxPerIP:  4,
+		Listen:   *listen,
+		MOTD:     wakerMOTD,
+		Kick:     wakerKick,
+		MaxConns: 64,
+		// Every peer is mc-router (no PROXY protocol), so a lower per-address cap would only be
+		// a global cap that a few slow clients could hold. mc-router's -connection-rate-limit
+		// and the 5-s Deadline bound abuse instead.
+		MaxPerIP:  64,
 		Deadline:  5 * time.Second,
 		WakeEvery: 10 * time.Second,
 		Out:       stdout,
