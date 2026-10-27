@@ -582,3 +582,52 @@ func TestNewRevisionDropsTheCarriedTPS(t *testing.T) {
 		t.Fatalf("revision 2 asked again: tps=%v rev=%d", sv.TPS, sv.Revision)
 	}
 }
+
+// Run hands every pass to Deps.OnPass after the alerter, with the same snapshot.
+func TestOnPassCalledWithSnapshot(t *testing.T) {
+	var (
+		mu     sync.Mutex
+		passes []Snapshot
+		cancel context.CancelFunc
+	)
+	e := newEnv(t, func(d *Deps) {
+		d.OnPass = func(_ context.Context, s Snapshot) {
+			mu.Lock()
+			passes = append(passes, s)
+			mu.Unlock()
+			cancel()
+		}
+	})
+	id := cAddInstance(t, e.db, "survival", "paper")
+	e.agent.set(agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.UnixMilli() - 1_000_000, Revision: 1})
+	ctx, c := context.WithCancel(context.Background())
+	cancel = c
+	done := make(chan struct{})
+	go func() { e.h.Run(ctx); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		cancel()
+		t.Fatal("Run did not return after OnPass cancelled it")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(passes) != 1 {
+		t.Fatalf("OnPass calls = %d", len(passes))
+	}
+	if s, ok := findSample(passes[0], id); !ok || !passes[0].At.Equal(t0) || s.State != agentapi.StateRunning {
+		t.Fatalf("snapshot = %+v", passes[0])
+	}
+
+	// The alerter has seen a pass before OnPass gets it.
+	srv := cAddInstance(t, e.db, "creative", "paper")
+	var firing []FiringAlert
+	e.h.d.OnPass = func(ctx context.Context, _ Snapshot) { firing = e.h.alerts.Firing(ctx) }
+	exited := ServerSample{ID: srv, Name: "creative", DesiredRunning: true, State: agentapi.StateExited}
+	for m := 0; m <= 3; m++ {
+		e.h.pass(context.Background(), Snapshot{At: t0.Add(time.Duration(m) * time.Minute), Agent: true, Docker: true, Servers: []ServerSample{exited}})
+	}
+	if len(firing) != 1 || firing[0].ServerID != srv || firing[0].Kind != alertServerDown {
+		t.Fatalf("firing seen by OnPass = %+v", firing)
+	}
+}

@@ -199,7 +199,9 @@ func (a *alerter) settings(ctx context.Context) (alertSettings, error) {
 	}, nil
 }
 
-// downAlertsOff returns the servers whose down alerts are switched off (no row = on).
+// downAlertsOff returns the servers whose down alerts are switched off (no row = on). Dev
+// instances never get down, recovered or crash-loop alerts (dev instances spec §2): they
+// sleep and wake on their own.
 func (a *alerter) downAlertsOff(ctx context.Context) (map[int64]bool, error) {
 	rows, err := a.q.MonitoringListServerAlerts(ctx)
 	if err != nil {
@@ -210,6 +212,13 @@ func (a *alerter) downAlertsOff(ctx context.Context) (map[int64]bool, error) {
 		if r.DownAlerts == 0 {
 			off[r.ServerID] = true
 		}
+	}
+	devs, err := a.q.DevList(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range devs {
+		off[d.ServerID] = true
 	}
 	return off, nil
 }
