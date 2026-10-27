@@ -381,8 +381,12 @@ func boolInt(b bool) int64 {
 	return 0
 }
 
+// ServerView is the OpenAPI schema Server, for handlers outside this package that answer with a
+// server (DevView).
+type ServerView = serverJSON
+
 // DevView is the Server schema of a dev as an admin sees it (201 of POST /servers/{id}/dev).
-func (h *Handler) DevView(ctx context.Context, devID int64) (serverJSON, error) {
+func (h *Handler) DevView(ctx context.Context, devID int64) (ServerView, error) {
 	s, err := h.q.RbacGetServer(ctx, devID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return serverJSON{}, ErrServerNotFound
