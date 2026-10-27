@@ -277,7 +277,9 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err == nil && overridesChanged {
-		err = h.servers.ApplyDevSpec(ctx, row.ServerID)
+		// Only the overrides: prod's current type, version or plugins must not be put onto
+		// the data of the last sync.
+		err = h.servers.UpdateDevOverrides(ctx, row.ServerID)
 	}
 	h.record(ctx, audit.ActionDevSettingsUpdate, row.ServerID, result(err), changed)
 	if err != nil {
