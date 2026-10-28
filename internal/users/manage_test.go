@@ -28,8 +28,8 @@ func insertSession(t *testing.T, db *sql.DB, userID int64, revoked sql.NullInt64
 	}
 	res, err := db.Exec(`INSERT INTO sessions (token_hash, user_id, stage, csrf_token, ip, user_agent,
 		created_at, last_seen_at, expires_at, revoked_at)
-		VALUES (?, ?, 'full', 'csrf', '203.0.113.7', 'test', 0, 0, ?, ?)`,
-		tok, userID, t0.Add(time.Hour).UnixMilli(), revoked)
+		VALUES (?, ?, 'full', 'csrf', '203.0.113.7', 'test', ?, ?, ?, ?)`,
+		tok, userID, t0.UnixMilli(), t0.UnixMilli(), t0.Add(time.Hour).UnixMilli(), revoked)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,13 +167,14 @@ func TestDeleteSelfIsRejected(t *testing.T) {
 	}
 }
 
-// Review Focus 2: the last admin cannot be deleted, even by a principal that is not that admin.
+// Review Focus 2: the last admin cannot be deleted, even by a principal that is not that admin
+// (such a principal has no active admin session, so the caller re-check refuses first).
 func TestDeleteLastAdminIsRejected(t *testing.T) {
 	e := newEnv(t)
 	ghost := principal.Principal{UserID: 9999, Username: "ghost", Role: principal.RoleAdmin,
 		Stage: principal.StageFull, SudoUntil: t0.Add(time.Minute)}
 	rec := e.do(http.MethodDelete, fmt.Sprintf("/users/%d", e.rootID), nil, &ghost)
-	if rec.Code != http.StatusConflict {
+	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("code = %d, body %s", rec.Code, rec.Body)
 	}
 	if n := countRows(t, e.db, `SELECT count(*) FROM users WHERE id = ?`, e.rootID); n != 1 {
@@ -324,6 +325,7 @@ func TestChangeRoleRevokesSessions(t *testing.T) {
 		t.Fatal("other users' sessions must stay")
 	}
 
+	mustExec(t, e.db, `UPDATE users SET totp_enabled = 1 WHERE id = ?`, second) // admins are fully signed in only with 2FA
 	other := principal.Principal{UserID: second, Username: "second", Role: principal.RoleAdmin, Stage: principal.StageFull,
 		SudoUntil: t0.Add(5 * time.Minute), SessionID: secondSess}
 	rec = e.do(http.MethodPatch, fmt.Sprintf("/users/%d", e.rootID), map[string]string{"role": "admin"}, &other)

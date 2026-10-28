@@ -42,8 +42,8 @@ func TestAdminSetPasswordForcesChange(t *testing.T) {
 // Review Focus 3: an admin setting their own password through the user management is not forced.
 func TestAdminSetsOwnPasswordNoForcedChange(t *testing.T) {
 	e := newEnv(t)
+	// (An admin with a pending forced change is limited to POST /me/password, so the flag starts at 0.)
 	admin := e.admin()
-	mustExec(t, e.db, `UPDATE users SET must_change_password = 1 WHERE id = ?`, e.rootID)
 	rec := e.do(http.MethodPatch, fmt.Sprintf("/users/%d", e.rootID), map[string]string{"password": newPassword}, &admin)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PATCH = %d %s", rec.Code, rec.Body)

@@ -84,8 +84,22 @@ func (h *Handler) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
-	u, err := newUser(ctx, h.q, h.clock.Now(), req.Username, req.Password, req.Role, true)
+	in, err := prepareUser(ctx, h.q, h.clock.Now(), req.Username, req.Password, req.Role, true)
+	var u store.User
+	if err == nil {
+		err = h.inTx(ctx, func(q *store.Queries) error {
+			if err := h.requireAdminCaller(ctx, q); err != nil {
+				return err
+			}
+			var err error
+			u, err = insertUser(ctx, q, in)
+			return err
+		})
+	}
 	switch {
+	case errors.Is(err, errCallerGone):
+		writeCallerGone(w, r)
+		return
 	case errors.Is(err, ErrUsernameTaken):
 		writeConflict(w, r, err.Error())
 		return

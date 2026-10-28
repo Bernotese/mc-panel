@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/auth"
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/notify"
@@ -28,6 +29,8 @@ type Handler struct {
 	notifier notify.Notifier
 	// passwordSet is called after an admin set a user's password (see OnPasswordSet).
 	passwordSet func(userID int64)
+	// sessions re-checks the caller inside write transactions (see CheckSessionsWith).
+	sessions *auth.Sessions
 }
 
 // NewHandler expects db from store.Open (BEGIN IMMEDIATE transactions).
@@ -38,6 +41,10 @@ func NewHandler(db *sql.DB, c clock.Clock, rec audit.Recorder, n notify.Notifier
 // OnPasswordSet registers fn to run after an admin set a user's password. cmd/panel uses it to
 // reset the user's second-factor lockout, which lives in the auth handler (spec §7.2).
 func (h *Handler) OnPasswordSet(fn func(userID int64)) { h.passwordSet = fn }
+
+// CheckSessionsWith sets the session manager that every admin write uses to re-check its caller
+// inside the write transaction (requireAdminCaller). Without it those writes fail closed.
+func (h *Handler) CheckSessionsWith(s *auth.Sessions) { h.sessions = s }
 
 // Routes registers all user and permission routes (paths relative to /api).
 func (h *Handler) Routes(api *rbac.Router) {

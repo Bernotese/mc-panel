@@ -1,9 +1,12 @@
 package auth
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/password"
 	"github.com/Bernotese/mc-panel/internal/principal"
@@ -331,6 +334,34 @@ func TestCredentialWritesNeedActiveSession(t *testing.T) {
 				t.Fatalf("%s %s on a revoked session = %d %s", tc.method, path, res.code, res.body)
 			}
 			tc.check(e, uid)
+		})
+	}
+}
+
+func TestRotateNeedsActiveSession(t *testing.T) {
+	cases := map[string]struct {
+		stage   principal.Stage
+		advance time.Duration
+		wantOK  bool
+	}{
+		"preauth within its lifetime":    {principal.StagePreAuth, 4 * time.Minute, true},
+		"preauth expired":                {principal.StagePreAuth, 6 * time.Minute, false},
+		"full session active":            {principal.StageFull, 10 * time.Minute, true},
+		"full session idle":              {principal.StageFull, 3 * time.Hour, false},
+		"full session past its lifetime": {principal.StageFull, 13 * time.Hour, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, _, clk, uid := newTestSessions(t)
+			_, sess := mustCreate(t, s, uid, tc.stage)
+			clk.Advance(tc.advance)
+			_, _, err := s.Rotate(context.Background(), sess, Rotation{Stage: principal.StageFull, SudoUntil: clk.Now().Add(time.Minute).UnixMilli()})
+			if tc.wantOK && err != nil {
+				t.Fatalf("rotate = %v", err)
+			}
+			if !tc.wantOK && !errors.Is(err, ErrNoSession) {
+				t.Fatalf("rotate = %v, want ErrNoSession", err)
+			}
 		})
 	}
 }

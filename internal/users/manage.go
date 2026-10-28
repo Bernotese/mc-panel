@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/auth"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/password"
@@ -45,21 +46,25 @@ func (h *Handler) inTx(ctx context.Context, fn func(q *store.Queries) error) err
 }
 
 // requireAdminCaller re-checks inside the write transaction what the route rule checked when the
-// request started: the caller's session is still active (not revoked or expired) and the caller is
-// still an admin. Credential and role writes for other users call it first, so an authorization
-// that ended meanwhile cannot replace another user's credential state.
+// request started: the caller's session still fully authenticates the caller (not revoked, expired
+// or idle, effective stage full; auth.Sessions.Recheck) and the caller is still an admin. Every
+// admin write calls it first, so an authorization that ended meanwhile changes nothing.
 func (h *Handler) requireAdminCaller(ctx context.Context, q *store.Queries) error {
+	if h.sessions == nil {
+		return errors.New("users: no session check configured")
+	}
 	p, ok := principal.From(ctx)
 	if !ok {
 		return errCallerGone
 	}
-	n, err := q.AuthSessionActiveWithRole(ctx, store.AuthSessionActiveWithRoleParams{
-		ID: p.SessionID, UserID: p.UserID, Now: h.clock.Now().UnixMilli(), Role: string(principal.RoleAdmin),
-	})
+	u, err := h.sessions.RecheckTx(ctx, q, p.SessionID, p.UserID)
+	if errors.Is(err, auth.ErrNoSession) {
+		return errCallerGone
+	}
 	if err != nil {
 		return err
 	}
-	if n == 0 {
+	if principal.Role(u.Role) != principal.RoleAdmin {
 		return errCallerGone
 	}
 	return nil
@@ -256,6 +261,9 @@ func (h *Handler) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	var deleted store.User
 	err := h.inTx(ctx, func(q *store.Queries) error {
+		if err := h.requireAdminCaller(ctx, q); err != nil {
+			return err
+		}
 		u, err := getUser(ctx, q, id)
 		if err != nil {
 			return err
@@ -270,6 +278,9 @@ func (h *Handler) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	switch {
+	case errors.Is(err, errCallerGone):
+		writeCallerGone(w, r)
+		return
 	case errors.Is(err, ErrNotFound):
 		writeNotFound(w, r, "user")
 		return

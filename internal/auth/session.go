@@ -160,6 +160,8 @@ func (s *Sessions) Rotate(ctx context.Context, sess store.Session, rot Rotation)
 		// request whose token was superseded meanwhile cannot rotate the session again.
 		OldTokenHash: sess.TokenHash,
 		OldStage:     sess.Stage,
+		Now:          now,
+		IdleCutoff:   now - s.cfg.Idle.Milliseconds(),
 	}
 	n, err := s.q.AuthRotateSession(ctx, p)
 	if err != nil {

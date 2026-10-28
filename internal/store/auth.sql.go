@@ -665,6 +665,7 @@ SET token_hash = ?1, stage = ?2, csrf_token = ?3,
     sudo_until = ?4, expires_at = ?5, last_seen_at = ?6,
     webauthn_state = NULL
 WHERE id = ?7 AND revoked_at IS NULL AND token_hash = ?8 AND stage = ?9
+  AND expires_at > ?10 AND (stage = 'preauth' OR last_seen_at > ?11)
 `
 
 type AuthRotateSessionParams struct {
@@ -677,10 +678,13 @@ type AuthRotateSessionParams struct {
 	ID           int64
 	OldTokenHash []byte
 	OldStage     string
+	Now          int64
+	IdleCutoff   int64
 }
 
 // Compare-and-swap on the presented token hash and stage: concurrent rotations of one session
-// (e.g. two second-factor completions) yield exactly one winner.
+// (e.g. two second-factor completions) yield exactly one winner. Only an active session rotates:
+// not revoked, not expired and, unless preauth, not idle (the same rules as Sessions.valid).
 func (q *Queries) AuthRotateSession(ctx context.Context, arg AuthRotateSessionParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, authRotateSession,
 		arg.TokenHash,
@@ -692,38 +696,13 @@ func (q *Queries) AuthRotateSession(ctx context.Context, arg AuthRotateSessionPa
 		arg.ID,
 		arg.OldTokenHash,
 		arg.OldStage,
+		arg.Now,
+		arg.IdleCutoff,
 	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
-}
-
-const authSessionActiveWithRole = `-- name: AuthSessionActiveWithRole :one
-SELECT count(*) FROM sessions s JOIN users u ON u.id = s.user_id
-WHERE s.id = ?1 AND s.user_id = ?2 AND s.revoked_at IS NULL
-  AND s.expires_at > ?3 AND u.role = ?4
-`
-
-type AuthSessionActiveWithRoleParams struct {
-	ID     int64
-	UserID int64
-	Now    int64
-	Role   string
-}
-
-// Whether the session is neither revoked nor expired and belongs to the user, who still has the role.
-// Write transactions that act for an admin re-check their authorization with it.
-func (q *Queries) AuthSessionActiveWithRole(ctx context.Context, arg AuthSessionActiveWithRoleParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, authSessionActiveWithRole,
-		arg.ID,
-		arg.UserID,
-		arg.Now,
-		arg.Role,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
 }
 
 const authSetPendingTOTP = `-- name: AuthSetPendingTOTP :execrows
