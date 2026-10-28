@@ -398,6 +398,8 @@ describe('mock behaviour', () => {
     expect(stale.status).toBe(409)
     expect(field(stale.body, 'error')).toBe('server_modified')
     expect((await callApi('GET', '/servers/2')).body).toMatchObject({ instance: { version: '26.3', memory_mib: 4096 } })
+    // null is no check, like absent (as in the panel)
+    expect((await patch({ memory_mib: 2048, expected_revision: null })).status).toBe(200)
   })
 
   it('publishes web routes like the panel: validated, sorted, pending then active; admin-only fields; 409 without base domain', async () => {

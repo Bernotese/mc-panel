@@ -495,6 +495,8 @@ export const en: Messages = {
       saved: 'Changes saved.',
       saved_restart: 'Changes saved. They take effect at the next restart.',
       running_notice: 'The server is running. Changes take effect after a restart.',
+      modified: 'The server was changed in the meantime – please reload. Your unsaved changes will be lost.',
+      reload: 'Reload',
     },
     delete: {
       title: 'Delete server',
