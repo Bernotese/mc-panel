@@ -18,8 +18,10 @@ var ErrAdmissionBusy = admit.ErrAdmissionBusy
 
 // Admission is the per-server admission lock of data safety spec §3: every start and every
 // data job (restore, dev sync, extract) checks the data state and makes its agent or files
-// call under it. Lock order: reconcile.mu -> Admission(id) -> (backup queue | extract pending)
-// -> files/agent I/O. The zero value is not usable; use NewAdmission.
+// call under it. Lock order: Admission(id) -> reconcile.mu -> (backup queue | extract pending)
+// -> files/agent I/O. The reconcile pass holds reconcile.mu and only TryLocks Admission(id), so
+// it never waits for a data job, and nobody waits for an admission lock while holding
+// reconcile.mu. The zero value is not usable; use NewAdmission.
 type Admission struct {
 	wait  time.Duration
 	mu    sync.Mutex
@@ -99,9 +101,13 @@ func (a *Admission) unlockFunc(id int64, l *admissionLock) func() {
 // Admit runs fn under the admission lock of server id (waiting at most AdmissionWait) once its
 // data state is safe, leaving out the caller's own hold (nil = none). It returns
 // ErrAdmissionBusy, the error of a state that is not safe (StateErr) or fn's error; fn runs at
-// most once and only while the lock is held. backups, serverfiles and devinst admit their data
-// jobs through it.
+// most once and only while the lock is held, and may take reconcile.mu (lock order).
+// backups, serverfiles and devinst admit their data jobs through it.
 func (h *Handler) Admit(ctx context.Context, id int64, own Hold, fn func(ctx context.Context) error) error {
+	// A state that is not safe is refused at once, without waiting for the lock.
+	if err := h.checkData(ctx, id, own); err != nil {
+		return err
+	}
 	unlock, err := h.admission.Lock(ctx, id)
 	if err != nil {
 		return err

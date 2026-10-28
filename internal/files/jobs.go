@@ -361,9 +361,28 @@ func (j *jobs) addReader(id int64) (func(), error) {
 // rewriting reports whether a restore, extract or resolve holds instance id (also during its
 // pre-check and while it waits for leases to drain).
 func (j *jobs) rewriting(id int64) bool {
+	_, ok := j.rewritingJob(id)
+	return ok
+}
+
+// rewritingJob reports whether a restore, extract or resolve holds instance id and returns the
+// job that holds it: the running job of that kind, one standing for its pre-check (no id yet),
+// or nil for a resolve (not a job the panel shows, data safety spec §2.3).
+func (j *jobs) rewritingJob(id int64) (*filesapi.Job, bool) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return rewrites(j.busy[id])
+	kind := j.busy[id]
+	switch {
+	case !rewrites(kind):
+		return nil, false
+	case kind == jobResolve:
+		return nil, true
+	}
+	if last := j.last[id]; last != nil && last.Kind == kind && last.State == filesapi.JobRunning {
+		c := *last
+		return &c, true
+	}
+	return &filesapi.Job{Kind: kind, State: filesapi.JobRunning}, true
 }
 
 // lease takes a shared mutation lease on instance id for a plain file mutation (data safety

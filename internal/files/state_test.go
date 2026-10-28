@@ -93,6 +93,23 @@ func TestStateSafeBusyRecovery(t *testing.T) {
 		t.Fatalf("after extract = %+v", st)
 	}
 
+	// Busy reports the job that holds the slot, not the last one (the extract above); a resolve
+	// holds it without a job the panel shows.
+	if err := s.jobs.acquire(1, filesapi.JobRestore); err != nil {
+		t.Fatal(err)
+	}
+	if st := mustState(t, s, 1); st.State != filesapi.StateBusy || st.Job == nil || st.Job.Kind != filesapi.JobRestore {
+		t.Fatalf("restore pre-check after an extract = %+v", st)
+	}
+	s.jobs.release(1)
+	if err := s.jobs.acquire(1, jobResolve); err != nil {
+		t.Fatal(err)
+	}
+	if st := mustState(t, s, 1); st.State != filesapi.StateBusy || st.Job != nil {
+		t.Fatalf("resolve = %+v", st)
+	}
+	s.jobs.release(1)
+
 	crashedRestore(t, s, data, phaseStuck, nil, map[string]string{"a.txt": "previous a"}, nil)
 	st := mustState(t, s, 1)
 	if st.State != filesapi.StateRecoveryRequired || st.Recovery == nil || st.Recovery.Phase != phaseStuck || st.Recovery.Since <= 0 {

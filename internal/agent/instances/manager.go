@@ -787,8 +787,6 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 		Instances: []agentapi.InstanceStatus{},
 		Router:    agentapi.RouterStatus{State: agentapi.StateMissing},
 	}
-	list, listErr := m.dc.List(ctx, LabelInstance)
-
 	type workState struct {
 		op              agentapi.Operation
 		queued          []agentapi.PowerAction // a fresh slice, safe to use after m.mu
@@ -806,6 +804,9 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 	}
 	resp.Router.LastError = m.routerErr
 	m.mu.Unlock()
+	// The work is read before the listing (data safety spec §2.2): an action that ends in
+	// between shows in the containers' state, never as a settled container in its old state.
+	list, listErr := m.dc.List(ctx, LabelInstance)
 
 	if listErr != nil {
 		m.setDocker(false, listErr)
@@ -836,6 +837,8 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 				st.StartedAt = startedAtMillis(info.State.StartedAt)
 			}
 		default:
+			// the listing's state may be out of date: never settled (no data job on it)
+			st.Uncertain = true
 			m.log.Debug("inspect failed while listing", "id", id, "err", err)
 		}
 		if s, ok := stats[id]; ok && st.State == agentapi.StateRunning {

@@ -522,7 +522,7 @@ func TestResolveEndpoint(t *testing.T) {
 		code   string
 	}{
 		{"safe", func() { e.data.set(id, servers.StateSafe) }, http.StatusConflict, "recovery_required"},
-		{"busy", func() { e.data.setBusy(id, "restore") }, http.StatusConflict, "recovery_required"},
+		{"busy", func() { e.data.setBusy(id, "restore") }, http.StatusConflict, "conflict"},
 		{"unknown", func() { e.data.setErr(errors.New("files down")) }, http.StatusServiceUnavailable, "data_state_unknown"},
 	} {
 		c.set()
@@ -537,14 +537,23 @@ func TestResolveEndpoint(t *testing.T) {
 	}
 
 	e.data.set(id, servers.StateRecoveryRequired)
-	for _, se := range []*filesapi.StatusError{
-		{Status: http.StatusNotFound, Code: filesapi.CodeNotFound, Message: "no unfinished restore"},
-		{Status: http.StatusTooManyRequests, Code: filesapi.CodeBusy, Message: "a job holds the server"},
+	for _, c := range []struct {
+		err    *filesapi.StatusError
+		status int
+		code   string
+	}{
+		{&filesapi.StatusError{Status: http.StatusNotFound, Code: filesapi.CodeNotFound, Message: "no unfinished restore"}, http.StatusConflict, "recovery_required"},
+		{&filesapi.StatusError{Status: http.StatusTooManyRequests, Code: filesapi.CodeBusy, Message: "a job holds the server"}, http.StatusConflict, "conflict"},
+		{&filesapi.StatusError{Status: http.StatusServiceUnavailable, Message: "the restore journal cannot be read"}, http.StatusServiceUnavailable, "data_state_unknown"},
 	} {
-		e.files.resolveErr = se
-		if rec := e.do(http.MethodPost, path, nil, &admin); rec.Code != http.StatusConflict || errCode(t, rec) != "recovery_required" {
-			t.Fatalf("refused by the service (%s): %d %s", se.Code, rec.Code, rec.Body)
+		e.files.resolveErr = c.err
+		if rec := e.do(http.MethodPost, path, nil, &admin); rec.Code != c.status || errCode(t, rec) != c.code {
+			t.Fatalf("refused by the service (%d): %d %s", c.err.Status, rec.Code, rec.Body)
 		}
+	}
+	// a refusal changed nothing and is not audited; an unreadable journal is a failure
+	if got := e.rec.Actions(); len(got) != 2 || got[1] != audit.ActionServerRecoveryResolve {
+		t.Fatalf("audit = %v", got)
 	}
 	e.files.resolveErr = fmt.Errorf("%w: dial unix /run/mcpanel/files.sock", filesapi.ErrUnavailable)
 	rec := e.do(http.MethodPost, path, nil, &admin)
@@ -569,7 +578,89 @@ func TestResolveEndpoint(t *testing.T) {
 		last.Details["folder"] != e.files.recovery.Folder || last.Details["name"] != "survival" {
 		t.Fatalf("audit = %+v", last)
 	}
-	if !slices.Equal(e.files.resolved, []int64{id, id, id, id}) {
+	if !slices.Equal(e.files.resolved, []int64{id, id, id, id, id}) {
 		t.Fatalf("resolved = %v", e.files.resolved)
+	}
+}
+
+// Data safety review: a delete of a server in recovery_required resolves only once every check
+// that can refuse it has passed, and drops the wish to run first, so a delete that still fails
+// afterwards never lets the half-swapped world start; the move is audited on its own.
+func TestDeleteRecoveryFailsAfterResolve(t *testing.T) {
+	e := newEnv(t)
+	setBaseDomain(t, e.db, "mc.example.com")
+	admin := e.admin()
+	id := e.create(t, paper("survival")).ID // desired running
+	e.agent.set(container("survival", id, 1, agentapi.StateExited, ""))
+	e.data.set(id, servers.StateRecoveryRequired)
+	e.files.recovery = filesapi.Recovery{Phase: "stuck", Folder: fmt.Sprintf("%d-1793000000", id)}
+
+	// the agent is down: the delete is refused before anything is moved or changed
+	e.agent.setErr(agentapi.ErrUnavailable)
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", id), nil, &admin); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("delete with the agent down: %d %s", rec.Code, rec.Body)
+	}
+	if len(e.files.resolved) != 0 || instanceRow(t, e.db, id).DesiredState != "running" {
+		t.Fatalf("a refused delete resolved (%v) or changed the desired state", e.files.resolved)
+	}
+	e.agent.setErr(nil)
+
+	// the agent refuses the remove after the move: the server stays, stopped, the move is audited
+	e.agent.setActionErr(agentapi.ErrUnavailable)
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", id), nil, &admin); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("delete with a failing remove: %d %s", rec.Code, rec.Body)
+	}
+	e.agent.setActionErr(nil)
+	if n := e.count(t, "servers"); n != 1 {
+		t.Fatalf("servers = %d", n)
+	}
+	if !slices.Equal(e.files.resolved, []int64{id}) || instanceRow(t, e.db, id).DesiredState != "stopped" {
+		t.Fatalf("resolved %v, desired %s", e.files.resolved, instanceRow(t, e.db, id).DesiredState)
+	}
+	last := e.rec.Entries[len(e.rec.Entries)-1]
+	if last.Action != audit.ActionServerRecoveryResolve || last.Result != audit.ResultSuccess || last.Details["folder"] != e.files.recovery.Folder {
+		t.Fatalf("audit = %+v", last)
+	}
+	e.data.set(id, servers.StateSafe) // what the files service reports after the move
+	e.agent.takeCalls()
+	if got := e.pass(); len(got) != 0 {
+		t.Fatalf("the reconcile loop acted on the resolved server: %v", got)
+	}
+}
+
+// Lock order (data safety spec §3, review): nothing waits for an admission lock while holding
+// reconcile.mu. A restart that waits behind a long data job does not stall the reconcile pass,
+// and an admitted job that needs reconcile.mu (a wake stores the start) is not blocked by it.
+func TestAdmissionBeforeReconcileLock(t *testing.T) {
+	e := newEnv(t)
+	setBaseDomain(t, e.db, "mc.example.com")
+	admin := e.admin()
+	id := createInstance(t, e.db, "survival")
+	e.agent.set(container("survival", id, 1, agentapi.StateRunning, ""))
+	passed := make(chan time.Duration, 1)
+	release, done := admitBlocked(t, e.h, id, func() {
+		start := time.Now()
+		e.h.ReconcileOnce(context.Background()) // takes reconcile.mu under the admission lock
+		passed <- time.Since(start)
+	})
+	res := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		res <- e.do(http.MethodPost, fmt.Sprintf("/servers/%d/power", id), map[string]string{"action": "restart"}, &admin)
+	}()
+	time.Sleep(100 * time.Millisecond) // the restart waits for the admission lock now
+	start := time.Now()
+	e.h.ReconcileOnce(context.Background())
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("a restart waiting for the admission stalled the reconcile pass for %s", d)
+	}
+	release()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if d := <-passed; d > 2*time.Second {
+		t.Fatalf("the admitted job waited %s for reconcile.mu", d)
+	}
+	if rec := <-res; rec.Code != http.StatusAccepted {
+		t.Fatalf("restart after the job: %d %s", rec.Code, rec.Body)
 	}
 }

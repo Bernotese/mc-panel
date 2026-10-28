@@ -90,31 +90,15 @@ func writeRateLimited(w http.ResponseWriter, r *http.Request, d time.Duration) {
 
 // admitPower admits a start or restart under the server's admission lock (data safety spec
 // §3): only a safe data state takes a limiter token (a refusal costs none and is not audited),
-// and a restart reaches the agent while the lock is held. A start only stores the wish; the
-// reconcile loop admits the actual start again. On failure it has written the answer.
+// and a restart reaches the agent while the lock is held. A state that is not safe is refused
+// before waiting for the lock. A start only stores the wish; the reconcile loop admits the
+// actual start again. On failure it has written the answer.
 func (h *Handler) admitPower(w http.ResponseWriter, r *http.Request, s store.Server, action agentapi.PowerAction) bool {
 	ctx := r.Context()
-	if action == agentapi.PowerRestart {
-		// Like a reconcile pass, a restart must not overlap a delete: under the lock the row is
-		// read again, so a server deleted meanwhile gets no agent call (no orphan container).
-		// Lock order: reconcile.mu, then the admission lock.
-		h.reconcile.mu.Lock()
-		defer h.reconcile.mu.Unlock()
+	err := h.checkData(ctx, s.ID, nil)
+	if err == nil {
+		err = h.admitPowerLocked(ctx, s, action)
 	}
-	p, _ := principal.From(ctx) // guaranteed by the rbac rule
-	err := h.Admit(ctx, s.ID, nil, func(ctx context.Context) error {
-		if d := h.power.take(p.UserID, h.clock.Now()); d > 0 {
-			return errRateLimited{d}
-		}
-		if action != agentapi.PowerRestart {
-			return nil
-		}
-		in, err := h.q.ServersGetInstance(ctx, s.ID)
-		if err != nil {
-			return err
-		}
-		return h.restart(ctx, s, in)
-	})
 	var rl errRateLimited
 	switch {
 	case err == nil:
@@ -130,6 +114,37 @@ func (h *Handler) admitPower(w http.ResponseWriter, r *http.Request, s store.Ser
 		writeAgentError(w, r, err)
 	}
 	return false
+}
+
+// admitPowerLocked is admitPower under the locks: the admission lock first, then (restart) the
+// reconcile lock, so a restart waiting for a long data job never stalls the reconcile pass.
+func (h *Handler) admitPowerLocked(ctx context.Context, s store.Server, action agentapi.PowerAction) error {
+	unlock, err := h.admission.Lock(ctx, s.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if action == agentapi.PowerRestart {
+		// Like a reconcile pass, a restart must not overlap a delete: under the lock the row is
+		// read again, so a server deleted meanwhile gets no agent call (no orphan container).
+		h.reconcile.mu.Lock()
+		defer h.reconcile.mu.Unlock()
+	}
+	if err := h.checkData(ctx, s.ID, nil); err != nil {
+		return err
+	}
+	p, _ := principal.From(ctx) // guaranteed by the rbac rule
+	if d := h.power.take(p.UserID, h.clock.Now()); d > 0 {
+		return errRateLimited{d}
+	}
+	if action != agentapi.PowerRestart {
+		return nil
+	}
+	in, err := h.q.ServersGetInstance(ctx, s.ID)
+	if err != nil {
+		return err
+	}
+	return h.restart(ctx, s, in)
 }
 
 // setDesired stores a user's power wish. On a dev instance a stop is falling asleep (the waker

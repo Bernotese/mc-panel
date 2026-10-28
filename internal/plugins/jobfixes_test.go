@@ -158,6 +158,38 @@ func TestInstallRetriesBusyService(t *testing.T) {
 	}
 }
 
+// An upload refused as busy may have met a restore that rewrote the jars meanwhile (data safety
+// spec §2.1): before the retry the plan is checked against the disk again, so a jar the restore
+// brought back is neither overwritten nor deleted.
+func TestInstallRechecksAfterBusy(t *testing.T) {
+	e := newEnv(t)
+	plugins.SetBusyBackoff(e.h, time.Millisecond)
+	id := e.paper("survival")
+	_, newJar := lpWorld(e, id, "LP-old.jar")
+	e.files.queueErrs("upload", fmt.Errorf("%w: a restore holds the server", filesapi.ErrBusy))
+	e.files.mu.Lock()
+	e.files.onQueued = func(op string) {
+		if op == "upload" { // the restore puts another LP-old.jar in place
+			e.files.put(id, "plugins/LP-old.jar", "restored luckperms")
+		}
+	}
+	e.files.mu.Unlock()
+	e.post(id, "/update", map[string]any{"files": []string{"LP-old.jar"}})
+	j := e.waitJob(id)
+	if j.Steps[0].State != "failed" || j.Steps[0].File != newJar.Name {
+		t.Fatalf("job = %+v", j)
+	}
+	if got, _ := e.files.get(id, "plugins/LP-old.jar"); got != "restored luckperms" {
+		t.Fatalf("the restored jar = %q", got)
+	}
+	if _, ok := e.files.get(id, "plugins/"+newJar.Name); ok {
+		t.Fatal("the new jar landed in the restored data")
+	}
+	if n := strings.Count(strings.Join(e.files.takeCalls(), "\n"), "upload "); n != 1 {
+		t.Fatalf("%d uploads, want only the refused one", n)
+	}
+}
+
 // K9: a version change through install records the old version like an update.
 func TestInstallVersionChangeAuditsFrom(t *testing.T) {
 	e := newEnv(t)

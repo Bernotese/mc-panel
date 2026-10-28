@@ -123,3 +123,19 @@ func TestStatusQueuedForMissingContainer(t *testing.T) {
 		t.Fatalf("status after the queue drained = %+v", s)
 	}
 }
+
+// TestStatusUncertainWhenInspectFails: a container the agent cannot inspect keeps the listing's
+// state, which may be out of date, and is never reported as settled (data safety spec §2.2).
+func TestStatusUncertainWhenInspectFails(t *testing.T) {
+	e := newEnv(t)
+	e.runningInstance(t, 1)
+	e.d.Fail(dockertest.OpInspect, 500, "daemon trouble")
+	s := e.status(t, 1)
+	if !s.Uncertain || s.Settled() {
+		t.Fatalf("status with a failing inspect = %+v", s)
+	}
+	e.d.Clear()
+	if s := e.status(t, 1); s.Uncertain || !s.Settled() {
+		t.Fatalf("status once inspect works = %+v", s)
+	}
+}
