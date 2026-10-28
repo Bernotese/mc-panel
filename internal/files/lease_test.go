@@ -35,7 +35,7 @@ func mutations(s *Service) map[string]error {
 	_, out["write"] = s.Write(ctx, filesapi.WriteRequest{ID: 1, Path: "new.txt", Content: "x"})
 	out["mkdir"] = s.Mkdir(ctx, 1, "newdir")
 	out["rename"] = s.Rename(ctx, filesapi.RenameRequest{ID: 1, From: "a.txt", To: "moved.txt"})
-	out["delete"] = s.Delete(ctx, 1, "a.txt")
+	out["delete"] = s.Delete(ctx, 1, "new.txt")
 	_, out["upload"] = s.Upload(ctx, 1, "up.txt", false, 1, strings.NewReader("x"))
 	_, out["upload checked"] = s.UploadChecked(ctx, 1, "up.jar", false, 1,
 		filesapi.Checksum{Algo: "sha256", Hex: "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"}, strings.NewReader("x"))
