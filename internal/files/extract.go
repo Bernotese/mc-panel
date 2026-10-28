@@ -54,6 +54,9 @@ func (s *Service) Extract(ctx context.Context, req filesapi.ExtractRequest) (fil
 			s.jobs.release(req.ID)
 		}
 	}()
+	if err := s.acquireRewrite(ctx, req.ID); err != nil {
+		return filesapi.Job{}, err
+	}
 	root, err := s.open(req.ID)
 	if err != nil {
 		return filesapi.Job{}, err

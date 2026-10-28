@@ -47,18 +47,20 @@ type Server struct {
 func NewServer(svc *Service, version string, log *slog.Logger) *Server {
 	s := &Server{svc: svc, version: version, log: log, io: clock.Real{}}
 	s.routes = map[string]route{
-		filesapi.PathHealth:   {method: http.MethodGet, handler: s.health},
-		filesapi.PathList:     {method: http.MethodPost, handler: s.list},
-		filesapi.PathRead:     {method: http.MethodPost, handler: s.read},
-		filesapi.PathWrite:    {method: http.MethodPost, handler: s.write},
-		filesapi.PathMkdir:    {method: http.MethodPost, handler: s.mkdir},
-		filesapi.PathRename:   {method: http.MethodPost, handler: s.rename},
-		filesapi.PathDelete:   {method: http.MethodPost, handler: s.delete},
-		filesapi.PathUpload:   {method: http.MethodPut, handler: s.upload},
-		filesapi.PathDownload: {method: http.MethodGet, handler: s.download},
-		filesapi.PathExtract:  {method: http.MethodPost, handler: s.extract},
-		filesapi.PathJobs:     {method: http.MethodGet, handler: s.jobs},
-		filesapi.PathJars:     {method: http.MethodPost, handler: s.jars},
+		filesapi.PathHealth:          {method: http.MethodGet, handler: s.health},
+		filesapi.PathList:            {method: http.MethodPost, handler: s.list},
+		filesapi.PathRead:            {method: http.MethodPost, handler: s.read},
+		filesapi.PathWrite:           {method: http.MethodPost, handler: s.write},
+		filesapi.PathMkdir:           {method: http.MethodPost, handler: s.mkdir},
+		filesapi.PathRename:          {method: http.MethodPost, handler: s.rename},
+		filesapi.PathDelete:          {method: http.MethodPost, handler: s.delete},
+		filesapi.PathUpload:          {method: http.MethodPut, handler: s.upload},
+		filesapi.PathDownload:        {method: http.MethodGet, handler: s.download},
+		filesapi.PathExtract:         {method: http.MethodPost, handler: s.extract},
+		filesapi.PathJobs:            {method: http.MethodGet, handler: s.jobs},
+		filesapi.PathJars:            {method: http.MethodPost, handler: s.jars},
+		filesapi.PathState:           {method: http.MethodGet, handler: s.state},
+		filesapi.PathRecoveryResolve: {method: http.MethodPost, handler: s.recoveryResolve},
 	}
 	for p, rt := range s.backupRoutes() {
 		s.routes[p] = rt
@@ -163,10 +165,11 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, op string, err err
 }
 
 // statusFor maps an error to the HTTP status and wire code (filesapi.CodeOf; other errors
-// are internal: 500 without a code). A service that is shutting down answers 503 without a
-// code, which the client reports as filesapi.ErrUnavailable (panel: 503 files_unavailable).
+// are internal: 500 without a code). A service that is shutting down or cannot read its restore
+// journal answers 503 without a code, which the client reports as filesapi.ErrUnavailable
+// (panel: 503 files_unavailable, data state unknown).
 func statusFor(err error) (int, string) {
-	if errors.Is(err, errShuttingDown) {
+	if errors.Is(err, errShuttingDown) || errors.Is(err, errJournalUnreadable) {
 		return http.StatusServiceUnavailable, ""
 	}
 	code, status := filesapi.CodeOf(err)
@@ -500,4 +503,39 @@ func (s *Server) jars(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// state: GET ?id= -> the data state of a server (data safety spec §2.1).
+func (s *Server) state(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.URL.Query().Get("id"))
+	if err != nil {
+		s.fail(w, r, "state", err)
+		return
+	}
+	res, err := s.svc.State(r.Context(), id)
+	if err != nil {
+		s.fail(w, r, "state", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// recoveryResolve moves the folders of an unfinished restore out of the data directory. It
+// waits for running file operations like a restore: longOp.
+func (s *Server) recoveryResolve(w http.ResponseWriter, r *http.Request) {
+	var req filesapi.IDRequest
+	if !s.decode(w, r, &req, filesapi.MaxSmallJSONBytes) {
+		return
+	}
+	var rec filesapi.Recovery
+	err := s.longOp(w, "recovery.resolve", func() error {
+		var err error
+		rec, err = s.svc.ResolveRecovery(r.Context(), req.ID)
+		return err
+	})
+	if err != nil {
+		s.fail(w, r, "recovery.resolve", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rec)
 }
