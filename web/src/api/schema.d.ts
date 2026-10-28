@@ -2745,7 +2745,7 @@ export interface components {
             tps_source: components["schemas"]["TpsSource"];
         };
         /** @enum {string} */
-        AlertKind: "server.down" | "server.crash_loop" | "host.disk_low";
+        AlertKind: "server.down" | "server.crash_loop" | "server.recovery_required" | "host.disk_low";
         /** @description [at (Unix ms), players] */
         SparklinePoint: number[];
         OverviewServer: {

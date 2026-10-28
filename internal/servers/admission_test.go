@@ -373,9 +373,9 @@ func TestRestartAdmittedUnderLock(t *testing.T) {
 	}
 }
 
-// Review Focus 5: a server whose restore could not be completed may be deleted (its recovery
-// folder stays, the audit entry says so); busy and unknown refuse the delete before anything
-// changes.
+// Review Focus 5: a server whose restore could not be completed may be deleted: its
+// half-swapped folders are moved to backups/recovery/ first and the audit entry names the
+// folder; busy and unknown refuse the delete before anything changes.
 func TestDeleteDataStates(t *testing.T) {
 	e := newEnv(t)
 	setBaseDomain(t, e.db, "mc.example.com")
@@ -409,19 +409,31 @@ func TestDeleteDataStates(t *testing.T) {
 	}
 	e.data.setErr(nil)
 	e.data.set(s.ID, servers.StateRecoveryRequired)
+	// the half-swapped folders are moved out before the data directory goes: a failing move
+	// refuses the delete
+	e.files.resolveErr = fmt.Errorf("%w: dial unix", filesapi.ErrUnavailable)
+	refuse("recovery, files failing", http.StatusServiceUnavailable, "files_unavailable")
+	e.files.resolveErr = &filesapi.StatusError{Status: http.StatusTooManyRequests, Code: filesapi.CodeBusy, Message: "busy"}
+	refuse("recovery, files busy", http.StatusConflict, "conflict")
+	e.files.resolveErr = nil
+	e.files.recovery = filesapi.Recovery{Phase: "stuck", Since: 1, Folder: fmt.Sprintf("%d-1793000000", s.ID)}
 	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", s.ID), nil, &admin); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete in recovery_required: %d %s", rec.Code, rec.Body)
 	}
+	if !slices.Equal(e.files.resolved, []int64{s.ID, s.ID, s.ID}) {
+		t.Fatalf("resolved = %v", e.files.resolved)
+	}
 	en := e.rec.Entries[len(e.rec.Entries)-1]
-	if rr, _ := en.Details["recovery_required"].(bool); en.Action != audit.ActionServerDelete || !rr {
+	if rr, _ := en.Details["recovery_required"].(bool); en.Action != audit.ActionServerDelete || !rr ||
+		en.Details["recovery_folder"] != e.files.recovery.Folder {
 		t.Fatalf("audit = %+v", en)
 	}
 	other := e.create(t, paper("creative"))
 	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", other.ID), nil, &admin); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete when safe: %d %s", rec.Code, rec.Body)
 	}
-	if _, ok := e.rec.Entries[len(e.rec.Entries)-1].Details["recovery_required"]; ok {
-		t.Fatal("a safe delete must not report a recovery")
+	if _, ok := e.rec.Entries[len(e.rec.Entries)-1].Details["recovery_required"]; ok || len(e.files.resolved) != 3 {
+		t.Fatal("a safe delete must neither resolve nor report a recovery")
 	}
 }
 

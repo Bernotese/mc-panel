@@ -134,7 +134,7 @@ const DYNAMIC_KEYS = [
     'spawn_protection',
   ].map((p) => `servers.props.${p}`),
   ...['pulling', 'creating', 'starting', 'stopping', 'removing'].map((o) => `servers.operation.${o}`),
-  ...['server_down', 'server_crash_loop', 'host_disk_low'].map((k) => `monitoring.alert.${k}`),
+  ...['server_down', 'server_crash_loop', 'server_recovery_required', 'host_disk_low'].map((k) => `monitoring.alert.${k}`),
   ...['reachable', 'unreachable'].map((k) => `monitoring.reachability.${k}`),
   ...['tick_query', 'paper', 'none', 'unknown'].map((s) => `monitoring.tps_source.${s}`),
   ...['1h', '24h', '7d', '30d'].map((r) => `monitoring.range.${r}`),

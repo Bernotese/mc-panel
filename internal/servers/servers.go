@@ -591,7 +591,9 @@ func purgeBackupsParam(r *http.Request) (purge, ok bool) {
 // server without instance needs no agent. A container of another server is never removed.
 // With ?purge_backups=1 the server's backups are deleted after the commit (backups spec §5.6).
 // The delete is admitted like a start (data safety spec §3), but a server whose restore could
-// not be completed (recovery_required) may be deleted too; its recovery folder is kept.
+// not be completed (recovery_required) may be deleted too: its half-swapped folders are first
+// moved to backups/recovery/ by the files service (never deleted with the server, D4) and the
+// audit entry names the folder.
 func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	purge, ok := purgeBackupsParam(r)
@@ -625,8 +627,9 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	// goes away.
 	ctx = context.WithoutCancel(ctx)
 	details := map[string]any{"name": s.Name, "configured": configured}
-	if recovery {
-		details["recovery_required"] = true // the half-swapped folders of the restore stay on the host
+	if recovery != nil {
+		// the half-swapped folders of the restore stay on the host, below backups/recovery/
+		details["recovery_required"], details["recovery_folder"] = true, recovery.Folder
 	}
 	if purge {
 		// After the commit and outside the reconcile lock: deleting a large repository can take
@@ -654,9 +657,10 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 }
 
 // deleteServerRows deletes the rows of s and (if configured and not foreign) its container under
-// the reconcile lock and the server's admission lock. recovery reports that the server was in
-// recovery_required. On failure it has written the error answer and returns ok = false.
-func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s store.Server) (configured, recovery, ok bool) {
+// the reconcile lock and the server's admission lock. A server in recovery_required has its
+// restore resolved first; recovery is the files service's answer then (nil otherwise). On
+// failure it has written the error answer and returns ok = false.
+func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s store.Server) (configured bool, recovery *filesapi.Recovery, ok bool) {
 	ctx := r.Context()
 	// Exclude a concurrent reconcile pass or restart: one that read this server before the
 	// delete would otherwise recreate the container after the remove (orphan container).
@@ -667,30 +671,34 @@ func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s sto
 		if !WriteDataStateError(w, r, err) {
 			h.log.DebugContext(ctx, "servers: delete admission ended with the request", "err", err)
 		}
-		return false, false, false
+		return false, nil, false
 	}
 	defer unlock()
 	info, err := h.data.Lookup(ctx, s.ID, nil)
 	if err != nil && ctx.Err() == nil {
 		h.log.WarnContext(ctx, "servers: delete refused, data state unknown", "server_id", s.ID, "err", err)
 	}
-	recovery = info.State == StateRecoveryRequired
-	if err := StateErr(info.State); err != nil && !recovery {
+	if err := StateErr(info.State); err != nil && info.State != StateRecoveryRequired {
 		WriteDataStateError(w, r, err)
-		return false, false, false
+		return false, nil, false
+	}
+	if info.State == StateRecoveryRequired {
+		if recovery, ok = h.resolveForDelete(w, r, s.ID); !ok {
+			return false, nil, false
+		}
 	}
 	_, err = h.q.ServersGetInstance(ctx, s.ID)
 	configured = err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		httpx.Internal(w, r, err)
-		return false, false, false
+		return false, nil, false
 	}
 	remove := configured
 	if configured {
 		foreign, err := h.isForeign(ctx, s)
 		if err != nil {
 			writeAgentError(w, r, err)
-			return false, false, false
+			return false, nil, false
 		}
 		if foreign {
 			h.log.Warn("servers: delete leaves the container of another server alone", "server_id", s.ID, "name", s.Name)
@@ -700,46 +708,74 @@ func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s sto
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		httpx.Internal(w, r, err)
-		return false, false, false
+		return false, nil, false
 	}
 	defer func() { _ = tx.Rollback() }()
 	// A dev created since the check in handleDeleteServer: its source stays (dev_instances has no
 	// cascade on source_id).
 	if _, err := h.q.WithTx(tx).DevGetBySource(ctx, s.ID); err == nil {
 		writeDevExists(w, r)
-		return false, false, false
+		return false, nil, false
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		httpx.Internal(w, r, err)
-		return false, false, false
+		return false, nil, false
 	}
 	n, err := h.q.WithTx(tx).RbacDeleteServer(ctx, s.ID)
 	if err != nil {
 		httpx.Internal(w, r, err)
-		return false, false, false
+		return false, nil, false
 	}
 	if n == 0 { // deleted concurrently between lookup and delete
 		writeNotFound(w, r)
-		return false, false, false
+		return false, nil, false
 	}
 	if err := deleteMonitoring(ctx, h.q.WithTx(tx), s.ID); err != nil {
 		httpx.Internal(w, r, err)
-		return false, false, false
+		return false, nil, false
 	}
 	if remove {
 		if err := h.inst.Remove(ctx, s.ID); err != nil {
 			writeAgentError(w, r, err) // the rollback keeps the rows
-			return false, false, false
+			return false, nil, false
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		h.log.Error("servers: delete: commit failed after the agent accepted the remove", "server_id", s.ID, "err", err)
 		httpx.Internal(w, r, err)
-		return false, false, false
+		return false, nil, false
 	}
 	delete(h.reconcile.attempts, s.ID)
 	delete(h.reconcile.foreign, s.ID)
 	h.setPanelError(s.ID, "")
 	return configured, recovery, true
+}
+
+// resolveForDelete moves the half-swapped folders of server id's unresolved restore out of its
+// data directory before the delete takes the directory away (data safety spec D4). A service
+// that finds no unresolved restore (any more) leaves nothing to keep: rec is nil then. On
+// failure it has written the error answer.
+func (h *Handler) resolveForDelete(w http.ResponseWriter, r *http.Request, id int64) (rec *filesapi.Recovery, ok bool) {
+	ctx := r.Context()
+	if h.files == nil {
+		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeFilesUnavailable, "the files service is not configured")
+		return nil, false
+	}
+	got, err := h.files.ResolveRecovery(ctx, id)
+	switch {
+	case err == nil:
+		return &got, true
+	case errors.Is(err, filesapi.ErrNotFound):
+		return nil, true
+	case errors.Is(err, filesapi.ErrBusy):
+		writeConflict(w, r, "a job holds this server's data; try again when it is done")
+	case ctx.Err() != nil:
+		h.log.DebugContext(ctx, "servers: delete: resolve ended with the request", "err", err)
+	default:
+		// the service's error may name host paths: log it, show a fixed text
+		h.log.ErrorContext(ctx, "servers: delete: resolve the unfinished restore", "server_id", id, "err", err)
+		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeFilesUnavailable, "the files service could not move the unfinished restore out of the data directory")
+	}
+	return nil, false
 }
 
 // deleteMonitoring removes the TP5 series and alert states of a deleted server (server_alerts
