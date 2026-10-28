@@ -513,7 +513,7 @@ func TestServerViewsShowDev(t *testing.T) {
 		t.Fatalf("paused dev = %+v", got.Dev)
 	}
 	mustExec(t, e.db, `UPDATE dev_instances SET deferred_since = NULL WHERE server_id = ?`, devID)
-	e.gate.set(devID, true)
+	e.data.setBusy(devID, "dev_sync")
 	if got := decode[devServerResp](t, e.do(http.MethodGet, fmt.Sprintf("/servers/%d", devID), nil, &admin)); !got.Dev.SyncPending {
 		t.Fatal("gated dev is not pending")
 	}

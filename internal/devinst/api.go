@@ -12,6 +12,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/servers"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
 
@@ -70,14 +71,19 @@ type devView struct {
 }
 
 // viewOf renders d. sync_pending follows the rule of the Server view (servers): a deferred or
-// running sync, a held data gate, or a sync this handler is about to queue.
+// running sync, busy data (the sync is queued or restoring), or a sync this handler is about to
+// queue.
 func (h *Handler) viewOf(ctx context.Context, d dev) devView {
 	r := d.row
 	ov := parseOverrides(r.PropertyOverrides)
 	h.mu.Lock()
 	pending := h.devs[r.ServerID] != nil && h.devs[r.ServerID].pending
 	h.mu.Unlock()
-	pending = pending || r.DeferredSince.Valid || r.LastSyncStatus.String == statusRunning || h.gate.DataJobRunning(ctx, r.ServerID)
+	if !pending && !r.DeferredSince.Valid && r.LastSyncStatus.String != statusRunning {
+		st, _ := h.data.State(ctx, r.ServerID) // an error comes with StateUnknown
+		pending = st == servers.StateBusy
+	}
+	pending = pending || r.DeferredSince.Valid || r.LastSyncStatus.String == statusRunning
 	return devView{
 		ServerID: r.ServerID, SourceID: r.SourceID, SourceName: d.sourceName, SyncPaused: r.SyncPaused != 0,
 		PausedAt: msPtr(r.PausedAt), SyncTime: r.SyncTime, IdleMinutes: r.IdleMinutes,

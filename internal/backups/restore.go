@@ -12,11 +12,11 @@ import (
 	"github.com/Bernotese/mc-panel/internal/httpx"
 )
 
-// DataJobRunning is true while the panel holds a restore job for the server, from the 202 (also
-// while it waits behind another server's job) to the end of the service's restore
-// (servers.DataGate; spec §5.5). The service's own restore job is covered by
-// serverfiles.DataJobRunning, also across a panel restart.
-func (h *Handler) DataJobRunning(_ context.Context, serverID int64) bool {
+// Holding reports a restore or dev sync job (keyed by the dev) of the server that waits or
+// runs, from the 202 to the end of the service's restore (servers.Hold; spec §5.5): the data
+// state is busy before the service knows the job. The service's own restore job is part of
+// servers.DataStates, also across a panel restart.
+func (h *Handler) Holding(serverID int64) (kind string, ok bool) {
 	return h.queue.restoreHeld(serverID)
 }
 

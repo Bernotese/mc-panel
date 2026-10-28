@@ -35,9 +35,9 @@ type Deps struct {
 	Web     agentapi.WebClient
 	Log     *slog.Logger  // nil = slog.Default()
 	Catalog CatalogSource // nil = catalog.New with the default upstreams
-	// Gate holds starts while a job rewrites a server's data directory (extract, restore);
-	// nil = never blocked.
-	Gate DataGate
+	// DataStates answers whether a server's data directory is safe (data safety spec §2.3):
+	// only then are starts admitted. nil = every server is safe (no files service).
+	DataStates DataStates
 	// Backups deletes a server's backups on DELETE /servers/{id}?purge_backups=1; nil = nothing
 	// to delete.
 	Backups BackupPurger
@@ -48,18 +48,19 @@ type Deps struct {
 }
 
 type Handler struct {
-	db      *sql.DB
-	q       *store.Queries
-	clock   clock.Clock
-	ioClock clock.Clock // wall clock for I/O deadlines (always clock.Real)
-	rec     audit.Recorder
-	box     *secretbox.Box
-	inst    agentapi.InstancesClient
-	web     agentapi.WebClient
-	catalog CatalogSource
-	gate    DataGate
-	backups BackupPurger
-	log     *slog.Logger
+	db        *sql.DB
+	q         *store.Queries
+	clock     clock.Clock
+	ioClock   clock.Clock // wall clock for I/O deadlines (always clock.Real)
+	rec       audit.Recorder
+	box       *secretbox.Box
+	inst      agentapi.InstancesClient
+	web       agentapi.WebClient
+	catalog   CatalogSource
+	data      DataStates
+	admission *Admission
+	backups   BackupPurger
+	log       *slog.Logger
 	// hostMemory: see Deps.HostMemory.
 	hostMemory func() (uint64, error)
 	power      *powerLimiter
@@ -87,9 +88,9 @@ func NewHandler(d Deps) *Handler {
 	if cat == nil {
 		cat = catalog.New(catalog.Options{Clock: d.Clock})
 	}
-	gate := d.Gate
-	if gate == nil {
-		gate = noGate{}
+	data := d.DataStates
+	if data == nil {
+		data = safeStates{}
 	}
 	purger := d.Backups
 	if purger == nil {
@@ -97,9 +98,9 @@ func NewHandler(d Deps) *Handler {
 	}
 	return &Handler{
 		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst, web: web, catalog: cat, log: log,
-		gate: gate, backups: purger, ioClock: clock.Real{}, hostMemory: d.HostMemory,
+		data: data, admission: NewAdmission(), backups: purger, ioClock: clock.Real{}, hostMemory: d.HostMemory,
 		power: newPowerLimiter(), kick: make(chan struct{}, 1),
-		reconcile: reconcileState{attempts: map[int64]attempt{}, warned: map[int64]bool{}, foreign: map[int64]bool{}},
+		reconcile: reconcileState{attempts: map[int64]attempt{}, warned: map[int64]bool{}, foreign: map[int64]bool{}, unknown: map[int64]bool{}},
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/servers"
 )
 
 // wakeTick sends the complete list of sleeping devs to the agent (PUT /v1/waker; the agent
@@ -54,11 +55,13 @@ func (h *Handler) wakeTick(ctx context.Context) {
 	}
 }
 
-// wake wakes devID unless its data gate is held (a sync or restore rewrites its data), it was
-// woken less than wakeGap ago, or wakeCap wakes happened panel-wide within wakeWindow.
+// wake wakes devID unless its data is not safe (a sync or restore rewrites it, a restore is
+// unresolved or the files service does not answer; data safety spec §3), it was woken less
+// than wakeGap ago, or wakeCap wakes happened panel-wide within wakeWindow. The start itself is
+// admitted again by the reconcile loop.
 func (h *Handler) wake(ctx context.Context, devID int64) {
-	if h.gate.DataJobRunning(ctx, devID) {
-		h.log.DebugContext(ctx, "devinst: wake ignored while the data gate is held", "server_id", devID)
+	if st, err := h.data.State(ctx, devID); st != servers.StateSafe {
+		h.log.DebugContext(ctx, "devinst: wake ignored, the dev's data is not safe", "server_id", devID, "state", st, "err", err)
 		return
 	}
 	now := h.clock.Now()

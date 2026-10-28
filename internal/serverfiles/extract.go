@@ -5,17 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 )
-
-// gateTimeout bounds the job query of DataJobRunning: power actions and the reconcile loop
-// must not hang on an unreachable service.
-const gateTimeout = 2 * time.Second
 
 type extractRequest struct {
 	Path string `json:"path"`
@@ -53,10 +48,6 @@ func toFileJob(j filesapi.Job) fileJobJSON {
 
 // isExtract: "" is an extract job of a service before sub-project 4.
 func isExtract(k filesapi.JobKind) bool { return k == "" || k == filesapi.JobExtract }
-
-// rewritesData reports whether a job of this kind writes into the data directory: an extract
-// or a restore. A backup only reads it, a forget never touches it.
-func rewritesData(k filesapi.JobKind) bool { return isExtract(k) || k == filesapi.JobRestore }
 
 var errRunning = errors.New("the server is running")
 
@@ -183,21 +174,12 @@ func (p *pendingExtracts) has(id int64) bool {
 	return p.n[id] > 0
 }
 
-// DataJobRunning reports whether a job that rewrites the data directory runs for the server (an
-// extract, files spec §5.1, or a restore, backups spec §5.5; a backup does not count), or an
-// extract request is between its state check and the service's answer. An unreachable service
-// counts as "no job". It implements servers.DataGate.
-func (h *Handler) DataJobRunning(ctx context.Context, serverID int64) bool {
+// Holding reports an extract request of the server between its admission and the service's
+// answer (servers.Hold, kind "extract"): until the service holds the job itself, the panel shows
+// the server as busy. The service's own jobs are part of servers.DataStates.
+func (h *Handler) Holding(serverID int64) (kind string, ok bool) {
 	if h.pending.has(serverID) {
-		return true
+		return string(filesapi.JobExtract), true
 	}
-	ctx, cancel := context.WithTimeout(ctx, gateTimeout)
-	defer cancel()
-	job, err := h.files.Job(ctx, serverID)
-	if err != nil {
-		h.log.WarnContext(ctx, "files: data gate open, job state unknown (file service unreachable)",
-			"server_id", serverID, "err", err)
-		return false
-	}
-	return job != nil && job.State == filesapi.JobRunning && rewritesData(job.Kind)
+	return "", false
 }

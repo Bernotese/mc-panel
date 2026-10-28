@@ -40,7 +40,7 @@ type Deps struct {
 	ServerView func(ctx context.Context, id int64) (any, error)
 	Waker      agentapi.WakerClient   // nil = no wake loop
 	Console    agentapi.ConsoleClient // RCON; nil = warnings and ops are not sent
-	Gate       servers.DataGate       // nil = never held
+	DataStates servers.DataStates     // nil = every dev's data is safe
 	Log        *slog.Logger           // nil = slog.Default()
 }
 
@@ -84,7 +84,7 @@ type Handler struct {
 	view     func(ctx context.Context, id int64) (any, error)
 	waker    agentapi.WakerClient
 	console  agentapi.ConsoleClient
-	gate     servers.DataGate
+	data     servers.DataStates
 	log      *slog.Logger
 
 	tickEvery, fastEvery time.Duration
@@ -129,7 +129,7 @@ type delayedSync struct {
 func NewHandler(d Deps) *Handler {
 	h := &Handler{
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, notifier: d.Notifier, servers: d.Servers,
-		syncer: d.Syncer, view: d.ServerView, waker: d.Waker, console: d.Console, gate: d.Gate, log: d.Log,
+		syncer: d.Syncer, view: d.ServerView, waker: d.Waker, console: d.Console, data: d.DataStates, log: d.Log,
 		tickEvery: tickEvery, fastEvery: fastEvery, devs: map[int64]*devState{},
 	}
 	if h.clock == nil {
@@ -141,8 +141,8 @@ func NewHandler(d Deps) *Handler {
 	if h.notifier == nil {
 		h.notifier = notify.Nop{}
 	}
-	if h.gate == nil {
-		h.gate = noGate{}
+	if h.data == nil {
+		h.data = safeStates{}
 	}
 	if h.log == nil {
 		h.log = slog.Default()
@@ -315,6 +315,10 @@ type nopRecorder struct{}
 
 func (nopRecorder) Record(context.Context, audit.Entry) error { return nil }
 
-type noGate struct{}
+// safeStates stands in for missing DataStates: every dev's data is safe.
+type safeStates struct{}
 
-func (noGate) DataJobRunning(context.Context, int64) bool { return false }
+func (safeStates) State(context.Context, int64) (servers.State, error) { return servers.StateSafe, nil }
+func (safeStates) Lookup(context.Context, int64, servers.Hold) (servers.DataInfo, error) {
+	return servers.DataInfo{State: servers.StateSafe}, nil
+}

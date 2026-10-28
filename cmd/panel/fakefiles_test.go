@@ -160,6 +160,21 @@ func (f *fakeFiles) Job(context.Context, int64) (*filesapi.Job, error) {
 	return &j, nil
 }
 
+// State is busy while the extract job runs (data safety spec §2.1), else safe.
+func (f *fakeFiles) State(context.Context, int64) (filesapi.StateResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.job != nil && f.job.State == filesapi.JobRunning {
+		j := *f.job
+		return filesapi.StateResponse{State: filesapi.StateBusy, Job: &j}, nil
+	}
+	return filesapi.StateResponse{State: filesapi.StateSafe}, nil
+}
+
+func (f *fakeFiles) ResolveRecovery(context.Context, int64) (filesapi.Recovery, error) {
+	return filesapi.Recovery{}, &filesapi.StatusError{Status: 409, Code: "conflict", Message: "no recovery required"}
+}
+
 // UploadChecked stores the upload only if the digest really matches; without overwrite an
 // existing file is ErrExists (like the service).
 func (f *fakeFiles) UploadChecked(_ context.Context, id int64, p string, overwrite bool, size int64, sum filesapi.Checksum, body io.Reader) (filesapi.UploadResponse, error) {
