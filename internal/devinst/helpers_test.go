@@ -28,6 +28,8 @@ import (
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/servers"
+	"github.com/Bernotese/mc-panel/internal/servers/admit"
 	"github.com/Bernotese/mc-panel/internal/store"
 	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
@@ -39,7 +41,7 @@ var t0 = time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
 var fiveAM = time.Date(2026, 10, 13, 3, 0, 0, 0, time.UTC)
 
 // env is a real database plus the devinst handler on a real rbac.Router with fakes for the
-// servers handler, the backup queue, the agent (waker, RCON) and the data gate.
+// servers handler, the backup queue, the agent (waker, RCON) and the data states.
 type env struct {
 	t       *testing.T
 	db      *sql.DB
@@ -51,7 +53,8 @@ type env struct {
 	syncer  *fakeSyncer
 	waker   *fakeWaker
 	console *fakeConsole
-	gate    *fakeGate
+	data    *fakeStates
+	admit   admit.Func // nil = no admission
 	h       *devinst.Handler
 	mux     *chi.Mux
 	rootID  int64
@@ -62,7 +65,7 @@ func newEnv(t *testing.T) *env {
 	db := storetest.Open(t)
 	e := &env{
 		t: t, db: db, q: store.New(db), clk: clock.NewFake(t0), rec: &audit.MemoryRecorder{}, notes: &notify.Recording{},
-		syncer: &fakeSyncer{}, waker: &fakeWaker{}, console: &fakeConsole{}, gate: &fakeGate{held: map[int64]bool{}},
+		syncer: &fakeSyncer{}, waker: &fakeWaker{}, console: &fakeConsole{}, data: &fakeStates{states: map[int64]servers.State{}},
 	}
 	e.servers = &fakeServers{t: t, db: db, clk: e.clk, errs: map[string]error{}}
 	e.h = e.newHandler()
@@ -78,7 +81,7 @@ func (e *env) newHandler() *devinst.Handler {
 	return devinst.NewHandler(devinst.Deps{
 		DB: e.db, Clock: e.clk, Audit: e.rec, Notifier: e.notes, Servers: e.servers, Syncer: e.syncer,
 		ServerView: func(_ context.Context, id int64) (any, error) { return map[string]any{"id": id}, nil },
-		Waker:      e.waker, Console: e.console, Gate: e.gate,
+		Waker:      e.waker, Console: e.console, DataStates: e.data, Admit: e.admit,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 }
@@ -437,19 +440,39 @@ func (f *fakeConsole) reset() {
 	f.cmds = nil
 }
 
-type fakeGate struct {
-	mu   sync.Mutex
-	held map[int64]bool
+// fakeStates is a servers.DataStates with a state per dev (missing = safe); err, while set,
+// makes every dev unknown.
+type fakeStates struct {
+	mu     sync.Mutex
+	states map[int64]servers.State
+	err    error
 }
 
-func (g *fakeGate) DataJobRunning(_ context.Context, id int64) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.held[id]
+func (f *fakeStates) State(ctx context.Context, id int64) (servers.State, error) {
+	info, err := f.Lookup(ctx, id, nil)
+	return info.State, err
 }
 
-func (g *fakeGate) set(id int64, held bool) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.held[id] = held
+func (f *fakeStates) Lookup(_ context.Context, id int64, _ servers.Hold) (servers.DataInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return servers.DataInfo{State: servers.StateUnknown}, f.err
+	}
+	if s, ok := f.states[id]; ok {
+		return servers.DataInfo{State: s}, nil
+	}
+	return servers.DataInfo{State: servers.StateSafe}, nil
+}
+
+func (f *fakeStates) set(id int64, s servers.State) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.states[id] = s
+}
+
+func (f *fakeStates) setErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.err = err
 }

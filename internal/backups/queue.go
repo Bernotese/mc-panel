@@ -150,14 +150,17 @@ func (q *queue) busy(serverID int64) bool {
 	return active(q.last[serverID])
 }
 
-// restoreHeld reports whether the server has a restore or dev sync job (keyed by the dev) that
-// waits or runs: the gate closes with the 202, not only when the worker picks the job up
+// restoreHeld reports the restore or dev sync job (keyed by the dev) of the server that waits
+// or runs: the data is busy from the 202 on, not only when the worker picks the job up
 // (another server's job may still run).
-func (q *queue) restoreHeld(serverID int64) bool {
+func (q *queue) restoreHeld(serverID int64) (kind string, ok bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	j := q.last[serverID]
-	return active(j) && (j.spec.kind == kindRestore || j.spec.kind == kindDevSync)
+	if active(j) && (j.spec.kind == kindRestore || j.spec.kind == kindDevSync) {
+		return j.spec.kind, true
+	}
+	return "", false
 }
 
 // idle reports whether no job waits or runs.

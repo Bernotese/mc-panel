@@ -73,26 +73,31 @@ func (h *Handler) step(ctx context.Context, j *job, step string) error {
 	return nil
 }
 
-// instanceState asks the agent for the container state; no agent client counts as stopped.
-// Docker not ok is always an error, never "stopped": the agent also reports it when dockerd
-// hangs while the containers keep running.
-func (h *Handler) instanceState(ctx context.Context, id int64) (agentapi.ContainerState, error) {
+// instanceStatus asks the agent for the server's status; no agent client or a server the
+// agent does not list counts as missing (stopped, settled).
+func (h *Handler) instanceStatus(ctx context.Context, id int64) (agentapi.InstanceStatus, error) {
 	if h.inst == nil {
-		return agentapi.StateMissing, nil
+		return agentapi.InstanceStatus{ID: id, State: agentapi.StateMissing}, nil
 	}
 	resp, err := h.inst.Instances(ctx)
 	if err != nil {
-		return "", err
+		return agentapi.InstanceStatus{}, err
 	}
 	if resp.Docker != agentapi.DockerOK {
-		return "", agentapi.ErrDockerUnavailable
+		return agentapi.InstanceStatus{}, agentapi.ErrDockerUnavailable
 	}
 	for _, s := range resp.Instances {
 		if s.ID == id {
-			return s.State, nil
+			return s, nil
 		}
 	}
-	return agentapi.StateMissing, nil
+	return agentapi.InstanceStatus{ID: id, State: agentapi.StateMissing}, nil
+}
+
+// instanceState asks the agent for the container state; no agent client counts as stopped.
+func (h *Handler) instanceState(ctx context.Context, id int64) (agentapi.ContainerState, error) {
+	st, err := h.instanceStatus(ctx, id)
+	return st.State, err
 }
 
 func isRunning(s agentapi.ContainerState) bool {

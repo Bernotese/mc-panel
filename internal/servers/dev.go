@@ -460,7 +460,7 @@ func (h *Handler) DevView(ctx context.Context, devID int64) (ServerView, error) 
 	if _, ok := d.dev.devs[devID]; !ok {
 		return serverJSON{}, ErrNotDev
 	}
-	return d.server(s, allPerms())
+	return d.server(ctx, s, allPerms())
 }
 
 // devSummaryJSON is the OpenAPI schema DevSummary.
@@ -482,8 +482,9 @@ type devData struct {
 	bySource map[int64]int64
 }
 
-// loadDevData reads every dev. A sync is pending while it waits for players to leave, is
-// running, or holds the dev's data gate (queued in the backup queue).
+// loadDevData reads every dev. A sync is pending while it waits for players to leave or is
+// running; viewData.applyData adds a dev whose data is busy (its sync queued in the backup
+// queue or restoring).
 func (h *Handler) loadDevData(ctx context.Context) (devData, error) {
 	rows, err := h.q.DevList(ctx)
 	if err != nil {
@@ -495,7 +496,7 @@ func (h *Handler) loadDevData(ctx context.Context) (devData, error) {
 		v := devSummaryJSON{
 			SourceID: r.SourceID, SourceName: r.SourceName, SyncPaused: r.SyncPaused != 0,
 			LastSyncAt: nullInt(r.LastSyncAt), LastSyncStatus: status, Sleeping: r.Sleeping != 0,
-			SyncPending: r.DeferredSince.Valid || status != nil && *status == "running" || h.gate.DataJobRunning(ctx, r.ServerID),
+			SyncPending: r.DeferredSince.Valid || status != nil && *status == "running",
 		}
 		if !v.SyncPaused {
 			v.NextSyncAt = nullInt(r.NextSyncAt)

@@ -11,13 +11,32 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/servers"
 	"github.com/Bernotese/mc-panel/internal/store"
 	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
 
-type cGate map[int64]bool
+// cStates is a servers.DataStates with a fixed state per server (missing = safe); a missing
+// entry with err set is unknown.
+type cStates struct {
+	m   map[int64]servers.State
+	err error
+}
 
-func (g cGate) DataJobRunning(_ context.Context, id int64) bool { return g[id] }
+func (c cStates) State(ctx context.Context, id int64) (servers.State, error) {
+	info, err := c.Lookup(ctx, id, nil)
+	return info.State, err
+}
+
+func (c cStates) Lookup(_ context.Context, id int64, _ servers.Hold) (servers.DataInfo, error) {
+	if s, ok := c.m[id]; ok {
+		return servers.DataInfo{State: s}, nil
+	}
+	if c.err != nil {
+		return servers.DataInfo{State: servers.StateUnknown}, c.err
+	}
+	return servers.DataInfo{State: servers.StateSafe}, nil
+}
 
 const cTickAnswer = "Target tick rate: 20.0 per second.\nAverage time per tick: 4.0ms (Target: 50.0ms)"
 
@@ -32,7 +51,7 @@ type cEnv struct {
 
 func newCEnv(t *testing.T) *cEnv {
 	t.Helper()
-	e := &cEnv{env: newEnv(t, func(d *Deps) { d.PingAddr = "127.0.0.1:25565"; d.Gate = cGate{} }), ids: map[string]int64{}}
+	e := &cEnv{env: newEnv(t, func(d *Deps) { d.PingAddr = "127.0.0.1:25565"; d.DataStates = cStates{} }), ids: map[string]int64{}}
 	ctx := context.Background()
 	q := store.New(e.db)
 	e.ids["survival"] = e.server("survival")
@@ -270,12 +289,25 @@ func TestPassServerWithoutContainer(t *testing.T) {
 	}
 }
 
-func TestPassGate(t *testing.T) {
+// Busy and recovery_required gate a server's down alerts; unknown does not (data safety spec
+// §2.3).
+func TestPassDataStates(t *testing.T) {
 	e := newCEnv(t)
-	e.c.d.Gate = cGate{e.ids["survival"]: true}
+	e.c.d.DataStates = cStates{m: map[int64]servers.State{e.ids["survival"]: servers.StateBusy}}
 	s := e.c.pass(context.Background())
-	if !e.sample(s, "survival").Gated || e.sample(s, "creative").Gated {
-		t.Fatal("Gated must reflect the data gate per server")
+	if sv := e.sample(s, "survival"); !sv.Gated || sv.DataState != servers.StateBusy {
+		t.Fatalf("busy: %+v", sv)
+	}
+	if sv := e.sample(s, "creative"); sv.Gated || sv.DataState != servers.StateSafe {
+		t.Fatalf("safe: %+v", sv)
+	}
+	e.c.d.DataStates = cStates{m: map[int64]servers.State{e.ids["survival"]: servers.StateRecoveryRequired}, err: errors.New("files down")}
+	s = e.c.pass(context.Background())
+	if sv := e.sample(s, "survival"); !sv.Gated || sv.DataState != servers.StateRecoveryRequired {
+		t.Fatalf("recovery: %+v", sv)
+	}
+	if sv := e.sample(s, "creative"); sv.Gated || sv.DataState != servers.StateUnknown {
+		t.Fatalf("unknown must not gate: %+v", sv)
 	}
 }
 

@@ -1233,6 +1233,7 @@ export const de = {
     alert: {
       server_down: 'Server down',
       server_crash_loop: 'Crash-Loop',
+      server_recovery_required: 'Wiederherstellung nötig',
       host_disk_low: 'Platte knapp',
     },
     host: {

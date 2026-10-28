@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,9 +42,17 @@ type env struct {
 	backups   *fakeBackups
 	up        *fakeUpstream
 	cfg       config.Panel
+	db        *sql.DB
+	deps      appDeps
+	handler   atomic.Pointer[http.Handler] // the current app's handler (restartApp swaps it)
+	stopApp   func()
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { return newEnvWith(t, nil) }
+
+// newEnvWith is newEnv; opt may replace dependencies (e.g. a real files service) before the app
+// is built.
+func newEnvWith(t *testing.T, opt func(*appDeps)) *env {
 	t.Helper()
 	srv := httptest.NewUnstartedServer(nil)
 	srv.StartTLS()
@@ -68,22 +78,46 @@ func newEnv(t *testing.T) *env {
 	ff := newFakeFiles()
 	fb := newFakeBackups()
 	up := newFakeUpstream(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	a, err := buildApp(ctx, cfg, db, appDeps{Clock: clk, Agent: fa, Instances: fi, Console: fc, Files: ff, Backups: fb, Upstream: up.client(clk), Version: "test",
-		HostMemory: func() (uint64, error) { return 16 << 30, nil }})
-	if err != nil {
-		t.Fatal(err)
+	deps := appDeps{Clock: clk, Agent: fa, Instances: fi, Console: fc, Files: ff, Backups: fb, Upstream: up.client(clk), Version: "test",
+		HostMemory: func() (uint64, error) { return 16 << 30, nil }}
+	if opt != nil {
+		opt(&deps)
 	}
-	done := make(chan struct{})
-	go func() { a.Run(ctx); close(done) }()
-	t.Cleanup(func() { cancel(); <-done; a.Close() })
-	srv.Config.Handler = a.Handler
+	e := &env{t: t, srv: srv, clk: clk, agent: fa, instances: fi, console: fc, files: ff, backups: fb, up: up, cfg: cfg, db: db, deps: deps}
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { (*e.handler.Load()).ServeHTTP(w, r) })
+	e.startApp()
+	t.Cleanup(func() { e.stopApp() })
 
 	if err := users.RunAdminCreate(context.Background(), db, clk, audit.NewSQLRecorder(db, clk),
 		[]string{"-username", "admin"}, strings.NewReader(adminPW+"\n"), io.Discard); err != nil {
 		t.Fatalf("admin create: %v", err)
 	}
-	return &env{t: t, srv: srv, app: a, clk: clk, agent: fa, instances: fi, console: fc, files: ff, backups: fb, up: up, cfg: cfg}
+	return e
+}
+
+// startApp builds the app on the env's database and dependencies and runs it.
+func (e *env) startApp() {
+	e.t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	a, err := buildApp(ctx, e.cfg, e.db, e.deps)
+	if err != nil {
+		cancel()
+		e.t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { a.Run(ctx); close(done) }()
+	e.app = a
+	h := a.Handler
+	e.handler.Store(&h)
+	e.stopApp = func() { cancel(); <-done; a.Close() }
+}
+
+// restartApp simulates a panel restart: the running app stops and a new one starts on the same
+// database (sessions survive, in-memory state does not).
+func (e *env) restartApp() {
+	e.t.Helper()
+	e.stopApp()
+	e.startApp()
 }
 
 type client struct {

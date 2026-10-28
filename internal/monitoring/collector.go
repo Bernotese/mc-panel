@@ -8,13 +8,17 @@ import (
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
+	"github.com/Bernotese/mc-panel/internal/servers"
 	"github.com/Bernotese/mc-panel/internal/store"
 	"github.com/Bernotese/mc-panel/internal/timescale"
 )
 
 // collectEvery, tpsEvery, liveTPSEvery, liveWindow and maxParallelPings come from types.go.
 const (
-	statusTimeout   = 10 * time.Second
+	statusTimeout = 10 * time.Second
+	// dataTimeout bounds all data state lookups of one pass together: a files service that
+	// hangs makes the remaining servers unknown at once.
+	dataTimeout     = 2 * time.Second
 	rconTimeout     = 10 * time.Second
 	maxParallelRcon = 4 // RCON calls at once, pass and live loop together
 )
@@ -210,11 +214,18 @@ func (c *collector) servers(ctx context.Context, now time.Time) ([]ServerSample,
 		status[st.ID] = st
 	}
 	out := make([]ServerSample, len(rows))
+	dctx, dcancel := context.WithTimeout(ctx, dataTimeout)
+	defer dcancel()
 	for i, r := range rows {
 		sv := ServerSample{ID: r.id, Name: r.name, DesiredRunning: r.desired, Revision: r.revision, State: agentapi.StateMissing}
-		if c.d.Gate != nil {
-			sv.Gated = c.d.Gate.DataJobRunning(ctx, r.id)
+		sv.DataState = servers.StateSafe
+		if c.d.DataStates != nil {
+			sv.DataState, _ = c.d.DataStates.State(dctx, r.id) // an error comes with StateUnknown
 		}
+		// A restore or extract stops the server on purpose, and one whose restore could not be
+		// completed must not start. An unknown state does not silence alerts (data safety spec
+		// §2.3): a data-safety error must not hide a real outage.
+		sv.Gated = sv.DataState == servers.StateBusy || sv.DataState == servers.StateRecoveryRequired
 		if st, ok := status[r.id]; ok && docker {
 			sv.State, sv.StartedAt, sv.RestartCount = st.State, st.StartedAt, st.RestartCount
 			if st.Revision > 0 { // the running container's revision (label), not the desired one

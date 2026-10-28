@@ -23,6 +23,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/servers/admit"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
 
@@ -52,7 +53,11 @@ type Deps struct {
 	// Instances is the agent's instance API, asked for the actual state before extracting;
 	// nil means "no agent" (extracting answers 503 agent_unavailable).
 	Instances agentapi.InstancesClient
-	Log       *slog.Logger // nil = slog.Default()
+	// Admit runs fn under the server's admission lock once its data state is safe
+	// (servers.Handler.Admit, data safety spec §3): an extract checks the server and hands the
+	// job to the service under it. nil = no admission (fn runs at once).
+	Admit admit.Func
+	Log   *slog.Logger // nil = slog.Default()
 }
 
 type Handler struct {
@@ -65,6 +70,7 @@ type Handler struct {
 	rec         audit.Recorder
 	files       filesapi.Client
 	inst        agentapi.InstancesClient
+	admitFn     admit.Func
 	log         *slog.Logger
 	uploads     *userSlots
 	downloads   *userSlots
@@ -89,7 +95,7 @@ func NewHandler(d Deps) *Handler {
 	}
 	return &Handler{
 		q: store.New(d.DB), clock: d.Clock, ioClock: clock.Real{}, ioTimeout: ioTimeout,
-		rec: d.Audit, files: fc, inst: inst, log: log,
+		rec: d.Audit, files: fc, inst: inst, admitFn: d.Admit, log: log,
 		uploads: newUserSlots(maxUploadsPerUser), downloads: newUserSlots(maxDownloadsPerUser),
 		editor: make(chan struct{}, maxEditorCalls), editors: newUserSlots(maxEditorCallsPerUser),
 		zips: newUserSlots(maxZipsPerUser), saveTimeout: saveTimeout, pending: newPendingExtracts(),

@@ -42,7 +42,7 @@ func TestRestoreRunningServer(t *testing.T) {
 		t.Fatalf("restore sent RCON: %v", e.console.sent())
 	}
 	eventually(t, "reconcile kick", func() bool { return e.kicks.Load() == 1 })
-	if e.h.DataJobRunning(t.Context(), id) {
+	if holding(e.h, id) {
 		t.Fatal("gate still closed after the restore")
 	}
 	entries, actors := e.rec.all()
@@ -59,16 +59,16 @@ func TestGateHoldsDuringRestore(t *testing.T) {
 	release := e.files.holdPlan("restore")
 	e.restore(id, snap)
 	e.waitStep(id, "restoring")
-	if !e.h.DataJobRunning(t.Context(), id) {
+	if !holding(e.h, id) {
 		t.Fatal("gate open while restoring")
 	}
 	other := e.instance("other")
-	if e.h.DataJobRunning(t.Context(), other) {
+	if holding(e.h, other) {
 		t.Fatal("gate closed for another server")
 	}
 	release()
 	e.waitJob(id)
-	if e.h.DataJobRunning(t.Context(), id) {
+	if holding(e.h, id) {
 		t.Fatal("gate still closed")
 	}
 }
@@ -81,7 +81,7 @@ func TestGateHoldsWhileStopping(t *testing.T) {
 	snap := e.files.add(id, filesapi.SnapshotManual, false, "")
 	e.restore(id, snap)
 	e.waitStep(id, "stopping")
-	if !e.h.DataJobRunning(t.Context(), id) {
+	if !holding(e.h, id) {
 		t.Fatal("gate open while stopping")
 	}
 	j := e.waitJob(id)
@@ -159,15 +159,15 @@ func TestGateHoldsWhileRestoreQueued(t *testing.T) {
 	if j.State != "queued" || j.QueuePosition != 1 {
 		t.Fatalf("restore = %+v", j)
 	}
-	if !e.h.DataJobRunning(t.Context(), b) {
+	if !holding(e.h, b) {
 		t.Fatal("gate open while the restore waits")
 	}
-	if e.h.DataJobRunning(t.Context(), a) {
+	if holding(e.h, a) {
 		t.Fatal("gate closed for the server that only backs up")
 	}
 	release()
 	e.waitJob(b)
-	if e.h.DataJobRunning(t.Context(), b) {
+	if holding(e.h, b) {
 		t.Fatal("gate still closed after the restore")
 	}
 }
