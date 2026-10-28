@@ -14,6 +14,14 @@ export const de = {
     no: 'Nein',
     retry: 'Erneut versuchen',
   },
+  freshness: {
+    title: 'Nicht aktuell.',
+    offline: 'Keine Verbindung zum Panel.',
+    agent_unavailable: 'Der Agent ist nicht erreichbar.',
+    since: 'Angezeigt wird der Stand von {{when}}.',
+    last_known: 'Zuletzt: {{state}}',
+    last_known_hint: 'Letzter bekannter Zustand; aktuelle Daten fehlen gerade.',
+  },
   theme: {
     toggle: 'Farbschema wechseln (aktuell: {{current}})',
     light: 'Hell',

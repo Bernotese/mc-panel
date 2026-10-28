@@ -5,6 +5,7 @@ import { LineChart, type ChartAxis } from '@/components/charts/line-chart'
 import type { ChartPoint } from '@/components/charts/thin'
 import { errorMessage } from '@/lib/error-message'
 import { useFormat } from '@/lib/format'
+import { isStale } from '@/lib/freshness'
 import { cn } from '@/lib/utils'
 import { metricsPollMs, serverMetricsQueryOptions } from './api'
 import { formatDecimal, GIB, lastValue, metricPoints, RANGE_MS } from './model'
@@ -22,20 +23,23 @@ function inGiB(points: ChartPoint[]): ChartPoint[] {
 
 /**
  * The four charts of the tab (spec §7.2); 24 h and more show the average with a min–max band.
- * `tpsUnavailable`: the live source is "none", the TPS chart says so instead of "no data".
+ * `tpsUnavailable`: the live source is "none", the TPS chart says so instead of "no data". A failed refresh keeps the
+ * charts dimmed (the tab shows the notice, issue #155); only a series that never loaded gives an error.
  */
 export function MetricCharts({ serverId, range, tpsUnavailable = false }: { serverId: number; range: MetricsRange; tpsUnavailable?: boolean }) {
   const { t } = useTranslation()
   const fmt = useFormat()
   const query = useQuery({ ...serverMetricsQueryOptions(serverId, range), refetchInterval: metricsPollMs(range), placeholderData: keepPreviousData })
   if (query.isPending) return <p className="text-muted-foreground">{t('common.loading')}</p>
-  if (query.isError)
+  // Placeholder data belongs to the previous range: an error for the new one has nothing of its own to keep.
+  if (query.data === undefined || (query.isError && query.isPlaceholderData))
     return (
       <p role="alert" className="text-destructive">
         {errorMessage(query.error, t)}
       </p>
     )
   const data = query.data
+  const stale = isStale(query) && !query.isPlaceholderData
   // The window ends when the answer arrived (render stays pure: no Date.now()); placeholder data of the previous
   // range has no update time of its own, so its newest point stands in until the new range is loaded. The chart
   // leaves out points outside the window; placeholder data is dimmed.
@@ -48,7 +52,11 @@ export function MetricCharts({ serverId, range, tpsUnavailable = false }: { serv
   const dec = (v: number, digits?: number) => formatDecimal(v, fmt.locale, digits ?? 1)
 
   return (
-    <div className={cn('grid gap-6 transition-opacity lg:grid-cols-2', query.isPlaceholderData && 'opacity-50')} aria-busy={query.isPlaceholderData || undefined}>
+    <div
+      className={cn('grid gap-6 transition-opacity lg:grid-cols-2', (query.isPlaceholderData || stale) && 'opacity-50')}
+      aria-busy={query.isPlaceholderData || undefined}
+      data-stale={stale || undefined}
+    >
       <LineChart
         {...common}
         title={t('monitoring.charts.players')}

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PixelIcon } from '@/components/pixel-icon'
+import { StaleNotice } from '@/components/stale-notice'
 import { StatSlot } from '@/components/stat-slot'
 import { Button } from '@/components/ui/button'
 import { DevBadge } from '@/features/dev/dev-badge'
@@ -9,6 +10,7 @@ import { DevBanner } from '@/features/dev/dev-banner'
 import { monitoringOverviewQueryOptions, OVERVIEW_POLL_MS } from '@/features/monitoring/api'
 import { formatDecimal } from '@/features/monitoring/model'
 import { useFormat } from '@/lib/format'
+import { freshnessOf, isStale, type FreshnessSource } from '@/lib/freshness'
 import { AddressLine } from './address-line'
 import { formatCpu, formatGiB } from './format'
 import { PowerButtons } from './power-buttons'
@@ -23,8 +25,11 @@ function tpsTone(tps: number | null): 'default' | 'warn' | 'danger' {
   return tps < 18 ? 'warn' : 'default'
 }
 
-/** Spec §4.4: always visible above every section of a server. */
-export function ServerHeader() {
+/**
+ * Spec §4.4: always visible above every section of a server. `detail` is the layout's server query: when its refresh
+ * fails, the header keeps the last state but says it is only the last known one (issue #155).
+ */
+export function ServerHeader({ detail }: { detail: FreshnessSource }) {
   const { t } = useTranslation()
   const fmt = useFormat()
   const id = useId()
@@ -33,6 +38,10 @@ export function ServerHeader() {
   // Same query as the dashboard: one request serves both, and missing values stay null ("–"), never 0.
   const overview = useQuery({ ...monitoringOverviewQueryOptions, refetchInterval: OVERVIEW_POLL_MS, enabled: instance !== null })
   const metrics = overview.data?.servers.find((s) => s.id === server.id)
+  // Container state and resources come with the server, players and TPS with the overview: each goes stale on its own.
+  const detailStale = isStale(detail)
+  const metricsStale = isStale(overview)
+  const freshness = freshnessOf(detail, instance !== null && overview)
   const canPower = server.permissions.includes('server.power')
   const running = status.state === 'running' && status.memory_limit_bytes > 0
 
@@ -44,7 +53,7 @@ export function ServerHeader() {
     ? t('servers.header.memory_value', { used: formatGiB(status.memory_bytes, fmt.locale), limit: formatGiB(status.memory_limit_bytes, fmt.locale) })
     : null
   const cpu = running ? t('servers.cpu_value', { value: formatCpu(status.cpu_percent, fmt.locale) }) : null
-  const iconState = status.state === 'running' ? 'online' : status.state === 'unknown' ? 'unknown' : 'offline'
+  const iconState = detailStale || status.state === 'unknown' ? 'unknown' : status.state === 'running' ? 'online' : 'offline'
 
   return (
     <section aria-labelledby={id} className="flex flex-col gap-6">
@@ -57,7 +66,7 @@ export function ServerHeader() {
                 {server.name}
               </h1>
               {server.dev ? <DevBadge source={server.dev.source_name} /> : null}
-              <ServerStatusBadge server={server} />
+              <ServerStatusBadge server={server} stale={detailStale} />
             </div>
             {instance ? (
               <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
@@ -73,13 +82,19 @@ export function ServerHeader() {
           </div>
         ) : null}
       </div>
+      <StaleNotice freshness={freshness} />
       {server.dev ? <DevBanner server={server} dev={server.dev} /> : null}
       {instance ? (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-6">
-          <StatSlot label={t('servers.header.players')} value={players} />
-          <StatSlot label={t('servers.header.tps')} value={tps} tone={tpsTone(tpsValue)} />
-          <StatSlot label={t('servers.header.memory')} value={memory} bar={running ? status.memory_bytes / status.memory_limit_bytes : null} />
-          <StatSlot label={t('servers.header.cpu')} value={cpu} />
+          <StatSlot label={t('servers.header.players')} value={players} stale={metricsStale} />
+          <StatSlot label={t('servers.header.tps')} value={tps} tone={tpsTone(tpsValue)} stale={metricsStale} />
+          <StatSlot
+            label={t('servers.header.memory')}
+            value={memory}
+            bar={running ? status.memory_bytes / status.memory_limit_bytes : null}
+            stale={detailStale}
+          />
+          <StatSlot label={t('servers.header.cpu')} value={cpu} stale={detailStale} />
         </div>
       ) : null}
       {status.restart_required ? <RestartBanner canPower={canPower} /> : null}

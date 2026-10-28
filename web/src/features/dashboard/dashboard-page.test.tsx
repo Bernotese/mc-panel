@@ -166,4 +166,53 @@ describe('DashboardPage', () => {
     const card = await screen.findByRole('article', { name: 'survival' })
     expect(within(card).queryByText('Erreichbar')).not.toBeInTheDocument()
   })
+
+  describe('when a refresh fails (issue #155)', () => {
+    it('keeps the server list, marks it stale with time and retry, and clears that on recovery', async () => {
+      const { queryClient } = await renderWithProviders(<DashboardPage />, { me: loginAs('alice') })
+      const card = await screen.findByRole('article', { name: 'survival' })
+      expect(within(card).getByText('Läuft')).toBeInTheDocument()
+
+      const outage = { broken: true }
+      server.use(http.get('*/api/servers', () => (outage.broken ? HttpResponse.error() : undefined)))
+      await queryClient.refetchQueries({ queryKey: ['servers'], exact: true })
+      const notice = await screen.findByTestId('stale-notice')
+      expect(notice).toHaveTextContent('Keine Verbindung zum Panel.')
+      expect(notice).toHaveTextContent(/Angezeigt wird der Stand von \d\d:\d\d\./)
+      expect(screen.getByRole('article', { name: 'survival' })).toBeInTheDocument()
+      expect(within(card).getByText('Zuletzt: Läuft')).toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+      outage.broken = false
+      await userEvent.setup().click(within(notice).getByRole('button', { name: 'Erneut versuchen' }))
+      await waitFor(() => expect(screen.queryByTestId('stale-notice')).not.toBeInTheDocument())
+      expect(within(card).getByText('Läuft')).toBeInTheDocument()
+    })
+
+    it('still reports a list that never loaded', async () => {
+      server.use(http.get('*/api/servers', () => HttpResponse.error()))
+      await renderWithProviders(<DashboardPage />, { me: loginAs('alice') })
+      expect(await screen.findByRole('alert')).toHaveTextContent('Server nicht erreichbar. Bitte Verbindung prüfen.')
+      expect(screen.queryByTestId('stale-notice')).not.toBeInTheDocument()
+    })
+
+    it('mutes the measured values and drops the reachability when the overview refresh fails (503)', async () => {
+      mockOverview({ servers: [overviewServer(1, { players: 3, players_max: 20, tps: 19.8 })], host: hostSnapshot() })
+      const { queryClient } = await renderWithProviders(<DashboardPage />, { me: loginAs('admin') })
+      const card = await screen.findByRole('article', { name: 'survival' })
+      expect(await within(card).findByText('3/20')).toBeInTheDocument()
+      expect(within(card).getByText('Erreichbar')).toBeInTheDocument()
+
+      server.use(http.get('*/api/monitoring/overview', () => HttpResponse.json({ error: 'agent_unavailable', message: 'no agent' }, { status: 503 })))
+      await queryClient.refetchQueries({ queryKey: ['monitoring', 'overview'] })
+      expect(await screen.findByTestId('stale-notice')).toHaveTextContent('Der Agent ist nicht erreichbar.')
+      expect(within(card).getByText('3/20').closest('[data-stale]')).not.toBeNull()
+      expect(within(card).getByText('19,8').closest('[data-stale]')).not.toBeNull()
+      expect(within(card).queryByText('Erreichbar')).not.toBeInTheDocument()
+      // The container state comes from the server list, which is still fresh.
+      expect(within(card).getByText('Läuft')).toBeInTheDocument()
+      const host = screen.getByRole('region', { name: 'Host' })
+      expect(within(host).getByText('0,52').closest('[data-stale]')).not.toBeNull()
+    })
+  })
 })
