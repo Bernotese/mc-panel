@@ -9,6 +9,22 @@ import (
 	"context"
 )
 
+const pluginsClampChanged = `-- name: PluginsClampChanged :exec
+UPDATE plugin_changes SET changed_at = ?1 WHERE server_id = ?2 AND changed_at > ?1
+`
+
+type PluginsClampChangedParams struct {
+	Now      int64
+	ServerID int64
+}
+
+// A change time in the future (recorded before the clock stepped back) becomes now: the change
+// happened no later than now, and a start after now must clear the restart notice.
+func (q *Queries) PluginsClampChanged(ctx context.Context, arg PluginsClampChangedParams) error {
+	_, err := q.db.ExecContext(ctx, pluginsClampChanged, arg.Now, arg.ServerID)
+	return err
+}
+
 const pluginsCopyInstalls = `-- name: PluginsCopyInstalls :exec
 INSERT INTO plugin_installs (server_id, filename, sha512, source, project_id, project_slug, title,
                              version_id, version_name, channel, installed_at)

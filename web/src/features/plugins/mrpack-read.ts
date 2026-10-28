@@ -49,7 +49,7 @@ export class MrpackReadError extends Error {
  * the entry, and only its bytes are read and inflated – a pack with hundreds of MB of overrides is never loaded whole,
  * and no other entry is ever decompressed. Every read and allocation is bounded before it happens: the compressed
  * entry by MAX_COMPRESSED_BYTES and the archive's own layout, the output by MAX_INDEX_BYTES per bounded push. The local
- * header must agree with the central directory and the output with the declared size. An aborted signal stops the
+ * header must agree with the central directory and the output with the declared size and CRC-32. An aborted signal stops the
  * read between steps. Returns the parsed JSON unchecked; the panel validates it (spec §4.1).
  */
 export async function readMrpackIndex(file: Blob, signal?: AbortSignal): Promise<unknown> {
@@ -70,6 +70,7 @@ export async function readMrpackIndex(file: Blob, signal?: AbortSignal): Promise
   if (raw.byteLength !== entry.compressedSize) throw new MrpackReadError('not_zip', 'truncated entry')
   const bytes = entry.method === 0 ? raw : await inflateLimited(raw, signal)
   if (bytes.byteLength !== entry.size) throw new MrpackReadError('not_zip', `${INDEX_NAME} does not match its declared size`)
+  if (crc32(bytes) !== entry.crc) throw new MrpackReadError('not_zip', `${INDEX_NAME} does not match its CRC-32`)
   let text: string
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
@@ -202,6 +203,23 @@ async function inflateLimited(raw: Uint8Array, signal?: AbortSignal): Promise<Ui
     at += c.byteLength
   }
   return out
+}
+
+let crcTable: Uint32Array | undefined
+
+/** CRC-32 (IEEE, as in ZIP) of at most MAX_INDEX_BYTES: a few milliseconds. */
+function crc32(bytes: Uint8Array): number {
+  if (!crcTable) {
+    crcTable = new Uint32Array(256)
+    for (let n = 0; n < 256; n++) {
+      let c = n
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+      crcTable[n] = c >>> 0
+    }
+  }
+  let crc = 0xffffffff
+  for (const b of bytes) crc = crcTable[(crc ^ b) & 0xff] ^ (crc >>> 8)
+  return (crc ^ 0xffffffff) >>> 0
 }
 
 function yieldToEventLoop(): Promise<void> {

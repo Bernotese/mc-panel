@@ -241,6 +241,8 @@ func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err e
 			return fmt.Errorf("%w: %s", errFileExists, jar.Name)
 		}
 	}
+	// Recorded before the upload too: a lost answer may hide a jar that is on disk (spec §6.2).
+	h.markChanged(ctx, srv.ID)
 	var resp filesapi.UploadResponse
 	for attempt := 0; ; attempt++ {
 		resp, err = h.transfer(ctx, srv, e, target, replaces == target, sum)

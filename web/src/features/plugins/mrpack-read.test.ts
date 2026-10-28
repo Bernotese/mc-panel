@@ -206,6 +206,15 @@ describe('readMrpackIndex', () => {
     expect(await failure(blob(patchSize(ok, size)))).toMatchObject({ code: 'not_zip' })
   })
 
+  it('refuses an index whose CRC-32 does not match', async () => {
+    for (const level of [0, 6] as const) {
+      const ok = zipSync({ 'modrinth.index.json': strToU8(JSON.stringify(INDEX)) }, { level })
+      const view = new DataView(ok.buffer)
+      const crc = view.getUint32(14, true) ^ 1 // the local header of the first (only) entry
+      expect(await failure(blob(patch(ok, { 14: crc }, { 16: crc })))).toMatchObject({ code: 'not_zip' })
+    }
+  })
+
   it('refuses a stored entry whose sizes differ', async () => {
     const ok = zipSync({ 'modrinth.index.json': strToU8(JSON.stringify(INDEX)) }, { level: 0 })
     expect(await failure(blob(patch(ok, { 22: 9 }, { 24: 9 })))).toMatchObject({ code: 'not_zip' })

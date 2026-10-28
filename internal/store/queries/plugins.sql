@@ -44,3 +44,8 @@ ON CONFLICT (server_id) DO UPDATE SET changed_at = max(plugin_changes.changed_at
 
 -- name: PluginsGetChanged :one
 SELECT changed_at FROM plugin_changes WHERE server_id = ?;
+
+-- name: PluginsClampChanged :exec
+-- A change time in the future (recorded before the clock stepped back) becomes now: the change
+-- happened no later than now, and a start after now must clear the restart notice.
+UPDATE plugin_changes SET changed_at = sqlc.arg(now) WHERE server_id = sqlc.arg(server_id) AND changed_at > sqlc.arg(now);
