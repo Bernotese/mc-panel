@@ -3,10 +3,14 @@ import type { Catalog, InstanceConfig, ServerMemoryLimits } from '@/api/types'
 import {
   changedFormKeys,
   containerMiB,
+  defaultPropertiesDraft,
   effectiveJava,
   effectiveVersion,
   emptyServerForm,
   formFromInstance,
+  isLowLoadDistances,
+  LOW_LOAD_DISTANCES,
+  withLowLoadDistances,
   memoryLimitsFrom,
   memoryOvercommit,
   rebaseServerForm,
@@ -289,5 +293,27 @@ describe('draft changes (issue #154)', () => {
     const draft = { ...base, version: '1.21.99', manualVersion: true }
     const merged = rebaseServerForm(base, draft, { ...base, version: '1.20.4' })
     expect(merged).toMatchObject({ version: '1.21.99', manualVersion: true })
+  })
+})
+
+describe('lower-load distance preset (issue #159)', () => {
+  it('fills 8/6 into the distance fields and leaves the rest alone', () => {
+    const d = defaultPropertiesDraft()
+    expect(LOW_LOAD_DISTANCES).toEqual({ view_distance: '8', simulation_distance: '6' })
+    const low = withLowLoadDistances(d)
+    expect(low).toEqual({ ...d, view_distance: '8', simulation_distance: '6' })
+    expect(isLowLoadDistances(low)).toBe(true)
+  })
+
+  it('keeps the defaults at 10/10 and recognises typed equivalents', () => {
+    const d = defaultPropertiesDraft()
+    expect([d.view_distance, d.simulation_distance]).toEqual(['10', '10'])
+    expect(isLowLoadDistances(d)).toBe(false)
+    expect(isLowLoadDistances({ ...d, view_distance: ' 08', simulation_distance: '6 ' })).toBe(true)
+  })
+
+  it('never changes stored distances when loading a server', () => {
+    const value = formFromInstance('survival', { ...survival, properties: { ...survival.properties, view_distance: 12, simulation_distance: 9 } })
+    expect([value.properties.view_distance, value.properties.simulation_distance]).toEqual(['12', '9'])
   })
 })

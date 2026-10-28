@@ -428,6 +428,20 @@ export const en: Messages = {
       level_type: 'World type',
       lists_hint: 'The whitelist, operators and bans are managed in the “Players” tab of the server page; changes there apply immediately.',
       world_hint: 'Seed and world type only apply when a new world is generated.',
+      distance_preset: {
+        title: 'Lower load',
+        description:
+          'For small or shared hosts: view distance 8 and simulation distance 6 instead of 10 and 10. Whether and how much it helps depends on the server; the fields stay editable.',
+        choose: 'Use lower load …',
+        tradeoff_title: 'What changes in the game:',
+        tradeoff_view: 'Distant terrain disappears from view earlier.',
+        tradeoff_simulation: 'Outside the simulation distance, farms, redstone and mobs stand still, even if players can still see them.',
+        tradeoff_restart: 'It takes effect only after saving, on a running server after the next restart.',
+        apply: 'Apply',
+        active: 'Active: view distance 8, simulation distance 6.',
+        override_hint:
+          'Plugins, mods and modpacks can override the distances in their own settings (for example per world). This only sets the default in server.properties.',
+      },
     },
     difficulty: {
       peaceful: 'Peaceful',

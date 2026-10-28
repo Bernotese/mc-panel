@@ -426,6 +426,20 @@ export const de = {
       level_type: 'Welttyp',
       lists_hint: 'Whitelist, Operatoren und Bans verwaltest du im Tab „Spieler“ der Serverseite; Änderungen dort wirken sofort.',
       world_hint: 'Seed und Welttyp wirken nur, wenn eine neue Welt erzeugt wird.',
+      distance_preset: {
+        title: 'Weniger Last',
+        description:
+          'Für kleine oder geteilte Hosts: Sichtweite 8 und Simulationsweite 6 statt 10 und 10. Ob und wie viel das bringt, hängt vom Server ab; die Felder bleiben änderbar.',
+        choose: 'Weniger Last übernehmen …',
+        tradeoff_title: 'Das ändert sich im Spiel:',
+        tradeoff_view: 'Entferntes Gelände verschwindet früher aus dem Blickfeld.',
+        tradeoff_simulation: 'Außerhalb der Simulationsweite stehen Farmen, Redstone und Mobs still, auch wenn Spieler sie noch sehen.',
+        tradeoff_restart: 'Es wirkt erst nach dem Speichern, bei einem laufenden Server nach dem nächsten Neustart.',
+        apply: 'Übernehmen',
+        active: 'Aktiv: Sichtweite 8, Simulationsweite 6.',
+        override_hint:
+          'Plugins, Mods und Modpacks können die Weiten in ihren eigenen Einstellungen (etwa pro Welt) überschreiben. Hier steht nur die Vorgabe für server.properties.',
+      },
     },
     difficulty: {
       peaceful: 'Friedlich',

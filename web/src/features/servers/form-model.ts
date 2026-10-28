@@ -142,6 +142,21 @@ export function defaultPropertiesDraft(): PropertiesDraft {
   }
 }
 
+/**
+ * Issue #159: an optional lower-load starting point for small or shared hosts – a benchmark candidate, not a measured
+ * gain. It only fills the two fields; the defaults stay 10/10 and stored servers keep their values.
+ */
+export const LOW_LOAD_DISTANCES = { view_distance: '8', simulation_distance: '6' } as const
+
+export function withLowLoadDistances(p: PropertiesDraft): PropertiesDraft {
+  return { ...p, ...LOW_LOAD_DISTANCES }
+}
+
+export function isLowLoadDistances(p: PropertiesDraft): boolean {
+  const n = (text: string) => text.trim().replace(/^0+(?=\d)/, '') // " 08" is 8
+  return n(p.view_distance) === LOW_LOAD_DISTANCES.view_distance && n(p.simulation_distance) === LOW_LOAD_DISTANCES.simulation_distance
+}
+
 export function emptyServerForm(): ServerFormValue {
   return {
     name: '',

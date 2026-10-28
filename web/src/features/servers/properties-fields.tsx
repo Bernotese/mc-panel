@@ -1,11 +1,13 @@
+import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { Difficulty, Gamemode, LevelType } from '@/api/types'
+import type { Difficulty, Gamemode, InstanceType, LevelType } from '@/api/types'
 import { NativeSelect } from '@/components/native-select'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { FieldRow } from './field-row'
-import type { PropertiesDraft, PropertyField } from './form-model'
+import { isLowLoadDistances, withLowLoadDistances, type PropertiesDraft, type PropertyField } from './form-model'
 import { DIFFICULTIES, GAMEMODES, LEVEL_TYPES, type FieldError } from './validation'
 
 type SwitchKey = 'pvp' | 'hardcore' | 'allow_flight' | 'enable_command_block' | 'online_mode' | 'whitelist_enabled'
@@ -24,12 +26,14 @@ export interface PropertiesFieldsProps {
   idPrefix: string
   mode: 'create' | 'edit'
   serverName: string
+  /** Decides whether plugins, mods or packs may override the distances (issue #159). */
+  type: InstanceType
   value: PropertiesDraft
   error(field: PropertyField): FieldError | undefined
-  onChange(patch: Partial<PropertiesDraft>, field?: PropertyField): void
+  onChange(patch: Partial<PropertiesDraft>, ...fields: PropertyField[]): void
 }
 
-export function PropertiesFields({ idPrefix, mode, serverName, value, error, onChange }: PropertiesFieldsProps) {
+export function PropertiesFields({ idPrefix, mode, serverName, type, value, error, onChange }: PropertiesFieldsProps) {
   const { t } = useTranslation()
   return (
     <div className="space-y-4">
@@ -93,6 +97,7 @@ export function PropertiesFields({ idPrefix, mode, serverName, value, error, onC
           </FieldRow>
         ))}
       </div>
+      <DistancePreset type={type} value={value} onChange={onChange} />
       <div className="grid gap-3 sm:grid-cols-2">
         {SWITCHES.map((key) => (
           <div key={key} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
@@ -128,6 +133,57 @@ export function PropertiesFields({ idPrefix, mode, serverName, value, error, onC
           )}
         </FieldRow>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Issue #159: fills view distance 8 / simulation distance 6 into the fields above, only after the gameplay tradeoff was
+ * shown and confirmed. Nothing changes on its own: defaults stay 10/10, stored values stay until the user saves.
+ */
+function DistancePreset({ type, value, onChange }: { type: InstanceType; value: PropertiesDraft; onChange: PropertiesFieldsProps['onChange'] }) {
+  const { t } = useTranslation()
+  const id = useId()
+  const [confirming, setConfirming] = useState(false)
+  const active = isLowLoadDistances(value)
+  return (
+    <div role="group" aria-labelledby={`${id}-title`} className="bevel-inset space-y-2 px-3 py-2 text-sm">
+      <p id={`${id}-title`} className="font-medium">
+        {t('servers.props.distance_preset.title')}
+      </p>
+      <p className="text-muted-foreground">{t('servers.props.distance_preset.description')}</p>
+      {active ? (
+        <p className="font-medium">{t('servers.props.distance_preset.active')}</p>
+      ) : confirming ? (
+        <div className="space-y-2">
+          <p className="font-medium">{t('servers.props.distance_preset.tradeoff_title')}</p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>{t('servers.props.distance_preset.tradeoff_view')}</li>
+            <li>{t('servers.props.distance_preset.tradeoff_simulation')}</li>
+            <li>{t('servers.props.distance_preset.tradeoff_restart')}</li>
+          </ul>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                onChange(withLowLoadDistances(value), 'properties.view_distance', 'properties.simulation_distance')
+                setConfirming(false)
+              }}
+            >
+              {t('servers.props.distance_preset.apply')}
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => setConfirming(false)}>
+              {t('common.cancel')}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button type="button" size="sm" variant="outline" onClick={() => setConfirming(true)}>
+          {t('servers.props.distance_preset.choose')}
+        </Button>
+      )}
+      {type === 'vanilla' ? null : <p className="text-muted-foreground">{t('servers.props.distance_preset.override_hint')}</p>}
     </div>
   )
 }
