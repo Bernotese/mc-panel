@@ -8,7 +8,7 @@ import type { DevInstance, Server } from '@/api/types'
 import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { memoryLimitsQueryOptions, serverKey, serverSettingsQueryOptions, serversKey, updateServer } from '@/features/servers/api'
+import { memoryLimitsKey, memoryLimitsQueryOptions, serverKey, serverSettingsQueryOptions, serversKey, updateServer } from '@/features/servers/api'
 import { FieldRow } from '@/features/servers/field-row'
 import { memoryLimitsFrom } from '@/features/servers/form-model'
 import { memoryInputValue } from '@/features/servers/format'
@@ -155,6 +155,7 @@ function DevMemorySection({ server, memoryMiB }: { server: Server; memoryMiB: nu
     onSuccess: (updated) => {
       queryClient.setQueryData(serverKey(server.id), updated)
       void queryClient.invalidateQueries({ queryKey: serversKey, exact: true })
+      void queryClient.invalidateQueries({ queryKey: memoryLimitsKey })
       toast.success(updated.status.restart_required ? t('servers.settings.saved_restart') : t('servers.settings.saved'))
     },
   })

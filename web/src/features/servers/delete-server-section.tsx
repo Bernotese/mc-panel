@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useErrorToast } from '@/lib/error-message'
-import { deleteServer, serverKey, serversKey } from './api'
+import { deleteServer, memoryLimitsKey, serverKey, serversKey } from './api'
 
 /**
  * Deleting needs the server name typed in; the text names the deleted/ folder on the host (spec §3.3). The backups stay
@@ -37,6 +37,7 @@ export function DeleteServerSection({ server }: { server: Server }) {
       else void navigate({ to: '/' })
       queryClient.removeQueries({ queryKey: serverKey(server.id), exact: true })
       void queryClient.invalidateQueries({ queryKey: serversKey, exact: true })
+      void queryClient.invalidateQueries({ queryKey: memoryLimitsKey })
     },
     onError: (err) => {
       // 409 conflict: an extract or a restore is rewriting the server's data; deleting has to wait for it.

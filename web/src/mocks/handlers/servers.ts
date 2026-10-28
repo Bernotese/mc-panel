@@ -370,7 +370,7 @@ export const serverOperations: MockOperation[] = [
       const body = await readJson<UpdateServerRequest>(request)
       if (!body) return apiError(400, 'bad_request', 'invalid JSON body')
       // Like the panel: a stale draft is refused as a whole before anything else is checked.
-      if (body.expected_revision !== undefined && body.expected_revision !== server.revision) {
+      if (body.expected_revision != null && body.expected_revision !== server.revision) {
         return apiError(409, 'server_modified', `the server was changed meanwhile (revision ${server.revision}, expected ${body.expected_revision}): reload it and apply the changes again`)
       }
       // A dev takes everything but its memory from its source at every sync.

@@ -493,6 +493,8 @@ export const de = {
       saved: 'Änderungen gespeichert.',
       saved_restart: 'Änderungen gespeichert. Sie werden beim nächsten Neustart aktiv.',
       running_notice: 'Der Server läuft. Änderungen werden erst nach einem Neustart aktiv.',
+      modified: 'Der Server wurde inzwischen geändert – bitte neu laden. Deine ungespeicherten Änderungen gehen dabei verloren.',
+      reload: 'Neu laden',
     },
     delete: {
       title: 'Server löschen',
