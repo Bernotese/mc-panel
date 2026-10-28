@@ -124,6 +124,8 @@ export const en: Messages = {
   auth: {
     brand: 'mc-panel',
     logout: 'Sign out',
+    logout_failed: 'Sign-out failed: the session is still active.',
+    logout_retry: 'Try again',
     other_account: 'Sign in with another account',
   },
   login: {
