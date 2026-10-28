@@ -72,7 +72,7 @@ Every action that can start a container or rewrite a data directory is **admitte
 | delete | `DataState ∈ {safe, recovery_required}` (deleting a broken server is allowed; its recovery folder is kept and reported) |
 | stop | no lock needed (always allowed) |
 
-- **Lock order (panel):** `reconcile.mu` → `Admission(id)` → (`queue.mu` | extract pending) → files/agent I/O. The reconcile pass takes a server's admission lock with `TryLock` and skips that server for this pass when it is held, so a long stop-wait of a restore does not stall the pass for all servers. Handlers take it with a 5 s timeout and answer `409 conflict` ("another operation on this server is being admitted") on timeout.
+- **Lock order (panel):** `Admission(id)` → `reconcile.mu` → (`queue.mu` | extract pending) → files/agent I/O. The reconcile pass already holds `reconcile.mu` and therefore only `TryLock`s a server's admission (never waits; it skips that server for this pass when it is held), so the order cannot invert and a long stop-wait of a restore does not stall the pass for all servers, so a long stop-wait of a restore does not stall the pass for all servers. Handlers take it with a 5 s timeout and answer `409 conflict` ("another operation on this server is being admitted") on timeout.
 - After the files service has accepted a job, the files state `busy` carries the exclusion; the panel lock is released. A panel restart therefore loses nothing that matters: a job that was admitted is visible as `busy`, a job that was not admitted never touched data.
 - A files service restart cancels running jobs (as today); a restore in its commit phase is rolled forward/back by `RecoverRestores` or ends `recovery_required`.
 

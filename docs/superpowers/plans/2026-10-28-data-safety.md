@@ -17,7 +17,7 @@
 - Mutation lease: `restore`/`extract` wait up to 30 s for leases to drain, then `409 busy`; while they hold a server, a new lease → `409 busy` immediately.
 - Resolve moves the restore temp folder to `<instances_dir>/backups/recovery/<id>-<unix>` and removes the journal entry; never deletes; refuses unless `recovery_required`.
 - Error codes (exact): `data_state_unknown` (503), `recovery_required` (409). Audit action `server.recovery_resolve`. Notify event `server.recovery_required` (operational queue, reminder 24 h like other alerts).
-- Panel lock order: `reconcile.mu` → `Admission(id)` → (`queue.mu` | extract pending) → files/agent I/O. Reconcile uses `TryLock` per server; handlers wait at most 5 s then `409 conflict`.
+- Panel lock order: `Admission(id)` → `reconcile.mu` → (`queue.mu` | extract pending) → files/agent I/O. Reconcile uses `TryLock` per server; handlers wait at most 5 s then `409 conflict`.
 - Monitoring: `busy`/`recovery_required` silence `server.down`/`server.crash_loop`; `unknown` does not.
 - Owner name in any file: "Jannes" only (CLAUDE.md).
 - CLAUDE.md rules: `make check` on the Mac, `make test-vm` before reporting, stdlib Go tests, `clock.Clock`.
