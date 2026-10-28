@@ -220,8 +220,13 @@ func (s *Service) ensureRepo(ctx context.Context, id int64) error {
 }
 
 // resticEnv is the complete environment of a restic call (spec 4 §3.3); id 0 = no repository.
+// limits.restic_gomaxprocs adds GOMAXPROCS (MC-PERF-04); nothing comes from the service's own
+// environment.
 func (s *Service) resticEnv(id int64, extra ...string) []string {
 	env := []string{"HOME=" + s.backupsDir(), "RESTIC_PROGRESS_FPS=1"}
+	if n := s.cfg.Limits.ResticGOMAXPROCS; n > 0 {
+		env = append(env, "GOMAXPROCS="+strconv.Itoa(n))
+	}
 	if id > 0 {
 		env = append(env, "RESTIC_REPOSITORY="+s.repoDir(id), "RESTIC_PASSWORD_FILE="+s.keyFile(id))
 	}

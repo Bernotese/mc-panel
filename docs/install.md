@@ -303,6 +303,21 @@ Backups are limited, too:
 
 The 5 % can be a lot on a large disk (50 GiB of a 1 TB disk): if a fairly full disk suddenly refuses uploads, plugin installs or backups after an update, lower `reserve_percent` (or set it to 0, which leaves `reserve_bytes`). Restart `mcpanel-files` (or `mcpanel-panel`) after changing these keys.
 
+### Backup CPU budget
+
+restic uses every CPU core of the host while it hashes, compresses and encrypts a backup. The files service already runs with a low CPU and I/O weight and takes one backup at a time, but on a small or shared host a backup can still make a running server lag. `restic_gomaxprocs` under `[limits]` in `/etc/mc-panel-files/files.toml` limits it:
+
+```toml
+[limits]
+restic_gomaxprocs = 1 # 0 or missing (default): restic uses every CPU
+```
+
+The value is passed to every restic process as `GOMAXPROCS` (allowed: 0, or 1 up to the number of CPUs of the host; a larger value stops `mcpanel-files` from starting, so lower it before you move to a smaller machine). Restart `mcpanel-files` after changing it. Know what it does and does not do:
+
+- `GOMAXPROCS` limits how many threads run restic's Go code at the same time. It is not a hard CPU quota of a cgroup and does not limit disk I/O: reading the world, writing the repository and the kernel's work for it are not counted.
+- Fewer threads make a backup take longer. A backup of a running server keeps saving off (`save-off`) for its whole duration, so the server writes nothing to disk for longer, and a slower backup gets closer to `max_duration` in `panel.toml`. Watch the duration of your backups after lowering the value.
+- The default stays unset until measurements show a better one. Every restic call uses the value: backups, restores, downloads and the cleanup of old snapshots.
+
 ## Backups of keys and data
 
 The panel's backups are local restic repositories, one per server, in `/srv/mc-panel/backups/repos/<id>`, on the same disk as the worlds. They protect against mistakes, not against losing the host. They do not protect against an attacker on the host either: the Minecraft containers and the files service run as the same user `mcpanel-mc`, which owns the worlds, the repositories **and** their keys. A Minecraft server that escapes its container (a kernel or runc bug) or a compromised panel with `server.backups` can delete or encrypt every backup, and corruption is only noticed at a restore. Follow the 3-2-1 rule: three copies, on two kinds of storage, one of them off the host and out of reach of the host (pull it from a backup server, or push to append-only storage such as restic's rest-server with `--append-only` or S3 with object lock), and test a restore now and then.

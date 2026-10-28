@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -31,6 +32,10 @@ type FilesLimits struct {
 	MaxBackupBytes   int64 `toml:"max_backup_bytes"`   // content of one snapshot (tar)
 	MaxBackupEntries int64 `toml:"max_backup_entries"` // entries of one snapshot
 	MaxBackupJobs    int   `toml:"max_backup_jobs"`    // concurrent restic jobs (backup, restore, forget)
+	// ResticGOMAXPROCS is passed to every restic child as GOMAXPROCS (MC-PERF-04): it bounds how
+	// many threads run Go code at once (hashing, compression, encryption), not I/O and not a
+	// cgroup CPU quota. 0 = unset, restic uses every CPU.
+	ResticGOMAXPROCS int `toml:"restic_gomaxprocs"`
 }
 
 // maxReservePercent bounds reserve_percent: a larger reserve would refuse most writes.
@@ -165,6 +170,9 @@ func (f Files) Validate() error {
 	}
 	if l.MaxBackupJobs < 1 || l.MaxBackupJobs > maxBackupJobsLimit {
 		errs = append(errs, fmt.Errorf("limits.max_backup_jobs must be between 1 and %d", maxBackupJobsLimit))
+	}
+	if n := runtime.NumCPU(); l.ResticGOMAXPROCS < 0 || l.ResticGOMAXPROCS > n {
+		errs = append(errs, fmt.Errorf("limits.restic_gomaxprocs must be between 1 and %d (the CPUs of this host), or 0 for unset", n))
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("config: %w", errors.Join(errs...))
