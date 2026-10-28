@@ -77,6 +77,9 @@ type Handler struct {
 	// afterStageDecision is a test seam (nil in production): it runs in the login flow after the
 	// session stage was decided and before the session row is inserted.
 	afterStageDecision func()
+	// afterPasswordCheck is a test seam (nil in production): it runs right after a password was
+	// verified (login, current password) and before anything is written.
+	afterPasswordCheck func()
 }
 
 func New(d Deps) (*Handler, error) {
@@ -372,18 +375,43 @@ func (h *Handler) presentedSession(ctx context.Context, p principal.Principal) (
 	return sess, nil
 }
 
+// requireActiveSession runs inside the write transaction of every credential-sensitive change: the
+// session that authorized the request must still be active (not revoked, expired or idle) and belong
+// to the principal's user, otherwise it returns ErrNoSession.
+func (h *Handler) requireActiveSession(ctx context.Context, q *store.Queries, p principal.Principal) error {
+	sess, err := q.AuthGetSessionByID(ctx, p.SessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNoSession
+	}
+	if err != nil {
+		return err
+	}
+	if sess.UserID != p.UserID || !h.sessions.valid(sess) {
+		return ErrNoSession
+	}
+	return nil
+}
+
 // sessionGone is the response when the session was revoked or rotated while the request ran.
 func sessionGone(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeUnauthorized, "authentication required")
 }
 
-// sessionError maps a Sessions.Rotate error to a response.
+// sessionError maps a Sessions.Rotate or requireActiveSession error to a response.
 func sessionError(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, ErrNoSession) {
+	switch {
+	case errors.Is(err, ErrNoSession):
 		sessionGone(w, r)
-		return
+	case errors.Is(err, errCredentialChanged):
+		credentialChanged(w, r)
+	default:
+		httpx.Internal(w, r, err)
 	}
-	httpx.Internal(w, r, err)
+}
+
+// credentialChanged answers a request whose verified password was replaced while it ran.
+func credentialChanged(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "the password was changed meanwhile; try again")
 }
 
 // busy answers a request whose password check could not get an argon2 slot in time

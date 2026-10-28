@@ -14,11 +14,14 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/auth"
 	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/config"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/store"
 	"github.com/Bernotese/mc-panel/internal/store/storetest"
 	"github.com/Bernotese/mc-panel/internal/users"
 )
@@ -39,6 +42,8 @@ type env struct {
 	mux    http.Handler
 	h      *users.Handler
 	rootID int64
+	// rootSession is the session row behind admin() (created on first use).
+	rootSession int64
 }
 
 func newEnv(t *testing.T) *env { return newEnvWithRecorder(t, nil) }
@@ -55,17 +60,24 @@ func newEnvWithRecorder(t *testing.T, mk func(*sql.DB, clock.Clock) audit.Record
 	mux := chi.NewRouter()
 	rt := rbac.NewRouter(mux, rbac.NewDBChecker(db), e.clk)
 	e.h = users.NewHandler(db, e.clk, rec, e.notes)
+	e.h.CheckSessionsWith(auth.NewSessions(store.New(db), e.clk, config.DefaultPanel().Session))
 	e.h.Routes(rt)
 	e.mux = mux
 	e.rootID = storetest.CreateUser(t, db, "root", "admin")
 	return e
 }
 
-// admin returns the principal of the seeded admin "root" with a valid sudo window.
+// admin returns the principal of the seeded admin "root" with a valid sudo window and an active
+// session (writes re-check that session).
 func (e *env) admin() principal.Principal {
+	if e.rootSession == 0 {
+		// An admin's session counts as fully signed in only with a second factor (mandatory 2FA).
+		mustExec(e.t, e.db, `UPDATE users SET totp_enabled = 1 WHERE id = ?`, e.rootID)
+		e.rootSession = insertSession(e.t, e.db, e.rootID, sql.NullInt64{})
+	}
 	return principal.Principal{
 		UserID: e.rootID, Username: "root", Role: principal.RoleAdmin,
-		Stage: principal.StageFull, SudoUntil: t0.Add(5 * time.Minute),
+		Stage: principal.StageFull, SudoUntil: t0.Add(5 * time.Minute), SessionID: e.rootSession,
 	}
 }
 

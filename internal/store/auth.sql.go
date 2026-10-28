@@ -28,21 +28,31 @@ func (q *Queries) AuthAdvanceTOTPStep(ctx context.Context, arg AuthAdvanceTOTPSt
 	return result.RowsAffected()
 }
 
-const authChangePassword = `-- name: AuthChangePassword :exec
+const authChangePassword = `-- name: AuthChangePassword :execrows
 UPDATE users SET password_hash = ?1, must_change_password = 0, password_changed_at = ?2, updated_at = ?2
-WHERE id = ?3
+WHERE id = ?3 AND password_hash = ?4
 `
 
 type AuthChangePasswordParams struct {
-	PasswordHash string
-	Now          int64
-	ID           int64
+	PasswordHash    string
+	Now             int64
+	ID              int64
+	OldPasswordHash string
 }
 
-// The user's own change; it also ends a forced change (must_change_password, SEC-45).
-func (q *Queries) AuthChangePassword(ctx context.Context, arg AuthChangePasswordParams) error {
-	_, err := q.db.ExecContext(ctx, authChangePassword, arg.PasswordHash, arg.Now, arg.ID)
-	return err
+// The user's own change; it also ends a forced change (must_change_password, SEC-45). Compare-and-swap
+// on the hash the current password was verified against.
+func (q *Queries) AuthChangePassword(ctx context.Context, arg AuthChangePasswordParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, authChangePassword,
+		arg.PasswordHash,
+		arg.Now,
+		arg.ID,
+		arg.OldPasswordHash,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const authClearWebAuthnState = `-- name: AuthClearWebAuthnState :execrows
@@ -568,20 +578,30 @@ func (q *Queries) AuthPruneSessions(ctx context.Context, cutoff int64) (int64, e
 	return result.RowsAffected()
 }
 
-const authRehashPassword = `-- name: AuthRehashPassword :exec
+const authRehashPassword = `-- name: AuthRehashPassword :execrows
 UPDATE users SET password_hash = ?1, updated_at = ?2
-WHERE id = ?3
+WHERE id = ?3 AND password_hash = ?4
 `
 
 type AuthRehashPasswordParams struct {
-	PasswordHash string
-	Now          int64
-	ID           int64
+	PasswordHash    string
+	Now             int64
+	ID              int64
+	OldPasswordHash string
 }
 
-func (q *Queries) AuthRehashPassword(ctx context.Context, arg AuthRehashPasswordParams) error {
-	_, err := q.db.ExecContext(ctx, authRehashPassword, arg.PasswordHash, arg.Now, arg.ID)
-	return err
+// Compare-and-swap on the hash that was verified: an upgrade never replaces a password set meanwhile.
+func (q *Queries) AuthRehashPassword(ctx context.Context, arg AuthRehashPasswordParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, authRehashPassword,
+		arg.PasswordHash,
+		arg.Now,
+		arg.ID,
+		arg.OldPasswordHash,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const authRevokeOtherSessions = `-- name: AuthRevokeOtherSessions :execrows
@@ -645,6 +665,7 @@ SET token_hash = ?1, stage = ?2, csrf_token = ?3,
     sudo_until = ?4, expires_at = ?5, last_seen_at = ?6,
     webauthn_state = NULL
 WHERE id = ?7 AND revoked_at IS NULL AND token_hash = ?8 AND stage = ?9
+  AND expires_at > ?10 AND (stage = 'preauth' OR last_seen_at > ?11)
 `
 
 type AuthRotateSessionParams struct {
@@ -657,10 +678,13 @@ type AuthRotateSessionParams struct {
 	ID           int64
 	OldTokenHash []byte
 	OldStage     string
+	Now          int64
+	IdleCutoff   int64
 }
 
 // Compare-and-swap on the presented token hash and stage: concurrent rotations of one session
-// (e.g. two second-factor completions) yield exactly one winner.
+// (e.g. two second-factor completions) yield exactly one winner. Only an active session rotates:
+// not revoked, not expired and, unless preauth, not idle (the same rules as Sessions.valid).
 func (q *Queries) AuthRotateSession(ctx context.Context, arg AuthRotateSessionParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, authRotateSession,
 		arg.TokenHash,
@@ -672,6 +696,8 @@ func (q *Queries) AuthRotateSession(ctx context.Context, arg AuthRotateSessionPa
 		arg.ID,
 		arg.OldTokenHash,
 		arg.OldStage,
+		arg.Now,
+		arg.IdleCutoff,
 	)
 	if err != nil {
 		return 0, err

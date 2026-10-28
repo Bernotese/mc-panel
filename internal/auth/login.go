@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log/slog"
@@ -56,86 +57,90 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	// Admin network restriction before the password check: a caller outside the allowlist must
-	// not learn whether the password was right (same work, same generic 401).
-	if principal.Role(user.Role) == principal.RoleAdmin {
-		if err := h.guard.CheckAdminNetwork(ctx, ip); err != nil {
-			if !errors.Is(err, defense.ErrAdminNetwork) {
-				h.guardError(w, r, err)
-				return
-			}
-			if errors.Is(password.DummyVerifyContext(ctx, req.Password), password.ErrBusy) {
-				busy(w, r)
-				return
-			}
-			h.recordAttempt(r, user.Username, user.ID, defense.StagePassword, false, reasonAdminNetwork)
-			invalidCredentials(w, r)
-			return
-		}
-	}
-	ok, rehash, err := password.VerifyContext(ctx, req.Password, user.PasswordHash)
-	if errors.Is(err, password.ErrMalformedHash) {
-		// Unusable hash (e.g. "!" from user creation without password): equalise timing.
-		err = password.DummyVerifyContext(ctx, req.Password)
-		ok = false
-	}
-	if errors.Is(err, password.ErrBusy) {
-		busy(w, r)
-		return
-	}
-	if !ok {
-		h.recordAttempt(r, user.Username, user.ID, defense.StagePassword, false, reasonBadPassword)
-		invalidCredentials(w, r)
-		return
-	}
-	if rehash {
-		h.rehashPassword(r, user, req.Password)
-	}
-	// The stage decision (does the user have a second factor? is one mandatory?) and the session
-	// insert run in one write transaction (BEGIN IMMEDIATE), so a concurrent first-factor
-	// enrolment cannot slip in between: it either commits before (-> preauth session) or after,
-	// and then revokes this session like every other password-only session.
+	// The password is checked outside any transaction (argon2 is slow). The transaction that creates
+	// the session requires the stored hash to be still the one that was checked, so a password
+	// replaced in between never authorizes a session. If the hash changed, the check runs once more
+	// against the current one: a concurrent login may only have upgraded the same password.
 	var (
 		stage principal.Stage
 		tok   string
 		sess  store.Session
 	)
-	err = h.withTx(ctx, func(q *store.Queries) error {
-		u, err := q.AuthGetUserByID(ctx, user.ID)
-		if err != nil {
-			return err
+	for retried := false; ; retried = true {
+		rehash, ok := h.checkLoginPassword(ctx, w, r, user, req.Password)
+		if !ok {
+			return
 		}
-		user = u
-		f, err := h.factors(ctx, q, u)
-		if err != nil {
-			return err
+		if h.afterPasswordCheck != nil {
+			h.afterPasswordCheck()
 		}
-		stage = principal.StagePreAuth
-		if !f.has2FA() {
-			mandatory, err := twoFactorMandatory(ctx, q, u)
+		verified, upgrade := user.PasswordHash, ""
+		if rehash {
+			upgrade = h.upgradedHash(ctx, user.ID, req.Password)
+		}
+		// The stage decision (does the user have a second factor? is one mandatory?) and the session
+		// insert run in one write transaction (BEGIN IMMEDIATE), so a concurrent first-factor
+		// enrolment cannot slip in between: it either commits before (-> preauth session) or after,
+		// and then revokes this session like every other password-only session.
+		err = h.withTx(ctx, func(q *store.Queries) error {
+			u, err := q.AuthGetUserByID(ctx, user.ID)
 			if err != nil {
 				return err
 			}
-			stage = principal.StageFull
-			if mandatory {
-				stage = principal.StageSetup
+			if u.PasswordHash != verified {
+				return errCredentialChanged
 			}
-		}
-		if h.afterStageDecision != nil {
-			h.afterStageDecision()
-		}
-		sessions := h.sessions.withQueries(q)
-		// Session fixation: never keep a session that was presented with the login request.
-		if old, ok := principal.From(ctx); ok {
-			if err := sessions.Revoke(ctx, old.SessionID); err != nil {
+			if upgrade != "" {
+				if _, err := q.AuthRehashPassword(ctx, store.AuthRehashPasswordParams{
+					PasswordHash: upgrade, Now: h.clock.Now().UnixMilli(), ID: u.ID, OldPasswordHash: verified,
+				}); err != nil {
+					return err
+				}
+				u.PasswordHash = upgrade
+			}
+			user = u
+			f, err := h.factors(ctx, q, u)
+			if err != nil {
 				return err
 			}
-		}
-		tok, sess, err = sessions.Create(ctx, NewSession{
-			UserID: u.ID, Stage: stage, IP: ip, UserAgent: userAgent(r), Country: h.geo.Country(ip),
+			stage = principal.StagePreAuth
+			if !f.has2FA() {
+				mandatory, err := twoFactorMandatory(ctx, q, u)
+				if err != nil {
+					return err
+				}
+				stage = principal.StageFull
+				if mandatory {
+					stage = principal.StageSetup
+				}
+			}
+			if h.afterStageDecision != nil {
+				h.afterStageDecision()
+			}
+			sessions := h.sessions.withQueries(q)
+			// Session fixation: never keep a session that was presented with the login request.
+			if old, ok := principal.From(ctx); ok {
+				if err := sessions.Revoke(ctx, old.SessionID); err != nil {
+					return err
+				}
+			}
+			tok, sess, err = sessions.Create(ctx, NewSession{
+				UserID: u.ID, Stage: stage, IP: ip, UserAgent: userAgent(r), Country: h.geo.Country(ip),
+			})
+			return err
 		})
-		return err
-	})
+		if !errors.Is(err, errCredentialChanged) || retried {
+			break
+		}
+		if user, err = h.q.AuthGetUserByID(ctx, user.ID); err != nil {
+			break
+		}
+	}
+	if errors.Is(err, errCredentialChanged) {
+		h.recordAttempt(r, user.Username, user.ID, defense.StagePassword, false, reasonBadPassword)
+		invalidCredentials(w, r)
+		return
+	}
 	if errors.Is(err, sql.ErrNoRows) { // user vanished meanwhile
 		invalidCredentials(w, r)
 		return
@@ -158,16 +163,55 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	h.writeMe(w, r, user, sess)
 }
 
-func (h *Handler) rehashPassword(r *http.Request, u store.User, pw string) {
-	hash, err := password.HashContext(r.Context(), pw)
-	if err == nil {
-		err = h.q.AuthRehashPassword(r.Context(), store.AuthRehashPasswordParams{
-			PasswordHash: hash, Now: h.clock.Now().UnixMilli(), ID: u.ID,
-		})
+// checkLoginPassword applies the admin network restriction and verifies pw against the stored hash
+// of user. It writes every failure response itself and returns ok = false then; rehash reports a
+// hash with outdated parameters.
+func (h *Handler) checkLoginPassword(ctx context.Context, w http.ResponseWriter, r *http.Request, user store.User, pw string) (rehash, ok bool) {
+	ip := httpx.ClientIP(ctx)
+	// Admin network restriction before the password check: a caller outside the allowlist must
+	// not learn whether the password was right (same work, same generic 401).
+	if principal.Role(user.Role) == principal.RoleAdmin {
+		if err := h.guard.CheckAdminNetwork(ctx, ip); err != nil {
+			if !errors.Is(err, defense.ErrAdminNetwork) {
+				h.guardError(w, r, err)
+				return false, false
+			}
+			if errors.Is(password.DummyVerifyContext(ctx, pw), password.ErrBusy) {
+				busy(w, r)
+				return false, false
+			}
+			h.recordAttempt(r, user.Username, user.ID, defense.StagePassword, false, reasonAdminNetwork)
+			invalidCredentials(w, r)
+			return false, false
+		}
 	}
+	ok, rehash, err := password.VerifyContext(ctx, pw, user.PasswordHash)
+	if errors.Is(err, password.ErrMalformedHash) {
+		// Unusable hash (e.g. "!" from user creation without password): equalise timing.
+		err = password.DummyVerifyContext(ctx, pw)
+		ok = false
+	}
+	if errors.Is(err, password.ErrBusy) {
+		busy(w, r)
+		return false, false
+	}
+	if !ok {
+		h.recordAttempt(r, user.Username, user.ID, defense.StagePassword, false, reasonBadPassword)
+		invalidCredentials(w, r)
+		return false, false
+	}
+	return rehash, true
+}
+
+// upgradedHash hashes pw with the current parameters. It returns "" when that fails; the login then
+// goes on with the old hash.
+func (h *Handler) upgradedHash(ctx context.Context, userID int64, pw string) string {
+	hash, err := password.HashContext(ctx, pw)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "rehash password", "err", err, "user_id", u.ID)
+		slog.ErrorContext(ctx, "rehash password", "err", err, "user_id", userID)
+		return ""
 	}
+	return hash
 }
 
 func (h *Handler) getMe(w http.ResponseWriter, r *http.Request) {

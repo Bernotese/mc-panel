@@ -47,40 +47,56 @@ func isValidationError(err error) bool {
 }
 
 // newUser validates the input, hashes the password and inserts the user with a fresh 32-byte
-// WebAuthn user handle. Shared by POST /users and `panel admin create`. mustChange makes the
-// user change the password at the next sign-in (SEC-45: an admin chose it for them).
+// WebAuthn user handle (`panel admin create`). mustChange makes the user change the password at
+// the next sign-in (SEC-45: an admin chose it for them).
 func newUser(ctx context.Context, q *store.Queries, now time.Time, username, pw, role string, mustChange bool) (store.User, error) {
-	if err := ValidateUsername(username); err != nil {
-		return store.User{}, err
-	}
-	if !validRole(role) {
-		return store.User{}, ErrInvalidRole
-	}
-	if err := password.Validate(pw, username); err != nil {
-		return store.User{}, err
-	}
-	if _, err := q.RbacGetUserByUsername(ctx, username); err == nil {
-		return store.User{}, ErrUsernameTaken
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return store.User{}, err
-	}
-	hash, err := password.HashContext(ctx, pw)
+	in, err := prepareUser(ctx, q, now, username, pw, role, mustChange)
 	if err != nil {
 		return store.User{}, err
 	}
+	return insertUser(ctx, q, in)
+}
+
+// prepareUser validates the input and hashes the password: the slow part, outside any write
+// transaction. The username check here only answers early; insertUser decides.
+func prepareUser(ctx context.Context, q *store.Queries, now time.Time, username, pw, role string, mustChange bool) (store.RbacCreateUserParams, error) {
+	if err := ValidateUsername(username); err != nil {
+		return store.RbacCreateUserParams{}, err
+	}
+	if !validRole(role) {
+		return store.RbacCreateUserParams{}, ErrInvalidRole
+	}
+	if err := password.Validate(pw, username); err != nil {
+		return store.RbacCreateUserParams{}, err
+	}
+	if _, err := q.RbacGetUserByUsername(ctx, username); err == nil {
+		return store.RbacCreateUserParams{}, ErrUsernameTaken
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return store.RbacCreateUserParams{}, err
+	}
+	hash, err := password.HashContext(ctx, pw)
+	if err != nil {
+		return store.RbacCreateUserParams{}, err
+	}
 	handle := make([]byte, 32)
 	if _, err := rand.Read(handle); err != nil {
-		return store.User{}, err
+		return store.RbacCreateUserParams{}, err
 	}
+	ms := now.UnixMilli()
+	return store.RbacCreateUserParams{
+		Username: username, PasswordHash: hash, Role: role, WebauthnHandle: handle,
+		MustChangePassword: boolInt(mustChange), PasswordChangedAt: ms, CreatedAt: ms, UpdatedAt: ms,
+	}, nil
+}
+
+// insertUser assigns the next id and inserts the user prepared by prepareUser.
+func insertUser(ctx context.Context, q *store.Queries, in store.RbacCreateUserParams) (store.User, error) {
 	id, err := q.RbacNextUserID(ctx)
 	if err != nil {
 		return store.User{}, err
 	}
-	ms := now.UnixMilli()
-	u, err := q.RbacCreateUser(ctx, store.RbacCreateUserParams{
-		ID: id, Username: username, PasswordHash: hash, Role: role, WebauthnHandle: handle,
-		MustChangePassword: boolInt(mustChange), PasswordChangedAt: ms, CreatedAt: ms, UpdatedAt: ms,
-	})
+	in.ID = id
+	u, err := q.RbacCreateUser(ctx, in)
 	if store.IsUniqueViolation(err) {
 		return store.User{}, ErrUsernameTaken
 	}

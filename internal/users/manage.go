@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/auth"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/password"
@@ -19,6 +20,8 @@ import (
 var (
 	ErrNotFound  = errors.New("user not found")
 	ErrLastAdmin = errors.New("cannot remove or demote the last admin")
+	// errCallerGone: the caller's session ended or the caller lost the admin role while the request ran.
+	errCallerGone = errors.New("caller no longer authorized")
 )
 
 func (h *Handler) manageRoutes(api *rbac.Router) {
@@ -40,6 +43,35 @@ func (h *Handler) inTx(ctx context.Context, fn func(q *store.Queries) error) err
 		return err
 	}
 	return tx.Commit()
+}
+
+// requireAdminCaller re-checks inside the write transaction what the route rule checked when the
+// request started: the caller's session still fully authenticates the caller (not revoked, expired
+// or idle, effective stage full; auth.Sessions.Recheck) and the caller is still an admin. Every
+// admin write calls it first, so an authorization that ended meanwhile changes nothing.
+func (h *Handler) requireAdminCaller(ctx context.Context, q *store.Queries) error {
+	if h.sessions == nil {
+		return errors.New("users: no session check configured")
+	}
+	p, ok := principal.From(ctx)
+	if !ok {
+		return errCallerGone
+	}
+	u, err := h.sessions.RecheckTx(ctx, q, p.SessionID, p.UserID)
+	if errors.Is(err, auth.ErrNoSession) {
+		return errCallerGone
+	}
+	if err != nil {
+		return err
+	}
+	if principal.Role(u.Role) != principal.RoleAdmin {
+		return errCallerGone
+	}
+	return nil
+}
+
+func writeCallerGone(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteError(w, r, http.StatusUnauthorized, httpx.CodeUnauthorized, "authentication required")
 }
 
 func getUser(ctx context.Context, q *store.Queries, id int64) (store.User, error) {
@@ -122,6 +154,9 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	forceChange := req.Password != nil && caller.UserID != id
 	var revoked int64
 	err = h.inTx(ctx, func(q *store.Queries) error {
+		if err := h.requireAdminCaller(ctx, q); err != nil {
+			return err
+		}
 		cur, err := getUser(ctx, q, id)
 		if err != nil {
 			return err
@@ -161,6 +196,9 @@ func (h *Handler) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	switch {
+	case errors.Is(err, errCallerGone):
+		writeCallerGone(w, r)
+		return
 	case errors.Is(err, ErrNotFound):
 		writeNotFound(w, r, "user")
 		return
@@ -223,6 +261,9 @@ func (h *Handler) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	var deleted store.User
 	err := h.inTx(ctx, func(q *store.Queries) error {
+		if err := h.requireAdminCaller(ctx, q); err != nil {
+			return err
+		}
 		u, err := getUser(ctx, q, id)
 		if err != nil {
 			return err
@@ -237,6 +278,9 @@ func (h *Handler) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	switch {
+	case errors.Is(err, errCallerGone):
+		writeCallerGone(w, r)
+		return
 	case errors.Is(err, ErrNotFound):
 		writeNotFound(w, r, "user")
 		return
@@ -265,6 +309,9 @@ func (h *Handler) handleReset2FA(w http.ResponseWriter, r *http.Request) {
 	now := h.clock.Now().UnixMilli()
 	var u store.User
 	err := h.inTx(ctx, func(q *store.Queries) error {
+		if err := h.requireAdminCaller(ctx, q); err != nil {
+			return err
+		}
 		var err error
 		if u, err = getUser(ctx, q, id); err != nil {
 			return err
@@ -282,6 +329,10 @@ func (h *Handler) handleReset2FA(w http.ResponseWriter, r *http.Request) {
 			RevokedAt: sql.NullInt64{Int64: now, Valid: true}, UserID: id,
 		})
 	})
+	if errors.Is(err, errCallerGone) {
+		writeCallerGone(w, r)
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		writeNotFound(w, r, "user")
 		return

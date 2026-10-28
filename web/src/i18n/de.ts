@@ -122,6 +122,8 @@ export const de = {
   auth: {
     brand: 'mc-panel',
     logout: 'Abmelden',
+    logout_failed: 'Abmelden fehlgeschlagen: Die Sitzung ist noch aktiv.',
+    logout_retry: 'Erneut versuchen',
     other_account: 'Mit anderem Konto anmelden',
   },
   login: {

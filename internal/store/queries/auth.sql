@@ -6,14 +6,16 @@ SELECT * FROM users WHERE username = sqlc.arg(username);
 -- name: AuthGetUserByID :one
 SELECT * FROM users WHERE id = sqlc.arg(id);
 
--- name: AuthRehashPassword :exec
+-- name: AuthRehashPassword :execrows
+-- Compare-and-swap on the hash that was verified: an upgrade never replaces a password set meanwhile.
 UPDATE users SET password_hash = sqlc.arg(password_hash), updated_at = sqlc.arg(now)
-WHERE id = sqlc.arg(id);
+WHERE id = sqlc.arg(id) AND password_hash = sqlc.arg(old_password_hash);
 
--- name: AuthChangePassword :exec
--- The user's own change; it also ends a forced change (must_change_password, SEC-45).
+-- name: AuthChangePassword :execrows
+-- The user's own change; it also ends a forced change (must_change_password, SEC-45). Compare-and-swap
+-- on the hash the current password was verified against.
 UPDATE users SET password_hash = sqlc.arg(password_hash), must_change_password = 0, password_changed_at = sqlc.arg(now), updated_at = sqlc.arg(now)
-WHERE id = sqlc.arg(id);
+WHERE id = sqlc.arg(id) AND password_hash = sqlc.arg(old_password_hash);
 
 -- name: AuthUpdateLocale :exec
 UPDATE users SET locale = sqlc.arg(locale), updated_at = sqlc.arg(now)
@@ -87,12 +89,14 @@ SELECT * FROM sessions WHERE id = sqlc.arg(id);
 
 -- name: AuthRotateSession :execrows
 -- Compare-and-swap on the presented token hash and stage: concurrent rotations of one session
--- (e.g. two second-factor completions) yield exactly one winner.
+-- (e.g. two second-factor completions) yield exactly one winner. Only an active session rotates:
+-- not revoked, not expired and, unless preauth, not idle (the same rules as Sessions.valid).
 UPDATE sessions
 SET token_hash = sqlc.arg(token_hash), stage = sqlc.arg(stage), csrf_token = sqlc.arg(csrf_token),
     sudo_until = sqlc.arg(sudo_until), expires_at = sqlc.arg(expires_at), last_seen_at = sqlc.arg(last_seen_at),
     webauthn_state = NULL
-WHERE id = sqlc.arg(id) AND revoked_at IS NULL AND token_hash = sqlc.arg(old_token_hash) AND stage = sqlc.arg(old_stage);
+WHERE id = sqlc.arg(id) AND revoked_at IS NULL AND token_hash = sqlc.arg(old_token_hash) AND stage = sqlc.arg(old_stage)
+  AND expires_at > sqlc.arg(now) AND (stage = 'preauth' OR last_seen_at > sqlc.arg(idle_cutoff));
 
 -- name: AuthTouchSession :exec
 UPDATE sessions SET last_seen_at = sqlc.arg(last_seen_at) WHERE id = sqlc.arg(id);

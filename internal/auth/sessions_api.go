@@ -99,11 +99,20 @@ func (h *Handler) revokeMySession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	n, err := h.q.AuthRevokeUserSession(r.Context(), store.AuthRevokeUserSessionParams{
-		RevokedAt: h.revokedAt(), ID: id, UserID: p.UserID,
+	ctx := r.Context()
+	var n int64
+	err := h.withTx(ctx, func(q *store.Queries) error {
+		if err := h.requireActiveSession(ctx, q, p); err != nil {
+			return err
+		}
+		var err error
+		n, err = q.AuthRevokeUserSession(ctx, store.AuthRevokeUserSessionParams{
+			RevokedAt: h.revokedAt(), ID: id, UserID: p.UserID,
+		})
+		return err
 	})
 	if err != nil {
-		httpx.Internal(w, r, err)
+		sessionError(w, r, err)
 		return
 	}
 	if n == 0 {
@@ -115,11 +124,20 @@ func (h *Handler) revokeMySession(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
 	p, _ := principal.From(r.Context())
-	n, err := h.q.AuthRevokeOtherSessions(r.Context(), store.AuthRevokeOtherSessionsParams{
-		RevokedAt: h.revokedAt(), UserID: p.UserID, KeepID: p.SessionID,
+	ctx := r.Context()
+	var n int64
+	err := h.withTx(ctx, func(q *store.Queries) error {
+		if err := h.requireActiveSession(ctx, q, p); err != nil {
+			return err
+		}
+		var err error
+		n, err = q.AuthRevokeOtherSessions(ctx, store.AuthRevokeOtherSessionsParams{
+			RevokedAt: h.revokedAt(), UserID: p.UserID, KeepID: p.SessionID,
+		})
+		return err
 	})
 	if err != nil {
-		httpx.Internal(w, r, err)
+		sessionError(w, r, err)
 		return
 	}
 	h.auditLog(r.Context(), p.UserID, p.Username, audit.ActionSessionRevoke, "sessions:others", audit.ResultSuccess,
@@ -143,9 +161,16 @@ func (h *Handler) revokeAnySession(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	n, err := h.q.AuthRevokeSession(ctx, store.AuthRevokeSessionParams{RevokedAt: h.revokedAt(), ID: id})
+	var n int64
+	err = h.withTx(ctx, func(q *store.Queries) error {
+		if err := h.requireActiveSession(ctx, q, p); err != nil {
+			return err
+		}
+		n, err = q.AuthRevokeSession(ctx, store.AuthRevokeSessionParams{RevokedAt: h.revokedAt(), ID: id})
+		return err
+	})
 	if err != nil {
-		httpx.Internal(w, r, err)
+		sessionError(w, r, err)
 		return
 	}
 	if n == 0 {

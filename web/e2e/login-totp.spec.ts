@@ -46,8 +46,18 @@ test('fresh admin: forced TOTP setup, recovery codes, TOTP sign-in, passkey regi
   const sid = (await page.context().cookies()).find((c) => c.name === '__Host-sid')
   expect(sid).toMatchObject({ httpOnly: true, secure: true, sameSite: 'Strict', path: '/' })
 
+  // A logout the server never confirmed must not look like one: the HttpOnly cookie still works.
+  await page.route('**/api/auth/logout', (route) => route.abort('failed'))
   await page.getByRole('button', { name: 'Abmelden', exact: true }).click()
+  await expect(page.getByText('Abmelden fehlgeschlagen: Die Sitzung ist noch aktiv.')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Server', level: 1 })).toBeVisible()
+  expect((await page.request.get('/api/auth/me')).status()).toBe(200)
+
+  // The retry revokes the session on the server; later authenticated requests fail.
+  await page.unroute('**/api/auth/logout')
+  await page.getByRole('button', { name: 'Erneut versuchen' }).click()
   await expect(page).toHaveURL(/\/login$/)
+  expect((await page.request.get('/api/auth/me')).status()).toBe(401)
 
   // Sign in again with TOTP. The setup code consumed its step (replay protection), so the next step is used.
   await submitPassword(page)
@@ -74,6 +84,7 @@ test('fresh admin: forced TOTP setup, recovery codes, TOTP sign-in, passkey regi
 
   await page.getByRole('button', { name: 'Abmelden', exact: true }).click()
   await expect(page).toHaveURL(/\/login$/)
+  expect((await page.request.get('/api/auth/me')).status()).toBe(401)
 
   // Sign in with the passkey as second factor.
   await submitPassword(page)
