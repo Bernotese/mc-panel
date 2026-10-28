@@ -41,3 +41,9 @@ func (s *Sessions) Recheck(ctx context.Context, sessionID, userID int64) (store.
 	}
 	return user, nil
 }
+
+// RecheckTx is Recheck on q, typically a write transaction of another package: admin writes
+// re-check their caller with it before they change anything.
+func (s *Sessions) RecheckTx(ctx context.Context, q *store.Queries, sessionID, userID int64) (store.User, error) {
+	return s.withQueries(q).Recheck(ctx, sessionID, userID)
+}

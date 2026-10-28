@@ -89,12 +89,14 @@ SELECT * FROM sessions WHERE id = sqlc.arg(id);
 
 -- name: AuthRotateSession :execrows
 -- Compare-and-swap on the presented token hash and stage: concurrent rotations of one session
--- (e.g. two second-factor completions) yield exactly one winner.
+-- (e.g. two second-factor completions) yield exactly one winner. Only an active session rotates:
+-- not revoked, not expired and, unless preauth, not idle (the same rules as Sessions.valid).
 UPDATE sessions
 SET token_hash = sqlc.arg(token_hash), stage = sqlc.arg(stage), csrf_token = sqlc.arg(csrf_token),
     sudo_until = sqlc.arg(sudo_until), expires_at = sqlc.arg(expires_at), last_seen_at = sqlc.arg(last_seen_at),
     webauthn_state = NULL
-WHERE id = sqlc.arg(id) AND revoked_at IS NULL AND token_hash = sqlc.arg(old_token_hash) AND stage = sqlc.arg(old_stage);
+WHERE id = sqlc.arg(id) AND revoked_at IS NULL AND token_hash = sqlc.arg(old_token_hash) AND stage = sqlc.arg(old_stage)
+  AND expires_at > sqlc.arg(now) AND (stage = 'preauth' OR last_seen_at > sqlc.arg(idle_cutoff));
 
 -- name: AuthTouchSession :exec
 UPDATE sessions SET last_seen_at = sqlc.arg(last_seen_at) WHERE id = sqlc.arg(id);
@@ -111,13 +113,6 @@ SELECT webauthn_state FROM sessions WHERE id = sqlc.arg(id);
 -- "UPDATE ... RETURNING" cannot hand back the old state.)
 UPDATE sessions SET webauthn_state = NULL
 WHERE id = sqlc.arg(id) AND webauthn_state = sqlc.arg(state);
-
--- name: AuthSessionActiveWithRole :one
--- Whether the session is neither revoked nor expired and belongs to the user, who still has the role.
--- Write transactions that act for an admin re-check their authorization with it.
-SELECT count(*) FROM sessions s JOIN users u ON u.id = s.user_id
-WHERE s.id = sqlc.arg(id) AND s.user_id = sqlc.arg(user_id) AND s.revoked_at IS NULL
-  AND s.expires_at > sqlc.arg(now) AND u.role = sqlc.arg(role);
 
 -- name: AuthRevokeSession :execrows
 UPDATE sessions SET revoked_at = sqlc.arg(revoked_at) WHERE id = sqlc.arg(id) AND revoked_at IS NULL;

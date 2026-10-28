@@ -222,7 +222,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Changes the own password and revokes every other session. Allowed in stage password and full. The new password must differ from the current one (400 validation_failed). In stage password it ends the forced change: the session token rotates (CSRF token kept) and the session continues in stage full, or setup when 2FA is mandatory and not set up. */
+        /** @description Changes the own password and revokes every other session. Allowed in stage password and full. The new password must differ from the current one (400 validation_failed). In stage password it ends the forced change: the session token rotates (CSRF token kept) and the session continues in stage full, or setup when 2FA is mandatory and not set up. 409 conflict when the password was changed while the request ran. */
         post: operations["changePassword"];
         delete?: never;
         options?: never;
@@ -305,7 +305,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Stores the new passkey. The first second factor also needs current_password (401 invalid_credentials without it); further methods need sudo instead. */
+        /** @description Stores the new passkey. The first second factor also needs current_password (401 invalid_credentials without it, 409 conflict when the password was changed while the request ran); further methods need sudo instead. */
         post: operations["finishPasskeyRegistration"];
         delete?: never;
         options?: never;
@@ -3398,6 +3398,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             429: components["responses"]["TooManyRequests"];
         };
     };
@@ -3535,6 +3536,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             429: components["responses"]["TooManyRequests"];
         };
     };

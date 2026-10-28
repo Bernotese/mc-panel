@@ -174,6 +174,9 @@ func (h *Handler) handleSetPermissions(w http.ResponseWriter, r *http.Request) {
 	)
 	// Validation of server ids and the replacement run in one transaction: all or nothing.
 	err = h.inTx(ctx, func(q *store.Queries) error {
+		if err := h.requireAdminCaller(ctx, q); err != nil {
+			return err
+		}
 		var err error
 		if u, err = getUser(ctx, q, id); err != nil {
 			return err
@@ -211,6 +214,9 @@ func (h *Handler) handleSetPermissions(w http.ResponseWriter, r *http.Request) {
 		dse devServerError
 	)
 	switch {
+	case errors.Is(err, errCallerGone):
+		writeCallerGone(w, r)
+		return
 	case errors.Is(err, ErrNotFound):
 		writeNotFound(w, r, "user")
 		return
