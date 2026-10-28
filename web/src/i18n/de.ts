@@ -508,6 +508,27 @@ export const de = {
       modified: 'Der Server wurde inzwischen geändert – bitte neu laden. Deine ungespeicherten Änderungen gehen dabei verloren.',
       reload: 'Neu laden',
     },
+    data: {
+      busy: 'Ein Auftrag schreibt gerade die Daten um ({{job}}). Starten ist gesperrt, bis er fertig ist.',
+      job: { restore: 'Wiederherstellung eines Backups', extract: 'Entpacken', dev_sync: 'Dev-Sync', other: 'Auftrag' },
+      unknown: 'Datenzustand unbekannt – der Files-Dienst antwortet nicht; Starten ist gesperrt.',
+      unknown_hint: 'Stoppen und Lesen gehen weiter; sobald der Dienst wieder antwortet, ist der Server frei.',
+      recovery_title: 'Wiederherstellung nötig',
+      recovery_text:
+        'Ein Restore dieses Servers konnte nicht abgeschlossen werden. Damit nichts verloren geht, bleibt der Server gestoppt: Starten, Restores und Dateiänderungen sind gesperrt, bis ein Admin die Wiederherstellung auflöst.',
+      recovery_runbook: 'Anleitung: Ein Restore konnte nicht abgeschlossen werden',
+      recovery_resolve_text:
+        'Auflösen verschiebt die halb getauschten Ordner nach backups/recovery/ im Instanz-Verzeichnis und gibt den Server wieder frei. Den Datenordner selbst ändert es nicht – prüfe ihn vorher nach der Anleitung.',
+      recovery_checked: 'Ich habe das Datenverzeichnis geprüft',
+      recovery_resolve: 'Wiederherstellung auflösen',
+      recovery_admin_only: 'Auflösen kann nur ein Admin.',
+      resolved_title: 'Wiederherstellung aufgelöst',
+      resolved_text_before: 'Die halb getauschten Ordner liegen jetzt in',
+      resolved_text_after: 'im Instanz-Verzeichnis. Lösche sie selbst, wenn du sie nicht mehr brauchst.',
+      lock_busy: 'Starten ist gesperrt, solange ein Auftrag die Daten umschreibt.',
+      lock_unknown: 'Starten ist gesperrt, solange der Datenzustand unbekannt ist.',
+      lock_recovery_required: 'Starten ist gesperrt, bis die Wiederherstellung aufgelöst ist.',
+    },
     delete: {
       title: 'Server löschen',
       description:

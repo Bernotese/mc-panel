@@ -4,27 +4,30 @@ import { useTranslation } from 'react-i18next'
 import type { PowerAction, Server } from '@/api/types'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
-import { POWER_ACTIONS, powerAllowed } from './status'
+import { dataLockKey, POWER_ACTIONS, powerAllowed } from './status'
 import { usePower } from './use-power'
 
 const ICONS: Record<PowerAction, LucideIcon> = { start: Play, stop: Square, restart: RotateCw }
 
 /**
- * Start, stop (after confirmation) and restart; actions that make no sense in the current state are disabled.
- * `compact` renders icon buttons (the label stays the accessible name and tooltip).
+ * Start, stop (after confirmation) and restart; actions that make no sense in the current state are disabled, and so
+ * are start and restart while the data directory is not safe (data safety spec §1.1; stop always works).
+ * `compact` renders icon buttons (the label stays the accessible name and tooltip; a data lock adds its reason).
  */
 export function PowerButtons({
   server,
   extracting = false,
   compact = false,
 }: {
-  server: Pick<Server, 'id' | 'name' | 'status'>
+  server: Pick<Server, 'id' | 'name' | 'status' | 'data_state'>
   extracting?: boolean
   compact?: boolean
 }) {
   const { t } = useTranslation()
   const [confirmStop, setConfirmStop] = useState(false)
   const power = usePower(server)
+  const lockKey = dataLockKey(server.data_state)
+  const lock = lockKey ? t(lockKey) : null
 
   return (
     <>
@@ -32,6 +35,7 @@ export function PowerButtons({
         {POWER_ACTIONS.map((action) => {
           const Icon = ICONS[action]
           const label = t(`servers.power.${action}`)
+          const locked = lock !== null && action !== 'stop'
           return (
             <Button
               key={action}
@@ -40,8 +44,8 @@ export function PowerButtons({
               // In lists only "start" is the call to action; in the header stop is the odd one out.
               variant={compact ? (action === 'start' ? 'default' : 'secondary') : action === 'stop' ? 'outline' : 'default'}
               aria-label={compact ? label : undefined}
-              title={compact ? label : undefined}
-              disabled={power.isPending || !powerAllowed(server.status.state, action) || (extracting && action !== 'stop')}
+              title={compact ? (locked ? `${label} – ${lock}` : label) : undefined}
+              disabled={power.isPending || locked || !powerAllowed(server.status.state, action) || (extracting && action !== 'stop')}
               onClick={() => (action === 'stop' ? setConfirmStop(true) : power.mutate(action))}
             >
               <Icon aria-hidden="true" />
@@ -51,6 +55,7 @@ export function PowerButtons({
         })}
       </div>
       {extracting ? <p className="text-muted-foreground text-sm">{t('servers.extracting_lock')}</p> : null}
+      {lock && !compact ? <p className="text-muted-foreground text-sm">{lock}</p> : null}
       <ConfirmDialog
         open={confirmStop}
         onOpenChange={setConfirmStop}
