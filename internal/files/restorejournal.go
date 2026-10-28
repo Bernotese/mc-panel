@@ -385,7 +385,7 @@ func (s *Service) RecoverRestores() int {
 // recoverRestore resolves one journal entry; false = it stays.
 func (s *Service) recoverRestore(id int64, j restoreJournal) bool {
 	if j.Phase == phaseStuck { // never resolved automatically
-		s.log.Error("files: a previous restore could not be completed; the old state of the data directory is kept in a hidden folder. Check it, then remove the journal entry",
+		s.log.Error("files: a previous restore could not be completed; the old state of the data directory is kept in a hidden folder. Check the data directory, then resolve the restore in the panel (it moves the folder to backups/recovery/)",
 			"id", id, "folder", j.Tmp, "journal", journalDir+"/"+strconv.FormatInt(id, 10))
 		return false
 	}

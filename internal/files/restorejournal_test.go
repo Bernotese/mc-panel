@@ -166,7 +166,7 @@ func TestFakeRestoreLeftoverIsRemoved(t *testing.T) {
 }
 
 // TestStuckRestoreIsKept: a swap whose undo failed keeps its temp folder through recovery and
-// CleanupTemp, and a new restore of the server is refused until a person removes the entry.
+// CleanupTemp, and a new restore of the server is refused until it is resolved.
 func TestStuckRestoreIsKept(t *testing.T) {
 	s, data, f := newBackupService(t)
 	put(t, data, "a.txt", "current a")
