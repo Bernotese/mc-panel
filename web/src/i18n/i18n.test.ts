@@ -48,6 +48,7 @@ const ERROR_CODES = [
   'dev_exists',
   'not_dev',
   'dev_managed',
+  'server_modified',
   'internal',
 ]
 

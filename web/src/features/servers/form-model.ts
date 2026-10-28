@@ -95,14 +95,30 @@ export function memoryLimitsFrom(limits: ServerMemoryLimits | undefined): Memory
   return limits ? { min: limits.min_mib, max: limits.max_mib, step: limits.step_mib } : STATIC_MEMORY_LIMITS
 }
 
+/** Container memory limit of a server with a heap of heapMiB: the panel's container_overhead_percent on top. */
+export function containerMiB(heapMiB: number, limits: ServerMemoryLimits): number {
+  return (heapMiB * (100 + limits.container_overhead_percent)) / 100
+}
+
+export interface MemoryOvercommit {
+  /** Container limits of all servers if this one gets the entered heap (configured worst case, not usage). */
+  totalMiB: number
+  /** What the containers may use together: host RAM minus the reserve. */
+  budgetMiB: number
+  hostMiB: number
+  reserveMiB: number
+}
+
 /**
- * Sum of all servers' memory if this server gets mib, when it exceeds the host memory (only a warning: stopped servers
- * use no memory). ownMiB is what this server already counts in allocated_mib (0 for a new one).
+ * The container limits of all servers would exceed the host's container budget if this server gets mib (heap). ownMiB is
+ * the heap this server already counts in the totals (edit; 0 for a new one): its container is replaced, not counted
+ * twice. Only a warning: the limits are worst cases and stopped servers use no memory.
  */
-export function memoryOvercommit(mib: number | null, limits: ServerMemoryLimits | undefined, ownMiB: number): { totalMiB: number; hostMiB: number } | null {
-  if (mib === null || !limits || limits.host_total_mib === null) return null
-  const totalMiB = limits.allocated_mib - ownMiB + mib
-  return totalMiB > limits.host_total_mib ? { totalMiB, hostMiB: limits.host_total_mib } : null
+export function memoryOvercommit(mib: number | null, limits: ServerMemoryLimits | undefined, ownMiB: number): MemoryOvercommit | null {
+  if (mib === null || !limits || limits.host_total_mib === null || limits.container_budget_mib === null) return null
+  const totalMiB = limits.allocated_container_mib - containerMiB(ownMiB, limits) + containerMiB(mib, limits)
+  if (totalMiB <= limits.container_budget_mib) return null
+  return { totalMiB, budgetMiB: limits.container_budget_mib, hostMiB: limits.host_total_mib, reserveMiB: limits.host_reserve_mib }
 }
 
 /** Defaults of spec §7; the MOTD default (server name) is applied by the panel when motd is omitted. */

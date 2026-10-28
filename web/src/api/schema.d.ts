@@ -544,7 +544,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Memory limits for the server form: the per-server maximum follows the host memory, (MemTotal − 1 GiB) / 1.25 in steps of 256 MiB within 1..32 GiB; create and update reject memory_mib above it (validation_failed). */
+        /** @description Memory budget and limits for the server form: the per-server maximum follows the host memory, (MemTotal − 1 GiB) / 1.25 in steps of 256 MiB within 1..32 GiB; create and update reject memory_mib above it (validation_failed). The sum of all servers is only a warning (see ServerMemoryLimits). */
         get: operations["getServerMemoryLimits"];
         put?: never;
         post?: never;
@@ -583,6 +583,13 @@ export interface paths {
         delete: operations["deleteServer"];
         options?: never;
         head?: never;
+        /**
+         * @description Partial update of a server's configuration and web routes. The whole request is one write transaction: the panel reads the stored row, checks `expected_revision`, merges the given fields into it, validates the result and writes the spec and the web routes together, so either everything is applied or nothing (no audit entry, no revision bump). Concurrent requests that set different fields never revert each other: each one merges into the state the previous one committed. Audit entries (`server.update`, `server.web_routes_update`) are written after the commit and name the values this request replaced.
+         *
+         *     **Conflict contract (stale drafts):** send the `instance.revision` the form was loaded with as `expected_revision`. If the stored revision differs, the request is refused with `409 server_modified` and nothing is written; reload the server (`GET /servers/{id}`), re-apply the draft to the new values and send it again with the new revision. The revision counts spec changes only: it is bumped by every spec change (including dev syncs, base domain and CurseForge key changes in the server settings), not by web route changes, so `expected_revision` does not detect a concurrent change of `web_routes` alone (that list is always replaced as a whole). Without `expected_revision` the request is applied to whatever is stored.
+         *
+         *     A dev instance accepts only `memory_mib` (and `expected_revision`); anything else is `409 dev_managed`.
+         */
         patch: operations["updateServer"];
         trace?: never;
     };
@@ -1614,7 +1621,7 @@ export interface components {
     schemas: {
         Error: {
             /** @enum {string} */
-            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "password_change_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "files_unavailable" | "file_exists" | "file_modified" | "not_text" | "not_regular" | "instance_running" | "insufficient_storage" | "plugins_unsupported" | "plugin_source_unavailable" | "plugin_not_downloadable" | "plugin_incompatible" | "mrpack_incompatible" | "mrpack_version_mismatch" | "backups_unavailable" | "backup_running" | "dev_exists" | "not_dev" | "dev_managed" | "internal";
+            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "password_change_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "files_unavailable" | "file_exists" | "file_modified" | "not_text" | "not_regular" | "instance_running" | "insufficient_storage" | "plugins_unsupported" | "plugin_source_unavailable" | "plugin_not_downloadable" | "plugin_incompatible" | "mrpack_incompatible" | "mrpack_version_mismatch" | "backups_unavailable" | "backup_running" | "dev_exists" | "not_dev" | "dev_managed" | "server_modified" | "internal";
             message: string;
             request_id?: string;
         };
@@ -1798,6 +1805,11 @@ export interface components {
             memory_mib: number;
             /** @description All fields set (defaults resolved); seed only for admins and users with server.files on the server */
             properties: components["schemas"]["ServerProperties"];
+            /**
+             * Format: int64
+             * @description Spec revision, bumped by every spec change (not by web routes); send it back as expected_revision of PATCH /servers/{id}
+             */
+            revision: number;
         };
         /**
          * @description Actual state of the instance as last reported by the agent (contract V4). `state` is the first matching row:
@@ -1988,6 +2000,11 @@ export interface components {
             properties?: components["schemas"]["ServerProperties"];
             /** @description The complete list of web routes to publish under https://<name>.<base_domain>; [] turns publishing off. Paths and ports unique, at most one root (path ""). Any order: the panel sorts by path before validating. Admin and sudo; 409 conflict without a base domain unless the list is empty. Does not bump revision. */
             web_routes?: components["schemas"]["WebRouteInput"][];
+            /**
+             * Format: int64
+             * @description instance.revision the client based this request on; if the stored revision differs, 409 server_modified and nothing is written. Omitted = no check.
+             */
+            expected_revision?: number;
         };
         /** @description start/stop set the desired state (applied by the reconcile loop, works without agent); restart needs the agent */
         PowerRequest: {
@@ -2019,10 +2036,11 @@ export interface components {
             /** @description Server name from the mcpanel.name label of the container, not the container name mcpanel-mc-<id> */
             name: string;
         };
+        /** @description The memory budget of the host, one model for limits, recommendations and the form's warning (issue #158). Each container may use container_overhead_percent more than its heap (memory_mib × 1.25: JVM and native overhead), and host_reserve_mib stays free for the system, so the containers of all running servers share container_budget_mib = host_total_mib − host_reserve_mib. The *_container_mib values are configured worst cases (container ceilings), not measured usage; stopped servers use none. Exceeding the budget is only a warning in the form, never refused. */
         ServerMemoryLimits: {
             /** @description Smallest memory_mib (1024) */
             min_mib: number;
-            /** @description Largest memory_mib a single server may get on this host: (host_total_mib − 1024) / 1.25, rounded down to step_mib, within min_mib..32768; 32768 if the host memory is unknown */
+            /** @description Largest memory_mib a single server may get on this host: the largest heap in steps of step_mib whose container (× 1.25) fits into container_budget_mib, within min_mib..32768; 32768 if the host memory is unknown */
             max_mib: number;
             /** @description memory_mib must be a multiple of it (256) */
             step_mib: number;
@@ -2030,18 +2048,38 @@ export interface components {
             host_total_mib: number | null;
             /**
              * Format: int64
-             * @description Sum of memory_mib of all servers (the form warns when a new total exceeds host_total_mib; stopped servers use no memory, so it is no limit)
+             * @description Memory that stays free for the system, Docker, mc-router and the panel (1024)
+             */
+            host_reserve_mib: number;
+            /**
+             * Format: int64
+             * @description How much more than its heap a container may use (25): container limit = memory_mib × (100 + container_overhead_percent) / 100
+             */
+            container_overhead_percent: number;
+            /**
+             * Format: int64
+             * @description host_total_mib − host_reserve_mib (at least 0): what the containers of all running servers may use together; null if the host memory is unknown
+             */
+            container_budget_mib: number | null;
+            /**
+             * Format: int64
+             * @description Sum of memory_mib (heaps) of all servers
              */
             allocated_mib: number;
-            /** @description Suggested memory_mib of a new server per type: 4096 (vanilla, paper, purpur) or 6144 (mod loaders, modpacks), at most half of host_total_mib − 1024 − allocated_mib, at least min_mib, at most max_mib */
+            /**
+             * Format: int64
+             * @description Sum of the container limits of all servers (configured worst case, not usage). The form warns when allocated_container_mib − the container of the edited server + the container of the new value exceeds container_budget_mib.
+             */
+            allocated_container_mib: number;
+            /** @description Suggested memory_mib of a new server per type: 4096 (vanilla, paper, purpur) or 6144 (mod loaders, modpacks), at most the heap whose container takes half of the free budget (container_budget_mib − allocated_container_mib), at most max_mib; min_mib if half is less but its container still fits into the whole free budget; null if not even min_mib fits (no safe size left). The type default if the host memory is unknown. */
             recommended_mib: {
-                vanilla: number;
-                paper: number;
-                purpur: number;
-                fabric: number;
-                neoforge: number;
-                modrinth: number;
-                curseforge: number;
+                vanilla: number | null;
+                paper: number | null;
+                purpur: number | null;
+                fabric: number | null;
+                neoforge: number | null;
+                modrinth: number | null;
+                curseforge: number | null;
             };
         };
         ServerSettings: {
@@ -4209,7 +4247,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
+            /** @description server_modified (expected_revision is not the stored revision), dev_managed (a dev instance and a field other than memory_mib), conflict (server not configured, or web routes without a base domain) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     serverPower: {

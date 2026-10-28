@@ -333,9 +333,20 @@ describe('mock behaviour', () => {
   it('reports the memory limits of the mock host and enforces them', async () => {
     const me = loginAs('admin', { sudo: true })
     const limits = (await callApi('GET', '/servers/memory')).body
-    // (26624 − 1024) / 1.25 = 20480; four seeded servers with 4 + 2 + 4 + 2 GiB (dev-survival)
-    expect(limits).toMatchObject({ min_mib: 1024, max_mib: 20480, step_mib: 256, host_total_mib: 26624, allocated_mib: 12288 })
-    expect(field(limits, 'recommended_mib')).toMatchObject({ paper: 4096, fabric: 6144 })
+    // (26624 − 1024) / 1.25 = 20480; four seeded servers with 4 + 2 + 4 + 2 GiB (dev-survival) = 15 GiB of containers
+    expect(limits).toMatchObject({
+      min_mib: 1024,
+      max_mib: 20480,
+      step_mib: 256,
+      host_total_mib: 26624,
+      host_reserve_mib: 1024,
+      container_overhead_percent: 25,
+      container_budget_mib: 25600,
+      allocated_mib: 12288,
+      allocated_container_mib: 15360,
+    })
+    // half of the free 10 GiB of container budget = 4 GiB of heap, also for mod loaders
+    expect(field(limits, 'recommended_mib')).toMatchObject({ paper: 4096, fabric: 4096 })
     const body = { name: 'huge', type: 'paper', version: '1.21.11', memory_mib: 20736, eula_accepted: true }
     const res = await callApi('POST', '/servers', { body, csrf: me.csrf_token })
     expect(field(res.body, 'error')).toBe('validation_failed')
@@ -373,6 +384,20 @@ describe('mock behaviour', () => {
     const stopped = await callApi('PATCH', '/servers/2', { body: { properties: { motd: 'Hi' } }, csrf: me.csrf_token })
     expect(stopped.body).toMatchObject({ instance: { properties: { motd: 'Hi', gamemode: 'survival' } }, status: { restart_required: false } })
     expect((await callApi('PATCH', '/servers/3', { body: { memory_mib: 2048 }, csrf: me.csrf_token })).status).toBe(409)
+  })
+
+  it('applies a PATCH with expected_revision only to that revision, like the panel', async () => {
+    const me = loginAs('admin', { sudo: true })
+    const patch = (body: unknown) => callApi('PATCH', '/servers/2', { body, csrf: me.csrf_token })
+    const revision = field(field((await callApi('GET', '/servers/2')).body, 'instance'), 'revision')
+    expect(typeof revision).toBe('number')
+    const ok = await patch({ memory_mib: 4096, expected_revision: revision })
+    expect(ok.status).toBe(200)
+    expect(ok.body).toMatchObject({ instance: { memory_mib: 4096, revision: Number(revision) + 1 } })
+    const stale = await patch({ version: '26.2', expected_revision: revision })
+    expect(stale.status).toBe(409)
+    expect(field(stale.body, 'error')).toBe('server_modified')
+    expect((await callApi('GET', '/servers/2')).body).toMatchObject({ instance: { version: '26.3', memory_mib: 4096 } })
   })
 
   it('publishes web routes like the panel: validated, sorted, pending then active; admin-only fields; 409 without base domain', async () => {
