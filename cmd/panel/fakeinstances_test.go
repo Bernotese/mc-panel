@@ -63,9 +63,11 @@ func (f *fakeInstances) Power(_ context.Context, id int64, action agentapi.Power
 		return fmt.Errorf("%w: no container", agentapi.ErrUnavailable)
 	}
 	f.powers = append(f.powers, fmt.Sprintf("%d %s", id, action))
-	st.State = agentapi.StateRunning
+	// Like the agent, a running container has a start time; 1 lies before any change the
+	// tests make (the panel's clock may be fake), so restart_needed is known.
+	st.State, st.StartedAt = agentapi.StateRunning, 1
 	if action == agentapi.PowerStop {
-		st.State = agentapi.StateExited
+		st.State, st.StartedAt = agentapi.StateExited, 0
 	}
 	f.inst[id] = st
 	return nil
