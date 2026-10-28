@@ -228,8 +228,9 @@ func TestStatusReportsQueuedOperation(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("worker did not finish the start operation")
 	}
-	if s := e.status(t, 1); s.Operation != agentapi.OpStopping {
-		t.Errorf("operation with a queued stop = %q, want %q", s.Operation, agentapi.OpStopping)
+	if s := e.status(t, 1); s.Operation != agentapi.OpStopping || len(s.Queued) != 0 {
+		// The next job is reported as the operation, so it must not be in queued as well.
+		t.Errorf("operation with a queued stop = %q, queued = %v; want %q, []", s.Operation, s.Queued, agentapi.OpStopping)
 	}
 	gate.open()
 	e.m.Wait()
