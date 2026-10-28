@@ -1198,6 +1198,9 @@ export const de = {
       services_warning:
         'Plugins und Mods mit externen Diensten (z. B. eine gemeinsame MySQL-Datenbank oder ein Discord-Bot) laufen auf der Dev-Instanz mit denselben Zugangsdaten und können dort Daten von {{source}} ändern.',
       submit: '{{name}} anlegen',
+      lock_busy: 'Eine Dev-Instanz lässt sich erst anlegen, wenn kein Auftrag mehr die Daten umschreibt.',
+      lock_unknown: 'Eine Dev-Instanz lässt sich erst anlegen, wenn der Datenzustand wieder bekannt ist.',
+      lock_recovery_required: 'Eine Dev-Instanz lässt sich erst anlegen, wenn die Wiederherstellung aufgelöst ist.',
       created: '{{name}} angelegt. Der erste Sync läuft.',
       exists: 'Dieser Server hat eine Dev-Instanz:',
       name_too_long: '{{name}} wäre länger als 32 Zeichen. Server mit Namen über 28 Zeichen bekommen keine Dev-Instanz.',

@@ -1199,6 +1199,9 @@ export const en: Messages = {
       services_warning:
         'Plugins and mods that use external services (e.g. a shared MySQL database or a Discord bot) run on the dev instance with the same credentials and can change data of {{source}} there.',
       submit: 'Create {{name}}',
+      lock_busy: 'A dev instance can only be created once no job is rewriting the data any more.',
+      lock_unknown: 'A dev instance can only be created once the data state is known again.',
+      lock_recovery_required: 'A dev instance can only be created once the recovery is resolved.',
       created: '{{name}} created. The first sync is running.',
       exists: 'This server has a dev instance:',
       name_too_long: '{{name}} would be longer than 32 characters. Servers with names over 28 characters get no dev instance.',
