@@ -24,6 +24,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/servers"
+	"github.com/Bernotese/mc-panel/internal/servers/admit"
 	"github.com/Bernotese/mc-panel/internal/store"
 	"github.com/Bernotese/mc-panel/internal/timescale"
 )
@@ -41,7 +42,10 @@ type Deps struct {
 	Waker      agentapi.WakerClient   // nil = no wake loop
 	Console    agentapi.ConsoleClient // RCON; nil = warnings and ops are not sent
 	DataStates servers.DataStates     // nil = every dev's data is safe
-	Log        *slog.Logger           // nil = slog.Default()
+	// Admit runs fn under the dev's admission lock once its data is safe (servers.Handler.Admit,
+	// data safety spec §3); a wake stores the start under it. nil = no admission.
+	Admit admit.Func
+	Log   *slog.Logger // nil = slog.Default()
 }
 
 // Timings (dev instances plan, Global Constraints). The minute of the schedule tick and of
@@ -85,6 +89,7 @@ type Handler struct {
 	waker    agentapi.WakerClient
 	console  agentapi.ConsoleClient
 	data     servers.DataStates
+	admitFn  admit.Func
 	log      *slog.Logger
 
 	tickEvery, fastEvery time.Duration
@@ -129,7 +134,7 @@ type delayedSync struct {
 func NewHandler(d Deps) *Handler {
 	h := &Handler{
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, notifier: d.Notifier, servers: d.Servers,
-		syncer: d.Syncer, view: d.ServerView, waker: d.Waker, console: d.Console, data: d.DataStates, log: d.Log,
+		syncer: d.Syncer, view: d.ServerView, waker: d.Waker, console: d.Console, data: d.DataStates, admitFn: d.Admit, log: d.Log,
 		tickEvery: tickEvery, fastEvery: fastEvery, devs: map[int64]*devState{},
 	}
 	if h.clock == nil {

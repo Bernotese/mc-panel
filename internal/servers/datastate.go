@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/servers/admit"
 )
 
 // State is the safety of a server's data directory as the panel sees it (data safety spec
@@ -52,9 +54,9 @@ const stateTimeout = 2 * time.Second
 
 // Data state errors of an admission (Admit); WriteDataStateError answers them.
 var (
-	ErrDataBusy         = errors.New("a job is rewriting this server's data")
-	ErrRecoveryRequired = errors.New("a restore of this server could not be completed")
-	ErrDataStateUnknown = errors.New("the files service did not report whether this server's data is safe")
+	ErrDataBusy         = admit.ErrDataBusy
+	ErrRecoveryRequired = admit.ErrRecoveryRequired
+	ErrDataStateUnknown = admit.ErrDataStateUnknown
 )
 
 // StateErr is the admission error of a data state: nil for StateSafe, else one of ErrDataBusy,
@@ -145,23 +147,65 @@ func (safeStates) Lookup(context.Context, int64, Hold) (DataInfo, error) {
 // ErrRecoveryRequired, ErrDataStateUnknown; data safety spec §4) and reports whether err was
 // one of them.
 func WriteDataStateError(w http.ResponseWriter, r *http.Request, err error) bool {
-	switch {
-	case errors.Is(err, ErrAdmissionBusy):
-		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "another operation on this server is being admitted; try again")
-	case errors.Is(err, ErrDataBusy):
-		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "a file or backup job is rewriting this server's data; try again when it is done")
-	case errors.Is(err, ErrRecoveryRequired):
-		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeRecoveryRequired, "a restore of this server could not be completed; resolve it first")
-	case errors.Is(err, ErrDataStateUnknown):
-		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeDataStateUnknown, "the files service did not report whether this server's data is safe; try again")
-	default:
-		return false
-	}
-	return true
+	return admit.WriteError(w, r, err)
 }
 
-// handleResolveRecovery answers POST /servers/{id}/recovery/resolve; the contract stub until
-// data safety plan Task 5 implements it.
+// handleResolveRecovery answers POST /servers/{id}/recovery/resolve (admin, sudo; data safety
+// spec §2.3): under the server's admission lock, a server in recovery_required gets its
+// half-swapped restore folders moved out of the data directory by the files service (never
+// deleted; the visible data directory is not touched) and its journal entry removed. The
+// operator has checked the data directory before (docs/install.md, "A restore could not be
+// completed"). Afterwards the reconcile loop may start the server again.
 func (h *Handler) handleResolveRecovery(w http.ResponseWriter, r *http.Request) {
-	httpx.WriteError(w, r, http.StatusConflict, httpx.CodeRecoveryRequired, "resolving a stuck restore is not available yet")
+	ctx := r.Context()
+	s, ok := h.loadServer(w, r)
+	if !ok {
+		return
+	}
+	unlock, err := h.admission.Lock(ctx, s.ID)
+	if err != nil {
+		if !WriteDataStateError(w, r, err) {
+			h.log.DebugContext(ctx, "servers: resolve admission ended with the request", "err", err)
+		}
+		return
+	}
+	defer unlock()
+	info, err := h.data.Lookup(ctx, s.ID, nil)
+	switch info.State {
+	case StateRecoveryRequired:
+	case StateUnknown:
+		if ctx.Err() == nil {
+			h.log.WarnContext(ctx, "servers: resolve refused, data state unknown", "server_id", s.ID, "err", err)
+		}
+		WriteDataStateError(w, r, ErrDataStateUnknown)
+		return
+	default:
+		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeRecoveryRequired, "this server has no restore to resolve")
+		return
+	}
+	if h.files == nil {
+		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeFilesUnavailable, "the files service is not configured")
+		return
+	}
+	rec, err := h.files.ResolveRecovery(ctx, s.ID)
+	details := map[string]any{"name": s.Name}
+	if err != nil {
+		h.record(ctx, audit.ActionServerRecoveryResolve, serverTarget(s.ID), audit.ResultFailure, details)
+		var se *filesapi.StatusError
+		switch {
+		case errors.As(err, &se) && (se.Status == http.StatusConflict || se.Status == http.StatusTooManyRequests):
+			httpx.WriteError(w, r, http.StatusConflict, httpx.CodeRecoveryRequired, "the files service refused the resolve: the server's restore is not unresolved (any more)")
+		case ctx.Err() != nil:
+			h.log.DebugContext(ctx, "servers: resolve ended with the request", "err", err)
+		default:
+			// the service's error may name host paths: log it, show a fixed text
+			h.log.ErrorContext(ctx, "servers: resolve a stuck restore", "server_id", s.ID, "err", err)
+			httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeFilesUnavailable, "the files service could not resolve the restore")
+		}
+		return
+	}
+	details["phase"], details["folder"] = rec.Phase, rec.Folder
+	h.record(ctx, audit.ActionServerRecoveryResolve, serverTarget(s.ID), audit.ResultSuccess, details)
+	h.Trigger()
+	httpx.WriteJSON(w, http.StatusOK, rec)
 }

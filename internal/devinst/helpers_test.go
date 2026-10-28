@@ -29,6 +29,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/servers"
+	"github.com/Bernotese/mc-panel/internal/servers/admit"
 	"github.com/Bernotese/mc-panel/internal/store"
 	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
@@ -53,6 +54,7 @@ type env struct {
 	waker   *fakeWaker
 	console *fakeConsole
 	data    *fakeStates
+	admit   admit.Func // nil = no admission
 	h       *devinst.Handler
 	mux     *chi.Mux
 	rootID  int64
@@ -79,7 +81,7 @@ func (e *env) newHandler() *devinst.Handler {
 	return devinst.NewHandler(devinst.Deps{
 		DB: e.db, Clock: e.clk, Audit: e.rec, Notifier: e.notes, Servers: e.servers, Syncer: e.syncer,
 		ServerView: func(_ context.Context, id int64) (any, error) { return map[string]any{"id": id}, nil },
-		Waker:      e.waker, Console: e.console, DataStates: e.data,
+		Waker:      e.waker, Console: e.console, DataStates: e.data, Admit: e.admit,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 }

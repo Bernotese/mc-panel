@@ -2,9 +2,10 @@ package servers
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
+
+	"github.com/Bernotese/mc-panel/internal/servers/admit"
 )
 
 // AdmissionWait is how long a handler waits for a server's admission lock (data safety spec
@@ -13,7 +14,7 @@ const AdmissionWait = 5 * time.Second
 
 // ErrAdmissionBusy: another operation on the server held its admission lock for longer than
 // the caller waits.
-var ErrAdmissionBusy = errors.New("another operation on this server is being admitted")
+var ErrAdmissionBusy = admit.ErrAdmissionBusy
 
 // Admission is the per-server admission lock of data safety spec §3: every start and every
 // data job (restore, dev sync, extract) checks the data state and makes its agent or files

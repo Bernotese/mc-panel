@@ -10,6 +10,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/servers/admit"
 )
 
 type extractRequest struct {
@@ -69,22 +70,53 @@ func (h *Handler) handleExtract(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// From the state check until the job exists, the server counts as extracting: a start
-	// asking the gate meanwhile is held (Review Focus #5).
-	defer h.pending.add(s.ID)()
-	if err := h.checkStopped(ctx, s.ID); err != nil {
-		h.writeStateError(w, r, err)
+	// Admitted (data safety spec §3): under the server's admission lock the data must be safe,
+	// the server stopped and settled, and the service takes the job; from the state check until
+	// the service answers the server shows as busy (Holding, Review Focus #5).
+	var job filesapi.Job
+	called := false
+	var filesErr error
+	err := h.admit(ctx, s.ID, func(ctx context.Context) error {
+		defer h.pending.add(s.ID)()
+		if err := h.checkStopped(ctx, s.ID); err != nil {
+			return stateError{err}
+		}
+		called = true
+		// The pre-check of a large archive can take minutes (filesapi.ExtractTimeout).
+		job, filesErr = h.files.Extract(context.WithoutCancel(ctx), filesapi.ExtractRequest{ID: s.ID, Path: p, Dest: dest})
+		return filesErr
+	})
+	if !called {
+		var se stateError
+		switch {
+		case admit.WriteError(w, r, err):
+		case errors.As(err, &se):
+			h.writeStateError(w, r, se.err)
+		default:
+			h.log.DebugContext(ctx, "extract admission ended with the request", "err", err)
+		}
 		return
 	}
-	// The pre-check of a large archive can take minutes (filesapi.ExtractTimeout).
-	job, err := h.files.Extract(context.WithoutCancel(ctx), filesapi.ExtractRequest{ID: s.ID, Path: p, Dest: dest})
 	h.extendWrite(w, r)
-	h.recordResult(ctx, audit.ActionFileExtract, s.ID, err, map[string]any{"path": p, "dest": dest})
-	if err != nil {
-		h.writeFilesError(w, r, err)
+	h.recordResult(ctx, audit.ActionFileExtract, s.ID, filesErr, map[string]any{"path": p, "dest": dest})
+	if filesErr != nil {
+		h.writeFilesError(w, r, filesErr)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusAccepted, toFileJob(job))
+}
+
+// stateError is a refusal of checkStopped inside the extract's admission.
+type stateError struct{ err error }
+
+func (e stateError) Error() string { return e.err.Error() }
+
+// admit runs fn under the admission of server id (Deps.Admit).
+func (h *Handler) admit(ctx context.Context, id int64, fn func(context.Context) error) error {
+	if h.admitFn == nil {
+		return fn(ctx)
+	}
+	return h.admitFn(ctx, id, fn)
 }
 
 func (h *Handler) handleJobs(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +139,8 @@ func (h *Handler) handleJobs(w http.ResponseWriter, r *http.Request) {
 
 // checkStopped asks the agent for the actual state (spec §5.1): only a server whose container
 // is exited, created or missing – or that the agent does not list at all – and that the agent
-// is not working on may be extracted into.
+// is not working on and has no power action queued for (settled, data safety spec §2.2) may be
+// extracted into.
 func (h *Handler) checkStopped(ctx context.Context, id int64) error {
 	resp, err := h.inst.Instances(ctx)
 	if err != nil {
@@ -120,7 +153,7 @@ func (h *Handler) checkStopped(ctx context.Context, id int64) error {
 		if st.ID != id {
 			continue
 		}
-		if st.Operation != agentapi.OpNone {
+		if !st.Settled() {
 			return errRunning
 		}
 		switch st.State {

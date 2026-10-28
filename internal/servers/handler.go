@@ -14,6 +14,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/clock"
+	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/secretbox"
@@ -38,6 +39,9 @@ type Deps struct {
 	// DataStates answers whether a server's data directory is safe (data safety spec §2.3):
 	// only then are starts admitted. nil = every server is safe (no files service).
 	DataStates DataStates
+	// Files resolves a stuck restore (POST /servers/{id}/recovery/resolve); nil = that answers
+	// 503 files_unavailable.
+	Files filesapi.StateClient
 	// Backups deletes a server's backups on DELETE /servers/{id}?purge_backups=1; nil = nothing
 	// to delete.
 	Backups BackupPurger
@@ -58,6 +62,7 @@ type Handler struct {
 	web       agentapi.WebClient
 	catalog   CatalogSource
 	data      DataStates
+	files     filesapi.StateClient
 	admission *Admission
 	backups   BackupPurger
 	log       *slog.Logger
@@ -98,7 +103,7 @@ func NewHandler(d Deps) *Handler {
 	}
 	return &Handler{
 		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst, web: web, catalog: cat, log: log,
-		data: data, admission: NewAdmission(), backups: purger, ioClock: clock.Real{}, hostMemory: d.HostMemory,
+		data: data, files: d.Files, admission: NewAdmission(), backups: purger, ioClock: clock.Real{}, hostMemory: d.HostMemory,
 		power: newPowerLimiter(), kick: make(chan struct{}, 1),
 		reconcile: reconcileState{attempts: map[int64]attempt{}, warned: map[int64]bool{}, foreign: map[int64]bool{}, unknown: map[int64]bool{}},
 	}

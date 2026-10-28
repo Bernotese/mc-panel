@@ -73,13 +73,16 @@ func TestAdmissionLock(t *testing.T) {
 }
 
 // fakeStateClient is a filesapi.StateClient with one fixed answer; block makes State wait for
-// the context.
+// the context. ResolveRecovery answers recovery or resolveErr and counts its calls.
 type fakeStateClient struct {
-	mu    sync.Mutex
-	resp  filesapi.StateResponse
-	err   error
-	block bool
-	calls int
+	mu         sync.Mutex
+	resp       filesapi.StateResponse
+	err        error
+	block      bool
+	calls      int
+	recovery   filesapi.Recovery
+	resolveErr error
+	resolved   []int64
 }
 
 func (f *fakeStateClient) State(ctx context.Context, _ int64) (filesapi.StateResponse, error) {
@@ -94,8 +97,14 @@ func (f *fakeStateClient) State(ctx context.Context, _ int64) (filesapi.StateRes
 	return resp, err
 }
 
-func (f *fakeStateClient) ResolveRecovery(context.Context, int64) (filesapi.Recovery, error) {
-	return filesapi.Recovery{}, errors.New("not used")
+func (f *fakeStateClient) ResolveRecovery(_ context.Context, id int64) (filesapi.Recovery, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resolved = append(f.resolved, id)
+	if f.resolveErr != nil {
+		return filesapi.Recovery{}, f.resolveErr
+	}
+	return f.recovery, nil
 }
 
 type fakeHold struct{ kinds map[int64]string }
@@ -468,5 +477,82 @@ func TestServerViewDataState(t *testing.T) {
 	body := e.do(http.MethodGet, fmt.Sprintf("/servers/%d", safe), nil, &admin).Body.String()
 	if !strings.Contains(body, `"data_job":null`) {
 		t.Fatalf("data_job missing: %s", body)
+	}
+}
+
+// POST /servers/{id}/recovery/resolve: admin with sudo only; only a server in
+// recovery_required is resolved through the files service (audited), every other state is
+// refused without asking it.
+func TestResolveEndpoint(t *testing.T) {
+	e := newEnv(t)
+	setBaseDomain(t, e.db, "mc.example.com")
+	admin := e.admin()
+	id := e.create(t, paper("survival")).ID
+	path := fmt.Sprintf("/servers/%d/recovery/resolve", id)
+	alice := storetest.CreateUser(t, e.db, "alice", "user")
+	grant(t, e.db, alice, id, allPermStrings...)
+	p := userP(alice, "alice")
+	if rec := e.do(http.MethodPost, path, nil, &p); rec.Code != http.StatusForbidden {
+		t.Fatalf("user: %d %s", rec.Code, rec.Body)
+	}
+	noSudo := admin
+	noSudo.SudoUntil = time.Time{}
+	if rec := e.do(http.MethodPost, path, nil, &noSudo); rec.Code != http.StatusForbidden || errCode(t, rec) != "sudo_required" {
+		t.Fatalf("without sudo: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do(http.MethodPost, "/servers/999/recovery/resolve", nil, &admin); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown server: %d", rec.Code)
+	}
+	for _, c := range []struct {
+		name   string
+		set    func()
+		status int
+		code   string
+	}{
+		{"safe", func() { e.data.set(id, servers.StateSafe) }, http.StatusConflict, "recovery_required"},
+		{"busy", func() { e.data.setBusy(id, "restore") }, http.StatusConflict, "recovery_required"},
+		{"unknown", func() { e.data.setErr(errors.New("files down")) }, http.StatusServiceUnavailable, "data_state_unknown"},
+	} {
+		c.set()
+		rec := e.do(http.MethodPost, path, nil, &admin)
+		if rec.Code != c.status || errCode(t, rec) != c.code {
+			t.Fatalf("%s: %d %s", c.name, rec.Code, rec.Body)
+		}
+		e.data.setErr(nil)
+	}
+	if len(e.files.resolved) != 0 || len(e.rec.Entries) != 1 { // server.create
+		t.Fatalf("refused resolves: service %v, audit %v", e.files.resolved, e.rec.Actions())
+	}
+
+	e.data.set(id, servers.StateRecoveryRequired)
+	e.files.resolveErr = &filesapi.StatusError{Status: http.StatusConflict, Code: "conflict", Message: "not stuck"}
+	if rec := e.do(http.MethodPost, path, nil, &admin); rec.Code != http.StatusConflict || errCode(t, rec) != "recovery_required" {
+		t.Fatalf("refused by the service: %d %s", rec.Code, rec.Body)
+	}
+	e.files.resolveErr = fmt.Errorf("%w: dial unix /run/mcpanel/files.sock", filesapi.ErrUnavailable)
+	rec := e.do(http.MethodPost, path, nil, &admin)
+	if rec.Code != http.StatusServiceUnavailable || errCode(t, rec) != "files_unavailable" || strings.Contains(rec.Body.String(), "/run/") {
+		t.Fatalf("service down: %d %s", rec.Code, rec.Body)
+	}
+	if last := e.rec.Entries[len(e.rec.Entries)-1]; last.Action != audit.ActionServerRecoveryResolve || last.Result != audit.ResultFailure {
+		t.Fatalf("audit = %+v", last)
+	}
+	e.files.resolveErr = nil
+	e.files.recovery = filesapi.Recovery{Phase: "stuck", Since: 1_700_000_000_000, Folder: fmt.Sprintf("backups/recovery/%d-1793000000", id)}
+	rec = e.do(http.MethodPost, path, nil, &admin)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("resolve: %d %s", rec.Code, rec.Body)
+	}
+	got := decode[filesapi.Recovery](t, rec)
+	if got != e.files.recovery {
+		t.Fatalf("answer = %+v", got)
+	}
+	last := e.rec.Entries[len(e.rec.Entries)-1]
+	if last.Action != audit.ActionServerRecoveryResolve || last.Result != audit.ResultSuccess ||
+		last.Details["folder"] != e.files.recovery.Folder || last.Details["name"] != "survival" {
+		t.Fatalf("audit = %+v", last)
+	}
+	if !slices.Equal(e.files.resolved, []int64{id, id, id}) {
+		t.Fatalf("resolved = %v", e.files.resolved)
 	}
 }

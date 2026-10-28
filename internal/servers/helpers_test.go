@@ -47,6 +47,7 @@ type env struct {
 	agent   *fakeAgent
 	catalog *fakeCatalog
 	data    *fakeStates
+	files   *fakeStateClient // the files service's resolve
 	purger  *fakePurger
 	logs    *bytes.Buffer // reconcile log output
 	hostMem uint64        // installed host memory in bytes; 0 = unknown
@@ -65,11 +66,11 @@ func newEnv(t *testing.T) *env {
 	e := &env{
 		t: t, db: db, clk: clock.NewFake(t0), rec: &audit.MemoryRecorder{}, box: box,
 		agent: newFakeAgent(), catalog: &fakeCatalog{}, logs: &bytes.Buffer{},
-		data: newFakeStates(), purger: &fakePurger{},
+		data: newFakeStates(), files: &fakeStateClient{}, purger: &fakePurger{},
 	}
 	e.h = servers.NewHandler(servers.Deps{
 		DB: db, Clock: e.clk, Audit: e.rec, Box: box, Instances: e.agent, Web: e.agent,
-		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog, DataStates: e.data,
+		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog, DataStates: e.data, Files: e.files,
 		Backups: e.purger,
 		HostMemory: func() (uint64, error) {
 			if e.hostMem == 0 {

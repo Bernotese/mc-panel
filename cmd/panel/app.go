@@ -135,20 +135,30 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 	usersH := users.NewHandler(db, d.Clock, auditRec, disp)
 	usersH.OnPasswordSet(authH.ResetSecondFactorLockout)
 	usersH.CheckSessionsWith(authH.Sessions())
-	// The files handler holds a server's data while an extract request is being admitted
-	// (files spec §5.1, data safety spec §3).
+	// The servers handler admits every start and data job (data safety spec §3); it is built
+	// below, after the handlers whose holds it reads, so the admissions bind to it late. The
+	// files handler holds a server's data while an extract request is being admitted (files
+	// spec §5.1).
+	var serversH *servers.Handler
 	filesH := serverfiles.NewHandler(serverfiles.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Files: d.Files, Instances: d.Instances,
+		Admit: func(ctx context.Context, id int64, fn func(context.Context) error) error {
+			return serversH.Admit(ctx, id, nil, fn)
+		},
 	})
 	// One version catalog for the create form and for resolving LATEST in the plugin search.
 	cat := catalog.New(catalog.Options{Clock: d.Clock, Version: d.Version})
-	// The backups handler needs servers for an immediate reconcile pass after a restore, the
-	// servers handler needs backups as data hold and purger: serversH is assigned right below.
-	var serversH *servers.Handler
-	backupsH := backups.NewHandler(backups.Deps{
+	// The backups handler needs servers for an immediate reconcile pass after a restore and for
+	// admissions, the servers handler needs backups as data hold and purger.
+	var backupsH *backups.Handler
+	backupsH = backups.NewHandler(backups.Deps{
 		DB: db, Clock: d.Clock, Audit: auditRec, Notifier: disp, Files: d.Backups,
 		Instances: d.Instances, Console: d.Console,
-		Reconcile:   func() { serversH.Trigger() },
+		Reconcile: func() { serversH.Trigger() },
+		// A restore or dev sync leaves out its own queue hold (busy from the 202 on).
+		Admit: func(ctx context.Context, id int64, fn func(context.Context) error) error {
+			return serversH.Admit(ctx, id, backupsH, fn)
+		},
 		MaxDuration: cfg.Backups.MaxDuration.Duration,
 	})
 	// The web router endpoint is part of the same *agent.Client; a fake without it means no agent.
@@ -162,6 +172,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		DB: db, Clock: d.Clock, Audit: auditRec, Box: box, Instances: d.Instances, Web: web,
 		Catalog:    cat,
 		DataStates: dataStates,
+		Files:      stateClient,
 		Backups:    backupsH,
 		// The per-server memory limit follows the host's installed memory (issue #79).
 		HostMemory: d.HostMemory,
@@ -174,6 +185,9 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		DB: db, Clock: d.Clock, Audit: auditRec, Notifier: disp, Servers: serversH, Syncer: backupsH,
 		ServerView: func(ctx context.Context, id int64) (any, error) { return serversH.DevView(ctx, id) },
 		Waker:      waker, Console: d.Console, DataStates: dataStates,
+		Admit: func(ctx context.Context, id int64, fn func(context.Context) error) error {
+			return serversH.Admit(ctx, id, nil, fn)
+		},
 	})
 	// Monitoring reads the agent status, pings through mc-router and asks RCON for TPS; the
 	// data states keep down alerts quiet while an extract or a restore holds the server and
