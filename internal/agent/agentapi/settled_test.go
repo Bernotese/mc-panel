@@ -17,6 +17,7 @@ func TestInstanceStatusSettled(t *testing.T) {
 		{"empty queue", agentapi.InstanceStatus{Queued: []agentapi.PowerAction{}}, true},
 		{"operation running", agentapi.InstanceStatus{Operation: agentapi.OpStopping}, false},
 		{"start queued", agentapi.InstanceStatus{Queued: []agentapi.PowerAction{agentapi.PowerStart}}, false},
+		{"not inspected", agentapi.InstanceStatus{Uncertain: true}, false},
 	}
 	for _, tc := range cases {
 		if got := tc.st.Settled(); got != tc.want {

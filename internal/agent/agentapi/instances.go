@@ -119,11 +119,17 @@ type InstanceStatus struct {
 	// TemplateOutdated: the container was created from another template than this agent
 	// would create now (agent upgrade or host settings); a recreate replaces it.
 	TemplateOutdated bool `json:"template_outdated"`
+	// Uncertain: the agent could not inspect the container, State is the listing's and may be
+	// out of date; such an instance is never settled.
+	Uncertain bool `json:"uncertain,omitempty"`
 }
 
-// Settled reports whether nothing runs or waits for the instance: no operation and an empty
-// queue. A data job is admitted only for a container that is not running and settled.
-func (s InstanceStatus) Settled() bool { return s.Operation == OpNone && len(s.Queued) == 0 }
+// Settled reports whether nothing runs or waits for the instance: no operation, an empty queue
+// and a state the agent could confirm. A data job is admitted only for a container that is not
+// running and settled.
+func (s InstanceStatus) Settled() bool {
+	return s.Operation == OpNone && len(s.Queued) == 0 && !s.Uncertain
+}
 
 // MarshalJSON writes Queued as [] when it is nil, so the field is never null on the wire.
 func (s InstanceStatus) MarshalJSON() ([]byte, error) {

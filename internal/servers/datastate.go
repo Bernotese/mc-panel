@@ -3,6 +3,7 @@ package servers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/servers/admit"
+	"github.com/Bernotese/mc-panel/internal/store"
 )
 
 // State is the safety of a server's data directory as the panel sees it (data safety spec
@@ -179,33 +181,74 @@ func (h *Handler) handleResolveRecovery(w http.ResponseWriter, r *http.Request) 
 		}
 		WriteDataStateError(w, r, ErrDataStateUnknown)
 		return
+	case StateBusy:
+		writeConflict(w, r, "a job holds this server's data; try again when it is done")
+		return
 	default:
-		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeRecoveryRequired, "this server has no restore to resolve")
+		writeNoRecovery(w, r)
 		return
 	}
+	rec, err := h.resolve(w, r, s)
+	switch {
+	case err == nil:
+		h.Trigger()
+		httpx.WriteJSON(w, http.StatusOK, rec)
+	case errors.Is(err, filesapi.ErrNotFound):
+		writeNoRecovery(w, r)
+	case errors.Is(err, filesapi.ErrBusy):
+		writeConflict(w, r, "a job holds this server's data; try again when it is done")
+	default:
+		writeResolveError(w, r, err)
+	}
+}
+
+// errNoFilesService: no files service is configured (resolve needs it).
+var errNoFilesService = errors.New("the files service is not configured")
+
+// resolve asks the files service to resolve the unfinished restore of s and audits its answer
+// (server.recovery_resolve; a refusal because there is none or a job holds the server changed
+// nothing and is not audited). The call is not cut short by a client that goes away, and it may
+// take longer than the service's lease drain (filesapi.ResolveTimeout): the answer gets a write
+// deadline past it.
+func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, s store.Server) (filesapi.Recovery, error) {
 	if h.files == nil {
-		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeFilesUnavailable, "the files service is not configured")
-		return
+		return filesapi.Recovery{}, errNoFilesService
 	}
+	ctx := context.WithoutCancel(r.Context())
+	h.extendWrite(w, r, filesapi.ResolveTimeout+resolveAnswerSlack)
 	rec, err := h.files.ResolveRecovery(ctx, s.ID)
 	details := map[string]any{"name": s.Name}
-	if err != nil {
+	switch {
+	case err == nil:
+		details["phase"], details["folder"] = rec.Phase, rec.Folder
+		h.record(ctx, audit.ActionServerRecoveryResolve, serverTarget(s.ID), audit.ResultSuccess, details)
+	case errors.Is(err, filesapi.ErrNotFound), errors.Is(err, filesapi.ErrBusy):
+	default:
 		h.record(ctx, audit.ActionServerRecoveryResolve, serverTarget(s.ID), audit.ResultFailure, details)
-		switch {
-		case errors.Is(err, filesapi.ErrNotFound) || errors.Is(err, filesapi.ErrBusy):
-			// no unfinished restore (any more), or a job holds the server meanwhile
-			httpx.WriteError(w, r, http.StatusConflict, httpx.CodeRecoveryRequired, "the files service refused the resolve: the server's restore is not unresolved (any more)")
-		case ctx.Err() != nil:
-			h.log.DebugContext(ctx, "servers: resolve ended with the request", "err", err)
-		default:
-			// the service's error may name host paths: log it, show a fixed text
-			h.log.ErrorContext(ctx, "servers: resolve a stuck restore", "server_id", s.ID, "err", err)
-			httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeFilesUnavailable, "the files service could not resolve the restore")
-		}
-		return
 	}
-	details["phase"], details["folder"] = rec.Phase, rec.Folder
-	h.record(ctx, audit.ActionServerRecoveryResolve, serverTarget(s.ID), audit.ResultSuccess, details)
-	h.Trigger()
-	httpx.WriteJSON(w, http.StatusOK, rec)
+	return rec, err
+}
+
+// resolveAnswerSlack is the time left for the answer after a resolve that used all of
+// filesapi.ResolveTimeout.
+const resolveAnswerSlack = 10 * time.Second
+
+func writeNoRecovery(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteError(w, r, http.StatusConflict, httpx.CodeRecoveryRequired, "this server has no unresolved restore")
+}
+
+// writeResolveError answers a failed resolve: an unreadable restore journal (the service's 503)
+// leaves the state unknown, everything else is the service failing. The service's error may
+// name host paths: it goes to the log, the answer has a fixed text.
+func writeResolveError(w http.ResponseWriter, r *http.Request, err error) {
+	var se *filesapi.StatusError
+	switch {
+	case errors.Is(err, errNoFilesService):
+		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeFilesUnavailable, "the files service is not configured")
+	case errors.As(err, &se) && se.Status == http.StatusServiceUnavailable:
+		WriteDataStateError(w, r, ErrDataStateUnknown)
+	default:
+		slog.ErrorContext(r.Context(), "servers: resolve an unfinished restore", "err", err)
+		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeFilesUnavailable, "the files service could not resolve the restore")
+	}
 }

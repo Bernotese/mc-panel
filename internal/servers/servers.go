@@ -657,15 +657,16 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 }
 
 // deleteServerRows deletes the rows of s and (if configured and not foreign) its container under
-// the reconcile lock and the server's admission lock. A server in recovery_required has its
-// restore resolved first; recovery is the files service's answer then (nil otherwise). On
-// failure it has written the error answer and returns ok = false.
+// the server's admission lock and the reconcile lock (in that order, data safety spec §3). A
+// server in recovery_required has its restore resolved once every check that can refuse the
+// delete has passed; recovery is the files service's answer then (nil otherwise). On failure it
+// has written the error answer and returns ok = false.
 func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s store.Server) (configured bool, recovery *filesapi.Recovery, ok bool) {
 	ctx := r.Context()
-	// Exclude a concurrent reconcile pass or restart: one that read this server before the
-	// delete would otherwise recreate the container after the remove (orphan container).
-	h.reconcile.mu.Lock()
-	defer h.reconcile.mu.Unlock()
+	// A refusal that needs no lock comes at once (no 5 s wait behind a restore).
+	if !h.deleteAllowed(w, r, s.ID) {
+		return false, nil, false
+	}
 	unlock, err := h.admission.Lock(ctx, s.ID)
 	if err != nil {
 		if !WriteDataStateError(w, r, err) {
@@ -674,18 +675,13 @@ func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s sto
 		return false, nil, false
 	}
 	defer unlock()
-	info, err := h.data.Lookup(ctx, s.ID, nil)
-	if err != nil && ctx.Err() == nil {
-		h.log.WarnContext(ctx, "servers: delete refused, data state unknown", "server_id", s.ID, "err", err)
-	}
-	if err := StateErr(info.State); err != nil && info.State != StateRecoveryRequired {
-		WriteDataStateError(w, r, err)
+	// Exclude a concurrent reconcile pass or restart: one that read this server before the
+	// delete would otherwise recreate the container after the remove (orphan container).
+	h.reconcile.mu.Lock()
+	defer h.reconcile.mu.Unlock()
+	info, ok := h.deleteState(w, r, s.ID)
+	if !ok {
 		return false, nil, false
-	}
-	if info.State == StateRecoveryRequired {
-		if recovery, ok = h.resolveForDelete(w, r, s.ID); !ok {
-			return false, nil, false
-		}
 	}
 	_, err = h.q.ServersGetInstance(ctx, s.ID)
 	configured = err == nil
@@ -703,6 +699,22 @@ func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s sto
 		if foreign {
 			h.log.Warn("servers: delete leaves the container of another server alone", "server_id", s.ID, "name", s.Name)
 			remove = false
+		}
+	}
+	if info.State == StateRecoveryRequired {
+		// Last before the rows and the container go (data safety spec D4). Should the delete
+		// still fail afterwards, the server is safe again but must not start with a half-swapped
+		// world: its wish to run is dropped first.
+		if configured {
+			if _, err := h.q.ServersSetDesiredState(ctx, store.ServersSetDesiredStateParams{
+				DesiredState: desiredStopped, UpdatedAt: h.clock.Now().UnixMilli(), ServerID: s.ID,
+			}); err != nil {
+				httpx.Internal(w, r, err)
+				return false, nil, false
+			}
+		}
+		if recovery, ok = h.resolveForDelete(w, r, s); !ok {
+			return false, nil, false
 		}
 	}
 	tx, err := h.db.BeginTx(ctx, nil)
@@ -750,17 +762,35 @@ func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s sto
 	return configured, recovery, true
 }
 
-// resolveForDelete moves the half-swapped folders of server id's unresolved restore out of its
-// data directory before the delete takes the directory away (data safety spec D4). A service
-// that finds no unresolved restore (any more) leaves nothing to keep: rec is nil then. On
-// failure it has written the error answer.
-func (h *Handler) resolveForDelete(w http.ResponseWriter, r *http.Request, id int64) (rec *filesapi.Recovery, ok bool) {
+// deleteAllowed answers a delete that the data state refuses (busy, unknown) without waiting for
+// the admission lock; deleteState checks again under it.
+func (h *Handler) deleteAllowed(w http.ResponseWriter, r *http.Request, id int64) bool {
+	_, ok := h.deleteState(w, r, id)
+	return ok
+}
+
+// deleteState returns the data state of server id if a delete is allowed in it (safe or
+// recovery_required); otherwise it has written the refusal.
+func (h *Handler) deleteState(w http.ResponseWriter, r *http.Request, id int64) (DataInfo, bool) {
 	ctx := r.Context()
-	if h.files == nil {
-		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeFilesUnavailable, "the files service is not configured")
-		return nil, false
+	info, err := h.data.Lookup(ctx, id, nil)
+	if err != nil && ctx.Err() == nil {
+		h.log.WarnContext(ctx, "servers: delete refused, data state unknown", "server_id", id, "err", err)
 	}
-	got, err := h.files.ResolveRecovery(ctx, id)
+	if err := StateErr(info.State); err != nil && info.State != StateRecoveryRequired {
+		WriteDataStateError(w, r, err)
+		return info, false
+	}
+	return info, true
+}
+
+// resolveForDelete moves the half-swapped folders of the unresolved restore of s out of its data
+// directory before the delete takes the directory away (data safety spec D4) and audits the
+// move on its own, so it is recorded even if the delete fails afterwards. A service that finds
+// no unresolved restore (any more) leaves nothing to keep: rec is nil then. On failure it has
+// written the error answer.
+func (h *Handler) resolveForDelete(w http.ResponseWriter, r *http.Request, s store.Server) (rec *filesapi.Recovery, ok bool) {
+	got, err := h.resolve(w, r, s)
 	switch {
 	case err == nil:
 		return &got, true
@@ -768,12 +798,8 @@ func (h *Handler) resolveForDelete(w http.ResponseWriter, r *http.Request, id in
 		return nil, true
 	case errors.Is(err, filesapi.ErrBusy):
 		writeConflict(w, r, "a job holds this server's data; try again when it is done")
-	case ctx.Err() != nil:
-		h.log.DebugContext(ctx, "servers: delete: resolve ended with the request", "err", err)
 	default:
-		// the service's error may name host paths: log it, show a fixed text
-		h.log.ErrorContext(ctx, "servers: delete: resolve the unfinished restore", "server_id", id, "err", err)
-		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeFilesUnavailable, "the files service could not move the unfinished restore out of the data directory")
+		writeResolveError(w, r, err)
 	}
 	return nil, false
 }

@@ -563,8 +563,8 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: 'recovery_required (the server is not in that state, or the operation is not available)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '503': { description: 'data_state_unknown or files_unavailable', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'recovery_required (the server has no unresolved restore) or conflict (a job holds its data, or another operation on it is being admitted)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { description: 'data_state_unknown (the files service did not report the state, or cannot read the restore journal) or files_unavailable', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /servers/{id}/power:
     post:
       operationId: serverPower

@@ -5,14 +5,19 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 // Data state of a server's data directory (data safety spec §2): the files service is the
 // owner of this answer; the panel never infers "safe" from a missing one.
 const (
 	PathState           = "/v1/state"            // GET ?id= -> StateResponse; 503 when the journal cannot be read
-	PathRecoveryResolve = "/v1/recovery/resolve" // POST IDRequest -> Recovery; 409 unless recovery_required
+	PathRecoveryResolve = "/v1/recovery/resolve" // POST IDRequest -> Recovery; 404 unless recovery_required
 )
+
+// ResolveTimeout bounds the panel's resolve call: the service first waits up to 30 s for the
+// server's mutation leases to drain (data safety spec §2.1).
+const ResolveTimeout = 45 * time.Second
 
 type DataState string
 
@@ -79,6 +84,6 @@ func (c *UnixClient) ResolveRecovery(ctx context.Context, id int64) (Recovery, e
 		return Recovery{}, err
 	}
 	var out Recovery
-	err := c.call(ctx, c.callTimeout, http.MethodPost, PathRecoveryResolve, IDRequest{ID: id}, &out)
+	err := c.call(ctx, ResolveTimeout, http.MethodPost, PathRecoveryResolve, IDRequest{ID: id}, &out)
 	return out, err
 }

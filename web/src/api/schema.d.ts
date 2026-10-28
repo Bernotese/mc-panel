@@ -4324,7 +4324,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description recovery_required (the server is not in that state, or the operation is not available) */
+            /** @description recovery_required (the server has no unresolved restore) or conflict (a job holds its data, or another operation on it is being admitted) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -4333,7 +4333,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description data_state_unknown or files_unavailable */
+            /** @description data_state_unknown (the files service did not report the state, or cannot read the restore journal) or files_unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
