@@ -12,6 +12,7 @@ import { formatDecimal } from '@/features/monitoring/model'
 import { useFormat } from '@/lib/format'
 import { freshnessOf, isStale, type FreshnessSource } from '@/lib/freshness'
 import { AddressLine } from './address-line'
+import { DataStateBanner } from './data-state-banner'
 import { formatCpu, formatGiB } from './format'
 import { PowerButtons } from './power-buttons'
 import { useServerContext } from './server-context'
@@ -83,6 +84,7 @@ export function ServerHeader({ detail }: { detail: FreshnessSource }) {
         ) : null}
       </div>
       <StaleNotice freshness={freshness} />
+      <DataStateBanner server={server} isAdmin={isAdmin} />
       {server.dev ? <DevBanner server={server} dev={server.dev} /> : null}
       {instance ? (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-6">

@@ -6,7 +6,7 @@ import type { LiveMetrics, MetricsSeries, MonitoringOverview, MonitoringSettings
 import type { PluginInventory, PluginJob, PluginResolution, PluginSearchResult, PluginUpdates, PluginVersionList } from '@/api/types'
 import type { Server } from '@/api/types'
 import { callApi, field } from '@/test/call-api'
-import { db, defaultMonitoring, loginAs } from './db'
+import { db, defaultMonitoring, loginAs, seedRecoveryScenario } from './db'
 import { operations } from './handlers'
 
 const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../api/openapi.yaml'), 'utf8')
@@ -20,6 +20,32 @@ describe('mock coverage', () => {
 })
 
 describe('mock behaviour', () => {
+  it('locks start and restart outside the safe data state and resolves a stuck restore once', async () => {
+    seedRecoveryScenario()
+    const me = loginAs('admin', { sudo: true })
+    const power = (id: number, action: string) => callApi('POST', `/servers/${id}/power`, { body: { action }, csrf: me.csrf_token })
+    const resolve = () => callApi('POST', '/servers/6/recovery/resolve', { csrf: me.csrf_token })
+    const archive = (await callApi('GET', '/servers/6')).body as Server
+    expect(archive).toMatchObject({ data_state: 'recovery_required', data_job: null })
+    expect(field((await power(6, 'start')).body, 'error')).toBe('recovery_required')
+    expect((await power(6, 'stop')).status).toBe(202)
+
+    const resolved = await resolve()
+    expect(resolved.status).toBe(200)
+    expect(resolved.body).toMatchObject({ phase: 'swap', folder: expect.stringMatching(/^6-\d+$/) })
+    expect(((await callApi('GET', '/servers/6')).body as Server).data_state).toBe('safe')
+    expect(field((await resolve()).body, 'error')).toBe('recovery_required')
+    expect((await power(6, 'start')).status).toBe(202)
+
+    const survival = db.servers.find((s) => s.id === 1)
+    if (!survival) throw new Error('no survival')
+    Object.assign(survival, { dataState: 'busy', dataJob: 'restore' })
+    expect(((await callApi('GET', '/servers/1')).body as Server).data_job).toBe('restore')
+    expect(field((await power(1, 'restart')).body, 'error')).toBe('conflict')
+    survival.dataState = 'unknown'
+    expect((await power(1, 'restart')).status).toBe(503)
+  })
+
   it('lists files without the RCON files and edits with a conflict check', async () => {
     const me = loginAs('admin')
     const root = (await callApi('GET', '/servers/1/files')).body as { entries: Array<{ name: string; type: string }> }

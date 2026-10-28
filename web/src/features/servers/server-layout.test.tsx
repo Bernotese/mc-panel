@@ -1,9 +1,9 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mockOverview, overviewServer } from '@/features/monitoring/test-utils'
-import { db, enableTotp, loginAs } from '@/mocks/db'
+import { db, enableTotp, loginAs, seedRecoveryScenario } from '@/mocks/db'
 import { server } from '@/mocks/node'
 import { renderApp } from './test-utils'
 
@@ -240,6 +240,78 @@ describe('ServerLayout', () => {
       expect(await within(header).findByTestId('stale-notice')).toHaveTextContent('Interner Serverfehler.')
       expect(within(header).getByText('3/20').closest('[data-stale]')).not.toBeNull()
       expect(within(header).getByText('Läuft')).toBeInTheDocument()
+    })
+  })
+
+  describe('data state (data safety spec §2.3)', () => {
+    beforeEach(() => {
+      seedRecoveryScenario()
+    })
+    const RUNBOOK = 'https://github.com/Bernotese/mc-panel/blob/main/docs/install.md#a-restore-could-not-be-completed'
+
+    it('says that a job rewrites the data and locks start and restart', async () => {
+      Object.assign(mockServer(1), { dataState: 'busy', dataJob: 'restore' })
+      await renderApp('/servers/1', loginAs('admin'))
+      const header = await screen.findByRole('region', { name: 'survival' })
+      expect(within(header).getByText('Ein Auftrag schreibt gerade die Daten um (Wiederherstellung eines Backups). Starten ist gesperrt, bis er fertig ist.')).toBeInTheDocument()
+      const controls = within(header).getByRole('group', { name: 'Steuerung für survival' })
+      expect(within(controls).getByRole('button', { name: 'Neu starten' })).toBeDisabled()
+      expect(within(controls).getByRole('button', { name: 'Stoppen' })).toBeEnabled()
+      expect(within(header).getByText('Starten ist gesperrt, solange ein Auftrag die Daten umschreibt.')).toBeInTheDocument()
+    })
+
+    it('warns when the data state is unknown and never treats it as safe', async () => {
+      Object.assign(mockServer(1), { dataState: 'unknown' })
+      await renderApp('/servers/1', loginAs('admin'))
+      const header = await screen.findByRole('region', { name: 'survival' })
+      expect(within(header).getByRole('alert')).toHaveTextContent('Datenzustand unbekannt – der Files-Dienst antwortet nicht; Starten ist gesperrt.')
+      expect(within(header).getByRole('button', { name: 'Neu starten' })).toBeDisabled()
+      expect(within(header).getByRole('button', { name: 'Stoppen' })).toBeEnabled()
+      expect(within(header).getByText('Starten ist gesperrt, solange der Datenzustand unbekannt ist.')).toBeInTheDocument()
+    })
+
+    it('explains a stuck restore, links the runbook and lets an admin resolve it after confirming', async () => {
+      const { queryClient } = await renderApp('/servers/6', loginAs('admin', { sudo: true }))
+      const header = await screen.findByRole('region', { name: 'archive' })
+      const recovery = within(header).getByRole('region', { name: 'Wiederherstellung nötig' })
+      expect(recovery).toHaveTextContent('Ein Restore dieses Servers konnte nicht abgeschlossen werden.')
+      expect(within(recovery).getByRole('link', { name: /Anleitung/ })).toHaveAttribute('href', RUNBOOK)
+      expect(within(header).getByRole('button', { name: 'Starten' })).toBeDisabled()
+      expect(within(header).getByText('Starten ist gesperrt, bis die Wiederherstellung aufgelöst ist.')).toBeInTheDocument()
+
+      const resolve = within(recovery).getByRole('button', { name: 'Wiederherstellung auflösen' })
+      expect(resolve).toBeDisabled()
+      const user = userEvent.setup()
+      await user.click(within(recovery).getByRole('checkbox', { name: 'Ich habe das Datenverzeichnis geprüft' }))
+      await user.click(resolve)
+
+      const done = await within(header).findByRole('status', { name: 'Wiederherstellung aufgelöst' })
+      expect(done).toHaveTextContent(/backups\/recovery\/6-\d+/)
+      await queryClient.refetchQueries({ queryKey: ['servers', 6], exact: true })
+      expect(within(header).queryByRole('region', { name: 'Wiederherstellung nötig' })).not.toBeInTheDocument()
+      expect(within(header).getByRole('button', { name: 'Starten' })).toBeEnabled()
+      expect(db.audit.at(-1)).toMatchObject({ action: 'server.recovery_resolve' })
+    })
+
+    it('asks for the second factor before resolving and retries afterwards', async () => {
+      await renderApp('/servers/6', loginAs('admin'))
+      const recovery = await screen.findByRole('region', { name: 'Wiederherstellung nötig' })
+      const user = userEvent.setup()
+      await user.click(within(recovery).getByRole('checkbox', { name: 'Ich habe das Datenverzeichnis geprüft' }))
+      await user.click(within(recovery).getByRole('button', { name: 'Wiederherstellung auflösen' }))
+      const sudo = await screen.findByRole('dialog', { name: 'Aktion bestätigen' })
+      await user.type(within(sudo).getByLabelText('Code aus der Authenticator-App'), '123456')
+      await user.click(within(sudo).getByRole('button', { name: 'Bestätigen' }))
+      expect(await screen.findByRole('status', { name: 'Wiederherstellung aufgelöst' })).toBeInTheDocument()
+    })
+
+    it('shows other users the stuck restore without the resolve action', async () => {
+      db.grants.set(2, [{ server_id: 6, permissions: ['server.view', 'server.power'] }])
+      await renderApp('/servers/6', loginAs('alice'))
+      const recovery = await screen.findByRole('region', { name: 'Wiederherstellung nötig' })
+      expect(within(recovery).getByText('Auflösen kann nur ein Admin.')).toBeInTheDocument()
+      expect(within(recovery).queryByRole('button', { name: 'Wiederherstellung auflösen' })).not.toBeInTheDocument()
+      expect(within(recovery).queryByRole('checkbox')).not.toBeInTheDocument()
     })
   })
 

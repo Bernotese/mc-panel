@@ -1,5 +1,5 @@
 import { isApiError } from '@/api/errors'
-import type { PowerAction, Server, ServerState, ServerStatus } from '@/api/types'
+import type { PowerAction, Server, ServerDataState, ServerState, ServerStatus } from '@/api/types'
 
 export const FAST_POLL_MS = 3_000
 export const SLOW_POLL_MS = 15_000
@@ -83,4 +83,12 @@ export function stateDotClass(state: ServerState): string {
   if (state === 'error') return 'bg-status-error'
   if (state === 'stopped' || state === 'not_configured') return 'bg-status-offline'
   return 'bg-status-starting'
+}
+
+/**
+ * Data safety spec §1.1: only a safe data directory admits start and restart; stop always works. The i18n key of the
+ * reason, or null when the data state locks nothing.
+ */
+export function dataLockKey(state: ServerDataState): string | null {
+  return state === 'safe' ? null : `servers.data.lock_${state}`
 }
