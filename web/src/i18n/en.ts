@@ -1255,6 +1255,7 @@ export const en: Messages = {
     alert: {
       server_down: 'Server down',
       server_crash_loop: 'Crash loop',
+      server_recovery_required: 'Recovery required',
       host_disk_low: 'Disk low',
     },
     host: {

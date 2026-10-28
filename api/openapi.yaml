@@ -2666,7 +2666,7 @@ components:
         memory_bytes: { type: [integer, 'null'], format: int64 }
         memory_limit_bytes: { type: [integer, 'null'], format: int64 }
         tps_source: { $ref: '#/components/schemas/TpsSource' }
-    AlertKind: { type: string, enum: [server.down, server.crash_loop, host.disk_low] }
+    AlertKind: { type: string, enum: [server.down, server.crash_loop, server.recovery_required, host.disk_low] }
     SparklinePoint:
       type: array
       description: '[at (Unix ms), players]'

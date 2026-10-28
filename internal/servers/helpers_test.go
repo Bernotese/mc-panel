@@ -46,7 +46,8 @@ type env struct {
 	box     *secretbox.Box
 	agent   *fakeAgent
 	catalog *fakeCatalog
-	gate    *fakeGate
+	data    *fakeStates
+	files   *fakeStateClient // the files service's resolve
 	purger  *fakePurger
 	logs    *bytes.Buffer // reconcile log output
 	hostMem uint64        // installed host memory in bytes; 0 = unknown
@@ -65,11 +66,11 @@ func newEnv(t *testing.T) *env {
 	e := &env{
 		t: t, db: db, clk: clock.NewFake(t0), rec: &audit.MemoryRecorder{}, box: box,
 		agent: newFakeAgent(), catalog: &fakeCatalog{}, logs: &bytes.Buffer{},
-		gate: &fakeGate{running: map[int64]bool{}}, purger: &fakePurger{},
+		data: newFakeStates(), files: &fakeStateClient{}, purger: &fakePurger{},
 	}
 	e.h = servers.NewHandler(servers.Deps{
 		DB: db, Clock: e.clk, Audit: e.rec, Box: box, Instances: e.agent, Web: e.agent,
-		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog, Gate: e.gate,
+		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog, DataStates: e.data, Files: e.files,
 		Backups: e.purger,
 		HostMemory: func() (uint64, error) {
 			if e.hostMem == 0 {
@@ -344,22 +345,50 @@ func (f *fakeCatalog) Get(_ context.Context, t instancespec.Type) (catalog.Catal
 	return f.cat, f.err
 }
 
-// fakeGate is a servers.DataGate with a switch per server.
-type fakeGate struct {
-	mu      sync.Mutex
-	running map[int64]bool
-	asked   int
+// fakeStates is a servers.DataStates with a state per server (missing = safe); err, while
+// set, makes every server unknown.
+type fakeStates struct {
+	mu     sync.Mutex
+	states map[int64]servers.State
+	jobs   map[int64]string
+	err    error
+	asked  int
 }
 
-func (g *fakeGate) set(id int64, on bool) { g.mu.Lock(); g.running[id] = on; g.mu.Unlock() }
+func newFakeStates() *fakeStates {
+	return &fakeStates{states: map[int64]servers.State{}, jobs: map[int64]string{}}
+}
 
-func (g *fakeGate) askedCount() int { g.mu.Lock(); defer g.mu.Unlock(); return g.asked }
+func (f *fakeStates) set(id int64, s servers.State) { f.mu.Lock(); f.states[id] = s; f.mu.Unlock() }
 
-func (g *fakeGate) DataJobRunning(_ context.Context, id int64) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.asked++
-	return g.running[id]
+// setBusy makes id busy with a job of kind.
+func (f *fakeStates) setBusy(id int64, kind string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.states[id], f.jobs[id] = servers.StateBusy, kind
+}
+
+func (f *fakeStates) setErr(err error) { f.mu.Lock(); f.err = err; f.mu.Unlock() }
+
+func (f *fakeStates) askedCount() int { f.mu.Lock(); defer f.mu.Unlock(); return f.asked }
+
+func (f *fakeStates) State(ctx context.Context, id int64) (servers.State, error) {
+	info, err := f.Lookup(ctx, id, nil)
+	return info.State, err
+}
+
+func (f *fakeStates) Lookup(_ context.Context, id int64, _ servers.Hold) (servers.DataInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked++
+	if f.err != nil {
+		return servers.DataInfo{State: servers.StateUnknown}, f.err
+	}
+	s, ok := f.states[id]
+	if !ok {
+		s = servers.StateSafe
+	}
+	return servers.DataInfo{State: s, Job: f.jobs[id]}, nil
 }
 
 // fakePurger is a servers.BackupPurger that records its calls.

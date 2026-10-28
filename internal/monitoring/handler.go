@@ -23,7 +23,7 @@ type Deps struct {
 	Notifier     notify.Notifier          // nil = notify.Nop{}
 	Instances    agentapi.InstancesClient // nil = no agent: no server samples
 	Console      agentapi.ConsoleClient   // RCON for TPS; nil = no TPS
-	Gate         servers.DataGate         // nil = never gated
+	DataStates   servers.DataStates       // nil = every server's data is safe
 	PingAddr     string                   // "" = no ping
 	InstancesDir string                   // statfs target; "" = no disk values
 	Log          *slog.Logger             // nil = slog.Default()

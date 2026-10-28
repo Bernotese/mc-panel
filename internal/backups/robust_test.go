@@ -147,7 +147,7 @@ func TestStalledRestoreKeepsGateUntilEnd(t *testing.T) {
 	e.clk.Advance(10 * time.Minute)
 	eventually(t, "cancel", func() bool { return e.files.count(fmt.Sprintf("cancel %d", id)) >= 1 })
 	time.Sleep(50 * time.Millisecond)
-	if !e.h.DataJobRunning(t.Context(), id) {
+	if !holding(e.h, id) {
 		t.Fatal("gate open while the service job still runs")
 	}
 	if j := e.job(id); j.State != "running" {
@@ -157,7 +157,7 @@ func TestStalledRestoreKeepsGateUntilEnd(t *testing.T) {
 	if j := e.waitJob(id); j.State != "done" {
 		t.Fatalf("job = %+v", j)
 	}
-	if e.h.DataJobRunning(t.Context(), id) {
+	if holding(e.h, id) {
 		t.Fatal("gate still closed")
 	}
 }
@@ -173,7 +173,7 @@ func TestRestoringSurvivesPollErrors(t *testing.T) {
 	e.waitStep(id, "restoring")
 	setFilesErr(e, "job", filesapi.ErrUnavailable)
 	time.Sleep(100 * time.Millisecond) // about 20 polls of 5 ms
-	if !e.h.DataJobRunning(t.Context(), id) {
+	if !holding(e.h, id) {
 		t.Fatal("gate opened after poll errors")
 	}
 	if n := e.files.count(fmt.Sprintf("cancel %d", id)); n != 0 {

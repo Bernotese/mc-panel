@@ -14,6 +14,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/servers"
 	"github.com/Bernotese/mc-panel/internal/store"
 	"github.com/Bernotese/mc-panel/internal/timescale"
 )
@@ -34,6 +35,7 @@ var kindEvent = map[string]notify.EventType{
 	alertServerDown: notify.EventServerDown,
 	alertCrashLoop:  notify.EventServerCrashLoop,
 	alertDiskLow:    notify.EventHostDiskLow,
+	alertRecovery:   notify.EventServerRecoveryRequired,
 }
 
 type alertSettings struct {
@@ -165,6 +167,7 @@ func (a *alerter) evalServers(ctx context.Context, now time.Time, set alertSetti
 		a.names[srv.ID] = srv.Name
 		a.evalCrash(ctx, now, set, srv, off[srv.ID])
 		a.evalDown(ctx, now, set, srv, off[srv.ID])
+		a.evalRecovery(ctx, now, srv)
 	}
 	a.forgetMissing(ctx, seen)
 	return nil
@@ -308,6 +311,22 @@ func (a *alerter) evalCrash(ctx context.Context, now time.Time, set alertSetting
 	}
 }
 
+// evalRecovery fires server.recovery_required once when the server enters that data state and
+// drops it without a message when a known state shows it left it (an admin resolved it, which
+// is audited). An unknown state changes nothing. The down-alert switch and dev instances do
+// not silence it: the server cannot start until someone acts.
+func (a *alerter) evalRecovery(ctx context.Context, now time.Time, srv ServerSample) {
+	key := alertKey(alertRecovery, srv.ID)
+	_, firing := a.firing[key]
+	switch {
+	case srv.DataState == servers.StateRecoveryRequired && !firing:
+		msg := srv.Name + " does not start: a restore of its data could not be completed. An admin has to check the data directory and resolve it (docs/install.md, \"A restore could not be completed\")."
+		a.fireLocked(ctx, key, now, msg, notify.Event{Type: notify.EventServerRecoveryRequired, Title: "Restore not completed: " + srv.Name, Message: msg})
+	case firing && (srv.DataState == servers.StateSafe || srv.DataState == servers.StateBusy):
+		a.dropLocked(ctx, key)
+	}
+}
+
 func (a *alerter) evalDisk(ctx context.Context, now time.Time, set alertSettings, h HostSample) {
 	if h.DiskFree == nil || h.DiskTotal == nil || *h.DiskTotal <= 0 {
 		return
@@ -328,7 +347,7 @@ func (a *alerter) evalDisk(ctx context.Context, now time.Time, set alertSettings
 
 // remind repeats every alert that has been firing for remindEvery since its last message.
 // Server alerts are only repeated in passes that know the servers (agent and Docker answered)
-// and not while the server is gated; host alerts always.
+// and, except server.recovery_required, not while the server is gated; host alerts always.
 func (a *alerter) remind(ctx context.Context, now time.Time, serversKnown bool, gated map[int64]bool) {
 	for _, key := range slices.Sorted(maps.Keys(a.firing)) {
 		st := a.firing[key]
@@ -336,7 +355,7 @@ func (a *alerter) remind(ctx context.Context, now time.Time, serversKnown bool, 
 			continue
 		}
 		kind, id := parseKey(key)
-		if id != 0 && (!serversKnown || gated[id]) {
+		if id != 0 && (!serversKnown || gated[id] && kind != alertRecovery) {
 			continue
 		}
 		ev := notify.Event{Type: kindEvent[kind], Message: fmt.Sprintf("Active since %s. %s", st.since.UTC().Format(time.RFC3339), st.detail)}
@@ -345,6 +364,8 @@ func (a *alerter) remind(ctx context.Context, now time.Time, serversKnown bool, 
 			ev.Title = "Server still down: " + a.nameLocked(ctx, id)
 		case alertCrashLoop:
 			ev.Title = "Server still in a crash loop: " + a.nameLocked(ctx, id)
+		case alertRecovery:
+			ev.Title = "Restore still not resolved: " + a.nameLocked(ctx, id)
 		default:
 			ev.Title = "Disk space still low"
 		}
@@ -362,7 +383,7 @@ func (a *alerter) remind(ctx context.Context, now time.Time, serversKnown bool, 
 // database (deleted servers; their alert_state rows are already gone with the server, spec §5).
 func (a *alerter) forgetMissing(ctx context.Context, seen map[int64]bool) {
 	for key := range a.firing {
-		if kind, id := parseKey(key); id != 0 && !seen[id] && (kind == alertServerDown || kind == alertCrashLoop) {
+		if kind, id := parseKey(key); id != 0 && !seen[id] && (kind == alertServerDown || kind == alertCrashLoop || kind == alertRecovery) {
 			a.dropLocked(ctx, key)
 		}
 	}

@@ -279,7 +279,7 @@ func TestDevSyncHoldsGate(t *testing.T) {
 	release := e.blockWorker()
 	holdRestore := e.files.holdPlan("restore")
 	ch := e.queue(nil)
-	if !e.h.DataJobRunning(ctx, e.dev) || e.h.DataJobRunning(ctx, e.prod) {
+	if !holding(e.h, e.dev) || holding(e.h, e.prod) {
 		t.Fatal("queued: the gate must hold the dev and only the dev")
 	}
 	release()
@@ -287,14 +287,14 @@ func TestDevSyncHoldsGate(t *testing.T) {
 		st, _, _ := backups.JobOf(e.h, e.dev)
 		return st == "running" && e.files.count("restore-from") == 1
 	})
-	if !e.h.DataJobRunning(ctx, e.dev) || e.h.DataJobRunning(ctx, e.prod) {
+	if !holding(e.h, e.dev) || holding(e.h, e.prod) {
 		t.Fatal("running: the gate must hold the dev and only the dev")
 	}
 	holdRestore()
 	if r := e.wait(ch); r.err != nil {
 		t.Fatal(r.err)
 	}
-	eventually(t, "gate open", func() bool { return !e.h.DataJobRunning(ctx, e.dev) })
+	eventually(t, "gate open", func() bool { return !holding(e.h, e.dev) })
 	if err := e.h.QueueDevSync(ctx, backups.DevSync{DevID: e.dev, SourceID: e.prod, Apply: func(context.Context) error { return nil }, Done: func(string, error) {}}); err != nil {
 		t.Fatalf("a second sync after the first: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestDevSyncApplyFails(t *testing.T) {
 	if r.err == nil || errors.Is(r.err, context.Canceled) || strings.Contains(r.err.Error(), "/var/lib") {
 		t.Fatalf("done = %+v", r)
 	}
-	eventually(t, "gate open", func() bool { return !e.h.DataJobRunning(t.Context(), e.dev) })
+	eventually(t, "gate open", func() bool { return !holding(e.h, e.dev) })
 	if e.files.count("forget") != 0 {
 		t.Fatal("forgot snapshots after a failed sync")
 	}

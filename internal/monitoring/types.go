@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/servers"
 	"github.com/Bernotese/mc-panel/internal/timescale"
 )
 
@@ -26,7 +27,8 @@ type ServerSample struct {
 	ID             int64
 	Name           string
 	DesiredRunning bool
-	Gated          bool // DataGate held during the pass
+	DataState      servers.State // data state of the pass (data safety spec §2)
+	Gated          bool          // DataState busy or recovery_required: down alerts are silenced
 	State          agentapi.ContainerState
 	StartedAt      int64 // Unix ms, 0 = not running
 	RestartCount   int
@@ -96,6 +98,8 @@ const (
 	alertServerDown = "server.down"
 	alertCrashLoop  = "server.crash_loop"
 	alertDiskLow    = "host.disk_low"
+	// alertRecovery: a restore of the server could not be completed (data safety spec §2.3).
+	alertRecovery = "server.recovery_required"
 )
 
 // Timings and retention (Global Constraints). Waits run on wall time; clock.Clock drives
