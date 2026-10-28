@@ -204,6 +204,22 @@ describe('ServerLayout', () => {
       expect(within(header).getByText('2 / 5 GiB').closest('[data-stale]')).toBeNull()
     })
 
+    it('shows one notice on the monitoring tab when the header and the tab both go stale', async () => {
+      const { queryClient } = await renderApp('/servers/1/monitoring', loginAs('admin'))
+      const header = await screen.findByRole('region', { name: 'survival' })
+      await screen.findByRole('region', { name: 'Jetzt' })
+      await screen.findAllByRole('img', { name: 'Spieler' })
+      server.use(
+        http.get('*/api/servers/:id', () => HttpResponse.error()),
+        http.get('*/api/servers/:id/metrics/live', () => HttpResponse.error()),
+        http.get('*/api/servers/:id/metrics', () => HttpResponse.error()),
+      )
+      await queryClient.refetchQueries({ queryKey: ['servers', 1] })
+      expect(await within(header).findByTestId('stale-notice')).toHaveTextContent('Keine Verbindung zum Panel.')
+      await waitFor(() => expect(screen.getByRole('region', { name: 'Jetzt' }).querySelector('[data-stale]')).not.toBeNull())
+      expect(screen.getAllByTestId('stale-notice')).toHaveLength(1)
+    })
+
     it('names a missing agent (503)', async () => {
       const { queryClient } = await renderApp('/servers/1', loginAs('admin'))
       const header = await screen.findByRole('region', { name: 'survival' })
