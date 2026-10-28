@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -34,7 +33,8 @@ type FilesLimits struct {
 	MaxBackupJobs    int   `toml:"max_backup_jobs"`    // concurrent restic jobs (backup, restore, forget)
 	// ResticGOMAXPROCS is passed to every restic child as GOMAXPROCS (MC-PERF-04): it bounds how
 	// many threads run Go code at once (hashing, compression, encryption), not I/O and not a
-	// cgroup CPU quota. 0 = unset, restic uses every CPU.
+	// cgroup CPU quota. 0 = unset, restic uses every CPU. A value above the CPUs of the host is
+	// clamped by the service (a smaller host must not stop it from starting).
 	ResticGOMAXPROCS int `toml:"restic_gomaxprocs"`
 }
 
@@ -43,6 +43,10 @@ const maxReservePercent = 50
 
 // maxBackupJobsLimit bounds max_backup_jobs: every restic job holds its own memory and disk I/O.
 const maxBackupJobsLimit = 8
+
+// maxResticGOMAXPROCS bounds restic_gomaxprocs: only a plausibility limit, the service clamps to
+// the CPUs of the host.
+const maxResticGOMAXPROCS = 1024
 
 // Files is the configuration of mcpanel-files (files.toml).
 type Files struct {
@@ -171,8 +175,8 @@ func (f Files) Validate() error {
 	if l.MaxBackupJobs < 1 || l.MaxBackupJobs > maxBackupJobsLimit {
 		errs = append(errs, fmt.Errorf("limits.max_backup_jobs must be between 1 and %d", maxBackupJobsLimit))
 	}
-	if n := runtime.NumCPU(); l.ResticGOMAXPROCS < 0 || l.ResticGOMAXPROCS > n {
-		errs = append(errs, fmt.Errorf("limits.restic_gomaxprocs must be between 1 and %d (the CPUs of this host), or 0 for unset", n))
+	if l.ResticGOMAXPROCS < 0 || l.ResticGOMAXPROCS > maxResticGOMAXPROCS {
+		errs = append(errs, fmt.Errorf("limits.restic_gomaxprocs must be between 0 (unset) and %d", maxResticGOMAXPROCS))
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("config: %w", errors.Join(errs...))

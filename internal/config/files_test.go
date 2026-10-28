@@ -206,8 +206,8 @@ func TestFilesResticGOMAXPROCS(t *testing.T) {
 		n     int
 		valid bool
 	}{
-		{0, true}, {1, true}, {runtime.NumCPU(), true},
-		{-1, false}, {runtime.NumCPU() + 1, false},
+		{0, true}, {1, true}, {runtime.NumCPU() + 1, true}, {1024, true}, // the service clamps to the CPUs
+		{-1, false}, {1025, false},
 	} {
 		f := ok
 		f.Limits.ResticGOMAXPROCS = c.n

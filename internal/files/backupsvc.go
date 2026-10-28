@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"syscall"
 
@@ -42,6 +43,9 @@ func (s *Service) InitBackups(ctx context.Context) filesapi.BackupsStatus {
 	s.backupMu.Lock()
 	s.backupStat = st
 	s.backupMu.Unlock()
+	if n, cpus := s.cfg.Limits.ResticGOMAXPROCS, runtime.NumCPU(); n > cpus {
+		s.log.Warn("files: restic_gomaxprocs is above the CPUs of this host; using the CPU count", "restic_gomaxprocs", n, "cpus", cpus)
+	}
 	if st.Available {
 		s.log.Info("files: backups available", "restic", st.Version)
 	} else {
@@ -220,11 +224,11 @@ func (s *Service) ensureRepo(ctx context.Context, id int64) error {
 }
 
 // resticEnv is the complete environment of a restic call (spec 4 §3.3); id 0 = no repository.
-// limits.restic_gomaxprocs adds GOMAXPROCS (MC-PERF-04); nothing comes from the service's own
-// environment.
+// limits.restic_gomaxprocs adds GOMAXPROCS (MC-PERF-04), at most the CPUs of the host (InitBackups
+// warns); nothing comes from the service's own environment.
 func (s *Service) resticEnv(id int64, extra ...string) []string {
 	env := []string{"HOME=" + s.backupsDir(), "RESTIC_PROGRESS_FPS=1"}
-	if n := s.cfg.Limits.ResticGOMAXPROCS; n > 0 {
+	if n := min(s.cfg.Limits.ResticGOMAXPROCS, runtime.NumCPU()); n > 0 {
 		env = append(env, "GOMAXPROCS="+strconv.Itoa(n))
 	}
 	if id > 0 {

@@ -312,7 +312,7 @@ restic uses every CPU core of the host while it hashes, compresses and encrypts 
 restic_gomaxprocs = 1 # 0 or missing (default): restic uses every CPU
 ```
 
-The value is passed to every restic process as `GOMAXPROCS` (allowed: 0, or 1 up to the number of CPUs of the host; a larger value stops `mcpanel-files` from starting, so lower it before you move to a smaller machine). Restart `mcpanel-files` after changing it. Know what it does and does not do:
+The value is passed to every restic process as `GOMAXPROCS` (allowed: 0 to 1024). A value above the number of CPUs of the host counts as that number, and `mcpanel-files` logs a warning at start (`journalctl -u mcpanel-files`), so moving to a smaller machine does not stop the service. Restart `mcpanel-files` after changing it. Know what it does and does not do:
 
 - `GOMAXPROCS` limits how many threads run restic's Go code at the same time. It is not a hard CPU quota of a cgroup and does not limit disk I/O: reading the world, writing the repository and the kernel's work for it are not counted.
 - Fewer threads make a backup take longer. A backup of a running server keeps saving off (`save-off`) for its whole duration, so the server writes nothing to disk for longer, and a slower backup gets closer to `max_duration` in `panel.toml`. Watch the duration of your backups after lowering the value.
