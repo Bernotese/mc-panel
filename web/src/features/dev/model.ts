@@ -114,3 +114,14 @@ export function devSettingsPatch(d: DevSettingsDraft, dev: DevInstance): UpdateD
   if (simulation !== dev.simulation_distance) patch.simulation_distance = simulation
   return patch
 }
+
+/** A field as it saves: whole numbers parsed ("030" is 30), the time as typed. */
+export function sameDevField(a: DevSettingsDraft, b: DevSettingsDraft, key: keyof DevSettingsDraft): boolean {
+  const norm = (v: string) => (/^\s*\d+\s*$/.test(v) ? Number(v) : v)
+  return norm(a[key]) === norm(b[key])
+}
+
+/** Issue #154: both drafts save the same settings. */
+export function sameDevDraft(a: DevSettingsDraft, b: DevSettingsDraft): boolean {
+  return (Object.keys(a) as (keyof DevSettingsDraft)[]).every((k) => sameDevField(a, b, k))
+}

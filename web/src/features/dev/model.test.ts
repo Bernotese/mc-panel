@@ -7,6 +7,7 @@ import {
   devSettingsPatch,
   draftFromDev,
   formatSyncWhen,
+  sameDevDraft,
   serverTreeEntries,
   validateDevSettings,
   withDevsAfterSources,
@@ -89,5 +90,14 @@ describe('dev settings form', () => {
     const errors = validateDevSettings({ time: '25:00', idle: '4', view: '33', simulation: '3' })
     expect(Object.keys(errors).sort()).toEqual(['idle', 'time', 'view'])
     for (const e of Object.values(errors)) expect(i18n.exists(e.key), e.key).toBe(true)
+  })
+})
+
+describe('sameDevDraft', () => {
+  it('compares the settings as they save', () => {
+    const a = { time: '05:00', idle: '15', view: '4', simulation: '3' }
+    expect(sameDevDraft(a, { ...a, idle: '015' })).toBe(true)
+    expect(sameDevDraft(a, { ...a, idle: '16' })).toBe(false)
+    expect(sameDevDraft(a, { ...a, time: '05:01' })).toBe(false)
   })
 })
