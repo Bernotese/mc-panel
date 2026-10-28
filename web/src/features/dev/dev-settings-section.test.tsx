@@ -75,4 +75,25 @@ describe('dev settings', () => {
     await user.click(within(resources).getByRole('button', { name: 'Arbeitsspeicher speichern' }))
     await waitFor(() => expect(bodies).toEqual([{ memory_mib: 3072 }]))
   })
+
+  it('keeps unsaved dev settings when they change elsewhere and keeps the own changes on top (issue #154)', async () => {
+    const { user, queryClient } = await settingsTab()
+    const sync = await screen.findByRole('region', { name: 'Sync und Ruhezustand' })
+    const idle = within(sync).getByLabelText('Schlafen nach (Minuten ohne Spieler)')
+    await user.clear(idle)
+    await user.type(idle, '30')
+
+    const dev = db.servers.find((s) => s.id === 5)?.dev
+    if (!dev) throw new Error('no seeded dev')
+    dev.viewDistance = 8
+    await queryClient.invalidateQueries({ queryKey: ['servers', 5, 'dev'] })
+    const alert = await within(sync).findByRole('alert')
+    expect(alert).toHaveTextContent('Sichtweite (Chunks) – gespeichert: 8')
+    expect(within(sync).getByLabelText('Schlafen nach (Minuten ohne Spieler)')).toHaveValue(30)
+
+    await user.click(within(alert).getByRole('button', { name: 'Meine Änderungen behalten' }))
+    await waitFor(() => expect(within(sync).queryByRole('alert')).not.toBeInTheDocument())
+    expect(within(sync).getByLabelText('Schlafen nach (Minuten ohne Spieler)')).toHaveValue(30)
+    expect(within(sync).getByLabelText('Sichtweite (Chunks)')).toHaveValue(8)
+  })
 })

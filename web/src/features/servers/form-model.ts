@@ -270,3 +270,32 @@ export function resolveServerForm(value: ServerFormValue, ctx: FormContext): Ser
 export function sameFormValue(a: ServerFormValue, b: ServerFormValue): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
+
+/** The fields an edit can change; manualVersion only says how the version is entered. */
+const EDIT_KEYS = ['version', 'loaderVersion', 'modpack', 'javaOverride', 'memoryGiB'] as const
+export type FormChangeKey = (typeof EDIT_KEYS)[number] | `properties.${keyof PropertiesDraft}`
+
+/** Issue #154: the edit fields in which two form values differ, properties one by one, in form order. */
+export function changedFormKeys(a: ServerFormValue, b: ServerFormValue): FormChangeKey[] {
+  const keys: FormChangeKey[] = EDIT_KEYS.filter((k) => a[k] !== b[k])
+  for (const k of Object.keys(a.properties) as (keyof PropertiesDraft)[]) if (a.properties[k] !== b.properties[k]) keys.push(`properties.${k}`)
+  return keys
+}
+
+/**
+ * Issue #154, "keep my changes": the stored value (`remote`) with every field the draft changed against the value it
+ * was edited from (`base`); a field changed on both sides keeps the own value.
+ */
+export function rebaseServerForm(base: ServerFormValue, draft: ServerFormValue, remote: ServerFormValue): ServerFormValue {
+  let out = remote
+  for (const key of changedFormKeys(base, draft)) {
+    if (key.startsWith('properties.')) {
+      const p = key.slice('properties.'.length) as keyof PropertiesDraft
+      out = { ...out, properties: { ...out.properties, [p]: draft.properties[p] } }
+    } else {
+      const k = key as (typeof EDIT_KEYS)[number]
+      out = { ...out, [k]: draft[k], ...(k === 'version' ? { manualVersion: draft.manualVersion } : {}) }
+    }
+  }
+  return out
+}

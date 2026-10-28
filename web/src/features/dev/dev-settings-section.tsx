@@ -9,12 +9,15 @@ import { Section } from '@/components/section'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { memoryLimitsKey, memoryLimitsQueryOptions, serverKey, serverSettingsQueryOptions, serversKey, updateServer } from '@/features/servers/api'
+import { DraftConflict } from '@/features/servers/draft-conflict'
 import { FieldRow } from '@/features/servers/field-row'
 import { memoryLimitsFrom } from '@/features/servers/form-model'
 import { memoryInputValue } from '@/features/servers/format'
 import { MemoryField } from '@/features/servers/server-form'
 import { memoryMiBFromGiB, validateMemoryMiB } from '@/features/servers/validation'
 import { errorMessage } from '@/lib/error-message'
+import { useReportUnsaved } from '@/lib/unsaved-changes'
+import { mergeChangedKeys, useRemoteDraft } from '@/lib/use-remote-draft'
 import { devKey, devQueryOptions, updateDev } from './api'
 import { devSettingsPatch, DISTANCE, draftFromDev, IDLE_MINUTES, validateDevSettings, type DevSettingsDraft } from './model'
 
@@ -31,10 +34,9 @@ export function DevSettings({ server }: { server: Server }) {
     )
   return (
     <div className="grid gap-6 xl:grid-cols-2">
-      {/* Re-initialised when the stored settings change (after saving or elsewhere). */}
-      <DevSettingsSection key={JSON.stringify(draftFromDev(dev.data))} server={server} dev={dev.data} />
+      <DevSettingsSection server={server} dev={dev.data} />
       <div className="flex flex-col gap-6">
-        {server.instance ? <DevMemorySection key={server.instance.memory_mib} server={server} memoryMiB={server.instance.memory_mib} /> : null}
+        {server.instance ? <DevMemorySection server={server} memoryMiB={server.instance.memory_mib} /> : null}
         <p className="bevel-inset px-4 py-3 text-sm">
           {t('dev.settings.managed')}{' '}
           <Link to="/servers/$id/settings" params={{ id: String(dev.data.source_id) }} className="text-primary underline underline-offset-4">
@@ -51,19 +53,32 @@ export function DevSettingsSection({ server, dev }: { server: Server; dev: DevIn
   const id = useId()
   const queryClient = useQueryClient()
   const settings = useQuery(serverSettingsQueryOptions)
-  const [draft, setDraft] = useState<DevSettingsDraft>(() => draftFromDev(dev))
+  // Issue #154: the draft survives the 15-s polls of the dev (DevBanner) and changes elsewhere; a clean form follows them.
+  const d = useRemoteDraft(dev, { toDraft: draftFromDev, merge: mergeChangedKeys })
+  useReportUnsaved(d.dirty)
+  const { draft } = d
   const [submitted, setSubmitted] = useState(false)
   const errors = validateDevSettings(draft)
   const valid = Object.keys(errors).length === 0
-  const patch = valid ? devSettingsPatch(draft, dev) : {}
+  const patch = valid ? devSettingsPatch(draft, d.base) : {}
   const dirty = !valid || Object.keys(patch).length > 0
   const shown = (field: keyof DevSettingsDraft) => (submitted ? errors[field] : undefined)
-  const set = (p: Partial<DevSettingsDraft>) => setDraft({ ...draft, ...p })
+  const set = (p: Partial<DevSettingsDraft>) => d.setDraft({ ...draft, ...p })
+  const labels: Record<keyof DevSettingsDraft, string> = {
+    time: t('dev.settings.sync_time'),
+    idle: t('dev.settings.idle_minutes'),
+    view: t('servers.props.view_distance'),
+    simulation: t('servers.props.simulation_distance'),
+  }
+  const changes = (Object.keys(labels) as (keyof DevSettingsDraft)[])
+    .filter((k) => d.remoteDraft[k] !== d.baseDraft[k])
+    .map((k) => ({ key: k, label: labels[k], theirs: d.remoteDraft[k], mine: draft[k] !== d.baseDraft[k] && draft[k] !== d.remoteDraft[k] ? draft[k] : null }))
 
   const save = useMutation({
     mutationFn: () => updateDev(server.id, patch),
     onSuccess: (updated) => {
       queryClient.setQueryData(devKey(server.id), updated)
+      d.saved(updated)
       // The overrides change the dev's spec (revision): the header may now ask for a restart.
       void queryClient.invalidateQueries({ queryKey: serversKey })
       toast.success(t('dev.settings.saved'))
@@ -81,6 +96,7 @@ export function DevSettingsSection({ server, dev }: { server: Server; dev: DevIn
           if (valid && Object.keys(patch).length > 0) save.mutate()
         }}
       >
+        {d.conflict ? <DraftConflict reason="remote" changes={changes} onReload={d.reload} onKeepMine={d.keepMine} /> : null}
         <FieldRow
           id={`${id}-time`}
           label={t('dev.settings.sync_time')}
@@ -146,7 +162,9 @@ function DevMemorySection({ server, memoryMiB }: { server: Server; memoryMiB: nu
   const id = useId()
   const queryClient = useQueryClient()
   const limits = useQuery(memoryLimitsQueryOptions)
-  const [text, setText] = useState(() => memoryInputValue(memoryMiB))
+  const d = useRemoteDraft(memoryMiB, { toDraft: memoryInputValue, merge: (_base, draft) => draft })
+  useReportUnsaved(d.dirty)
+  const text = d.draft
   const [touched, setTouched] = useState(false)
   const mib = memoryMiBFromGiB(text)
   const error = validateMemoryMiB(mib, memoryLimitsFrom(limits.data)) ?? undefined
@@ -154,6 +172,7 @@ function DevMemorySection({ server, memoryMiB }: { server: Server; memoryMiB: nu
     mutationFn: (value: number) => updateServer(server.id, { memory_mib: value }),
     onSuccess: (updated) => {
       queryClient.setQueryData(serverKey(server.id), updated)
+      if (updated.instance) d.saved(updated.instance.memory_mib)
       void queryClient.invalidateQueries({ queryKey: serversKey, exact: true })
       void queryClient.invalidateQueries({ queryKey: memoryLimitsKey })
       toast.success(updated.status.restart_required ? t('servers.settings.saved_restart') : t('servers.settings.saved'))
@@ -170,15 +189,23 @@ function DevMemorySection({ server, memoryMiB }: { server: Server; memoryMiB: nu
           if (!error && mib !== null) save.mutate(mib)
         }}
       >
+        {d.conflict ? (
+          <DraftConflict
+            reason="remote"
+            changes={[{ key: 'memory', label: t('servers.form.memory'), theirs: t('servers.draft.gib', { value: d.remoteDraft }), mine: t('servers.draft.gib', { value: text }) }]}
+            onReload={d.reload}
+            onKeepMine={d.keepMine}
+          />
+        ) : null}
         <MemoryField
           id={`${id}-memory`}
           text={text}
           error={touched ? error : undefined}
           limits={limits.data}
-          ownMiB={memoryMiB}
+          ownMiB={d.base}
           recommendedMiB={undefined}
           onChange={(value) => {
-            setText(value)
+            d.setDraft(value)
             setTouched(true)
           }}
         />
@@ -188,7 +215,7 @@ function DevMemorySection({ server, memoryMiB }: { server: Server; memoryMiB: nu
           </p>
         ) : null}
         <div>
-          <Button type="submit" disabled={save.isPending || mib === memoryMiB}>
+          <Button type="submit" disabled={save.isPending || mib === d.base}>
             {t('dev.settings.save_memory')}
           </Button>
         </div>

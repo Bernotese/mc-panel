@@ -250,4 +250,37 @@ describe('WebRoutesSection', () => {
     expect(await within(s).findByText(/brauchen eine Basisdomain/)).toBeInTheDocument()
     expect(within(s).getByRole('switch', { name: ROOT_SWITCH })).toBeDisabled()
   })
+
+  describe('drafts (issue #154)', () => {
+    it('follows routes changed elsewhere while clean', async () => {
+      const { queryClient } = await settingsTab()
+      const s = await section()
+      expect(within(s).getByRole('switch', { name: ROOT_SWITCH })).not.toBeChecked()
+      setRoutes(2, [{ path: '', port: 8100 }])
+      await queryClient.invalidateQueries({ queryKey: ['servers', 2] })
+      await waitFor(() => expect(within(s).getByRole('switch', { name: ROOT_SWITCH })).toBeChecked())
+      expect(within(s).queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('keeps unsaved routes when they change elsewhere and lets the user choose', async () => {
+      const { user, queryClient } = await settingsTab()
+      const s = await section()
+      await user.click(within(s).getByRole('switch', { name: ROOT_SWITCH }))
+      const port = within(s).getByRole('spinbutton', { name: ROOT_PORT })
+      await user.clear(port)
+      await user.type(port, '8200')
+
+      setRoutes(2, [{ path: 'map', port: 8123 }])
+      await queryClient.invalidateQueries({ queryKey: ['servers', 2] })
+      const alert = await within(s).findByRole('alert')
+      expect(alert).toHaveTextContent('Weboberflächen – gespeichert: /map/ → 8123 · deins: / → 8200')
+      expect(within(s).getByRole('spinbutton', { name: ROOT_PORT })).toHaveValue(8200)
+
+      await user.click(within(alert).getByRole('button', { name: 'Gespeicherten Stand laden' }))
+      await waitFor(() => expect(within(s).queryByRole('alert')).not.toBeInTheDocument())
+      expect(within(s).getByRole('switch', { name: ROOT_SWITCH })).not.toBeChecked()
+      expect(within(s).getByRole('textbox', { name: 'Pfad 1' })).toHaveValue('map')
+      expect(within(s).getByRole('button', { name: SAVE })).toBeDisabled()
+    })
+  })
 })

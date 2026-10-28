@@ -44,6 +44,11 @@ type Update = (patch: Partial<ServerFormValue>, ...fields: FormField[]) => void
 export interface ServerFormProps {
   mode: 'create' | 'edit'
   initial: ServerFormValue
+  /** edit only: the stored value the draft is compared with (dirty, own memory); default `initial`. It differs after the
+   * own changes were put onto a newer stored value (issue #154). */
+  baseline?: ServerFormValue
+  /** Every change of the draft, for the caller's draft tracking (issue #154). */
+  onDraftChange?(value: ServerFormValue): void
   /** create only: live address preview */
   baseDomain?: string | null
   /** create only: CurseForge can only be chosen with a stored API key */
@@ -60,6 +65,8 @@ export interface ServerFormProps {
 export function ServerForm({
   mode,
   initial,
+  baseline = initial,
+  onDraftChange,
   baseDomain = null,
   curseforgeKeySet = false,
   submitLabel,
@@ -85,11 +92,13 @@ export function ServerForm({
   const ctx: FormContext = { mode, catalog: catalog.data, curseforgeKeySet, memory: memoryLimitsFrom(memoryLimits.data) }
   const errors = validateServerForm(value, ctx)
   const hasErrors = Object.keys(errors).length > 0
-  const dirty = mode === 'create' || !sameFormValue(value, initial)
+  const dirty = mode === 'create' || !sameFormValue(value, baseline)
   const shown: Shown = (field) => (submitted || touched.has(field) ? errors[field] : undefined)
 
   const update: Update = (patch, ...fields) => {
-    setValue({ ...value, ...patch })
+    const next = { ...value, ...patch }
+    setValue(next)
+    onDraftChange?.(next)
     if (fields.length > 0) setTouched(new Set([...touched, ...fields]))
   }
 
@@ -140,7 +149,7 @@ export function ServerForm({
           text={value.memoryGiB}
           error={shown('memory')}
           limits={memoryLimits.data}
-          ownMiB={mode === 'edit' ? (memoryMiBFromGiB(initial.memoryGiB) ?? 0) : 0}
+          ownMiB={mode === 'edit' ? (memoryMiBFromGiB(baseline.memoryGiB) ?? 0) : 0}
           recommendedMiB={recommendedMiB}
           onChange={(memoryGiB) => update({ memoryGiB }, 'memory')}
         />

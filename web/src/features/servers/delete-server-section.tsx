@@ -33,8 +33,9 @@ export function DeleteServerSection({ server }: { server: Server }) {
     onSuccess: () => {
       toast.success(t('servers.delete.deleted', { name: server.name }))
       // A deleted dev leads back to its source.
-      if (server.dev) void navigate({ to: '/servers/$id', params: { id: String(server.dev.source_id) } })
-      else void navigate({ to: '/' })
+      // The server is gone: its unsaved settings no longer matter, so the area's leave guard does not ask (issue #154).
+      if (server.dev) void navigate({ to: '/servers/$id', params: { id: String(server.dev.source_id) }, ignoreBlocker: true })
+      else void navigate({ to: '/', ignoreBlocker: true })
       queryClient.removeQueries({ queryKey: serverKey(server.id), exact: true })
       void queryClient.invalidateQueries({ queryKey: serversKey, exact: true })
       void queryClient.invalidateQueries({ queryKey: memoryLimitsKey })

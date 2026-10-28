@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Catalog, InstanceConfig, ServerMemoryLimits } from '@/api/types'
 import {
+  changedFormKeys,
   containerMiB,
   effectiveJava,
   effectiveVersion,
@@ -8,6 +9,7 @@ import {
   formFromInstance,
   memoryLimitsFrom,
   memoryOvercommit,
+  rebaseServerForm,
   resolveServerForm,
   sameFormValue,
   validateServerForm,
@@ -245,5 +247,32 @@ describe('memory limits', () => {
     const first = { ...limits, allocated_mib: 7168, allocated_container_mib: 8960 }
     // 14 GiB of heap < 16 GiB of RAM, but 17.5 GiB of container limits > 15 GiB
     expect(memoryOvercommit(7168, first, 0)).toEqual({ totalMiB: 17920, budgetMiB: 15360, hostMiB: 16384, reserveMiB: 1024 })
+  })
+})
+
+describe('draft changes (issue #154)', () => {
+  const base = formFromInstance('survival', survival)
+
+  it('names the changed fields, properties one by one', () => {
+    const other = { ...base, version: '1.20.4', memoryGiB: '6', properties: { ...base.properties, pvp: !base.properties.pvp } }
+    expect(changedFormKeys(base, other)).toEqual(['version', 'memoryGiB', 'properties.pvp'])
+    expect(changedFormKeys(base, { ...base, manualVersion: true })).toEqual([])
+  })
+
+  it('puts the own changes onto the stored value, field by field', () => {
+    const draft = { ...base, memoryGiB: '6', manualVersion: true, properties: { ...base.properties, motd: 'mine' } }
+    const remote = { ...base, version: '1.20.4', properties: { ...base.properties, max_players: '50', motd: 'theirs' } }
+    const merged = rebaseServerForm(base, draft, remote)
+    expect(merged.memoryGiB).toBe('6')
+    expect(merged.version).toBe('1.20.4')
+    expect(merged.manualVersion).toBe(false)
+    expect(merged.properties.max_players).toBe('50')
+    expect(merged.properties.motd).toBe('mine')
+  })
+
+  it('keeps the own version together with its input mode', () => {
+    const draft = { ...base, version: '1.21.99', manualVersion: true }
+    const merged = rebaseServerForm(base, draft, { ...base, version: '1.20.4' })
+    expect(merged).toMatchObject({ version: '1.21.99', manualVersion: true })
   })
 })

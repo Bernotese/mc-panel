@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { Plus, X } from 'lucide-react'
-import { useId, useState, type ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { isApiError, isSudoCancelled } from '@/api/errors'
@@ -13,8 +13,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { errorMessage } from '@/lib/error-message'
+import { useReportUnsaved } from '@/lib/unsaved-changes'
+import { useRemoteDraft } from '@/lib/use-remote-draft'
 import { cn } from '@/lib/utils'
 import { serverKey, serversKey, updateServer } from './api'
+import { DraftConflict } from './draft-conflict'
 import { DEFAULT_ROOT_PORT, MAX_WEB_ROUTES, toWebRoutes, webPathError, webPortError, webRouteUrl, type WebRouteInput } from './web-routes'
 
 const STATUS_DOT: Record<Server['web_status'], string> = {
@@ -32,6 +35,24 @@ const ROW_GRID = 'grid grid-cols-[minmax(0,1fr)_auto] items-end gap-x-3 gap-y-2 
 const PATH_CELL = 'col-span-full space-y-2 sm:col-span-1'
 
 type PathRow = { key: number; path: string; port: string; touched: boolean }
+type WebDraft = { rootOn: boolean; rootPort: string; rows: PathRow[] }
+type StoredRoute = { path: string; port: number }
+
+function draftFromRoutes(stored: readonly StoredRoute[]): WebDraft {
+  const root = stored.find((r) => r.path === '')
+  return {
+    rootOn: root !== undefined,
+    rootPort: String(root?.port ?? DEFAULT_ROOT_PORT),
+    rows: stored.filter((r) => r.path !== '').map((r, i) => ({ key: i, path: r.path, port: String(r.port), touched: true })),
+  }
+}
+
+const routesOf = (d: WebDraft) => toWebRoutes(d.rootOn, d.rootPort, d.rows)
+
+/** The routes as one line for the conflict box: "/ → 8100, /map/ → 8123". */
+function describeRoutes(routes: readonly StoredRoute[], none: string): string {
+  return routes.length === 0 ? none : routes.map((r) => `/${r.path ? `${r.path}/` : ''} → ${r.port}`).join(', ')
+}
 type FieldError = 'invalid' | 'reserved' | 'duplicate' | null
 
 /** The 409 the panel answers when the base domain is gone; the section then shows the same hint as without one. */
@@ -53,17 +74,23 @@ export function WebRoutesSection({ server }: { server: Server }) {
   const id = useId()
   const queryClient = useQueryClient()
   const stored = server.web_routes ?? []
-  const storedRoot = stored.find((r) => r.path === '')
-  const [rootOn, setRootOn] = useState(storedRoot !== undefined)
-  const [rootPort, setRootPort] = useState(String(storedRoot?.port ?? DEFAULT_ROOT_PORT))
-  const [rows, setRows] = useState<PathRow[]>(() =>
-    stored.filter((r) => r.path !== '').map((r, i) => ({ key: i, path: r.path, port: String(r.port), touched: true })),
+  // Issue #154: a draft survives polling and changes elsewhere; the routes carry no revision, so a newer stored list is
+  // shown for comparison and "keep" saves the own list over it.
+  const d = useRemoteDraft(
+    stored.map(({ path, port }) => ({ path, port })),
+    { toDraft: draftFromRoutes, merge: (_base, draft) => draft, isDirty: (draft, base) => JSON.stringify(routesOf(draft)) !== JSON.stringify(routesOf(base)) },
   )
+  useReportUnsaved(d.dirty)
+  const { rootOn, rootPort, rows } = d.draft
+  const setRootOn = (on: boolean) => d.setDraft((x) => ({ ...x, rootOn: on }))
+  const setRootPort = (port: string) => d.setDraft((x) => ({ ...x, rootPort: port }))
+  const setRows = (f: (rows: PathRow[]) => PathRow[]) => d.setDraft((x) => ({ ...x, rows: f(x.rows) }))
 
   const save = useMutation({
     mutationFn: (routes: WebRouteInput[]) => updateServer(server.id, { web_routes: routes }),
     onSuccess: (updated) => {
       queryClient.setQueryData(serverKey(server.id), updated)
+      d.saved((updated.web_routes ?? []).map(({ path, port }) => ({ path, port })))
       void queryClient.invalidateQueries({ queryKey: serversKey, exact: true })
       toast.success(updated.web_status === 'off' ? t('servers.web.saved_off') : t('servers.web.saved_on'))
     },
@@ -71,8 +98,8 @@ export function WebRoutesSection({ server }: { server: Server }) {
 
   const noDomain = server.address === null || isBaseDomainRequired(save.error)
   const disabled = noDomain || save.isPending
-  const next = toWebRoutes(rootOn, rootPort, rows)
-  const dirty = JSON.stringify(next) !== JSON.stringify(stored.map(({ path, port }) => ({ path, port })))
+  const next = routesOf(d.draft)
+  const dirty = d.dirty
   const published = (rootOn ? 1 : 0) + rows.length
   const otherError = save.error && !noDomain && !isSudoCancelled(save.error) ? errorMessage(save.error, t) : null
 
@@ -134,6 +161,21 @@ export function WebRoutesSection({ server }: { server: Server }) {
           save.mutate(next)
         }}
       >
+        {d.conflict ? (
+          <DraftConflict
+            reason="remote"
+            changes={[
+              {
+                key: 'routes',
+                label: t('servers.web.title'),
+                theirs: describeRoutes(routesOf(d.remoteDraft), t('servers.draft.none')),
+                mine: describeRoutes(next, t('servers.draft.none')),
+              },
+            ]}
+            onReload={d.reload}
+            onKeepMine={d.keepMine}
+          />
+        ) : null}
         {noDomain ? (
           <div role="status" className="border-status-starting/60 border p-3 text-sm">
             <p>{t('servers.web.no_domain')}</p>
