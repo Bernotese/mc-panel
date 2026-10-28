@@ -161,6 +161,11 @@ func (s *Service) Write(ctx context.Context, req filesapi.WriteRequest) (filesap
 	if int64(len(req.Content)) > s.cfg.Limits.MaxTextBytes {
 		return filesapi.WriteResponse{}, fmt.Errorf("%w: content exceeds %d bytes", filesapi.ErrTooLarge, s.cfg.Limits.MaxTextBytes)
 	}
+	release, err := s.lease(req.ID)
+	if err != nil {
+		return filesapi.WriteResponse{}, err
+	}
+	defer release()
 	root, err := s.open(req.ID)
 	if err != nil {
 		return filesapi.WriteResponse{}, err
@@ -257,6 +262,11 @@ func (s *Service) Mkdir(ctx context.Context, id int64, p string) error {
 	if clean == "" {
 		return fmt.Errorf("%w: the root exists", filesapi.ErrInvalid)
 	}
+	release, err := s.lease(id)
+	if err != nil {
+		return err
+	}
+	defer release()
 	root, err := s.open(id)
 	if err != nil {
 		return err
@@ -291,6 +301,11 @@ func (s *Service) Rename(ctx context.Context, req filesapi.RenameRequest) error 
 	if to == from || strings.HasPrefix(to, from+"/") {
 		return fmt.Errorf("%w: %s cannot be moved into itself", filesapi.ErrInvalid, from)
 	}
+	release, err := s.lease(req.ID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	root, err := s.open(req.ID)
 	if err != nil {
 		return err
@@ -322,6 +337,11 @@ func (s *Service) Delete(ctx context.Context, id int64, p string) error {
 	if clean == "" {
 		return fmt.Errorf("%w: the root cannot be deleted", filesapi.ErrInvalid)
 	}
+	release, err := s.lease(id)
+	if err != nil {
+		return err
+	}
+	defer release()
 	root, err := s.open(id)
 	if err != nil {
 		return err
