@@ -71,6 +71,8 @@ export const en: Messages = {
     not_dev: 'This server is not a dev instance.',
     dev_managed: 'A dev instance takes this from its source and has no backups.',
     server_modified: 'The server was changed in the meantime. Reload it and apply your changes again.',
+    data_state_unknown: 'The files service did not report whether this server\'s data is safe. Please try again in a moment.',
+    recovery_required: 'A restore of this server could not be completed. Resolve the recovery first.',
     internal: 'Internal server error.',
     network: 'Server unreachable. Please check your connection.',
     unknown: 'Unexpected error (HTTP {{status}}).',

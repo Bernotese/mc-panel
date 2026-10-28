@@ -124,6 +124,7 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Patch("/servers/{id}", rbac.Admin().WithSudo(), h.handleUpdateServer)
 	api.Delete("/servers/{id}", rbac.Admin().WithSudo(), h.handleDeleteServer)
 	api.Post("/servers/{id}/power", rbac.Server(rbac.PermServerPower, "id"), h.handleServerPower)
+	api.Post("/servers/{id}/recovery/resolve", rbac.Admin().WithSudo(), h.handleResolveRecovery)
 }
 
 // pathID parses the {id} URL parameter; false for non-numeric or non-positive values.

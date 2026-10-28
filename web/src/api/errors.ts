@@ -81,6 +81,8 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   'backups_unavailable',
   'backup_running',
   'server_modified',
+  'data_state_unknown',
+  'recovery_required',
   'internal',
 ])
 

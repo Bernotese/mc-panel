@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -171,7 +172,7 @@ func TestEnsureCreatesInstance(t *testing.T) {
 		t.Fatalf("router = %+v", r)
 	}
 	want := agentapi.InstanceStatus{ID: 1, Name: "survival", Revision: 1, State: agentapi.StateCreated}
-	if got := e.status(t, 1); got != want {
+	if got := e.status(t, 1); !reflect.DeepEqual(got, want) {
 		t.Fatalf("status = %+v, want %+v", got, want)
 	}
 	resp := e.m.Status(context.Background())

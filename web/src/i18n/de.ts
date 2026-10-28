@@ -69,6 +69,8 @@ export const de = {
     not_dev: 'Dieser Server ist keine Dev-Instanz.',
     dev_managed: 'Eine Dev-Instanz übernimmt das von ihrer Quelle und hat keine Backups.',
     server_modified: 'Der Server wurde inzwischen geändert. Lade ihn neu und übernimm deine Änderungen noch einmal.',
+    data_state_unknown: 'Der Files-Dienst hat nicht gemeldet, ob die Daten dieses Servers sicher sind. Bitte gleich noch einmal versuchen.',
+    recovery_required: 'Ein Restore dieses Servers konnte nicht abgeschlossen werden. Erst die Wiederherstellung auflösen.',
     internal: 'Interner Serverfehler.',
     network: 'Server nicht erreichbar. Bitte Verbindung prüfen.',
     unknown: 'Unerwarteter Fehler (HTTP {{status}}).',

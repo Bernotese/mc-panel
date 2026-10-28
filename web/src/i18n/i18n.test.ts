@@ -49,6 +49,8 @@ const ERROR_CODES = [
   'not_dev',
   'dev_managed',
   'server_modified',
+  'data_state_unknown',
+  'recovery_required',
   'internal',
 ]
 

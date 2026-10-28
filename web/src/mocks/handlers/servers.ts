@@ -204,6 +204,8 @@ export function toServer(s: MockServer, permissions: Permission[], admin = true)
     ...webFields(s, admin),
     ...(s.dev ? { dev: devSummary(s.dev) } : {}),
     ...withDevId(s.id),
+    data_state: 'safe',
+    data_job: null,
   }
 }
 
@@ -436,6 +438,16 @@ export const serverOperations: MockOperation[] = [
       recordAudit(g.user, 'server.delete', `server:${server.id}`, 'success', details)
       if (server.dev) recordAudit(g.user, 'dev.delete', `server:${server.id}`, 'success', { name: server.name })
       return noContent()
+    }),
+  ),
+
+  op(
+    'resolveServerRecovery',
+    http.post(`${API}/servers/:id/recovery/resolve`, ({ request, params }) => {
+      const g = guard(request, { admin: true, sudo: true })
+      if (g instanceof Response) return g
+      if (!db.servers.some((s) => s.id === idParam(params))) return apiError(404, 'not_found', 'server not found')
+      return apiError(409, 'recovery_required', 'the server has no unresolved restore')
     }),
   ),
 

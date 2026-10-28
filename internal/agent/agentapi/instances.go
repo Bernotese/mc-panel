@@ -2,6 +2,7 @@ package agentapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -111,10 +112,26 @@ type InstanceStatus struct {
 	MemoryLimitBytes int64          `json:"memory_limit_bytes"`
 	CPUPercent       float64        `json:"cpu_percent"`
 	Operation        Operation      `json:"operation"`
-	LastError        string         `json:"last_error"`
+	// Queued are the power actions waiting behind Operation in the instance's worker, in order
+	// (data safety spec §2.2); never null on the wire.
+	Queued    []PowerAction `json:"queued"`
+	LastError string        `json:"last_error"`
 	// TemplateOutdated: the container was created from another template than this agent
 	// would create now (agent upgrade or host settings); a recreate replaces it.
 	TemplateOutdated bool `json:"template_outdated"`
+}
+
+// Settled reports whether nothing runs or waits for the instance: no operation and an empty
+// queue. A data job is admitted only for a container that is not running and settled.
+func (s InstanceStatus) Settled() bool { return s.Operation == OpNone && len(s.Queued) == 0 }
+
+// MarshalJSON writes Queued as [] when it is nil, so the field is never null on the wire.
+func (s InstanceStatus) MarshalJSON() ([]byte, error) {
+	type plain InstanceStatus
+	if s.Queued == nil {
+		s.Queued = []PowerAction{}
+	}
+	return json.Marshal(plain(s))
 }
 
 type RouterStatus struct {
