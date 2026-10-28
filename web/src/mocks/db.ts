@@ -115,10 +115,13 @@ export function emptyPlayers(): MockPlayers {
 const ALEX_UUID = 'ec561538-f3fd-461d-aff5-086b22154bce'
 const STEVE_UUID = '8667ba71-b85a-4004-af54-457a9734eed7'
 
+/** The stored instance; toServer adds revision from MockServer.revision. */
+export type MockInstance = Omit<InstanceConfig, 'revision'>
+
 export interface MockServer {
   id: number
   name: string
-  instance: InstanceConfig | null // properties always fully resolved (defaults from spec §7)
+  instance: MockInstance | null // properties always fully resolved (defaults from spec §7)
   status: ServerStatus
   revision: number // desired revision
   runningRevision: number // revision of the "running container"
@@ -176,7 +179,7 @@ export function nextDailyAt(minutes: number, timeZone: string, now: number): num
 }
 
 /** Like servers.ApplyDevOverrides: prod's spec with the dev's memory, distances and the fixed "[DEV] " MOTD prefix. */
-export function devInstanceConfig(prodName: string, prod: InstanceConfig, memoryMib: number, ov: { viewDistance: number; simulationDistance: number }): InstanceConfig {
+export function devInstanceConfig(prodName: string, prod: MockInstance, memoryMib: number, ov: { viewDistance: number; simulationDistance: number }): MockInstance {
   const props = resolveProperties(prodName, prod.properties)
   return {
     ...prod,
@@ -618,7 +621,7 @@ function seedDev(now: number): MockServer {
     sleeping: true,
     ops: ['Steve'],
   }
-  const survival: InstanceConfig = { type: 'paper', version: '1.21.11', loader_version: null, modpack: null, java: 'java21', memory_mib: 4096, properties: resolveProperties('survival') }
+  const survival: MockInstance = { type: 'paper', version: '1.21.11', loader_version: null, modpack: null, java: 'java21', memory_mib: 4096, properties: resolveProperties('survival') }
   return {
     id: 5,
     name: 'dev-survival',

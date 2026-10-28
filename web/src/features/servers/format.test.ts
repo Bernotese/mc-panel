@@ -7,7 +7,7 @@ const GIB = 1024 ** 3
 const t = i18n.t.bind(i18n)
 
 function instance(patch: Partial<InstanceConfig>): InstanceConfig {
-  return { type: 'paper', version: '1.21.11', loader_version: null, modpack: null, java: 'java21', memory_mib: 4096, properties: {}, ...patch }
+  return { type: 'paper', version: '1.21.11', loader_version: null, modpack: null, java: 'java21', memory_mib: 4096, properties: {}, revision: 1, ...patch }
 }
 
 describe('servers format', () => {

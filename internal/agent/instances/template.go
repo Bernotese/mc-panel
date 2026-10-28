@@ -54,12 +54,10 @@ const (
 	// NofileLimit is the open-files limit of instance containers (soft = hard).
 	NofileLimit = 65536
 
-	routerPort        = "25565/tcp"
-	routerConfigDir   = "/config"
-	routesFileName    = "routes.json"
-	mib               = 1 << 20
-	memoryNumerator   = 5 // Memory = memory_mib × 1.25 MiB: heap plus JVM/native overhead
-	memoryDenominator = 4
+	routerPort      = "25565/tcp"
+	routerConfigDir = "/config"
+	routesFileName  = "routes.json"
+	mib             = 1 << 20
 )
 
 // TemplateEpoch is part of every instance template hash. InstanceTemplateHash only sees the
@@ -150,7 +148,8 @@ func InstanceContainer(h Host, req agentapi.EnsureRequest) (docker.ContainerConf
 	if err != nil {
 		return docker.ContainerConfig{}, err
 	}
-	memory := int64(req.Spec.MemoryMiB) * mib * memoryNumerator / memoryDenominator
+	// Memory = memory_mib × 1.25 MiB: heap plus JVM/native overhead.
+	memory := int64(req.Spec.MemoryMiB) * mib * instancespec.ContainerMemoryNumerator / instancespec.ContainerMemoryDenominator
 	return docker.ContainerConfig{
 		Image:    img,
 		User:     fmt.Sprintf("%d:%d", h.UID, h.GID),

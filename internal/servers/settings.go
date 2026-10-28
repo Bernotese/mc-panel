@@ -94,7 +94,12 @@ type instanceSettings struct {
 }
 
 func (h *Handler) loadSettings(ctx context.Context) (instanceSettings, error) {
-	row, err := h.q.ServersGetSettings(ctx)
+	return h.loadSettingsQ(ctx, h.q)
+}
+
+// loadSettingsQ is loadSettings through q (inside a transaction).
+func (h *Handler) loadSettingsQ(ctx context.Context, q *store.Queries) (instanceSettings, error) {
+	row, err := q.ServersGetSettings(ctx)
 	if err != nil {
 		return instanceSettings{}, err
 	}

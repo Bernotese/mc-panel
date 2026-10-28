@@ -3,7 +3,7 @@ import type { DevSummary, InstanceConfig, Permission, Server } from '@/api/types
 import { sectionForSwitch, sectionFromPath, serverIdFromPath, sectionHref, sectionLabelKey, serverSections } from './sections'
 
 function instance(type: InstanceConfig['type']): InstanceConfig {
-  return { type, version: '1.21.11', loader_version: null, modpack: null, java: 'java21', memory_mib: 4096, properties: {} as InstanceConfig['properties'] }
+  return { type, version: '1.21.11', loader_version: null, modpack: null, java: 'java21', memory_mib: 4096, properties: {} as InstanceConfig['properties'], revision: 1 }
 }
 function srv(perms: Permission[], type: InstanceConfig['type'] | null = 'paper'): Pick<Server, 'permissions' | 'instance' | 'dev'> {
   return { permissions: perms, instance: type ? instance(type) : null }

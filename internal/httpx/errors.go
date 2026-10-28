@@ -48,6 +48,7 @@ const (
 	CodeDevExists               = "dev_exists"
 	CodeNotDev                  = "not_dev"
 	CodeDevManaged              = "dev_managed"
+	CodeServerModified          = "server_modified"
 	CodeInternal                = "internal"
 )
 

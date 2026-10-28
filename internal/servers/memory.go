@@ -18,11 +18,32 @@ const (
 	defaultModdedMemoryMiB = 6144
 )
 
+// The memory budget of a host (issue #158): the agent gives each container
+// instancespec.ContainerMemoryNumerator/Denominator (1.25) times its heap, and memoryReserveMiB
+// stays free for the host, so the containers of all running servers share host − reserve.
+// Every limit, recommendation and the form's overcommit warning derive from these functions;
+// they are configured worst cases (container ceilings), not measured usage.
+
+// ContainerMemoryMiB is the container memory limit of a server with a heap of heapMiB.
+func ContainerMemoryMiB(heapMiB int64) int64 {
+	return heapMiB * instancespec.ContainerMemoryNumerator / instancespec.ContainerMemoryDenominator
+}
+
+// heapForContainerMiB is the largest heap (in memory steps) whose container fits into
+// containerMiB; ≤ 0 when none does.
+func heapForContainerMiB(containerMiB int64) int64 {
+	m := containerMiB * instancespec.ContainerMemoryDenominator / instancespec.ContainerMemoryNumerator
+	return m - m%instancespec.MemoryStepMiB
+}
+
+// containerBudgetMiB is the memory the containers of all servers may use on a host with
+// hostMiB > 0: host − reserve, at least 0.
+func containerBudgetMiB(hostMiB int64) int64 { return max(hostMiB-memoryReserveMiB, 0) }
+
 // MaxMemoryMiB is the largest memory_mib a single server may get on a host with hostMiB of
-// installed memory: (host − reserve) / 1.25, because the agent lets the container use 25 %
-// more than the heap (instances.memoryNumerator/memoryDenominator), rounded down to the
-// memory step and kept within instancespec's absolute bounds. hostMiB ≤ 0 means unknown: then
-// only instancespec.MaxMemoryMiB applies.
+// installed memory: the largest heap whose container fits into host − reserve, kept within
+// instancespec's absolute bounds. hostMiB ≤ 0 means unknown: then only
+// instancespec.MaxMemoryMiB applies.
 //
 // This is the one place of the formula (issue #79); the API, the checks on create/update and
 // the form's limits all derive from it.
@@ -30,35 +51,47 @@ func MaxMemoryMiB(hostMiB int64) int {
 	if hostMiB <= 0 {
 		return instancespec.MaxMemoryMiB
 	}
-	m := (hostMiB - memoryReserveMiB) * 4 / 5
-	m -= m % instancespec.MemoryStepMiB
+	m := heapForContainerMiB(containerBudgetMiB(hostMiB))
 	return int(min(max(m, instancespec.MinMemoryMiB), instancespec.MaxMemoryMiB))
 }
 
 // RecommendedMemoryMiB is the suggested memory_mib of a new server of type t: 4 GiB for
-// vanilla/paper/purpur, 6 GiB for mod loaders and modpacks, at most half of the memory no
-// server has been given yet (host − reserve − allocated), at least instancespec.MinMemoryMiB
-// and never above MaxMemoryMiB. allocatedMiB is the sum of memory_mib of all servers.
-func RecommendedMemoryMiB(t instancespec.Type, hostMiB, allocatedMiB int64) int {
+// vanilla/paper/purpur, 6 GiB for mod loaders and modpacks, but at most the heap whose
+// container takes half of the budget the containers of all servers have not been given yet
+// (host − reserve − allocatedContainerMiB), and never above MaxMemoryMiB. If half is less
+// than the minimum, the minimum is suggested as long as its container still fits into the
+// whole free budget. ok is false when not even that fits: then there is no safe size, and
+// the form says so instead of suggesting one. hostMiB ≤ 0 (unknown) means the type default.
+func RecommendedMemoryMiB(t instancespec.Type, hostMiB, allocatedContainerMiB int64) (mib int, ok bool) {
 	rec := int64(defaultMemoryMiB)
 	if t.HasLoader() || t.IsModpack() {
 		rec = defaultModdedMemoryMiB
 	}
 	if hostMiB > 0 {
-		half := max(hostMiB-memoryReserveMiB-allocatedMiB, 0) / 2
-		rec = min(rec, half-half%instancespec.MemoryStepMiB)
+		free := max(containerBudgetMiB(hostMiB)-allocatedContainerMiB, 0)
+		rec = min(rec, heapForContainerMiB(free/2))
+		if rec < instancespec.MinMemoryMiB {
+			if heapForContainerMiB(free) < instancespec.MinMemoryMiB {
+				return 0, false
+			}
+			rec = instancespec.MinMemoryMiB
+		}
 	}
-	return int(min(max(rec, instancespec.MinMemoryMiB), int64(MaxMemoryMiB(hostMiB))))
+	return int(min(rec, int64(MaxMemoryMiB(hostMiB)))), true
 }
 
 // memoryLimitsJSON is the OpenAPI schema ServerMemoryLimits.
 type memoryLimitsJSON struct {
-	MinMiB         int                       `json:"min_mib"`
-	MaxMiB         int                       `json:"max_mib"`
-	StepMiB        int                       `json:"step_mib"`
-	HostTotalMiB   *int64                    `json:"host_total_mib"`
-	AllocatedMiB   int64                     `json:"allocated_mib"`
-	RecommendedMiB map[instancespec.Type]int `json:"recommended_mib"`
+	MinMiB                   int                        `json:"min_mib"`
+	MaxMiB                   int                        `json:"max_mib"`
+	StepMiB                  int                        `json:"step_mib"`
+	HostTotalMiB             *int64                     `json:"host_total_mib"`
+	HostReserveMiB           int64                      `json:"host_reserve_mib"`
+	ContainerOverheadPercent int64                      `json:"container_overhead_percent"`
+	ContainerBudgetMiB       *int64                     `json:"container_budget_mib"`
+	AllocatedMiB             int64                      `json:"allocated_mib"`
+	AllocatedContainerMiB    int64                      `json:"allocated_container_mib"`
+	RecommendedMiB           map[instancespec.Type]*int `json:"recommended_mib"`
 }
 
 // hostMemoryMiB is the installed memory of the host in MiB; 0 when unknown (no reader, macOS,
@@ -95,20 +128,30 @@ func (h *Handler) handleGetMemoryLimits(w http.ResponseWriter, r *http.Request) 
 		httpx.Internal(w, r, err)
 		return
 	}
-	var allocated int64
+	var allocated, allocatedContainer int64
 	for _, in := range rows {
 		allocated += in.MemoryMib
+		allocatedContainer += ContainerMemoryMiB(in.MemoryMib)
 	}
 	host := h.hostMemoryMiB(ctx)
 	out := memoryLimitsJSON{
 		MinMiB: instancespec.MinMemoryMiB, MaxMiB: MaxMemoryMiB(host), StepMiB: instancespec.MemoryStepMiB,
-		AllocatedMiB: allocated, RecommendedMiB: make(map[instancespec.Type]int, len(instancespec.Types)),
+		HostReserveMiB: memoryReserveMiB,
+		ContainerOverheadPercent: (instancespec.ContainerMemoryNumerator - instancespec.ContainerMemoryDenominator) * 100 /
+			instancespec.ContainerMemoryDenominator,
+		AllocatedMiB: allocated, AllocatedContainerMiB: allocatedContainer,
+		RecommendedMiB: make(map[instancespec.Type]*int, len(instancespec.Types)),
 	}
 	if host > 0 {
-		out.HostTotalMiB = &host
+		budget := containerBudgetMiB(host)
+		out.HostTotalMiB, out.ContainerBudgetMiB = &host, &budget
 	}
 	for _, t := range instancespec.Types {
-		out.RecommendedMiB[t] = RecommendedMemoryMiB(t, host, allocated)
+		if mib, ok := RecommendedMemoryMiB(t, host, allocatedContainer); ok {
+			out.RecommendedMiB[t] = &mib
+		} else {
+			out.RecommendedMiB[t] = nil
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }

@@ -80,6 +80,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<ErrorCode>([
   'mrpack_version_mismatch',
   'backups_unavailable',
   'backup_running',
+  'server_modified',
   'internal',
 ])
 
