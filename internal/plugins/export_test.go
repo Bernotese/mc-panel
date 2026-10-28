@@ -1,9 +1,18 @@
 package plugins
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"github.com/Bernotese/mc-panel/internal/store"
+)
 
 // MarkChanged records a plugin change of serverID at t (restart_needed tests).
-func MarkChanged(h *Handler, serverID int64, t time.Time) { h.restart.mark(serverID, t) }
+func MarkChanged(h *Handler, serverID int64, t time.Time) {
+	if err := h.q.PluginsMarkChanged(context.Background(), store.PluginsMarkChangedParams{ServerID: serverID, ChangedAt: t.UnixMilli()}); err != nil {
+		panic(err)
+	}
+}
 
 // WaitJobs waits until every started job has finished (only between sequential test steps).
 func WaitJobs(h *Handler) { h.jobs.wg.Wait() }

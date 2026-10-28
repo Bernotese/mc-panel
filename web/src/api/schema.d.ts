@@ -2298,8 +2298,8 @@ export interface components {
             jars: components["schemas"]["InstalledJar"][];
             /** @description More than 500 jars; only the first are listed */
             truncated: boolean;
-            /** @description The server runs and the panel changed its plugins since it started */
-            restart_needed: boolean;
+            /** @description The server runs and the panel changed its plugins since its container started (the change time is stored, so it survives a panel restart). null = unknown: the panel changed plugins, but the agent or Docker cannot tell whether the server runs since then */
+            restart_needed: boolean | null;
             /** @description Sources that failed while matching; their jars may show as manual */
             source_errors: components["schemas"]["PluginSource"][];
         };

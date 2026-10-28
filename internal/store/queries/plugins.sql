@@ -36,3 +36,16 @@ ON CONFLICT (server_id, filename) DO UPDATE SET
     sha512 = excluded.sha512, source = excluded.source, project_id = excluded.project_id,
     project_slug = excluded.project_slug, title = excluded.title, version_id = excluded.version_id,
     version_name = excluded.version_name, channel = excluded.channel, installed_at = excluded.installed_at;
+
+-- name: PluginsMarkChanged :exec
+-- Never moves back: a clock step backwards must not hide an earlier change from the restart check.
+INSERT INTO plugin_changes (server_id, changed_at) VALUES (?, ?)
+ON CONFLICT (server_id) DO UPDATE SET changed_at = max(plugin_changes.changed_at, excluded.changed_at);
+
+-- name: PluginsGetChanged :one
+SELECT changed_at FROM plugin_changes WHERE server_id = ?;
+
+-- name: PluginsClampChanged :exec
+-- A change time in the future (recorded before the clock stepped back) becomes now: the change
+-- happened no later than now, and a start after now must clear the restart notice.
+UPDATE plugin_changes SET changed_at = sqlc.arg(now) WHERE server_id = sqlc.arg(server_id) AND changed_at > sqlc.arg(now);

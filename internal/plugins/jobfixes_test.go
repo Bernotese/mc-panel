@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/plugins"
@@ -21,6 +22,7 @@ func TestUpdateOldJarNotDeletable(t *testing.T) {
 	e := newEnv(t)
 	id := e.paper("survival")
 	oldJar, newJar := lpWorld(e, id, "LP-old.jar")
+	e.agent.set(agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(-time.Hour).UnixMilli()})
 	e.updates(id, "")
 	e.files.setCallErr(fmt.Sprintf("delete %d plugins/LP-old.jar", id), fmt.Errorf("%w: busy disk", filesapi.ErrUnavailable))
 	e.post(id, "/update", map[string]any{"files": []string{"LP-old.jar"}})
@@ -44,6 +46,10 @@ func TestUpdateOldJarNotDeletable(t *testing.T) {
 	j = e.waitJob(id)
 	if j.Steps[0].State != "failed" || !strings.Contains(j.Steps[0].Error, "LP-old.jar") || !strings.Contains(j.Steps[0].Error, newJar.Name) {
 		t.Fatalf("job = %+v", j)
+	}
+	// both jars stay on disk although the step failed: the running server needs a restart
+	if got := e.inventory(id).RestartNeeded; !isTrue(got) {
+		t.Fatalf("restart_needed = %s after a failed step left a new jar", fmtTri(got))
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -52,7 +53,7 @@ type invJSON struct {
 	Sources       []string  `json:"sources"`
 	Jars          []jarJSON `json:"jars"`
 	Truncated     bool      `json:"truncated"`
-	RestartNeeded bool      `json:"restart_needed"`
+	RestartNeeded *bool     `json:"restart_needed"`
 	SourceErrors  []string  `json:"source_errors"`
 }
 
@@ -98,7 +99,7 @@ func TestInventoryMapping(t *testing.T) {
 
 	inv := e.inventory(id)
 	if inv.Kind != "plugin" || inv.Dir != "plugins" || inv.GameVersion == nil || *inv.GameVersion != "1.21.11" ||
-		!slices.Equal(inv.Sources, []string{"modrinth", "hangar"}) || inv.Truncated || inv.RestartNeeded ||
+		!slices.Equal(inv.Sources, []string{"modrinth", "hangar"}) || inv.Truncated || !isFalse(inv.RestartNeeded) ||
 		inv.SourceErrors == nil || len(inv.SourceErrors) != 0 {
 		t.Fatalf("inventory = %+v", inv)
 	}
@@ -286,30 +287,143 @@ func TestInventoryFileServiceErrors(t *testing.T) {
 	}
 }
 
+func isTrue(b *bool) bool  { return b != nil && *b }
+func isFalse(b *bool) bool { return b != nil && !*b }
+
+func fmtTri(b *bool) string {
+	if b == nil {
+		return "null"
+	}
+	return strconv.FormatBool(*b)
+}
+
 func TestRestartNeeded(t *testing.T) {
 	e := newEnv(t)
 	id := e.paper("survival")
-	if e.inventory(id).RestartNeeded {
-		t.Fatal("restart_needed without a change")
+	e.agent.setErr(agentapi.ErrUnavailable)
+	if got := e.inventory(id).RestartNeeded; !isFalse(got) {
+		t.Fatalf("without any change restart_needed = %s, want false even without the agent", fmtTri(got))
 	}
+	e.agent.setErr(nil)
 	plugins.MarkChanged(e.h, id, t0)
 	for _, tc := range []struct {
 		st   agentapi.InstanceStatus
-		want bool
+		want string
 	}{
-		{agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(-time.Minute).UnixMilli()}, true},
-		{agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: 0}, true},
-		{agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(time.Minute).UnixMilli()}, false},
-		{agentapi.InstanceStatus{ID: id, State: agentapi.StateExited}, false},
+		{agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(-time.Minute).UnixMilli()}, "true"},
+		{agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.UnixMilli()}, "true"},
+		{agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: 0}, "null"}, // start time unknown (inspect failed)
+		{agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(time.Minute).UnixMilli()}, "false"},
+		{agentapi.InstanceStatus{ID: id, State: agentapi.StateExited}, "false"},
 	} {
 		e.agent.set(tc.st)
-		if got := e.inventory(id).RestartNeeded; got != tc.want {
-			t.Errorf("%+v: restart_needed = %v, want %v", tc.st, got, tc.want)
+		if got := fmtTri(e.inventory(id).RestartNeeded); got != tc.want {
+			t.Errorf("%+v: restart_needed = %s, want %s", tc.st, got, tc.want)
 		}
 	}
 	e.agent.set(agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(-time.Minute).UnixMilli()})
 	e.agent.setErr(agentapi.ErrUnavailable)
-	if e.inventory(id).RestartNeeded {
-		t.Fatal("restart_needed without agent")
+	if got := e.inventory(id).RestartNeeded; got != nil {
+		t.Fatalf("agent down: restart_needed = %s, want null (unknown, never false)", fmtTri(got))
+	}
+	e.agent.setErr(nil)
+	e.agent.setDocker(agentapi.DockerUnavailable)
+	if got := e.inventory(id).RestartNeeded; got != nil {
+		t.Fatalf("docker down: restart_needed = %s, want null", fmtTri(got))
+	}
+}
+
+// TestRestartNeededSurvivesPanelRestart: the change time is in the DB, so a new handler on the
+// same DB (a panel restart) still sees it, and only a container start after it clears it.
+func TestRestartNeededSurvivesPanelRestart(t *testing.T) {
+	e := newEnv(t)
+	id := e.paper("survival")
+	e.files.put(id, "plugins/Tool.jar", "tool")
+	e.agent.set(agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(-time.Hour).UnixMilli()})
+	e.clk.Advance(time.Minute)
+	if code, ec := e.toggle(id, "Tool.jar", false); code != http.StatusNoContent {
+		t.Fatalf("disable: %d %s", code, ec)
+	}
+	e.restartPanel()
+	if got := e.inventory(id).RestartNeeded; !isTrue(got) {
+		t.Fatalf("after a panel restart restart_needed = %s, want true", fmtTri(got))
+	}
+	// the Minecraft container restarts after the change: cleared, without forgetting the change
+	e.agent.set(agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: e.clk.Now().Add(time.Second).UnixMilli()})
+	if got := e.inventory(id).RestartNeeded; !isFalse(got) {
+		t.Fatalf("after a container restart restart_needed = %s, want false", fmtTri(got))
+	}
+	// a clock step back does not move the recorded change back
+	plugins.MarkChanged(e.h, id, t0.Add(-24*time.Hour))
+	e.agent.set(agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.UnixMilli()})
+	if got := e.inventory(id).RestartNeeded; !isTrue(got) {
+		t.Fatalf("an earlier mark moved the change back: restart_needed = %s", fmtTri(got))
+	}
+}
+
+// TestRestartNeededAfterLostResponse: a files call whose answer is lost may still have changed
+// the disk, so the change is recorded before the call (erring towards "restart needed").
+func TestRestartNeededAfterLostResponse(t *testing.T) {
+	lost := fmt.Errorf("%w: connection reset", filesapi.ErrUnavailable)
+	running := func(id int64) agentapi.InstanceStatus {
+		return agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(-time.Hour).UnixMilli()}
+	}
+	t.Run("install", func(t *testing.T) {
+		e := newEnv(t)
+		id := e.fabric("modded")
+		fabricWorld(e)
+		e.agent.set(running(id))
+		e.files.setErr("upload", lost)
+		e.install(id, "modrinth", "chunky")
+		if j := e.waitJob(id); j.State != "failed" {
+			t.Fatalf("job = %+v", j)
+		}
+		if got := e.inventory(id).RestartNeeded; !isTrue(got) {
+			t.Fatalf("restart_needed = %s after a failed upload, want true", fmtTri(got))
+		}
+	})
+	t.Run("toggle", func(t *testing.T) {
+		e := newEnv(t)
+		id := e.paper("survival")
+		e.files.put(id, "plugins/Tool.jar", "tool")
+		e.agent.set(running(id))
+		e.files.setErr("rename", lost)
+		if code, _ := e.toggle(id, "Tool.jar", false); code == http.StatusNoContent {
+			t.Fatal("toggle succeeded")
+		}
+		if got := e.inventory(id).RestartNeeded; !isTrue(got) {
+			t.Fatalf("restart_needed = %s after a failed rename, want true", fmtTri(got))
+		}
+	})
+	t.Run("delete", func(t *testing.T) {
+		e := newEnv(t)
+		id := e.paper("survival")
+		e.files.put(id, "plugins/Tool.jar", "tool")
+		e.agent.set(running(id))
+		e.files.setErr("delete", lost)
+		if rec := e.post(id, "/delete", map[string]any{"file": "Tool.jar"}); rec.Code == http.StatusNoContent {
+			t.Fatal("delete succeeded")
+		}
+		if got := e.inventory(id).RestartNeeded; !isTrue(got) {
+			t.Fatalf("restart_needed = %s after a failed delete, want true", fmtTri(got))
+		}
+	})
+}
+
+// TestRestartNeededFutureChange: a change recorded before the clock stepped back lies in the
+// future. The first read pins it to now (still "needed"), so the next real start clears it
+// instead of the notice lasting until the clock catches up.
+func TestRestartNeededFutureChange(t *testing.T) {
+	e := newEnv(t)
+	id := e.paper("survival")
+	plugins.MarkChanged(e.h, id, t0.Add(24*time.Hour))
+	e.agent.set(agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(-time.Minute).UnixMilli()})
+	if got := e.inventory(id).RestartNeeded; !isTrue(got) {
+		t.Fatalf("before a restart restart_needed = %s, want true", fmtTri(got))
+	}
+	e.clk.Advance(2 * time.Minute)
+	e.agent.set(agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(time.Minute).UnixMilli()})
+	if got := e.inventory(id).RestartNeeded; !isFalse(got) {
+		t.Fatalf("after a restart restart_needed = %s, want false", fmtTri(got))
 	}
 }

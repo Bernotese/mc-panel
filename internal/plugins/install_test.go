@@ -123,7 +123,7 @@ func TestInstallWithDependency(t *testing.T) {
 		t.Fatalf("audit entry = %+v", entries[0])
 	}
 	inv := e.inventory(id)
-	if !inv.RestartNeeded || !jarNamed(t, inv, chunky.Name).InstalledByPanel {
+	if !isTrue(inv.RestartNeeded) || !jarNamed(t, inv, chunky.Name).InstalledByPanel {
 		t.Fatalf("inventory after install = %+v", inv)
 	}
 }

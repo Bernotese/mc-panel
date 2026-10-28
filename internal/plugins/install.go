@@ -241,6 +241,8 @@ func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err e
 			return fmt.Errorf("%w: %s", errFileExists, jar.Name)
 		}
 	}
+	// Recorded before the upload too: a lost answer may hide a jar that is on disk (spec §6.2).
+	h.markChanged(ctx, srv.ID)
 	var resp filesapi.UploadResponse
 	for attempt := 0; ; attempt++ {
 		resp, err = h.transfer(ctx, srv, e, target, replaces == target, sum)
@@ -254,11 +256,13 @@ func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err e
 	if err != nil {
 		return err
 	}
+	// The jar is on disk: record it even if the job is being cancelled right now, and count it as
+	// a change whatever the following steps do (spec §6.2).
+	ctx = context.WithoutCancel(ctx)
+	h.markChanged(ctx, srv.ID)
 	if resp.SHA512 == "" {
 		return fmt.Errorf("%w: the file service returned no checksum", filesapi.ErrUnavailable)
 	}
-	// The jar is on disk: record it even if the job is being cancelled right now.
-	ctx = context.WithoutCancel(ctx)
 	if replaces != "" && replaces != target {
 		if err := h.files.Delete(ctx, srv.ID, filesapi.Join(srv.Kind.Dir, replaces)); err != nil && !errors.Is(err, filesapi.ErrNotFound) {
 			// Never leave both versions loaded: take the new jar back.
@@ -280,7 +284,6 @@ func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err e
 	}); err != nil {
 		return err
 	}
-	h.markChanged(srv.ID)
 	return nil
 }
 
