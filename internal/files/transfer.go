@@ -53,6 +53,12 @@ func (s *Service) UploadChecked(ctx context.Context, id int64, p string, overwri
 		return filesapi.UploadResponse{}, err
 	}
 	defer release()
+	// The lease is held while the body streams: a restore or extract waits for it (or gives up).
+	unlease, err := s.lease(id)
+	if err != nil {
+		return filesapi.UploadResponse{}, err
+	}
+	defer unlease()
 	root, err := s.open(id)
 	if err != nil {
 		return filesapi.UploadResponse{}, err
