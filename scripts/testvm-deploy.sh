@@ -114,7 +114,9 @@ checkout() {
     git clone -q "$REPO_URL" "$SRC"
   fi
   log "git checkout $ref"
-  git -C "$SRC" fetch -q --prune --tags origin
+  # --force: a tag GitHub moved (the history rewrite of 2026-10-28) replaces the local one
+  # instead of failing the fetch with "would clobber existing tag".
+  git -C "$SRC" fetch -q --prune --tags --force origin
   # Branch names resolve against origin, so "main" deploys what GitHub has, not a stale local branch.
   local target="$ref"
   if git -C "$SRC" rev-parse -q --verify "origin/$ref^{commit}" >/dev/null; then
