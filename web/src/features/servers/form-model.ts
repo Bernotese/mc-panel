@@ -267,19 +267,40 @@ export function resolveServerForm(value: ServerFormValue, ctx: FormContext): Ser
   }
 }
 
-export function sameFormValue(a: ServerFormValue, b: ServerFormValue): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
-}
-
 /** The fields an edit can change; manualVersion only says how the version is entered. */
 const EDIT_KEYS = ['version', 'loaderVersion', 'modpack', 'javaOverride', 'memoryGiB'] as const
 export type FormChangeKey = (typeof EDIT_KEYS)[number] | `properties.${keyof PropertiesDraft}`
 
-/** Issue #154: the edit fields in which two form values differ, properties one by one, in form order. */
+/** A whole number as typed ("010", " 10 ") compares as the number it saves; anything else as typed. */
+function comparableText(text: string): string | number {
+  return /^\s*\d+\s*$/.test(text) ? Number(text) : text
+}
+
+/**
+ * Issue #154: a field as it would be saved – memory in MiB, whole numbers parsed, java as its effective value (an
+ * explicit override equal to the derived java saves the same) – so that only real changes count.
+ */
+function comparable(v: ServerFormValue, key: FormChangeKey): unknown {
+  if (key === 'memoryGiB') return memoryMiBFromGiB(v.memoryGiB) ?? v.memoryGiB
+  if (key === 'javaOverride') return effectiveJava(v, undefined)
+  if (key.startsWith('properties.')) {
+    const value = v.properties[key.slice('properties.'.length) as keyof PropertiesDraft]
+    return typeof value === 'string' ? comparableText(value) : value
+  }
+  return v[key as (typeof EDIT_KEYS)[number]]
+}
+
+/** Issue #154: the edit fields in which two form values would save differently, properties one by one, in form order. */
 export function changedFormKeys(a: ServerFormValue, b: ServerFormValue): FormChangeKey[] {
-  const keys: FormChangeKey[] = EDIT_KEYS.filter((k) => a[k] !== b[k])
-  for (const k of Object.keys(a.properties) as (keyof PropertiesDraft)[]) if (a.properties[k] !== b.properties[k]) keys.push(`properties.${k}`)
-  return keys
+  const keys: FormChangeKey[] = [...EDIT_KEYS, ...(Object.keys(a.properties) as (keyof PropertiesDraft)[]).map((k) => `properties.${k}` as const)]
+  // An automatic java on both sides follows the version: a version change is reported once, as the version.
+  const bothAuto = a.javaOverride === '' && b.javaOverride === ''
+  return keys.filter((k) => !(k === 'javaOverride' && bothAuto) && comparable(a, k) !== comparable(b, k))
+}
+
+/** Both values save the same edit (name, type and EULA belong to creating and compare as typed). */
+export function sameFormValue(a: ServerFormValue, b: ServerFormValue): boolean {
+  return a.name === b.name && a.type === b.type && a.eulaAccepted === b.eulaAccepted && changedFormKeys(a, b).length === 0
 }
 
 /**

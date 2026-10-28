@@ -11,7 +11,7 @@ import { memoryLimitsKey, serverKey, serversKey, updateServer } from './api'
 import { DeleteServerSection } from './delete-server-section'
 import { serverFormChanges } from './draft-changes'
 import { DraftConflict } from './draft-conflict'
-import { formFromInstance, rebaseServerForm, type ServerFormResult } from './form-model'
+import { formFromInstance, rebaseServerForm, sameFormValue, type ServerFormResult } from './form-model'
 import { ServerForm } from './server-form'
 import { UnsavedGuard } from './unsaved-guard'
 import { WebRoutesSection } from './web-routes-section'
@@ -54,7 +54,7 @@ function InstanceSettings({ server, instance }: { server: Server; instance: Inst
   const queryClient = useQueryClient()
   // The draft keeps its base: the panel applies the save only to that revision (expected_revision), so a change by
   // someone else in the meantime is never silently reverted (409 server_modified). A clean form follows every change.
-  const d = useRemoteDraft(instance, { toDraft: (i) => formFromInstance(server.name, i), merge: rebaseServerForm })
+  const d = useRemoteDraft(instance, { toDraft: (i) => formFromInstance(server.name, i), merge: rebaseServerForm, same: sameFormValue })
   useReportUnsaved(d.dirty)
   // Errors are rendered by the form; a cancelled sudo dialog stays silent.
   const save = useMutation({
@@ -104,7 +104,11 @@ function InstanceSettings({ server, instance }: { server: Server; instance: Inst
         mode="edit"
         initial={d.start}
         baseline={d.baseDraft}
-        onDraftChange={d.setDraft}
+        onDraftChange={(value) => {
+          d.setDraft(value)
+          // Back to the stored values after a refusal: nothing left to resolve, and the clean form follows the server again.
+          if (rejected && sameFormValue(value, d.baseDraft)) save.reset()
+        }}
         submitLabel={t('servers.settings.save')}
         pending={save.isPending}
         error={rejected ? null : save.error}

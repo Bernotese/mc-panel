@@ -508,7 +508,7 @@ export const de = {
       reload: 'Gespeicherten Stand laden',
       keep: 'Meine Änderungen behalten',
       keep_hint: 'Behalten setzt deine Änderungen auf den gespeicherten Stand; speichere danach erneut.',
-      java_auto: 'automatisch',
+      keep_hint_routes: 'Behalten übernimmt nur deine eigenen Änderungen – hinzugefügte, geänderte und entfernte Pfade – in die gespeicherte Liste; speichere danach erneut.',
       loader: 'Loader-Version',
       modpack: 'Modpack',
       gib: '{{value}} GiB',

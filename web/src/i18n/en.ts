@@ -510,7 +510,7 @@ export const en: Messages = {
       reload: 'Load the saved state',
       keep: 'Keep my changes',
       keep_hint: 'Keeping puts your changes onto the saved state; save again afterwards.',
-      java_auto: 'automatic',
+      keep_hint_routes: 'Keeping applies only your own changes – added, changed and removed paths – to the saved list; save again afterwards.',
       loader: 'Loader version',
       modpack: 'Modpack',
       gib: '{{value}} GiB',

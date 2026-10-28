@@ -1,5 +1,5 @@
 import type { TFunction } from 'i18next'
-import { changedFormKeys, type FormChangeKey, type PropertiesDraft, type ServerFormValue } from './form-model'
+import { changedFormKeys, effectiveJava, type FormChangeKey, type PropertiesDraft, type ServerFormValue } from './form-model'
 import { javaLabel } from './format'
 import type { DraftChange } from './draft-conflict'
 
@@ -25,7 +25,7 @@ function display(v: ServerFormValue, key: FormChangeKey, t: TFunction): string {
   if (key === 'version') return v.version || t('servers.form.version_latest')
   if (key === 'loaderVersion') return v.loaderVersion || t('servers.form.loader_latest')
   if (key === 'modpack') return v.modpack || t('servers.draft.none')
-  if (key === 'javaOverride') return v.javaOverride ? javaLabel(v.javaOverride) : t('servers.draft.java_auto')
+  if (key === 'javaOverride') return v.javaOverride ? javaLabel(v.javaOverride) : t('servers.form.java_auto', { java: javaLabel(effectiveJava(v, undefined)) })
   return t('servers.draft.gib', { value: v.memoryGiB })
 }
 

@@ -90,6 +90,17 @@ describe('useRemoteDraft', () => {
   })
 })
 
+describe('useRemoteDraft with a custom comparison', () => {
+  it('counts only changes that would save differently', () => {
+    const same = (a: Draft, b: Draft) => Number(a.a) === Number(b.a) && a.b === b.b
+    const { result } = renderHook(() => useRemoteDraft({ revision: 1, a: '10', b: 'y' }, { toDraft, merge: mergeChangedKeys, same }))
+    act(() => result.current.setDraft({ a: '010', b: 'y' }))
+    expect(result.current.dirty).toBe(false)
+    act(() => result.current.setDraft({ a: '11', b: 'y' }))
+    expect(result.current.dirty).toBe(true)
+  })
+})
+
 describe('mergeChangedKeys', () => {
   it('takes the remote value with the keys the draft changed against the base', () => {
     expect(mergeChangedKeys({ a: 1, b: 1, c: 1 }, { a: 2, b: 1, c: 1 }, { a: 1, b: 3, c: 3 })).toEqual({ a: 2, b: 3, c: 3 })

@@ -259,7 +259,7 @@ describe('WebRoutesSection', () => {
       setRoutes(2, [{ path: '', port: 8100 }])
       await queryClient.invalidateQueries({ queryKey: ['servers', 2] })
       await waitFor(() => expect(within(s).getByRole('switch', { name: ROOT_SWITCH })).toBeChecked())
-      expect(within(s).queryByRole('alert')).not.toBeInTheDocument()
+      expect(within(s).queryByRole('region', { name: 'Inzwischen geändert' })).not.toBeInTheDocument()
     })
 
     it('keeps unsaved routes when they change elsewhere and lets the user choose', async () => {
@@ -272,15 +272,35 @@ describe('WebRoutesSection', () => {
 
       setRoutes(2, [{ path: 'map', port: 8123 }])
       await queryClient.invalidateQueries({ queryKey: ['servers', 2] })
-      const alert = await within(s).findByRole('alert')
-      expect(alert).toHaveTextContent('Weboberflächen – gespeichert: /map/ → 8123 · deins: / → 8200')
+      const box = await within(s).findByRole('region', { name: 'Inzwischen geändert' })
+      expect(box).toHaveTextContent('Weboberflächen – gespeichert: /map/ → 8123 · deins: / → 8200')
       expect(within(s).getByRole('spinbutton', { name: ROOT_PORT })).toHaveValue(8200)
 
-      await user.click(within(alert).getByRole('button', { name: 'Gespeicherten Stand laden' }))
-      await waitFor(() => expect(within(s).queryByRole('alert')).not.toBeInTheDocument())
+      await user.click(within(box).getByRole('button', { name: 'Gespeicherten Stand laden' }))
+      await waitFor(() => expect(within(s).queryByRole('region', { name: 'Inzwischen geändert' })).not.toBeInTheDocument())
       expect(within(s).getByRole('switch', { name: ROOT_SWITCH })).not.toBeChecked()
       expect(within(s).getByRole('textbox', { name: 'Pfad 1' })).toHaveValue('map')
       expect(within(s).getByRole('button', { name: SAVE })).toBeDisabled()
+    })
+
+    it('keeps only the own route changes on top of routes added elsewhere', async () => {
+      const bodies = capturePatches()
+      const { user, queryClient } = await settingsTab()
+      const s = await section()
+      await user.click(within(s).getByRole('switch', { name: ROOT_SWITCH }))
+
+      setRoutes(2, [{ path: 'map', port: 8123 }])
+      await queryClient.invalidateQueries({ queryKey: ['servers', 2] })
+      const box = await within(s).findByRole('region', { name: 'Inzwischen geändert' })
+      expect(box).toHaveTextContent('Behalten übernimmt nur deine eigenen Änderungen')
+      await user.click(within(box).getByRole('button', { name: 'Meine Änderungen behalten' }))
+      await waitFor(() => expect(within(s).queryByRole('region', { name: 'Inzwischen geändert' })).not.toBeInTheDocument())
+      expect(within(s).getByRole('switch', { name: ROOT_SWITCH })).toBeChecked()
+      expect(within(s).getByRole('textbox', { name: 'Pfad 1' })).toHaveValue('map')
+
+      await user.click(within(s).getByRole('button', { name: SAVE }))
+      await waitFor(() => expect(bodies).toHaveLength(1))
+      expect(bodies[0]).toEqual({ web_routes: [{ path: '', port: 8100 }, { path: 'map', port: 8123 }] })
     })
   })
 })

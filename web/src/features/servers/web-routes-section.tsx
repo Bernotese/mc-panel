@@ -18,7 +18,19 @@ import { useRemoteDraft } from '@/lib/use-remote-draft'
 import { cn } from '@/lib/utils'
 import { serverKey, serversKey, updateServer } from './api'
 import { DraftConflict } from './draft-conflict'
-import { DEFAULT_ROOT_PORT, MAX_WEB_ROUTES, toWebRoutes, webPathError, webPortError, webRouteUrl, type WebRouteInput } from './web-routes'
+import {
+  DEFAULT_ROOT_PORT,
+  MAX_WEB_ROUTES,
+  rebaseWebDraft,
+  sameWebDraft,
+  webDraftFromRoutes,
+  webDraftRoutes,
+  webPathError,
+  webPortError,
+  webRouteUrl,
+  type WebRouteInput,
+  type WebRouteRow,
+} from './web-routes'
 
 const STATUS_DOT: Record<Server['web_status'], string> = {
   off: 'bg-status-offline',
@@ -34,26 +46,13 @@ const STATUS_DOT: Record<Server['web_status'], string> = {
 const ROW_GRID = 'grid grid-cols-[minmax(0,1fr)_auto] items-end gap-x-3 gap-y-2 sm:grid-cols-[minmax(0,18rem)_9rem_auto]'
 const PATH_CELL = 'col-span-full space-y-2 sm:col-span-1'
 
-type PathRow = { key: number; path: string; port: string; touched: boolean }
-type WebDraft = { rootOn: boolean; rootPort: string; rows: PathRow[] }
-type StoredRoute = { path: string; port: number }
-
-function draftFromRoutes(stored: readonly StoredRoute[]): WebDraft {
-  const root = stored.find((r) => r.path === '')
-  return {
-    rootOn: root !== undefined,
-    rootPort: String(root?.port ?? DEFAULT_ROOT_PORT),
-    rows: stored.filter((r) => r.path !== '').map((r, i) => ({ key: i, path: r.path, port: String(r.port), touched: true })),
-  }
-}
-
-const routesOf = (d: WebDraft) => toWebRoutes(d.rootOn, d.rootPort, d.rows)
+type PathRow = WebRouteRow
+type FieldError = 'invalid' | 'reserved' | 'duplicate' | null
 
 /** The routes as one line for the conflict box: "/ → 8100, /map/ → 8123". */
-function describeRoutes(routes: readonly StoredRoute[], none: string): string {
+function describeRoutes(routes: readonly WebRouteInput[], none: string): string {
   return routes.length === 0 ? none : routes.map((r) => `/${r.path ? `${r.path}/` : ''} → ${r.port}`).join(', ')
 }
-type FieldError = 'invalid' | 'reserved' | 'duplicate' | null
 
 /** The 409 the panel answers when the base domain is gone; the section then shows the same hint as without one. */
 function isBaseDomainRequired(err: unknown): boolean {
@@ -75,10 +74,10 @@ export function WebRoutesSection({ server }: { server: Server }) {
   const queryClient = useQueryClient()
   const stored = server.web_routes ?? []
   // Issue #154: a draft survives polling and changes elsewhere; the routes carry no revision, so a newer stored list is
-  // shown for comparison and "keep" saves the own list over it.
+  // shown for comparison and "keep" puts only the own changes onto it, path by path.
   const d = useRemoteDraft(
     stored.map(({ path, port }) => ({ path, port })),
-    { toDraft: draftFromRoutes, merge: (_base, draft) => draft, isDirty: (draft, base) => JSON.stringify(routesOf(draft)) !== JSON.stringify(routesOf(base)) },
+    { toDraft: webDraftFromRoutes, merge: rebaseWebDraft, same: sameWebDraft },
   )
   useReportUnsaved(d.dirty)
   const { rootOn, rootPort, rows } = d.draft
@@ -98,7 +97,7 @@ export function WebRoutesSection({ server }: { server: Server }) {
 
   const noDomain = server.address === null || isBaseDomainRequired(save.error)
   const disabled = noDomain || save.isPending
-  const next = routesOf(d.draft)
+  const next = webDraftRoutes(d.draft)
   const dirty = d.dirty
   const published = (rootOn ? 1 : 0) + rows.length
   const otherError = save.error && !noDomain && !isSudoCancelled(save.error) ? errorMessage(save.error, t) : null
@@ -168,10 +167,11 @@ export function WebRoutesSection({ server }: { server: Server }) {
               {
                 key: 'routes',
                 label: t('servers.web.title'),
-                theirs: describeRoutes(routesOf(d.remoteDraft), t('servers.draft.none')),
+                theirs: describeRoutes(webDraftRoutes(d.remoteDraft), t('servers.draft.none')),
                 mine: describeRoutes(next, t('servers.draft.none')),
               },
             ]}
+            keepHint={t('servers.draft.keep_hint_routes')}
             onReload={d.reload}
             onKeepMine={d.keepMine}
           />

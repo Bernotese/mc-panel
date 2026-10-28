@@ -16,8 +16,8 @@ export interface RemoteDraftOptions<R, D> {
   toDraft(remote: R): D
   /** keepMine: the own changes (draft against base) on top of the remote value. */
   merge(base: D, draft: D, remote: D): D
-  /** Default: the draft differs from the base's form value. */
-  isDirty?(draft: D, base: D): boolean
+  /** Whether two form values would save the same (default: equal JSON); decides dirty and conflict. */
+  same?(a: D, b: D): boolean
 }
 
 export interface RemoteDraft<R, D> {
@@ -55,13 +55,13 @@ interface State<R, D> {
  * revision bump without remounting the form); a dirty one keeps its base, so the save goes onto the revision it was
  * edited against, and reports a conflict as soon as the remote value differs in what the form shows.
  */
-export function useRemoteDraft<R, D>(remote: R, { toDraft, merge, isDirty }: RemoteDraftOptions<R, D>): RemoteDraft<R, D> {
+export function useRemoteDraft<R, D>(remote: R, { toDraft, merge, same = sameJSON }: RemoteDraftOptions<R, D>): RemoteDraft<R, D> {
   const [state, setState] = useState<State<R, D>>(() => {
     const draft = toDraft(remote)
     return { base: remote, draft, start: draft, generation: 0 }
   })
   const baseDraft = toDraft(state.base)
-  const dirty = isDirty ? isDirty(state.draft, baseDraft) : !sameJSON(state.draft, baseDraft)
+  const dirty = !same(state.draft, baseDraft)
   const remoteDraft = toDraft(remote)
 
   // Following the remote value while clean: state derived from props, adjusted during render (no effect, no flash).
@@ -83,7 +83,7 @@ export function useRemoteDraft<R, D>(remote: R, { toDraft, merge, isDirty }: Rem
     start: state.start,
     generation: state.generation,
     dirty,
-    conflict: dirty && !sameJSON(remoteDraft, baseDraft),
+    conflict: dirty && !same(remoteDraft, baseDraft),
     remoteDraft,
     setDraft: (draft) => setState((s) => ({ ...s, draft: typeof draft === 'function' ? (draft as (d: D) => D)(s.draft) : draft })),
     reload: () => replace(remote, remoteDraft),

@@ -270,6 +270,21 @@ describe('draft changes (issue #154)', () => {
     expect(merged.properties.motd).toBe('mine')
   })
 
+  it('compares values as they would be saved (issue #154 review)', () => {
+    expect(sameFormValue(base, { ...base, memoryGiB: '4.250' })).toBe(true)
+    expect(sameFormValue(base, { ...base, properties: { ...base.properties, max_players: `0${base.properties.max_players}` } })).toBe(true)
+    expect(sameFormValue(base, { ...base, manualVersion: true })).toBe(true)
+    expect(sameFormValue(base, { ...base, memoryGiB: '5' })).toBe(false)
+    expect(changedFormKeys(base, { ...base, memoryGiB: '4.250', properties: { ...base.properties, view_distance: ` ${base.properties.view_distance}` } })).toEqual([])
+  })
+
+  it('does not report java as changed while its effective value stays the same', () => {
+    // The stored java of a version change made elsewhere can stay the old one: explicit in the form, but equal in effect.
+    const explicit = { ...base, javaOverride: 'java21' as const }
+    expect(changedFormKeys(base, explicit)).toEqual([])
+    expect(changedFormKeys(base, { ...base, javaOverride: 'java25' as const })).toEqual(['javaOverride'])
+  })
+
   it('keeps the own version together with its input mode', () => {
     const draft = { ...base, version: '1.21.99', manualVersion: true }
     const merged = rebaseServerForm(base, draft, { ...base, version: '1.20.4' })

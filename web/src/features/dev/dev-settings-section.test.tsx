@@ -65,15 +65,16 @@ describe('dev settings', () => {
     expect(bodies).toEqual([])
   })
 
-  it('changes only the memory through PATCH /servers/{id}', async () => {
+  it('changes only the memory through PATCH /servers/{id}, onto the loaded revision', async () => {
     const bodies = capture('patch', '/servers/5')
+    const revision = db.servers.find((s) => s.id === 5)?.revision
     const { user } = await settingsTab()
     const resources = await screen.findByRole('region', { name: 'Ressourcen' })
     const memory = within(resources).getByRole('spinbutton', { name: 'Arbeitsspeicher (GiB)' })
     await user.clear(memory)
     await user.type(memory, '3')
     await user.click(within(resources).getByRole('button', { name: 'Arbeitsspeicher speichern' }))
-    await waitFor(() => expect(bodies).toEqual([{ memory_mib: 3072 }]))
+    await waitFor(() => expect(bodies).toEqual([{ memory_mib: 3072, expected_revision: revision }]))
   })
 
   it('keeps unsaved dev settings when they change elsewhere and keeps the own changes on top (issue #154)', async () => {
@@ -87,13 +88,37 @@ describe('dev settings', () => {
     if (!dev) throw new Error('no seeded dev')
     dev.viewDistance = 8
     await queryClient.invalidateQueries({ queryKey: ['servers', 5, 'dev'] })
-    const alert = await within(sync).findByRole('alert')
-    expect(alert).toHaveTextContent('Sichtweite (Chunks) – gespeichert: 8')
+    const box = await within(sync).findByRole('region', { name: 'Inzwischen geändert' })
+    expect(box).toHaveTextContent('Sichtweite (Chunks) – gespeichert: 8')
     expect(within(sync).getByLabelText('Schlafen nach (Minuten ohne Spieler)')).toHaveValue(30)
 
-    await user.click(within(alert).getByRole('button', { name: 'Meine Änderungen behalten' }))
-    await waitFor(() => expect(within(sync).queryByRole('alert')).not.toBeInTheDocument())
+    await user.click(within(box).getByRole('button', { name: 'Meine Änderungen behalten' }))
+    await waitFor(() => expect(within(sync).queryByRole('region', { name: 'Inzwischen geändert' })).not.toBeInTheDocument())
     expect(within(sync).getByLabelText('Schlafen nach (Minuten ohne Spieler)')).toHaveValue(30)
     expect(within(sync).getByLabelText('Sichtweite (Chunks)')).toHaveValue(8)
+  })
+
+  it('saves the dev memory onto the revision it was edited against and resolves a refusal (issue #154)', async () => {
+    const bodies = capture('patch', '/servers/5')
+    const { user } = await settingsTab()
+    const resources = await screen.findByRole('region', { name: 'Ressourcen' })
+    const memory = within(resources).getByRole('spinbutton', { name: 'Arbeitsspeicher (GiB)' })
+    await user.clear(memory)
+    await user.type(memory, '3')
+    const stored = db.servers.find((s) => s.id === 5)
+    if (!stored?.instance) throw new Error('no seeded dev instance')
+    const revision = stored.revision
+    stored.revision += 1 // e.g. a sync took over a new spec from the source meanwhile
+
+    await user.click(within(resources).getByRole('button', { name: 'Arbeitsspeicher speichern' }))
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ memory_mib: 3072, expected_revision: revision })
+    const box = await within(resources).findByRole('region', { name: 'Inzwischen geändert' })
+    expect(box).toHaveTextContent('Der Server wurde inzwischen geändert, deshalb wurde nichts gespeichert.')
+    await user.click(await within(box).findByRole('button', { name: 'Meine Änderungen behalten' }))
+    await waitFor(() => expect(within(resources).queryByRole('region', { name: 'Inzwischen geändert' })).not.toBeInTheDocument())
+    await user.click(within(resources).getByRole('button', { name: 'Arbeitsspeicher speichern' }))
+    await waitFor(() => expect(stored.instance?.memory_mib).toBe(3072))
+    expect(bodies[1]).toEqual({ memory_mib: 3072, expected_revision: revision + 1 })
   })
 })
