@@ -6,7 +6,7 @@ import type { MetricsRange } from '@/api/types'
 import { renderSection } from '@/test/render-section'
 import { loginAs } from '@/mocks/db'
 import { server } from '@/mocks/node'
-import { LIVE_POLL_MS } from './api'
+import { LIVE_POLL_MS, metricsPollMs } from './api'
 import { MonitoringTab } from './monitoring-tab'
 import { liveMetrics, metricsSeries, mockLive, mockMetrics } from './test-utils'
 
@@ -53,9 +53,48 @@ describe('MonitoringTab', () => {
     await openMonitoring()
     expect(await screen.findByText('Der Server antwortet nicht auf Anfragen (startet er noch?).')).toBeInTheDocument()
 
+    // A failed refresh keeps the last values but no longer claims a current verdict (issue #155).
     server.use(http.get('*/api/servers/:id/metrics/live', () => HttpResponse.json({ error: 'agent_unavailable', message: 'no agent' }, { status: 503 })))
     await act(() => vi.advanceTimersByTimeAsync(LIVE_POLL_MS + 100))
+    expect(await screen.findByTestId('stale-notice')).toHaveTextContent('Der Agent ist nicht erreichbar.')
+    expect(screen.queryByText('Der Server antwortet nicht auf Anfragen (startet er noch?).')).not.toBeInTheDocument()
+  })
+
+  it('reports a missing agent when the live values never loaded', async () => {
+    server.use(http.get('*/api/servers/:id/metrics/live', () => HttpResponse.json({ error: 'agent_unavailable', message: 'no agent' }, { status: 503 })))
+    mockMetrics()
+    await openMonitoring()
     expect(await screen.findByText('Der Agent ist gerade nicht erreichbar; es gibt keine aktuellen Werte.')).toBeInTheDocument()
+  })
+
+  it('keeps live values and charts when their refresh fails, marks them stale once and recovers', async () => {
+    mockLive(liveMetrics())
+    mockMetrics()
+    const outage = { broken: false }
+    server.use(
+      http.get('*/api/servers/:id/metrics/live', () => (outage.broken ? HttpResponse.error() : undefined)),
+      http.get('*/api/servers/:id/metrics', () => (outage.broken ? HttpResponse.error() : undefined)),
+    )
+    const { user } = await openMonitoring()
+    const now = await screen.findByRole('region', { name: 'Jetzt' })
+    expect(await within(now).findByText('19,9')).toBeInTheDocument()
+    expect(await screen.findByRole('img', { name: 'Spieler' })).toBeInTheDocument()
+
+    outage.broken = true
+    await act(() => vi.advanceTimersByTimeAsync(metricsPollMs('1h') + 100))
+    const notice = await screen.findByTestId('stale-notice')
+    expect(notice).toHaveTextContent('Keine Verbindung zum Panel.')
+    expect(within(now).getByText('19,9').closest('[data-stale]')).not.toBeNull()
+    expect(within(now).getByText('3 / 5 GiB').closest('[data-stale]')).not.toBeNull()
+    const charts = screen.getByRole('img', { name: 'Spieler' }).closest('[data-stale]')
+    expect(charts).not.toBeNull()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    outage.broken = false
+    await user.click(within(notice).getByRole('button', { name: 'Erneut versuchen' }))
+    await waitFor(() => expect(screen.queryByTestId('stale-notice')).not.toBeInTheDocument())
+    expect(within(now).getByText('19,9').closest('[data-stale]')).toBeNull()
+    expect(screen.getByRole('img', { name: 'Spieler' }).closest('[data-stale]')).toBeNull()
   })
 
   it('shows a dash for missing live values', async () => {

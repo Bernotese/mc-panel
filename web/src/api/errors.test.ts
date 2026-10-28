@@ -8,6 +8,10 @@ describe('toApiError', () => {
     expect(err).toMatchObject({ status: 409, code: 'conflict', message: 'username taken', requestId: 'r-1' })
   })
 
+  it.each(['dev_exists', 'not_dev', 'dev_managed'] as const)('knows the dev instance code %s', (code) => {
+    expect(toApiError(new Response(null, { status: 409 }), { error: code, message: 'x' }).code).toBe(code)
+  })
+
   it('falls back to unknown for non-JSON bodies', () => {
     const err = toApiError(new Response(null, { status: 502 }), 'Bad Gateway')
     expect(err).toMatchObject({ status: 502, code: 'unknown', message: 'Bad Gateway' })

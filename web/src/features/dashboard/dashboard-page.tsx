@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PageHeader } from '@/components/page-header'
 import { Section } from '@/components/section'
+import { StaleNotice } from '@/components/stale-notice'
 import { Button } from '@/components/ui/button'
 import { useMe } from '@/features/auth/me'
 import { withDevsAfterSources } from '@/features/dev/model'
@@ -12,6 +13,7 @@ import { HostCard } from '@/features/monitoring/host-card'
 import { serverSettingsQueryOptions, serversQueryOptions } from '@/features/servers/api'
 import { pollInterval } from '@/features/servers/status'
 import { errorMessage } from '@/lib/error-message'
+import { freshnessOf, isStale } from '@/lib/freshness'
 import { ServerRow } from './server-row'
 
 export function DashboardPage() {
@@ -27,11 +29,15 @@ export function DashboardPage() {
   const monitoring = useQuery({ ...monitoringOverviewQueryOptions, refetchInterval: OVERVIEW_POLL_MS })
   const metricsById = new Map((monitoring.data?.servers ?? []).map((m) => [m.id, m]))
   const host = isAdmin ? (monitoring.data?.host ?? null) : null
+  // A failed refresh keeps what was loaded and marks it stale (issue #155); only a list that never loaded is an error.
+  const serversStale = isStale(servers)
+  const metricsStale = isStale(monitoring)
+  const freshness = freshnessOf(servers, monitoring)
 
   let content: ReactNode
   if (servers.isPending) {
     content = <p className="text-muted-foreground">{t('common.loading')}</p>
-  } else if (servers.isError) {
+  } else if (servers.data === undefined) {
     content = (
       <p role="alert" className="text-destructive">
         {errorMessage(servers.error, t)}
@@ -44,7 +50,7 @@ export function DashboardPage() {
       <ul aria-label={t('dashboard.list_label')} className="space-y-2">
         {withDevsAfterSources(servers.data).map((server) => (
           <li key={server.id}>
-            <ServerRow server={server} metrics={metricsById.get(server.id)} />
+            <ServerRow server={server} metrics={metricsById.get(server.id)} stale={serversStale} metricsStale={metricsStale} />
           </li>
         ))}
       </ul>
@@ -79,7 +85,8 @@ export function DashboardPage() {
             </div>
           </Section>
         ) : null}
-        {host ? <HostCard host={host} /> : null}
+        <StaleNotice freshness={freshness} />
+        {host ? <HostCard host={host} stale={metricsStale} /> : null}
         {content}
       </div>
     </>
