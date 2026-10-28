@@ -312,7 +312,7 @@ func TestRestartNeeded(t *testing.T) {
 	}{
 		{agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(-time.Minute).UnixMilli()}, "true"},
 		{agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.UnixMilli()}, "true"},
-		{agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: 0}, "true"}, // start time unknown: counts as before
+		{agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: 0}, "null"}, // start time unknown (inspect failed)
 		{agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(time.Minute).UnixMilli()}, "false"},
 		{agentapi.InstanceStatus{ID: id, State: agentapi.StateExited}, "false"},
 	} {
@@ -358,5 +358,72 @@ func TestRestartNeededSurvivesPanelRestart(t *testing.T) {
 	e.agent.set(agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.UnixMilli()})
 	if got := e.inventory(id).RestartNeeded; !isTrue(got) {
 		t.Fatalf("an earlier mark moved the change back: restart_needed = %s", fmtTri(got))
+	}
+}
+
+// TestRestartNeededAfterLostResponse: a files call whose answer is lost may still have changed
+// the disk, so the change is recorded before the call (erring towards "restart needed").
+func TestRestartNeededAfterLostResponse(t *testing.T) {
+	lost := fmt.Errorf("%w: connection reset", filesapi.ErrUnavailable)
+	running := func(id int64) agentapi.InstanceStatus {
+		return agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(-time.Hour).UnixMilli()}
+	}
+	t.Run("install", func(t *testing.T) {
+		e := newEnv(t)
+		id := e.fabric("modded")
+		fabricWorld(e)
+		e.agent.set(running(id))
+		e.files.setErr("upload", lost)
+		e.install(id, "modrinth", "chunky")
+		if j := e.waitJob(id); j.State != "failed" {
+			t.Fatalf("job = %+v", j)
+		}
+		if got := e.inventory(id).RestartNeeded; !isTrue(got) {
+			t.Fatalf("restart_needed = %s after a failed upload, want true", fmtTri(got))
+		}
+	})
+	t.Run("toggle", func(t *testing.T) {
+		e := newEnv(t)
+		id := e.paper("survival")
+		e.files.put(id, "plugins/Tool.jar", "tool")
+		e.agent.set(running(id))
+		e.files.setErr("rename", lost)
+		if code, _ := e.toggle(id, "Tool.jar", false); code == http.StatusNoContent {
+			t.Fatal("toggle succeeded")
+		}
+		if got := e.inventory(id).RestartNeeded; !isTrue(got) {
+			t.Fatalf("restart_needed = %s after a failed rename, want true", fmtTri(got))
+		}
+	})
+	t.Run("delete", func(t *testing.T) {
+		e := newEnv(t)
+		id := e.paper("survival")
+		e.files.put(id, "plugins/Tool.jar", "tool")
+		e.agent.set(running(id))
+		e.files.setErr("delete", lost)
+		if rec := e.post(id, "/delete", map[string]any{"file": "Tool.jar"}); rec.Code == http.StatusNoContent {
+			t.Fatal("delete succeeded")
+		}
+		if got := e.inventory(id).RestartNeeded; !isTrue(got) {
+			t.Fatalf("restart_needed = %s after a failed delete, want true", fmtTri(got))
+		}
+	})
+}
+
+// TestRestartNeededFutureChange: a change recorded before the clock stepped back lies in the
+// future. The first read pins it to now (still "needed"), so the next real start clears it
+// instead of the notice lasting until the clock catches up.
+func TestRestartNeededFutureChange(t *testing.T) {
+	e := newEnv(t)
+	id := e.paper("survival")
+	plugins.MarkChanged(e.h, id, t0.Add(24*time.Hour))
+	e.agent.set(agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(-time.Minute).UnixMilli()})
+	if got := e.inventory(id).RestartNeeded; !isTrue(got) {
+		t.Fatalf("before a restart restart_needed = %s, want true", fmtTri(got))
+	}
+	e.clk.Advance(2 * time.Minute)
+	e.agent.set(agentapi.InstanceStatus{ID: id, State: agentapi.StateRunning, StartedAt: t0.Add(time.Minute).UnixMilli()})
+	if got := e.inventory(id).RestartNeeded; !isFalse(got) {
+		t.Fatalf("after a restart restart_needed = %s, want false", fmtTri(got))
 	}
 }

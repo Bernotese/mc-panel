@@ -452,11 +452,13 @@ function step(title: string, file: string): PluginJobStep {
   return { title, file, state: 'pending', error_code: null, error: '' }
 }
 
-/** Like the panel: unknown (null) after a change while the actual state is unknown, else running and started before the change. */
+/** Like the panel: after a change unknown (null) while the state or the start time is unknown, else running and started no later than the change. */
 function restartNeeded(c: Ctx): boolean | null {
   if (c.inv.changedAt === 0) return false
   if (c.server.status.state === 'unknown') return null
-  return c.server.status.state === 'running' && c.inv.changedAt > c.server.status.started_at
+  if (c.server.status.state !== 'running') return false
+  if (c.server.status.started_at === 0) return null
+  return c.inv.changedAt >= c.server.status.started_at
 }
 
 function inventory(c: Ctx): PluginInventory {

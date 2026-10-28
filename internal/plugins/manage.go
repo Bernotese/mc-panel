@@ -85,6 +85,7 @@ func (h *Handler) handleToggle(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
+	h.markChanged(ctx, srv.ID) // a lost answer may hide a rename that happened (spec §6.2)
 	err := h.files.Rename(context.WithoutCancel(ctx), filesapi.RenameRequest{
 		ID: srv.ID, From: filesapi.Join(srv.Kind.Dir, req.File), To: filesapi.Join(srv.Kind.Dir, target),
 	})
@@ -122,6 +123,7 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dctx := context.WithoutCancel(ctx)
+	h.markChanged(dctx, srv.ID) // a lost answer may hide a delete that happened (spec §6.2)
 	err = h.files.Delete(dctx, srv.ID, filesapi.Join(srv.Kind.Dir, req.File))
 	if err == nil {
 		h.dropRow(dctx, srv.ID, base, jar.SHA512)
