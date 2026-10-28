@@ -191,9 +191,9 @@ func (h *Handler) handleResolveRecovery(w http.ResponseWriter, r *http.Request) 
 	details := map[string]any{"name": s.Name}
 	if err != nil {
 		h.record(ctx, audit.ActionServerRecoveryResolve, serverTarget(s.ID), audit.ResultFailure, details)
-		var se *filesapi.StatusError
 		switch {
-		case errors.As(err, &se) && (se.Status == http.StatusConflict || se.Status == http.StatusTooManyRequests):
+		case errors.Is(err, filesapi.ErrNotFound) || errors.Is(err, filesapi.ErrBusy):
+			// no unfinished restore (any more), or a job holds the server meanwhile
 			httpx.WriteError(w, r, http.StatusConflict, httpx.CodeRecoveryRequired, "the files service refused the resolve: the server's restore is not unresolved (any more)")
 		case ctx.Err() != nil:
 			h.log.DebugContext(ctx, "servers: resolve ended with the request", "err", err)

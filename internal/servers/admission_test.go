@@ -525,9 +525,14 @@ func TestResolveEndpoint(t *testing.T) {
 	}
 
 	e.data.set(id, servers.StateRecoveryRequired)
-	e.files.resolveErr = &filesapi.StatusError{Status: http.StatusConflict, Code: "conflict", Message: "not stuck"}
-	if rec := e.do(http.MethodPost, path, nil, &admin); rec.Code != http.StatusConflict || errCode(t, rec) != "recovery_required" {
-		t.Fatalf("refused by the service: %d %s", rec.Code, rec.Body)
+	for _, se := range []*filesapi.StatusError{
+		{Status: http.StatusNotFound, Code: filesapi.CodeNotFound, Message: "no unfinished restore"},
+		{Status: http.StatusTooManyRequests, Code: filesapi.CodeBusy, Message: "a job holds the server"},
+	} {
+		e.files.resolveErr = se
+		if rec := e.do(http.MethodPost, path, nil, &admin); rec.Code != http.StatusConflict || errCode(t, rec) != "recovery_required" {
+			t.Fatalf("refused by the service (%s): %d %s", se.Code, rec.Code, rec.Body)
+		}
 	}
 	e.files.resolveErr = fmt.Errorf("%w: dial unix /run/mcpanel/files.sock", filesapi.ErrUnavailable)
 	rec := e.do(http.MethodPost, path, nil, &admin)
@@ -552,7 +557,7 @@ func TestResolveEndpoint(t *testing.T) {
 		last.Details["folder"] != e.files.recovery.Folder || last.Details["name"] != "survival" {
 		t.Fatalf("audit = %+v", last)
 	}
-	if !slices.Equal(e.files.resolved, []int64{id, id, id}) {
+	if !slices.Equal(e.files.resolved, []int64{id, id, id, id}) {
 		t.Fatalf("resolved = %v", e.files.resolved)
 	}
 }
