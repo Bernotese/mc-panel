@@ -6,6 +6,7 @@ import { Section } from '@/components/section'
 import { StatSlot } from '@/components/stat-slot'
 import { formatCpu, formatGiB } from '@/features/servers/format'
 import { useFormat } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import { Meter } from './meter'
 import { formatDecimal } from './model'
 
@@ -14,8 +15,11 @@ function Bar({ children }: { children: ReactNode }) {
   return <div className="pt-1.5">{children}</div>
 }
 
-/** Admin-only host values on the dashboard (spec §5.1); bars stay Meter (aria-valuenow in bytes). */
-export function HostCard({ host }: { host: HostSnapshot }) {
+/**
+ * Admin-only host values on the dashboard (spec §5.1); bars stay Meter (aria-valuenow in bytes). `stale`: the overview
+ * could not be refreshed, the values are the last known ones (issue #155).
+ */
+export function HostCard({ host, stale = false }: { host: HostSnapshot; stale?: boolean }) {
   const { t } = useTranslation()
   const fmt = useFormat()
   const low = host.alerts.includes('host.disk_low')
@@ -37,10 +41,11 @@ export function HostCard({ host }: { host: HostSnapshot }) {
         </Link>
       }
     >
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={cn('grid gap-3 sm:grid-cols-2 lg:grid-cols-4', stale && '[&_[role=meter]]:opacity-50')}>
         <StatSlot
           label={t('monitoring.host.cpu')}
           value={cpu}
+          stale={stale}
           hint={
             host.cpu_percent !== null && cpu ? (
               <Bar>
@@ -49,10 +54,11 @@ export function HostCard({ host }: { host: HostSnapshot }) {
             ) : undefined
           }
         />
-        <StatSlot label={t('monitoring.host.load')} value={host.load1 === null ? null : formatDecimal(host.load1, fmt.locale, 2)} />
+        <StatSlot label={t('monitoring.host.load')} value={host.load1 === null ? null : formatDecimal(host.load1, fmt.locale, 2)} stale={stale} />
         <StatSlot
           label={t('monitoring.host.memory')}
           value={mem}
+          stale={stale}
           hint={
             host.memory_used !== null && host.memory_total !== null && mem ? (
               <Bar>
@@ -65,6 +71,7 @@ export function HostCard({ host }: { host: HostSnapshot }) {
           label={t('monitoring.host.disk')}
           value={disk}
           tone={low ? 'danger' : 'default'}
+          stale={stale}
           hint={
             host.disk_free !== null && host.disk_total !== null && disk ? (
               <Bar>

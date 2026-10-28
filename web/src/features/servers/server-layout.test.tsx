@@ -2,6 +2,7 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mockOverview, overviewServer } from '@/features/monitoring/test-utils'
 import { db, enableTotp, loginAs } from '@/mocks/db'
 import { server } from '@/mocks/node'
 import { renderApp } from './test-utils'
@@ -166,6 +167,80 @@ describe('ServerLayout', () => {
     db.grants.set(2, [])
     await queryClient.refetchQueries({ queryKey: ['servers', 1] })
     expect(await screen.findByText('Du hast keine Berechtigung, diesen Server anzusehen.')).toBeInTheDocument()
+  })
+
+  describe('when a refresh fails (issue #155)', () => {
+    /** Answers GET /servers/1 with `failure` while set; otherwise the regular mock answers. */
+    function breakDetail(failure: () => Response) {
+      const state: { broken: boolean } = { broken: true }
+      server.use(http.get('*/api/servers/:id', () => (state.broken ? failure() : undefined)))
+      return state
+    }
+
+    it('keeps the last data, marks it stale with time and retry, and clears that on recovery', async () => {
+      const survival = mockServer(1)
+      survival.status = { ...survival.status, memory_bytes: 2 * GIB, memory_limit_bytes: 5 * GIB, cpu_percent: 12.5 }
+      const { queryClient } = await renderApp('/servers/1', loginAs('admin'))
+      const header = await screen.findByRole('region', { name: 'survival' })
+      expect(within(header).getByText('Läuft')).toBeInTheDocument()
+      expect(within(header).queryByTestId('stale-notice')).not.toBeInTheDocument()
+
+      const outage = breakDetail(() => HttpResponse.error())
+      await queryClient.refetchQueries({ queryKey: ['servers', 1], exact: true })
+      const notice = await within(header).findByTestId('stale-notice')
+      expect(notice).toHaveRole('status')
+      expect(notice).toHaveTextContent('Keine Verbindung zum Panel.')
+      expect(notice).toHaveTextContent(/Angezeigt wird der Stand von \d\d:\d\d\./)
+      expect(within(header).getByText('Zuletzt: Läuft')).toBeInTheDocument()
+      expect(within(header).queryByText('Läuft')).not.toBeInTheDocument()
+      // The values stay readable, but muted: they are not current.
+      expect(within(header).getByText('2 / 5 GiB').closest('[data-stale]')).not.toBeNull()
+      expect(within(header).getByText('12,5 %').closest('[data-stale]')).not.toBeNull()
+
+      outage.broken = false
+      await userEvent.setup().click(within(notice).getByRole('button', { name: 'Erneut versuchen' }))
+      await waitFor(() => expect(within(header).queryByTestId('stale-notice')).not.toBeInTheDocument())
+      expect(within(header).getByText('Läuft')).toBeInTheDocument()
+      expect(within(header).getByText('2 / 5 GiB').closest('[data-stale]')).toBeNull()
+    })
+
+    it('shows one notice on the monitoring tab when the header and the tab both go stale', async () => {
+      const { queryClient } = await renderApp('/servers/1/monitoring', loginAs('admin'))
+      const header = await screen.findByRole('region', { name: 'survival' })
+      await screen.findByRole('region', { name: 'Jetzt' })
+      await screen.findAllByRole('img', { name: 'Spieler' })
+      server.use(
+        http.get('*/api/servers/:id', () => HttpResponse.error()),
+        http.get('*/api/servers/:id/metrics/live', () => HttpResponse.error()),
+        http.get('*/api/servers/:id/metrics', () => HttpResponse.error()),
+      )
+      await queryClient.refetchQueries({ queryKey: ['servers', 1] })
+      expect(await within(header).findByTestId('stale-notice')).toHaveTextContent('Keine Verbindung zum Panel.')
+      await waitFor(() => expect(screen.getByRole('region', { name: 'Jetzt' }).querySelector('[data-stale]')).not.toBeNull())
+      expect(screen.getAllByTestId('stale-notice')).toHaveLength(1)
+    })
+
+    it('names a missing agent (503)', async () => {
+      const { queryClient } = await renderApp('/servers/1', loginAs('admin'))
+      const header = await screen.findByRole('region', { name: 'survival' })
+      breakDetail(() => HttpResponse.json({ error: 'agent_unavailable', message: 'no agent' }, { status: 503 }))
+      await queryClient.refetchQueries({ queryKey: ['servers', 1], exact: true })
+      expect(await within(header).findByTestId('stale-notice')).toHaveTextContent('Der Agent ist nicht erreichbar.')
+      expect(within(header).getByText('Zuletzt: Läuft')).toBeInTheDocument()
+    })
+
+    it('marks only the measured values stale when the monitoring overview fails', async () => {
+      mockOverview({ servers: [overviewServer(1, { players: 3, players_max: 20 })], host: null })
+      const { queryClient } = await renderApp('/servers/1', loginAs('admin'))
+      const header = await screen.findByRole('region', { name: 'survival' })
+      const players = await within(header).findByText('3/20')
+      expect(players.closest('[data-stale]')).toBeNull()
+      server.use(http.get('*/api/monitoring/overview', () => HttpResponse.json({ error: 'internal', message: 'boom' }, { status: 500 })))
+      await queryClient.refetchQueries({ queryKey: ['monitoring', 'overview'] })
+      expect(await within(header).findByTestId('stale-notice')).toHaveTextContent('Interner Serverfehler.')
+      expect(within(header).getByText('3/20').closest('[data-stale]')).not.toBeNull()
+      expect(within(header).getByText('Läuft')).toBeInTheDocument()
+    })
   })
 
   it('explains a server that does not exist', async () => {

@@ -16,6 +16,14 @@ export const en: Messages = {
     no: 'No',
     retry: 'Try again',
   },
+  freshness: {
+    title: 'Not up to date.',
+    offline: 'No connection to the panel.',
+    agent_unavailable: 'The agent is unreachable.',
+    since: 'Showing the data as of {{when}}.',
+    last_known: 'Last known: {{state}}',
+    last_known_hint: 'Last known state; current data is missing right now.',
+  },
   theme: {
     toggle: 'Change color scheme (current: {{current}})',
     light: 'Light',

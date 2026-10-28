@@ -26,7 +26,8 @@ export function ServerLayout({ serverId }: { serverId: number }) {
   const fileJob = useFileJob(serverId, filesAllowed)
 
   if (query.isPending) return <p className="text-muted-foreground">{t('common.loading')}</p>
-  // A failed refetch keeps the old data: after 403/404 the server is gone or hidden, so stale data must not look live.
+  // A failed refetch keeps the old data, which the header marks stale (issue #155); after 403/404 the server is gone
+  // or hidden, so its data must not stay at all.
   const gone = isApiError(query.error, 'not_found') || isApiError(query.error, 'forbidden')
   if (!query.data || gone) {
     let message = errorMessage(query.error, t)
@@ -49,7 +50,7 @@ export function ServerLayout({ serverId }: { serverId: number }) {
   return (
     <ServerContext.Provider value={value}>
       <div className="flex min-w-0 flex-col gap-6">
-        <ServerHeader />
+        <ServerHeader detail={query} />
         <Outlet />
       </div>
     </ServerContext.Provider>
