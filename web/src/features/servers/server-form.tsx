@@ -175,9 +175,10 @@ export function ServerForm({
             idPrefix={`${id}-prop`}
             mode={mode}
             serverName={value.name.trim()}
+            type={value.type}
             value={value.properties}
             error={shown}
-            onChange={(patch, field) => update({ properties: { ...value.properties, ...patch } }, ...(field ? [field] : []))}
+            onChange={(patch, ...fields) => update({ properties: { ...value.properties, ...patch } }, ...fields)}
           />
         </CollapsibleSection>
         {mode === 'create' ? (
