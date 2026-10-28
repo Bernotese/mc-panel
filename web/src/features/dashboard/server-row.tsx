@@ -23,18 +23,32 @@ function iconState(state: ServerState): 'online' | 'offline' | 'unknown' {
   return TRANSITIONAL.has(state) ? 'unknown' : 'offline'
 }
 
-/** One "MOTD" fact; each value is its own text node so that "–" and numbers stay findable. */
-function Fact({ label, children, className }: { label?: string; children: ReactNode; className?: string }) {
+/** One "MOTD" fact; each value is its own text node so that "–" and numbers stay findable. `stale`: last known value. */
+function Fact({ label, children, className, stale = false }: { label?: string; children: ReactNode; className?: string; stale?: boolean }) {
   return (
-    <span className={cn('inline-flex items-baseline gap-1', className)}>
+    <span data-stale={stale || undefined} className={cn('inline-flex items-baseline gap-1', className, stale && 'text-muted-foreground')}>
       {label ? <span className="text-muted-foreground text-xs">{label}</span> : null}
       <span className="font-medium">{children}</span>
     </span>
   )
 }
 
-/** One server in the multiplayer-style list (spec §5.1); every missing value is "–", never 0. */
-export function ServerRow({ server, metrics }: { server: Server; metrics?: OverviewServer }) {
+/**
+ * One server in the multiplayer-style list (spec §5.1); every missing value is "–", never 0. `stale`: the server list
+ * could not be refreshed, `metricsStale`: the monitoring overview could not (issue #155) – both keep the last values
+ * but mark them.
+ */
+export function ServerRow({
+  server,
+  metrics,
+  stale = false,
+  metricsStale = false,
+}: {
+  server: Server
+  metrics?: OverviewServer
+  stale?: boolean
+  metricsStale?: boolean
+}) {
   const { t } = useTranslation()
   const fmt = useFormat()
   const syncWhen = useSyncWhen()
@@ -44,7 +58,8 @@ export function ServerRow({ server, metrics }: { server: Server; metrics?: Overv
   const running = status.state === 'running'
   const showMemory = running && status.memory_limit_bytes > 0
   const missing = t('monitoring.missing')
-  const reach = reachability(server, metrics)
+  // A stale "reachable" would claim a fresh check: without a current overview there is no verdict.
+  const reach = metricsStale ? null : reachability(server, metrics)
   // The schema types a point as number[] (minItems/maxItems 2); the chart wants [at, value] pairs.
   const spark = (metrics?.sparkline ?? []).map(([at, v]) => [at, v] as const)
   const sparkMax = spark.reduce((m, [, v]) => Math.max(m, v), 0)
@@ -55,7 +70,7 @@ export function ServerRow({ server, metrics }: { server: Server; metrics?: Overv
       className="bg-card hover:bg-accent/40 flex flex-col gap-3 border p-3 transition-colors sm:flex-row sm:items-center"
     >
       <div className="flex min-w-0 flex-1 gap-3">
-        <PixelIcon kind="server" state={iconState(status.state)} size={40} className="mt-0.5" />
+        <PixelIcon kind="server" state={stale ? 'unknown' : iconState(status.state)} size={40} className="mt-0.5" />
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h2 id={headingId} className="min-w-0 font-semibold break-words">
@@ -68,12 +83,12 @@ export function ServerRow({ server, metrics }: { server: Server; metrics?: Overv
               </Link>
             </h2>
             {server.dev ? <DevBadge source={server.dev.source_name} /> : null}
-            <ServerStatusBadge server={server} />
+            <ServerStatusBadge server={server} stale={stale} />
             {instance ? <AddressLine address={server.address} /> : null}
             {metrics && instance ? (
               <span className="flex items-center gap-2 sm:ml-auto">
                 <Users aria-hidden="true" className="text-muted-foreground size-3.5" />
-                <span className="font-medium tabular-nums">
+                <span data-stale={metricsStale || undefined} className={cn('font-medium tabular-nums', metricsStale && 'text-muted-foreground')}>
                   {metrics.players === null
                     ? missing
                     : t('monitoring.players_value', { players: metrics.players, max: metrics.players_max ?? missing })}
@@ -97,16 +112,16 @@ export function ServerRow({ server, metrics }: { server: Server; metrics?: Overv
             )}
             {instance && metrics ? (
               <>
-                <Fact label={t('monitoring.tps')} className="text-mc-b">
+                <Fact label={t('monitoring.tps')} className="text-mc-b" stale={metricsStale}>
                   {metrics.tps === null ? missing : formatDecimal(metrics.tps, fmt.locale)}
                 </Fact>
-                <Fact label={t('monitoring.cpu')}>
+                <Fact label={t('monitoring.cpu')} stale={metricsStale}>
                   {metrics.cpu_percent === null ? missing : t('monitoring.percent', { value: formatCpu(metrics.cpu_percent, fmt.locale) })}
                 </Fact>
               </>
             ) : null}
             {showMemory ? (
-              <Fact>
+              <Fact stale={stale}>
                 {t('servers.memory_usage', { used: formatGiB(status.memory_bytes, fmt.locale), limit: formatGiB(status.memory_limit_bytes, fmt.locale) })}
               </Fact>
             ) : null}
@@ -130,7 +145,7 @@ export function ServerRow({ server, metrics }: { server: Server; metrics?: Overv
         </div>
       </div>
       {spark.length >= 2 ? (
-        <div className="hidden w-40 shrink-0 lg:block">
+        <div className={cn('hidden w-40 shrink-0 lg:block', metricsStale && 'opacity-50')}>
           <Sparkline points={spark} spanMs={3_600_000} label={t('monitoring.sparkline', { current: spark[spark.length - 1][1], max: sparkMax })} />
         </div>
       ) : null}
