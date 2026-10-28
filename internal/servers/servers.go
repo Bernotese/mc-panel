@@ -279,6 +279,9 @@ type updateServerRequest struct {
 	// WebRoutes is not part of the spec (no revision bump): the complete list, [] = off; null
 	// is refused.
 	WebRoutes optional[[]agentapi.WebTarget] `json:"web_routes"`
+	// ExpectedRevision makes the request conditional: it is refused (409 server_modified) unless
+	// the stored revision still equals it. Absent or null = no check.
+	ExpectedRevision *int64 `json:"expected_revision"`
 }
 
 var errNotNullable = errors.New("must not be null")
@@ -322,116 +325,75 @@ func (req updateServerRequest) apply(c config) (config, error) {
 	return c, nil
 }
 
+// patchError is an answer decided inside the PATCH transaction; returning it rolls back.
+type patchError struct {
+	status    int
+	code, msg string
+}
+
+func (e *patchError) Error() string { return e.msg }
+
+// patchResult is what one PATCH transaction committed.
+type patchResult struct {
+	s   store.Server
+	in  store.Instance // the row after the write
+	set instanceSettings
+	// changes are the spec fields this write replaced (diff of the row it read), nil if none.
+	changes map[string]any
+	// routes are the stored web routes after the write; oldRoutes the ones it replaced when
+	// routesChanged.
+	routes, oldRoutes []agentapi.WebTarget
+	routesChanged     bool
+}
+
+// handleUpdateServer applies a partial update (UpdateServerRequest) in one write transaction:
+// it reads the row, checks expected_revision, merges and validates the request, then writes
+// the spec and the web routes, so concurrent requests never revert each other's fields and a
+// failure leaves everything unchanged (issue #150). Audit entries follow the commit and name
+// the values this write replaced.
 func (h *Handler) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var req updateServerRequest
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
-	s, ok := h.loadServer(w, r)
+	id, ok := pathID(r)
 	if !ok {
+		writeNotFound(w, r)
 		return
 	}
-	in, ok := h.loadInstance(w, r, s)
-	if !ok {
+	maxMiB := h.maxMemoryMiB(ctx) // reads /proc: outside the transaction
+	var res patchResult
+	err := h.inTx(ctx, func(q *store.Queries) error {
+		var err error
+		res, err = h.patchServer(ctx, q, id, req, maxMiB)
+		return err
+	})
+	if pe := (*patchError)(nil); errors.As(err, &pe) {
+		httpx.WriteError(w, r, pe.status, pe.code, pe.msg)
 		return
 	}
-	dev, err := isDev(ctx, h.q, s.ID)
 	if err != nil {
 		httpx.Internal(w, r, err)
 		return
 	}
-	if dev && req.setsMoreThanMemory() {
-		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeDevManaged,
-			"a dev instance follows its source server: only memory_mib can be changed here, dev settings go through /servers/{id}/dev")
-		return
+	if len(res.changes) > 0 {
+		h.record(ctx, audit.ActionServerUpdate, serverTarget(res.s.ID), audit.ResultSuccess,
+			map[string]any{"name": res.s.Name, "revision": res.in.Revision, "changes": res.changes})
 	}
-	cur, err := configFromInstance(in)
+	if res.routesChanged {
+		h.record(ctx, audit.ActionServerWebRoutesUpdate, serverTarget(res.s.ID), audit.ResultSuccess,
+			map[string]any{"name": res.s.Name, "old": webRoutesDetails(res.oldRoutes), "new": webRoutesDetails(res.routes)})
+	}
+	if len(res.changes) > 0 || res.routesChanged {
+		h.Trigger() // a new revision or route list for the reconcile loop
+	}
+	out, err := view(res.s, allPerms(), &res.in, res.routes, res.set.BaseDomain, h.snapshot())
 	if err != nil {
 		httpx.Internal(w, r, err)
 		return
 	}
-	next, err := req.apply(cur)
-	if err != nil {
-		writeValidation(w, r, err.Error())
-		return
-	}
-	set, err := h.loadSettings(ctx)
-	if err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
-	if err := next.validate(set.CurseForgeKey); err != nil {
-		writeValidation(w, r, err.Error())
-		return
-	}
-	if err := checkMemoryLimit(next.MemoryMiB, h.maxMemoryMiB(ctx)); err != nil {
-		writeValidation(w, r, err.Error())
-		return
-	}
-	webNext, err := req.webRoutes()
-	if err != nil {
-		writeValidation(w, r, err.Error())
-		return
-	}
-	if len(webNext) > 0 && set.BaseDomain == nil {
-		writeConflict(w, r, errBaseDomainRequired)
-		return
-	}
-	changes, err := diff(cur, next)
-	if err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
-	if len(changes) > 0 {
-		propsJSON, err := next.propertiesJSON()
-		if err != nil {
-			httpx.Internal(w, r, err)
-			return
-		}
-		if dev {
-			// Only the memory: the rest of the row may have been replaced by a sync meanwhile.
-			in, err = h.q.ServersUpdateDevMemory(ctx, store.ServersUpdateDevMemoryParams{
-				MemoryMib: int64(next.MemoryMiB), UpdatedAt: h.clock.Now().UnixMilli(), ServerID: s.ID,
-			})
-		} else {
-			in, err = h.q.ServersUpdateInstance(ctx, store.ServersUpdateInstanceParams{
-				Version: next.Version, LoaderVersion: toNullString(next.LoaderVersion), Modpack: toNullString(next.Modpack),
-				Java: string(next.Java), MemoryMib: int64(next.MemoryMiB), Properties: propsJSON,
-				UpdatedAt: h.clock.Now().UnixMilli(), ServerID: s.ID,
-			})
-		}
-		if errors.Is(err, sql.ErrNoRows) { // deleted concurrently
-			writeNotFound(w, r)
-			return
-		}
-		if err != nil {
-			httpx.Internal(w, r, err)
-			return
-		}
-		h.record(ctx, audit.ActionServerUpdate, serverTarget(s.ID), audit.ResultSuccess,
-			map[string]any{"name": s.Name, "revision": in.Revision, "changes": changes})
-		h.Trigger()
-	}
-	var routes []agentapi.WebTarget
-	if req.WebRoutes.Set {
-		if routes, ok = h.updateWebRoutes(w, r, s, webNext); !ok {
-			return
-		}
-	} else {
-		rows, err := h.q.ServersListServerWebRoutes(ctx, s.ID)
-		if err != nil {
-			httpx.Internal(w, r, err)
-			return
-		}
-		routes = webTargets(rows)
-	}
-	out, err := view(s, allPerms(), &in, routes, set.BaseDomain, h.snapshot())
-	if err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
-	on, err := h.downAlerts(ctx, s.ID)
+	on, err := h.downAlerts(ctx, res.s.ID)
 	if err != nil {
 		httpx.Internal(w, r, err)
 		return
@@ -444,6 +406,102 @@ func (h *Handler) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	dd.apply(&out)
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// patchServer is the transaction of handleUpdateServer. maxMiB is the host's per-server
+// memory limit.
+func (h *Handler) patchServer(ctx context.Context, q *store.Queries, id int64, req updateServerRequest, maxMiB int) (patchResult, error) {
+	var res patchResult
+	var err error
+	if res.s, err = q.RbacGetServer(ctx, id); errors.Is(err, sql.ErrNoRows) {
+		return res, &patchError{http.StatusNotFound, httpx.CodeNotFound, "server not found"}
+	} else if err != nil {
+		return res, err
+	}
+	in, err := q.ServersGetInstance(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return res, &patchError{http.StatusConflict, httpx.CodeConflict, "server is not configured (no instance)"}
+	}
+	if err != nil {
+		return res, err
+	}
+	if req.ExpectedRevision != nil && *req.ExpectedRevision != in.Revision {
+		return res, &patchError{http.StatusConflict, httpx.CodeServerModified,
+			fmt.Sprintf("the server was changed meanwhile (revision %d, expected %d): reload it and apply the changes again", in.Revision, *req.ExpectedRevision)}
+	}
+	dev, err := isDev(ctx, q, id)
+	if err != nil {
+		return res, err
+	}
+	if dev && req.setsMoreThanMemory() {
+		return res, &patchError{http.StatusConflict, httpx.CodeDevManaged,
+			"a dev instance follows its source server: only memory_mib can be changed here, dev settings go through /servers/{id}/dev"}
+	}
+	invalid := func(err error) error { return &patchError{http.StatusBadRequest, httpx.CodeValidation, err.Error()} }
+	cur, err := configFromInstance(in)
+	if err != nil {
+		return res, err
+	}
+	next, err := req.apply(cur)
+	if err != nil {
+		return res, invalid(err)
+	}
+	if res.set, err = h.loadSettingsQ(ctx, q); err != nil {
+		return res, err
+	}
+	if err := next.validate(res.set.CurseForgeKey); err != nil {
+		return res, invalid(err)
+	}
+	if err := checkMemoryLimit(next.MemoryMiB, maxMiB); err != nil {
+		return res, invalid(err)
+	}
+	webNext, err := req.webRoutes()
+	if err != nil {
+		return res, invalid(err)
+	}
+	if len(webNext) > 0 && res.set.BaseDomain == nil {
+		return res, &patchError{http.StatusConflict, httpx.CodeConflict, errBaseDomainRequired}
+	}
+	if res.changes, err = diff(cur, next); err != nil {
+		return res, err
+	}
+	res.in = in
+	if len(res.changes) > 0 {
+		now := h.clock.Now().UnixMilli()
+		if dev {
+			// Only the memory, like a sync writes everything but the memory.
+			res.in, err = q.ServersUpdateDevMemory(ctx, store.ServersUpdateDevMemoryParams{
+				MemoryMib: int64(next.MemoryMiB), UpdatedAt: now, ServerID: id,
+			})
+		} else {
+			propsJSON, perr := next.propertiesJSON()
+			if perr != nil {
+				return res, perr
+			}
+			res.in, err = q.ServersUpdateInstance(ctx, store.ServersUpdateInstanceParams{
+				Version: next.Version, LoaderVersion: toNullString(next.LoaderVersion), Modpack: toNullString(next.Modpack),
+				Java: string(next.Java), MemoryMib: int64(next.MemoryMiB), Properties: propsJSON,
+				UpdatedAt: now, ServerID: id,
+			})
+		}
+		if err != nil {
+			return res, err
+		}
+	} else {
+		res.changes = nil
+	}
+	rows, err := q.ServersListServerWebRoutes(ctx, id)
+	if err != nil {
+		return res, err
+	}
+	res.routes = webTargets(rows)
+	if req.WebRoutes.Set && !slices.Equal(res.routes, webNext) {
+		if err := replaceWebRoutes(ctx, q, id, webNext); err != nil {
+			return res, err
+		}
+		res.oldRoutes, res.routes, res.routesChanged = res.routes, webNext, true
+	}
+	return res, nil
 }
 
 // setsMoreThanMemory reports whether the request sets a field a dev instance takes from its
@@ -474,53 +532,18 @@ func (req updateServerRequest) webRoutes() ([]agentapi.WebTarget, error) {
 	return ts, nil
 }
 
-// updateWebRoutes replaces the web routes of s with the validated, sorted list next, audits
-// the change and triggers the reconcile loop that sends the route list; an unchanged list
-// writes nothing. It returns the stored list. On failure it has written the error answer and
-// returns ok = false.
-func (h *Handler) updateWebRoutes(w http.ResponseWriter, r *http.Request, s store.Server, next []agentapi.WebTarget) ([]agentapi.WebTarget, bool) {
-	ctx := r.Context()
-	var old []agentapi.WebTarget
-	changed := false
-	// Read and replace in one write transaction, so old is the list this write replaced.
-	err := h.inTx(ctx, func(q *store.Queries) error {
-		if _, err := q.ServersGetInstance(ctx, s.ID); err != nil {
-			return err // sql.ErrNoRows: deleted concurrently
-		}
-		rows, err := q.ServersListServerWebRoutes(ctx, s.ID)
-		if err != nil {
+// replaceWebRoutes replaces the stored web routes of a server with the validated, sorted list
+// next (inside the caller's transaction).
+func replaceWebRoutes(ctx context.Context, q *store.Queries, id int64, next []agentapi.WebTarget) error {
+	if err := q.ServersDeleteWebRoutes(ctx, id); err != nil {
+		return err
+	}
+	for _, t := range next {
+		if err := q.ServersInsertWebRoute(ctx, store.ServersInsertWebRouteParams{ServerID: id, Path: t.Path, Port: int64(t.Port)}); err != nil {
 			return err
 		}
-		old = webTargets(rows)
-		if slices.Equal(old, next) {
-			return nil
-		}
-		changed = true
-		if err := q.ServersDeleteWebRoutes(ctx, s.ID); err != nil {
-			return err
-		}
-		for _, t := range next {
-			if err := q.ServersInsertWebRoute(ctx, store.ServersInsertWebRouteParams{ServerID: s.ID, Path: t.Path, Port: int64(t.Port)}); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if errors.Is(err, sql.ErrNoRows) {
-		writeNotFound(w, r)
-		return nil, false
 	}
-	if err != nil {
-		httpx.Internal(w, r, err)
-		return nil, false
-	}
-	if !changed {
-		return old, true
-	}
-	h.record(ctx, audit.ActionServerWebRoutesUpdate, serverTarget(s.ID), audit.ResultSuccess,
-		map[string]any{"name": s.Name, "old": webRoutesDetails(old), "new": webRoutesDetails(next)})
-	h.Trigger()
-	return next, true
+	return nil
 }
 
 // downAlerts is the TP5 per-server alert switch; a missing row means on.

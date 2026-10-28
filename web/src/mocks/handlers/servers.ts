@@ -32,25 +32,54 @@ function validBaseDomain(d: string): boolean {
 
 /** Installed memory of the mock host (26 GiB): the per-server limit is (26 − 1) / 1.25 = 20 GiB. */
 const MOCK_HOST_MIB = 26624
+/** Same budget model as internal/servers/memory.go: containers get 1.25 × heap, 1 GiB stays free. */
 const MEMORY_RESERVE_MIB = 1024
+const CONTAINER_OVERHEAD_PERCENT = 25
+
+function containerMiB(heapMiB: number): number {
+  return (heapMiB * (100 + CONTAINER_OVERHEAD_PERCENT)) / 100
+}
+
+/** Largest heap in 256 MiB steps whose container fits into containerMiB. */
+function heapForContainerMiB(container: number): number {
+  const m = Math.floor((container * 100) / (100 + CONTAINER_OVERHEAD_PERCENT))
+  return m - (m % 256)
+}
 
 /** Same formula as servers.MaxMemoryMiB: (host − 1 GiB) / 1.25 in 256 MiB steps, within 1..32 GiB. */
 function maxMemoryMiB(hostMiB: number): number {
-  const m = Math.floor(((hostMiB - MEMORY_RESERVE_MIB) * 4) / 5)
-  return Math.min(Math.max(m - (m % 256), 1024), 32768)
+  return Math.min(Math.max(heapForContainerMiB(hostMiB - MEMORY_RESERVE_MIB), 1024), 32768)
 }
 
-/** Same rule as servers.RecommendedMemoryMiB. */
-function recommendedMemoryMiB(type: InstanceType, hostMiB: number, allocatedMiB: number): number {
+/** Same rule as servers.RecommendedMemoryMiB; null = not even the minimum fits the free budget. */
+function recommendedMemoryMiB(type: InstanceType, hostMiB: number, allocatedContainerMiB: number): number | null {
   const base = type === 'fabric' || type === 'neoforge' || type === 'modrinth' || type === 'curseforge' ? 6144 : 4096
-  const half = Math.floor(Math.max(hostMiB - MEMORY_RESERVE_MIB - allocatedMiB, 0) / 2)
-  return Math.min(Math.max(Math.min(base, half - (half % 256)), 1024), maxMemoryMiB(hostMiB))
+  const free = Math.max(hostMiB - MEMORY_RESERVE_MIB - allocatedContainerMiB, 0)
+  let rec = Math.min(base, heapForContainerMiB(Math.floor(free / 2)))
+  if (rec < 1024) {
+    if (heapForContainerMiB(free) < 1024) return null
+    rec = 1024
+  }
+  return Math.min(rec, maxMemoryMiB(hostMiB))
 }
 
 export function memoryLimits(): ServerMemoryLimits {
-  const allocated = db.servers.reduce((sum, s) => sum + (s.instance?.memory_mib ?? 0), 0)
-  const recommended = Object.fromEntries(TYPES.map((t) => [t, recommendedMemoryMiB(t, MOCK_HOST_MIB, allocated)])) as ServerMemoryLimits['recommended_mib']
-  return { min_mib: 1024, max_mib: maxMemoryMiB(MOCK_HOST_MIB), step_mib: 256, host_total_mib: MOCK_HOST_MIB, allocated_mib: allocated, recommended_mib: recommended }
+  const heaps = db.servers.map((s) => s.instance?.memory_mib ?? 0)
+  const allocated = heaps.reduce((sum, m) => sum + m, 0)
+  const allocatedContainer = heaps.reduce((sum, m) => sum + containerMiB(m), 0)
+  const recommended = Object.fromEntries(TYPES.map((t) => [t, recommendedMemoryMiB(t, MOCK_HOST_MIB, allocatedContainer)])) as ServerMemoryLimits['recommended_mib']
+  return {
+    min_mib: 1024,
+    max_mib: maxMemoryMiB(MOCK_HOST_MIB),
+    step_mib: 256,
+    host_total_mib: MOCK_HOST_MIB,
+    host_reserve_mib: MEMORY_RESERVE_MIB,
+    container_overhead_percent: CONTAINER_OVERHEAD_PERCENT,
+    container_budget_mib: MOCK_HOST_MIB - MEMORY_RESERVE_MIB,
+    allocated_mib: allocated,
+    allocated_container_mib: allocatedContainer,
+    recommended_mib: recommended,
+  }
 }
 
 export function validMemory(m: unknown): m is number {
@@ -169,7 +198,7 @@ export function toServer(s: MockServer, permissions: Permission[], admin = true)
     name: s.name,
     permissions,
     address: s.instance && base ? `${s.name}.${base}` : null,
-    instance,
+    instance: instance ? { ...instance, revision: s.revision } : null,
     status: admin ? s.status : { ...s.status, last_error: '' },
     down_alerts: admin ? (db.monitoring.downAlerts[s.id] ?? true) : null,
     ...webFields(s, admin),
@@ -340,8 +369,12 @@ export const serverOperations: MockOperation[] = [
       if (!server.instance) return apiError(409, 'conflict', 'server is not configured (no instance)')
       const body = await readJson<UpdateServerRequest>(request)
       if (!body) return apiError(400, 'bad_request', 'invalid JSON body')
+      // Like the panel: a stale draft is refused as a whole before anything else is checked.
+      if (body.expected_revision !== undefined && body.expected_revision !== server.revision) {
+        return apiError(409, 'server_modified', `the server was changed meanwhile (revision ${server.revision}, expected ${body.expected_revision}): reload it and apply the changes again`)
+      }
       // A dev takes everything but its memory from its source at every sync.
-      if (server.dev && Object.keys(body).some((k) => k !== 'memory_mib')) {
+      if (server.dev && Object.keys(body).some((k) => k !== 'memory_mib' && k !== 'expected_revision')) {
         return apiError(409, 'dev_managed', 'a dev instance only accepts memory_mib; everything else follows its source')
       }
       if (body.memory_mib !== undefined && !validMemory(body.memory_mib)) {

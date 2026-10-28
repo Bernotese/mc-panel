@@ -69,24 +69,45 @@ describe('CreateServerPage', () => {
     expect(onCreated).not.toHaveBeenCalled()
   })
 
-  it('suggests memory per type within the host limits and warns about overcommitting', async () => {
+  it('suggests memory per type within the host budget and warns about overcommitting', async () => {
     const user = userEvent.setup()
     await renderWithProviders(<CreateServerPage onCreated={vi.fn()} />, { me: loginAs('admin') })
-    // mock host: 26 GiB RAM, limit 20 GiB, 12 GiB given to the seeded servers
-    expect(await screen.findByText(/Der Host hat 26 GiB RAM/)).toBeInTheDocument()
+    // mock host: 26 GiB RAM, 25 GiB container budget, limit 20 GiB; the seeded servers have 12 GiB of heap = 15 GiB of
+    // container limits, so half of the free 10 GiB is 5 GiB of container = 4 GiB of heap
+    expect(await screen.findByText(/Der Host hat 26 GiB RAM: 1 GiB bleibt frei, und der Container darf 25 % mehr nutzen/)).toBeInTheDocument()
     expect(screen.getByText('Empfohlen: 4 GiB')).toBeInTheDocument()
     const memory = screen.getByRole('spinbutton', { name: 'Arbeitsspeicher (GiB)' })
     expect(memory).toHaveAttribute('max', '20')
+    // 6 GiB for mod loaders, capped by the free budget
     await user.click(screen.getByRole('radio', { name: 'Fabric' }))
-    expect(screen.getByText('Empfohlen: 6 GiB')).toBeInTheDocument()
-    expect(memory).toHaveValue(6)
+    expect(screen.getByText('Empfohlen: 4 GiB')).toBeInTheDocument()
+    expect(memory).toHaveValue(4)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
 
+    // 8 GiB of heap = 10 GiB of container: exactly the free budget, no warning yet
+    await user.clear(memory)
+    await user.type(memory, '8')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
     await user.clear(memory)
     await user.type(memory, '20')
-    expect(screen.getByRole('status')).toHaveTextContent('Alle Server zusammen hätten 32 GiB, der Host hat 26 GiB RAM.')
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Liefen alle Server gleichzeitig, könnten ihre Container bis zu 40 GiB nutzen, verfügbar sind aber nur 25 GiB (26 GiB RAM minus 1 GiB für das System).',
+    )
     // a changed value stays when the type changes
     await user.click(screen.getByRole('radio', { name: 'Paper' }))
     expect(memory).toHaveValue(20)
+  })
+
+  it('says so when no safe size is left instead of recommending the minimum', async () => {
+    // 20 + 2 + 4 + 2 GiB of heap = 35 GiB of container limits on a 25 GiB budget
+    const first = db.servers.find((s) => s.instance?.memory_mib === 4096)
+    if (!first?.instance) throw new Error('no seeded 4 GiB server')
+    first.instance.memory_mib = 20480
+    await renderWithProviders(<CreateServerPage onCreated={vi.fn()} />, { me: loginAs('admin') })
+    expect(await screen.findByText(/Keine sichere Größe mehr frei: Schon das Minimum von 1 GiB/)).toBeInTheDocument()
+    expect(screen.queryByText(/Empfohlen/)).not.toBeInTheDocument()
+    expect(screen.getByRole('spinbutton', { name: 'Arbeitsspeicher (GiB)' })).toHaveValue(1)
+    expect(screen.getByRole('status')).toHaveTextContent('bis zu 36,25 GiB')
   })
 
   it('explains a missing base domain and shows the 409 from the panel', async () => {

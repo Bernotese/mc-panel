@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Catalog, InstanceConfig, ServerMemoryLimits } from '@/api/types'
 import {
+  containerMiB,
   effectiveJava,
   effectiveVersion,
   emptyServerForm,
@@ -38,6 +39,7 @@ const survival: InstanceConfig = {
   modpack: null,
   java: 'java21',
   memory_mib: 4352,
+  revision: 1,
   properties: {
     motd: 'Hallo',
     difficulty: 'hard',
@@ -202,13 +204,18 @@ describe('server form model', () => {
 })
 
 describe('memory limits', () => {
+  // 16 GiB host: 15 GiB container budget; two servers with 4 + 6 GiB heap = 12.5 GiB of container limits
   const limits: ServerMemoryLimits = {
     min_mib: 1024,
     max_mib: 12288,
     step_mib: 256,
     host_total_mib: 16384,
-    allocated_mib: 12288,
-    recommended_mib: { vanilla: 1536, paper: 1536, purpur: 1536, fabric: 1536, neoforge: 1536, modrinth: 1536, curseforge: 1536 },
+    host_reserve_mib: 1024,
+    container_overhead_percent: 25,
+    container_budget_mib: 15360,
+    allocated_mib: 10240,
+    allocated_container_mib: 12800,
+    recommended_mib: { vanilla: 1024, paper: 1024, purpur: 1024, fabric: 1024, neoforge: 1024, modrinth: 1024, curseforge: 1024 },
   }
 
   it('falls back to the static bounds without host limits', () => {
@@ -216,14 +223,27 @@ describe('memory limits', () => {
     expect(memoryLimitsFrom(limits)).toEqual({ min: 1024, max: 12288, step: 256 })
   })
 
-  it('warns when all servers together exceed the host memory', () => {
-    expect(memoryOvercommit(4096, limits, 0)).toBeNull()
-    expect(memoryOvercommit(4352, limits, 0)).toEqual({ totalMiB: 16640, hostMiB: 16384 })
-    // editing a server that already counts 4096 in allocated_mib
-    expect(memoryOvercommit(8192, limits, 4096)).toBeNull()
-    expect(memoryOvercommit(8448, limits, 4096)).toEqual({ totalMiB: 16640, hostMiB: 16384 })
+  it('converts a heap into its container limit with the panel factor', () => {
+    expect(containerMiB(4096, limits)).toBe(5120)
+    expect(containerMiB(7168, limits)).toBe(8960)
+    expect(containerMiB(4096, { ...limits, container_overhead_percent: 50 })).toBe(6144)
+  })
+
+  it('warns when the container limits of all servers exceed host RAM minus the reserve', () => {
+    // 2560 MiB of container budget left: a 2 GiB heap (2560) fits exactly, 2.25 GiB (2880) does not
+    expect(memoryOvercommit(2048, limits, 0)).toBeNull()
+    expect(memoryOvercommit(2304, limits, 0)).toEqual({ totalMiB: 15680, budgetMiB: 15360, hostMiB: 16384, reserveMiB: 1024 })
+    // editing the 6 GiB server replaces its 7.5 GiB container instead of counting it twice
+    expect(memoryOvercommit(8192, limits, 6144)).toBeNull()
+    expect(memoryOvercommit(8448, limits, 6144)).toEqual({ totalMiB: 15680, budgetMiB: 15360, hostMiB: 16384, reserveMiB: 1024 })
     expect(memoryOvercommit(null, limits, 0)).toBeNull()
     expect(memoryOvercommit(32768, undefined, 0)).toBeNull()
-    expect(memoryOvercommit(32768, { ...limits, host_total_mib: null }, 0)).toBeNull()
+    expect(memoryOvercommit(32768, { ...limits, host_total_mib: null, container_budget_mib: null }, 0)).toBeNull()
+  })
+
+  it('warns for two 7 GiB servers on a 16 GiB host although their heaps fit (issue #158)', () => {
+    const first = { ...limits, allocated_mib: 7168, allocated_container_mib: 8960 }
+    // 14 GiB of heap < 16 GiB of RAM, but 17.5 GiB of container limits > 15 GiB
+    expect(memoryOvercommit(7168, first, 0)).toEqual({ totalMiB: 17920, budgetMiB: 15360, hostMiB: 16384, reserveMiB: 1024 })
   })
 })

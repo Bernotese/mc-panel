@@ -47,6 +47,11 @@ const (
 	MinMemoryMiB  = 1024
 	MaxMemoryMiB  = 32768
 	MemoryStepMiB = 256
+	// The container memory limit is MemoryMiB × ContainerMemoryNumerator/ContainerMemoryDenominator
+	// (1.25): the heap plus JVM and native overhead. The agent's template applies it; the panel's
+	// memory budget (servers.ContainerMemoryMiB) counts with it.
+	ContainerMemoryNumerator   = 5
+	ContainerMemoryDenominator = 4
 )
 
 // ErrInvalid wraps every validation error; the message names the field.

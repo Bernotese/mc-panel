@@ -77,9 +77,11 @@ export function ServerForm({
   const catalog = useQuery({ ...catalogQueryOptions(draft.type), enabled: !modpack })
   // Without the host limits (still loading or failed) the form falls back to 1..32 GiB; the panel checks again.
   const memoryLimits = useQuery(memoryLimitsQueryOptions)
-  // A new server follows the recommendation for its type until the admin changes the memory.
+  // A new server follows the recommendation for its type until the admin changes the memory. Without a safe size
+  // (null: not even the minimum fits the free budget) the field starts at the minimum and says so.
   const recommendedMiB = mode === 'create' ? memoryLimits.data?.recommended_mib[draft.type] : undefined
-  const value = recommendedMiB !== undefined && !touched.has('memory') ? { ...draft, memoryGiB: memoryInputValue(recommendedMiB) } : draft
+  const prefillMiB = recommendedMiB === null ? memoryLimits.data?.min_mib : recommendedMiB
+  const value = prefillMiB !== undefined && !touched.has('memory') ? { ...draft, memoryGiB: memoryInputValue(prefillMiB) } : draft
   const ctx: FormContext = { mode, catalog: catalog.data, curseforgeKeySet, memory: memoryLimitsFrom(memoryLimits.data) }
   const errors = validateServerForm(value, ctx)
   const hasErrors = Object.keys(errors).length > 0
@@ -408,8 +410,8 @@ interface MemoryFieldProps {
   limits: ServerMemoryLimits | undefined
   /** Memory this server already counts in limits.allocated_mib (edit), 0 for a new one. */
   ownMiB: number
-  /** create only: the suggested size for the chosen type */
-  recommendedMiB: number | undefined
+  /** create only: the suggested size for the chosen type; null = no size fits the free budget safely */
+  recommendedMiB: number | null | undefined
   onChange(text: string): void
 }
 
@@ -422,10 +424,12 @@ export function MemoryField({ id, text, error, limits, ownMiB, recommendedMiB, o
   const fallback = Math.min(Math.max(recommendedMiB ?? ownMiB, bounds.min), bounds.max)
   const slider = mib !== null && mib >= bounds.min && mib <= bounds.max ? mib / 1024 : fallback / 1024
   const range = { min: gib(bounds.min), max: gib(bounds.max) }
-  const hint =
-    limits?.host_total_mib != null
-      ? t('servers.form.memory_hint_host', { ...range, host: gib(limits.host_total_mib) })
-      : t('servers.form.memory_hint', range)
+  let hint = t('servers.form.memory_hint', range)
+  if (limits?.host_total_mib != null) {
+    hint = t('servers.form.memory_hint_host', { ...range, host: gib(limits.host_total_mib), reserve: gib(limits.host_reserve_mib), overhead: limits.container_overhead_percent })
+  } else if (limits) {
+    hint = t('servers.form.memory_hint_overhead', { ...range, overhead: limits.container_overhead_percent })
+  }
   const overcommit = memoryOvercommit(mib, limits, ownMiB)
   // The range in the error follows the locale like the hint (11,5 instead of 11.5).
   const shownError = error?.key === 'servers.validation.memory' ? { ...error, params: range } : error
@@ -459,10 +463,20 @@ export function MemoryField({ id, text, error, limits, ownMiB, recommendedMiB, o
           </div>
         )}
       </FieldRow>
-      {recommendedMiB !== undefined ? <p className="text-muted-foreground text-sm">{t('servers.form.memory_recommended', { value: gib(recommendedMiB) })}</p> : null}
+      {recommendedMiB != null ? <p className="text-muted-foreground text-sm">{t('servers.form.memory_recommended', { value: gib(recommendedMiB) })}</p> : null}
+      {recommendedMiB === null ? (
+        <p role="note" className="text-status-starting text-sm">
+          {t('servers.form.memory_no_recommendation', { min: gib(bounds.min) })}
+        </p>
+      ) : null}
       {overcommit ? (
         <p role="status" className="text-status-starting text-sm">
-          {t('servers.form.memory_overcommit', { total: gib(overcommit.totalMiB), host: gib(overcommit.hostMiB) })}
+          {t('servers.form.memory_overcommit', {
+            total: gib(overcommit.totalMiB),
+            budget: gib(overcommit.budgetMiB),
+            host: gib(overcommit.hostMiB),
+            reserve: gib(overcommit.reserveMiB),
+          })}
         </p>
       ) : null}
     </div>

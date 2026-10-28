@@ -48,6 +48,8 @@ type instanceJSON struct {
 	Java          instancespec.Java `json:"java"`
 	MemoryMiB     int               `json:"memory_mib"`
 	Properties    propertiesJSON    `json:"properties"`
+	// Revision is the spec revision; PATCH /servers/{id} takes it back as expected_revision.
+	Revision int64 `json:"revision"`
 }
 
 // serverJSON is the OpenAPI schema Server; permissions are the caller's effective permissions.
@@ -157,6 +159,7 @@ func view(s store.Server, perms []rbac.Permission, in *store.Instance, routes []
 	out.Instance = &instanceJSON{
 		Type: c.Type, Version: c.Version, LoaderVersion: c.LoaderVersion, Modpack: c.Modpack,
 		Java: c.Java, MemoryMiB: c.MemoryMiB, Properties: resolvedProperties(s.Name, c.Properties),
+		Revision: in.Revision,
 	}
 	return out, nil
 }
