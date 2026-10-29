@@ -6,6 +6,7 @@ describe('sudoActionKey', () => {
   it('maps method and path template to a translated label', () => {
     expect(sudoActionKey({ method: 'DELETE', path: '/servers/{id}' })).toBe('sudo.action.server_delete')
     expect(sudoActionKey({ method: 'post', path: '/servers/{id}/backups/{snapshot}/restore' })).toBe('sudo.action.backup_restore')
+    expect(sudoActionKey({ method: 'POST', path: '/servers/deletions/{id}/abandon' })).toBe('sudo.action.deletion_abandon')
     expect(sudoActionKey({ method: 'GET', path: '/servers/{id}' })).toBe('sudo.action.generic')
     expect(sudoActionKey({ method: 'POST', path: '/nope' })).toBe('sudo.action.generic')
   })

@@ -397,7 +397,7 @@ describe('ServerLayout', () => {
     await user.type(screen.getByLabelText('Zum Bestätigen den Namen „survival“ eintippen'), 'survival')
     expect(submit).toBeEnabled()
     await user.click(submit)
-    expect(await screen.findByText('Server „survival“ gelöscht.')).toBeInTheDocument()
+    expect(await screen.findByText('Server „survival“ gelöscht. Der Container wird noch abgebaut.')).toBeInTheDocument()
     await waitFor(() => expect(router.state.location.pathname).toBe('/'))
     expect(db.servers.some((s) => s.id === 1)).toBe(false)
   })
@@ -606,7 +606,11 @@ describe('ServerLayout', () => {
         await new Promise<void>((resolve) => {
           release = resolve
         })
-        return new HttpResponse(null, { status: 204 })
+        const now = Date.now()
+        return HttpResponse.json(
+          { server_id: 1, name: 'survival', state: 'pending', container: 'pending', container_error: null, backups: 'purged', backups_error: null, requested_at: now, updated_at: now, completed_at: null },
+          { status: 202 },
+        )
       }),
     )
     await renderApp('/servers/1/settings', loginAs('admin', { sudo: true }))
@@ -617,6 +621,6 @@ describe('ServerLayout', () => {
     await user.click(screen.getByRole('button', { name: 'Server löschen' }))
     expect(await screen.findByText('Server und Backups werden gelöscht …')).toBeInTheDocument()
     release()
-    expect(await screen.findByText('Server „survival“ gelöscht.')).toBeInTheDocument()
+    expect(await screen.findByText('Server „survival“ gelöscht. Der Container wird noch abgebaut.')).toBeInTheDocument()
   })
 })

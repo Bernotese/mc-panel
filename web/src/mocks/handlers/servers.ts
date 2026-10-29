@@ -21,6 +21,19 @@ import { DEV_PREFIX, devOf, devSummary, settleDev } from './dev-model'
 import { API, apiError, guard, idParam, op, readJson, serverPermissions, type MockOperation } from './util'
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/
+/** How long the mock agent takes to confirm a container remove. */
+export const MOCK_REMOVE_MS = 3_000
+
+/** The mock agent confirms a pending remove MOCK_REMOVE_MS after the last attempt; failed ones stay until a retry. */
+export function settleDeletions(now: number): void {
+  for (const d of db.deletions) {
+    if (d.state !== 'pending' || now - d.updated_at < MOCK_REMOVE_MS) continue
+    d.container = d.container === 'pending' ? 'removed' : d.container
+    d.state = d.backups === 'failed' ? 'partial' : 'done'
+    d.updated_at = now
+    if (d.state === 'done') d.completed_at = now
+  }
+}
 const ACTIONS: PowerAction[] = ['start', 'stop', 'restart']
 const TYPES: InstanceType[] = ['vanilla', 'paper', 'purpur', 'fabric', 'neoforge', 'modrinth', 'curseforge']
 const DNS_LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
@@ -247,7 +260,9 @@ export const serverOperations: MockOperation[] = [
       if (body.eula_accepted !== true) return apiError(400, 'validation_failed', 'eula_accepted must be true')
       if (!body.type || !TYPES.includes(body.type)) return apiError(400, 'validation_failed', 'type: unknown type')
       if (!validMemory(body.memory_mib)) return apiError(400, 'validation_failed', MEMORY_MESSAGE)
-      if (db.servers.some((s) => s.name === name)) return apiError(409, 'conflict', 'server name already taken')
+      // Like the panel: a name stays taken until its deletion is done (the old container may still be routed under it).
+      if (db.servers.some((s) => s.name === name) || db.deletions.some((d) => d.name === name && d.completed_at === null))
+        return apiError(409, 'conflict', 'server name already taken')
       const version = body.version ?? ''
       const server: MockServer = {
         id: nextId(),
@@ -347,6 +362,18 @@ export const serverOperations: MockOperation[] = [
     }),
   ),
 
+  // Before getServer: "deletions" would match /servers/:id (the panel's router prefers the static path).
+  op(
+    'listServerDeletions',
+    http.get(`${API}/servers/deletions`, ({ request }) => {
+      const g = guard(request, { admin: true })
+      if (g instanceof Response) return g
+      settleDeletions(Date.now())
+      const since = Date.now() - 7 * 24 * 3600 * 1000
+      return HttpResponse.json<ServerDeletion[]>(db.deletions.filter((d) => d.completed_at === null || d.completed_at >= since))
+    }),
+  ),
+
   op(
     'getServer',
     http.get(`${API}/servers/:id`, ({ request, params }) => {
@@ -439,24 +466,22 @@ export const serverOperations: MockOperation[] = [
       }
       recordAudit(g.user, 'server.delete', `server:${server.id}`, 'success', details)
       if (server.dev) recordAudit(g.user, 'dev.delete', `server:${server.id}`, 'success', { name: server.name })
-      // Like the panel: a tombstone; the mock agent confirms the removal at once.
+      // Like the panel: a tombstone; the remove is asked for and confirmed by the mock agent a little later (settleDeletions).
       const now = Date.now()
       const deletion: ServerDeletion = {
-        server_id: id, name: server.name, state: 'done', container: server.instance ? 'removed' : 'none', container_error: null,
-        backups: purge ? 'purged' : 'none', backups_error: null, requested_at: now, updated_at: now, completed_at: now,
+        server_id: id,
+        name: server.name,
+        state: server.instance ? 'pending' : 'done',
+        container: server.instance ? 'pending' : 'none',
+        container_error: null,
+        backups: purge ? 'purged' : 'none',
+        backups_error: null,
+        requested_at: now,
+        updated_at: now,
+        completed_at: server.instance ? null : now,
       }
       db.deletions.unshift(deletion)
       return HttpResponse.json<ServerDeletion>(deletion, { status: 202 })
-    }),
-  ),
-
-  op(
-    'listServerDeletions',
-    http.get(`${API}/servers/deletions`, ({ request }) => {
-      const g = guard(request, { admin: true })
-      if (g instanceof Response) return g
-      const since = Date.now() - 7 * 24 * 3600 * 1000
-      return HttpResponse.json<ServerDeletion[]>(db.deletions.filter((d) => d.completed_at === null || d.completed_at >= since))
     }),
   ),
 

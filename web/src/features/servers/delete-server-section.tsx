@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useErrorToast } from '@/lib/error-message'
-import { deleteServer, memoryLimitsKey, serverKey, serversKey } from './api'
+import { deleteServer, memoryLimitsKey, serverDeletionsKey, serverKey, serversKey } from './api'
 
 /**
  * Deleting needs the server name typed in; the text names the deleted/ folder on the host (spec §3.3). The backups stay
@@ -30,8 +30,19 @@ export function DeleteServerSection({ server }: { server: Server }) {
 
   const remove = useMutation({
     mutationFn: () => deleteServer(server.id, purge),
-    onSuccess: () => {
-      toast.success(t('servers.delete.deleted', { name: server.name }))
+    // The server is gone from the panel at once; its cleanup may still run or have failed (#148): say which.
+    onSuccess: (deletion) => {
+      const name = server.name
+      const details = { label: t('servers.delete.details'), onClick: () => void navigate({ to: '/settings' }) }
+      if (deletion.state === 'pending') toast.success(t('servers.delete.deleted_pending', { name }), { action: details })
+      else if (deletion.state !== 'failed' && deletion.state !== 'partial') toast.success(t('servers.delete.deleted', { name }))
+      else
+        toast.warning(t(`servers.delete.deleted_${deletion.state}`, { name }), {
+          description: deletion.container_error ?? deletion.backups_error ?? undefined,
+          action: details,
+          duration: 15_000,
+        })
+      void queryClient.invalidateQueries({ queryKey: serverDeletionsKey })
       // A deleted dev leads back to its source.
       // The server is gone: its unsaved settings no longer matter, so the area's leave guard does not ask (issue #154).
       if (server.dev) void navigate({ to: '/servers/$id', params: { id: String(server.dev.source_id) }, ignoreBlocker: true })
