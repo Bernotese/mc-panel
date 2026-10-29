@@ -13,6 +13,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/servers/admit"
 )
 
@@ -25,6 +26,13 @@ type deletionResp struct {
 	Backups        string  `json:"backups"`
 	BackupsError   *string `json:"backups_error"`
 	CompletedAt    *int64  `json:"completed_at"`
+}
+
+// adminNow is the admin with a sudo window from the fake clock's now (tests that advance it).
+func (e *env) adminNow() principal.Principal {
+	p := e.admin()
+	p.SudoUntil = e.clk.Now().Add(5 * time.Minute)
+	return p
 }
 
 // deleteServer deletes id (202) and returns the deletion.
@@ -243,6 +251,7 @@ func TestDeletionAuditAndNotify(t *testing.T) {
 
 	// a retry by an admin is audited with the actor; the completion by the panel as system
 	e.agent.setErr(nil)
+	admin = e.adminNow()
 	rec := e.do(http.MethodPost, fmt.Sprintf("/servers/deletions/%d/retry", id), nil, &admin)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("retry: %d %s", rec.Code, rec.Body)
@@ -324,7 +333,6 @@ func TestDeletionAbandonAndDisabledAgent(t *testing.T) {
 		t.Fatalf("second abandon: %d", rec.Code)
 	}
 	e.agent.takeCalls()
-	e.clk.Advance(time.Hour)
 	if calls := e.deletionPass(); len(calls) != 0 {
 		t.Fatalf("an abandoned deletion still asks the agent: %v", calls)
 	}
