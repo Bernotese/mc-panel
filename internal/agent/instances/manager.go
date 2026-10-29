@@ -794,7 +794,6 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 		Docker:    agentapi.DockerUnavailable,
 		Instances: []agentapi.InstanceStatus{},
 		Router:    agentapi.RouterStatus{State: agentapi.StateMissing},
-		Removed:   []int64{},
 	}
 	type workState struct {
 		op              agentapi.Operation
@@ -807,7 +806,6 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 		op, queued := st.snapshot()
 		work[id] = workState{op: op, queued: queued, lastError: st.lastError, name: st.name}
 	}
-	resp.Removed = make([]int64, 0, len(m.removed))
 	for id := range m.removed {
 		resp.Removed = append(resp.Removed, id)
 	}
@@ -887,7 +885,6 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 			Docker:    agentapi.DockerUnavailable,
 			Instances: []agentapi.InstanceStatus{},
 			Router:    agentapi.RouterStatus{State: agentapi.StateMissing, LastError: resp.Router.LastError},
-			Removed:   []int64{},
 		}
 	}
 	return resp
