@@ -239,6 +239,14 @@ Then extract the tar into an empty directory and check it. The last entry, `.mcp
 
 "Delete server" with "Delete backups too" removes the journal entry as well.
 
+**Backup CPU budget (MC-PERF-04, issue #161).** `limits.restic_gomaxprocs` in `files.toml` (0 = unset, default) reaches restic as `GOMAXPROCS` through the fixed child environment of `resticEnv` (`internal/files/backupsvc.go`); nothing of the service's own environment is inherited. Whether a value other than unset is a better default is open until it is measured with `scripts/bench-restic-budget.sh`, on the test VM only while nothing else runs there (no `make test-vm`, no teammates):
+
+1. Deploy the branch to measure (`make deploy-testvm REF=…`) and create a benchmark server (paper, at least 1.20.3 for `tick query` with percentiles, 4 GiB) with a copied world of realistic size; schedule off, no other servers running. Its backups are deleted by the script.
+2. Start a fixed workload and let it settle for 5 minutes: install Chunky (Modrinth) and pre-generate a fixed area through the console (`chunky world world`, `chunky center 0 0`, `chunky radius 3000`, `chunky start`), which is the exploration part; restart Chunky from the same settings before every measurement (`chunky cancel`, `chunky start`). Real players can be added, but the same for every candidate.
+3. `scp scripts/bench-restic-budget.sh claude@192.168.1.117:` and `ssh claude@192.168.1.117 'sudo RUNS=3 bash bench-restic-budget.sh <id> 0 1 2'` (`ssh -t` or `nohup … &` for a run of more than an hour; results in `~/bench-restic-<date>/`). Per round it samples 120 s without a backup, then an initial (repository purged) and an incremental backup for every budget, interleaved, each between `save-off`/`save-all flush` and `save-on` as the panel does. It restores `files.toml` at the end.
+4. Read `results.csv` and the summary: tick P95/P99 of 5 s windows (`tick query` covers 100 ticks) against the baseline, backup and save-off duration, CPU seconds of the files service and the server container (cgroups), host CPU, average disk latency of the instances disk, peak RSS of restic and `memory.peak` of the files service (`MemoryMax=1G`), repository growth.
+5. Change the default only if a budget lowers P95/P99 clearly without making save-off much longer; otherwise keep it unset and record the result in the issue. Compression (`auto` vs `off`) is a separate measurement on the minimum restic version (0.17).
+
 ## Installer
 
 Spec: `docs/superpowers/specs/2026-10-13-mc-panel-installer-design.md`; manual acceptance `docs/dev/acceptance.md` ("Installer"); operator guide `docs/install.md`.

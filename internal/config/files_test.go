@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -192,5 +193,39 @@ func TestLoadFilesBackupKeys(t *testing.T) {
 	}
 	if f.ResticBinary != "/usr/local/bin/restic" || f.Limits.MaxBackupJobs != 2 || f.Limits.MaxBackupEntries != 1_000_000 {
 		t.Fatalf("loaded = %+v", f)
+	}
+}
+
+func TestFilesResticGOMAXPROCS(t *testing.T) {
+	if d := config.DefaultFiles(); d.Limits.ResticGOMAXPROCS != 0 {
+		t.Fatalf("default restic_gomaxprocs = %d, want 0 (unset)", d.Limits.ResticGOMAXPROCS)
+	}
+	ok := config.DefaultFiles()
+	ok.PanelUID = 998
+	for _, c := range []struct {
+		n     int
+		valid bool
+	}{
+		{0, true}, {1, true}, {runtime.NumCPU() + 1, true}, {1024, true}, // the service clamps to the CPUs
+		{-1, false}, {1025, false},
+	} {
+		f := ok
+		f.Limits.ResticGOMAXPROCS = c.n
+		err := f.Validate()
+		switch {
+		case c.valid && err != nil:
+			t.Errorf("%d: %v", c.n, err)
+		case !c.valid && (err == nil || !strings.Contains(err.Error(), "restic_gomaxprocs")):
+			t.Errorf("%d: %v, want an error about restic_gomaxprocs", c.n, err)
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "files.toml")
+	if err := os.WriteFile(path, []byte("panel_uid = 998\n[limits]\nrestic_gomaxprocs = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := config.LoadFiles(path)
+	if err != nil || f.Limits.ResticGOMAXPROCS != 1 || f.Limits.MaxBackupJobs != 1 {
+		t.Fatalf("loaded = %+v %v", f.Limits, err)
 	}
 }
