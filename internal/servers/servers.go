@@ -650,7 +650,7 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	if purge {
 		h.extendWrite(w, r, purgeTimeout+purgeAnswerSlack)
 	}
-	d, err := h.attemptDeletion(ctx, s.ID)
+	d, completed, err := h.attemptDeletion(ctx, s.ID, nil)
 	if err != nil {
 		h.log.Error("servers: delete: first cleanup attempt", "server_id", s.ID, "err", err)
 	}
@@ -662,6 +662,8 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	if purge {
 		details["backups_purged"] = d.Backups == delPurged
 	}
+	// a cleanup that finishes later gets a server.delete_completed entry of its own
+	details["completed"] = completed
 	h.record(ctx, audit.ActionServerDelete, serverTarget(s.ID), audit.ResultSuccess, details)
 	if wasDev {
 		h.record(ctx, audit.ActionDevDelete, serverTarget(s.ID), audit.ResultSuccess,

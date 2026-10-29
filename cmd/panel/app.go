@@ -173,6 +173,7 @@ func buildApp(ctx context.Context, cfg config.Panel, db *sql.DB, d appDeps) (*ap
 		Catalog:    cat,
 		DataStates: dataStates,
 		Files:      stateClient,
+		Notifier:   disp,
 		Backups:    backupsH,
 		// The per-server memory limit follows the host's installed memory (issue #79).
 		HostMemory: d.HostMemory,

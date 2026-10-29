@@ -7,15 +7,20 @@
 CREATE TABLE server_deletions (
     server_id       INTEGER PRIMARY KEY,
     name            TEXT    NOT NULL,
-    -- none: nothing to remove (no instance); pending: not confirmed yet; removed: the agent
-    -- confirmed it (container gone, data archived to deleted/); foreign: the container belongs
-    -- to another server and is left alone
+    -- none: nothing to remove (no instance, or an agent that manages no containers, make dev
+    -- without Docker); pending: not confirmed yet; removed: the agent confirmed it (container
+    -- gone, data archived to deleted/); foreign: the container belongs to another server and is
+    -- left alone
     container       TEXT    NOT NULL CHECK (container IN ('none', 'pending', 'removed', 'foreign')),
     container_error TEXT    NOT NULL DEFAULT '',
     -- none: not requested; pending/failed: to purge (failed = the last attempt failed);
     -- purged: repository and key are gone
     backups         TEXT    NOT NULL CHECK (backups IN ('none', 'pending', 'purged', 'failed')),
     backups_error   TEXT    NOT NULL DEFAULT '',
+    -- 1: an admin closed the deletion without finishing it (leftovers are the operator's)
+    abandoned       INTEGER NOT NULL DEFAULT 0,
+    -- 1: the server.delete_failed notification for this deletion was sent
+    notified        INTEGER NOT NULL DEFAULT 0,
     requested_at    INTEGER NOT NULL,
     updated_at      INTEGER NOT NULL,
     completed_at    INTEGER

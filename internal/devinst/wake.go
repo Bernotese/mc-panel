@@ -94,7 +94,7 @@ func (h *Handler) wake(ctx context.Context, devID int64) {
 	err := h.admit(ctx, devID, func(ctx context.Context) error { return h.servers.SetDevSleeping(ctx, devID, false, now) })
 	if err != nil {
 		if refused := errors.Is(err, admit.ErrAdmissionBusy) || errors.Is(err, admit.ErrDataBusy) ||
-			errors.Is(err, admit.ErrRecoveryRequired) || errors.Is(err, admit.ErrDataStateUnknown); refused {
+			errors.Is(err, admit.ErrRecoveryRequired) || errors.Is(err, admit.ErrDataStateUnknown) || errors.Is(err, admit.ErrDeleted); refused {
 			h.log.DebugContext(ctx, "devinst: wake not admitted", "server_id", devID, "err", err)
 		} else {
 			h.log.WarnContext(ctx, "devinst: wake a dev", "server_id", devID, "err", err)

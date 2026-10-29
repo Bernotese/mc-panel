@@ -100,7 +100,8 @@ func (a *Admission) unlockFunc(id int64, l *admissionLock) func() {
 
 // Admit runs fn under the admission lock of server id (waiting at most AdmissionWait) once its
 // data state is safe, leaving out the caller's own hold (nil = none). It returns
-// ErrAdmissionBusy, the error of a state that is not safe (StateErr) or fn's error; fn runs at
+// ErrAdmissionBusy, admit.ErrDeleted for a deleted server whose deletion is open, the error of
+// a state that is not safe (StateErr) or fn's error; fn runs at
 // most once and only while the lock is held, and may take reconcile.mu (lock order).
 // backups, serverfiles and devinst admit their data jobs through it.
 func (h *Handler) Admit(ctx context.Context, id int64, own Hold, fn func(ctx context.Context) error) error {
@@ -113,6 +114,13 @@ func (h *Handler) Admit(ctx context.Context, id int64, own Hold, fn func(ctx con
 		return err
 	}
 	defer unlock()
+	// A deleted server (its deletion may still clean up, issue #148) gets no job: a power or
+	// remove job of it would also clear the agent's confirmation of the removal.
+	if n, err := h.q.ServersDeletionOpen(ctx, id); err != nil {
+		return err
+	} else if n > 0 {
+		return admit.ErrDeleted
+	}
 	if err := h.checkData(ctx, id, own); err != nil {
 		return err
 	}

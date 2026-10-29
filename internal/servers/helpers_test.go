@@ -25,6 +25,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/principal"
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/secretbox"
@@ -48,6 +49,7 @@ type env struct {
 	catalog *fakeCatalog
 	data    *fakeStates
 	files   *fakeStateClient // the files service's resolve
+	notes   *notify.Recording
 	purger  *fakePurger
 	logs    *bytes.Buffer // reconcile log output
 	hostMem uint64        // installed host memory in bytes; 0 = unknown
@@ -66,11 +68,11 @@ func newEnv(t *testing.T) *env {
 	e := &env{
 		t: t, db: db, clk: clock.NewFake(t0), rec: &audit.MemoryRecorder{}, box: box,
 		agent: newFakeAgent(), catalog: &fakeCatalog{}, logs: &bytes.Buffer{},
-		data: newFakeStates(), files: &fakeStateClient{}, purger: &fakePurger{},
+		data: newFakeStates(), files: &fakeStateClient{}, purger: &fakePurger{}, notes: &notify.Recording{},
 	}
 	e.h = servers.NewHandler(servers.Deps{
 		DB: db, Clock: e.clk, Audit: e.rec, Box: box, Instances: e.agent, Web: e.agent,
-		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog, DataStates: e.data, Files: e.files,
+		Log: slog.New(slog.NewTextHandler(e.logs, nil)), Catalog: e.catalog, DataStates: e.data, Files: e.files, Notifier: e.notes,
 		Backups: e.purger,
 		HostMemory: func() (uint64, error) {
 			if e.hostMem == 0 {
@@ -196,6 +198,8 @@ type fakeAgent struct {
 	webStatus func(agentapi.WebRoute) agentapi.WebRouteStatus
 	webReqs   []agentapi.WebRoutesRequest
 	removed   []int64 // InstancesResponse.Removed (confirmed removals)
+	disabled  bool    // an agent without containers (make dev without Docker)
+	statusN   int     // Instances calls
 }
 
 func newFakeAgent() *fakeAgent {
@@ -225,8 +229,12 @@ func (f *fakeAgent) takeCalls() []string {
 func (f *fakeAgent) Instances(context.Context) (agentapi.InstancesResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.statusN++
 	if f.err != nil {
 		return agentapi.InstancesResponse{}, f.err
+	}
+	if f.disabled {
+		return agentapi.InstancesResponse{Docker: agentapi.DockerUnavailable, Instances: []agentapi.InstanceStatus{}, Disabled: true}, nil
 	}
 	list := make([]agentapi.InstanceStatus, 0, len(f.inst))
 	for _, st := range f.inst {
@@ -235,6 +243,8 @@ func (f *fakeAgent) Instances(context.Context) (agentapi.InstancesResponse, erro
 	slices.SortFunc(list, func(a, b agentapi.InstanceStatus) int { return cmp.Compare(a.ID, b.ID) })
 	return agentapi.InstancesResponse{Docker: f.docker, Instances: list, Removed: slices.Clone(f.removed)}, nil
 }
+
+func (f *fakeAgent) statusCalls() int { f.mu.Lock(); defer f.mu.Unlock(); return f.statusN }
 
 // confirmRemoved makes the agent report id as removed: its container is gone.
 func (f *fakeAgent) confirmRemoved(id int64) {

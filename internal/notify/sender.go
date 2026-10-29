@@ -206,6 +206,7 @@ var defaultTitles = map[EventType]string{
 	EventServerRecovered:        "Server back online",
 	EventServerCrashLoop:        "Crash loop",
 	EventServerRecoveryRequired: "A restore could not be completed",
+	EventServerDeleteFailed:     "A server deletion is stuck",
 	EventHostDiskLow:            "Low disk space on the host",
 	EventHostDiskOK:             "Disk space OK again",
 	Event2FALockout:             "Second factor locked",

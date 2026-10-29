@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
@@ -13,7 +14,9 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
+	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/store"
 )
 
@@ -37,10 +40,11 @@ const (
 
 // Overall states of a deletion (OpenAPI ServerDeletionState).
 const (
-	deletionPending = "pending" // cleanup in progress
-	deletionFailed  = "failed"  // the container could not be removed yet; retried
-	deletionPartial = "partial" // the server is gone, but its backups could not be purged; retried
-	deletionDone    = "done"
+	deletionPending   = "pending" // cleanup in progress
+	deletionFailed    = "failed"  // the container could not be removed yet; retried
+	deletionPartial   = "partial" // the server is gone, but its backups could not be purged; retried
+	deletionDone      = "done"
+	deletionAbandoned = "abandoned" // an admin closed it unfinished; leftovers are the operator's
 )
 
 const (
@@ -51,6 +55,9 @@ const (
 	// maxBackoff).
 	purgeRetry    = time.Minute
 	purgeRetryMax = time.Hour
+	// deletionAlertAfter: a deletion that is still failed or partial this long after the request
+	// is reported once (server.delete_failed); transient failures (an agent restart) stay quiet.
+	deletionAlertAfter = 10 * time.Minute
 )
 
 // deletionJSON is the OpenAPI schema ServerDeletion.
@@ -73,6 +80,8 @@ func backupsDone(b string) bool { return b == delNone || b == delPurged }
 
 func deletionState(d store.ServerDeletion) string {
 	switch {
+	case d.Abandoned != 0:
+		return deletionAbandoned
 	case containerDone(d.Container) && backupsDone(d.Backups):
 		return deletionDone
 	case containerDone(d.Container) && d.Backups == delFailed:
@@ -107,6 +116,9 @@ type deletionRetries struct {
 type deletionRetry struct {
 	removeAt, purgeAt time.Time // not before
 	removes, purges   int       // attempts so far
+	// issued: the agent accepted a remove since the panel started, so its last_error (once it
+	// is settled again) is the remove's, not an older error of the instance.
+	issued bool
 }
 
 func (d *deletionRetries) get(id int64) *deletionRetry {
@@ -139,21 +151,17 @@ func (d *deletionRetries) due(id int64, purge bool, now time.Time) bool {
 	return true
 }
 
-// asked reports whether a remove of id was asked for since the panel started.
-func (d *deletionRetries) asked(id int64) bool {
+// issued reports whether the agent accepted a remove of id since the panel started.
+func (d *deletionRetries) issued(id int64) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.get(id).removes > 0
+	return d.get(id).issued
 }
 
-// unbook takes back the remove attempt due just booked: nothing was asked for.
-func (d *deletionRetries) unbook(id int64) {
+func (d *deletionRetries) markIssued(id int64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if r := d.m[id]; r != nil && r.removes > 0 {
-		r.removes--
-		r.removeAt = time.Time{}
-	}
+	d.get(id).issued = true
 }
 
 func (d *deletionRetries) reset(id int64) {
@@ -195,7 +203,8 @@ func (h *Handler) runDeletions(ctx context.Context) {
 }
 
 // DeletionPass makes one cleanup attempt for every open deletion whose admission lock is free
-// and forgets completed deletions older than deletionKeep.
+// (with one agent status for all of them) and forgets completed deletions older than
+// deletionKeep.
 func (h *Handler) DeletionPass(ctx context.Context) {
 	now := h.clock.Now()
 	if err := h.q.ServersPruneDeletions(ctx, sql.NullInt64{Int64: now.Add(-deletionKeep).UnixMilli(), Valid: true}); err != nil {
@@ -206,6 +215,7 @@ func (h *Handler) DeletionPass(ctx context.Context) {
 		h.log.Error("servers: list open deletions", "err", err)
 		return
 	}
+	var view *agentView
 	for _, d := range rows {
 		if ctx.Err() != nil {
 			return
@@ -214,27 +224,60 @@ func (h *Handler) DeletionPass(ctx context.Context) {
 		if !ok {
 			continue // the request's own attempt (or a retry) is running
 		}
-		if _, err := h.attemptDeletion(ctx, d.ServerID); err != nil && ctx.Err() == nil {
-			h.log.Error("servers: deletion attempt", "server_id", d.ServerID, "err", err)
+		if view == nil && d.Container == delPending {
+			view = h.loadAgentView(ctx)
 		}
+		d, completed, err := h.attemptDeletion(ctx, d.ServerID, view)
 		unlock()
+		switch {
+		case err != nil && ctx.Err() == nil:
+			h.log.Error("servers: deletion attempt", "server_id", d.ServerID, "err", err)
+		case completed:
+			h.recordDeletionCompleted(ctx, d)
+		}
+	}
+}
+
+// agentView is one answer of the agent for the deletion attempts of a pass.
+type agentView struct {
+	resp agentapi.InstancesResponse
+	snap Snapshot
+	err  error
+}
+
+func (h *Handler) loadAgentView(ctx context.Context) *agentView {
+	resp, snap, err := h.refreshStatus(ctx)
+	return &agentView{resp: resp, snap: snap, err: err}
+}
+
+// recordDeletionCompleted audits a deletion the panel completed after its request (system).
+func (h *Handler) recordDeletionCompleted(ctx context.Context, d store.ServerDeletion) {
+	err := h.rec.Record(ctx, audit.Entry{
+		Action: audit.ActionServerDeleteCompleted, Target: serverTarget(d.ServerID), Result: audit.ResultSuccess,
+		ActorType: audit.ActorSystem, ActorName: string(audit.ActorSystem),
+		Details: map[string]any{"name": d.Name, "container": d.Container, "backups": d.Backups, "backups_purged": d.Backups == delPurged},
+	})
+	if err != nil {
+		h.log.ErrorContext(ctx, "audit record failed", "action", audit.ActionServerDeleteCompleted, "err", err)
 	}
 }
 
 // attemptDeletion makes one cleanup attempt for deletion id (the caller holds its admission
-// lock) and returns the stored result. An error is a database error or ctx's (shut down);
-// cleanup failures are stored in the row.
-func (h *Handler) attemptDeletion(ctx context.Context, id int64) (store.ServerDeletion, error) {
-	d, err := h.q.ServersGetDeletion(ctx, id)
+// lock) with the agent's answer view (nil = asked when needed) and returns the stored result;
+// completed reports that this attempt finished the deletion. An error is a database error or
+// ctx's (shut down); cleanup failures are stored in the row.
+func (h *Handler) attemptDeletion(ctx context.Context, id int64, view *agentView) (d store.ServerDeletion, completed bool, err error) {
+	d, err = h.q.ServersGetDeletion(ctx, id)
 	if err != nil || d.CompletedAt.Valid {
-		return d, err
+		return d, false, err
 	}
 	before := d
 	now := h.clock.Now()
-	if d.Container == delPending && h.dels.due(id, false, now) {
-		d.Container, d.ContainerError = h.removeContainer(ctx, d)
-	} else if d.Container == delPending {
-		d.Container, d.ContainerError = h.checkRemoved(ctx, d)
+	if d.Container == delPending {
+		if view == nil {
+			view = h.loadAgentView(ctx)
+		}
+		d.Container, d.ContainerError = h.containerStep(ctx, d, view, now)
 	}
 	if (d.Backups == delPending || d.Backups == delFailed) && h.dels.due(id, true, now) {
 		pctx, cancel := context.WithTimeout(ctx, purgeTimeout)
@@ -244,37 +287,81 @@ func (h *Handler) attemptDeletion(ctx context.Context, id int64) (store.ServerDe
 		case err == nil:
 			d.Backups, d.BackupsError = delPurged, ""
 		case ctx.Err() != nil:
-			return d, ctx.Err() // shut down: nothing learned, nothing stored
+			return d, false, ctx.Err() // shut down: nothing learned, nothing stored
 		default:
 			h.log.Error("servers: deletion: purging the backups failed", "server_id", id, "err", err)
 			d.Backups, d.BackupsError = delFailed, "the backups could not be purged; retried later"
 		}
 	}
-	if deletionState(d) == deletionDone {
-		d.CompletedAt = sql.NullInt64{Int64: h.clock.Now().UnixMilli(), Valid: true}
+	switch st := deletionState(d); {
+	case st == deletionDone:
+		d.CompletedAt = sql.NullInt64{Int64: now.UnixMilli(), Valid: true}
+		completed = true
 		h.dels.forget(id)
 		h.log.Info("servers: deletion complete", "server_id", id, "name", d.Name, "container", d.Container, "backups", d.Backups)
+	case (st == deletionFailed || st == deletionPartial) && d.Notified == 0 && now.Sub(time.UnixMilli(d.RequestedAt)) >= deletionAlertAfter:
+		d.Notified = 1
+		h.notifyDeletionStuck(ctx, d, st)
 	}
 	if d == before {
-		return d, nil
+		return d, false, nil
 	}
-	d.UpdatedAt = h.clock.Now().UnixMilli()
+	d.UpdatedAt = now.UnixMilli()
 	err = h.q.ServersUpdateDeletion(context.WithoutCancel(ctx), store.ServersUpdateDeletionParams{
 		Container: d.Container, ContainerError: d.ContainerError, Backups: d.Backups, BackupsError: d.BackupsError,
-		UpdatedAt: d.UpdatedAt, CompletedAt: d.CompletedAt, ServerID: id,
+		Notified: d.Notified, UpdatedAt: d.UpdatedAt, CompletedAt: d.CompletedAt, ServerID: id,
 	})
-	return d, err
+	return d, completed && err == nil, err
 }
 
-// checkRemoved looks for the agent's confirmation of a remove asked for earlier, without asking
-// again (the retry delay has not passed).
-func (h *Handler) checkRemoved(ctx context.Context, d store.ServerDeletion) (container, msg string) {
-	resp, snap, err := h.refreshStatus(ctx)
-	if err != nil || resp.Docker != agentapi.DockerOK {
-		return d.Container, d.ContainerError
+// notifyDeletionStuck sends server.delete_failed once per deletion (operational queue).
+func (h *Handler) notifyDeletionStuck(ctx context.Context, d store.ServerDeletion, state string) {
+	msg := fmt.Sprintf("The deletion of %s (server %d) is not complete after %d minutes", d.Name, d.ServerID, int(deletionAlertAfter/time.Minute))
+	switch {
+	case state == deletionPartial:
+		msg += ": its backups could not be purged."
+	case d.ContainerError != "":
+		msg += ": " + d.ContainerError
+	default:
+		msg += "."
 	}
-	c, msg, _ := h.removalSeen(d, resp, snap)
-	return c, msg
+	msg += " It is retried; see Servers → Deletions, retry or abandon it there."
+	h.notifier.Notify(context.WithoutCancel(ctx), notify.Event{
+		Type: notify.EventServerDeleteFailed, Title: "Server deletion stuck: " + d.Name, Message: msg, Time: h.clock.Now(),
+	})
+}
+
+// containerStep advances the container part of d with the agent's answer view: confirmed,
+// left alone (foreign), nothing to remove (an agent without containers), or the remove is asked
+// for when its retry delay has passed and the agent is not working on the instance.
+func (h *Handler) containerStep(ctx context.Context, d store.ServerDeletion, view *agentView, now time.Time) (container, msg string) {
+	switch {
+	case view.err == nil && view.resp.Disabled:
+		return delNone, "" // make dev without Docker: no container can exist
+	case errors.Is(view.err, agentapi.ErrDockerUnavailable), view.err == nil && view.resp.Docker != agentapi.DockerOK:
+		return d.Container, "Docker is not available on the host; retried later"
+	case view.err != nil:
+		return d.Container, "the agent is not reachable; retried later"
+	}
+	c, msg, final := h.removalSeen(d, view.resp, view.snap)
+	if final {
+		return c, msg
+	}
+	if st, listed := view.snap.Instances[d.ServerID]; listed && !st.Settled() {
+		return d.Container, msg // the agent is working on it: look again on the next pass
+	}
+	if !h.dels.due(d.ServerID, false, now) {
+		return d.Container, msg
+	}
+	if err := h.inst.Remove(ctx, d.ServerID); err != nil {
+		if errors.Is(err, agentapi.ErrBusy) {
+			return d.Container, "the agent is busy; retried later"
+		}
+		h.log.Warn("servers: deletion: remove the container", "server_id", d.ServerID, "err", err)
+		return d.Container, "the agent did not accept the remove; retried later"
+	}
+	h.dels.markIssued(d.ServerID)
+	return d.Container, msg
 }
 
 // removalSeen decides from the agent's answer whether the container part of d is finished:
@@ -288,39 +375,11 @@ func (h *Handler) removalSeen(d store.ServerDeletion, resp agentapi.InstancesRes
 		return delForeign, "", true
 	case slices.Contains(resp.Removed, d.ServerID) && (!listed || st.State == agentapi.StateMissing):
 		return delRemoved, "", true
-	case listed && st.LastError != "" && h.dels.asked(d.ServerID):
+	case listed && st.Settled() && st.LastError != "" && h.dels.issued(d.ServerID):
+		// the last job of the instance is the remove this panel asked for
 		return d.Container, st.LastError, false
 	}
 	return d.Container, d.ContainerError, false
-}
-
-// removeContainer asks the agent to remove the container of d unless it confirmed the removal
-// already or is still working on the instance. The remove is idempotent: a missing container
-// only has its data archived (if any is left).
-func (h *Handler) removeContainer(ctx context.Context, d store.ServerDeletion) (container, msg string) {
-	resp, snap, err := h.refreshStatus(ctx)
-	switch {
-	case err == nil && resp.Docker != agentapi.DockerOK, errors.Is(err, agentapi.ErrDockerUnavailable):
-		return d.Container, "Docker is not available on the host; retried later"
-	case err != nil:
-		return d.Container, "the agent is not reachable; retried later"
-	}
-	c, msg, final := h.removalSeen(d, resp, snap)
-	if final {
-		return c, msg
-	}
-	if st, listed := snap.Instances[d.ServerID]; listed && !st.Settled() {
-		h.dels.unbook(d.ServerID) // the agent is working on it: look again on the next pass
-		return d.Container, msg
-	}
-	if err := h.inst.Remove(ctx, d.ServerID); err != nil {
-		if errors.Is(err, agentapi.ErrBusy) {
-			return d.Container, "the agent is busy; retried later"
-		}
-		h.log.Warn("servers: deletion: remove the container", "server_id", d.ServerID, "err", err)
-		return d.Container, "the agent did not accept the remove; retried later"
-	}
-	return d.Container, msg
 }
 
 // errNameDeleting: the name belongs to a server whose deletion is not complete; its container
@@ -355,43 +414,98 @@ func (h *Handler) handleListDeletions(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRetryDeletion answers POST /servers/deletions/{id}/retry: the next attempt of an open
-// deletion runs right away (admins, sudo: it may purge backups).
+// deletion runs right away (admins, sudo: it may purge backups; audited).
 func (h *Handler) handleRetryDeletion(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	d, unlock, ok := h.openDeletion(w, r)
+	if !ok {
+		return
+	}
+	defer unlock()
+	h.dels.reset(d.ServerID)
+	ctx = context.WithoutCancel(ctx)
+	if d.Backups == delPending || d.Backups == delFailed {
+		h.extendWrite(w, r, purgeTimeout+purgeAnswerSlack)
+	}
+	d, completed, err := h.attemptDeletion(ctx, d.ServerID, nil)
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	h.record(ctx, audit.ActionServerDeleteRetry, serverTarget(d.ServerID), audit.ResultSuccess, map[string]any{
+		"name": d.Name, "state": deletionState(d), "container": d.Container, "backups": d.Backups,
+	})
+	if completed {
+		h.recordDeletionCompleted(ctx, d)
+	}
+	h.KickDeletions()
+	httpx.WriteJSON(w, http.StatusOK, toDeletionJSON(d))
+}
+
+// handleAbandonDeletion answers POST /servers/deletions/{id}/abandon (admins, sudo; audited):
+// an open deletion that cannot finish (an unmanaged container under the server's name, data
+// that cannot be archived) is closed as abandoned and its name is free again. Nothing is
+// removed: the leftovers are the operator's (docs/install.md, "A server deletion does not
+// finish").
+func (h *Handler) handleAbandonDeletion(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	d, unlock, ok := h.openDeletion(w, r)
+	if !ok {
+		return
+	}
+	defer unlock()
+	now := h.clock.Now().UnixMilli()
+	n, err := h.q.ServersAbandonDeletion(ctx, store.ServersAbandonDeletionParams{
+		UpdatedAt: now, CompletedAt: sql.NullInt64{Int64: now, Valid: true}, ServerID: d.ServerID,
+	})
+	if err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	if n == 0 {
+		writeConflict(w, r, "the deletion is complete")
+		return
+	}
+	h.dels.forget(d.ServerID)
+	h.log.Warn("servers: deletion abandoned, leftovers stay on the host", "server_id", d.ServerID, "name", d.Name,
+		"container", d.Container, "backups", d.Backups)
+	h.record(ctx, audit.ActionServerDeleteAbandon, serverTarget(d.ServerID), audit.ResultSuccess, map[string]any{
+		"name": d.Name, "container": d.Container, "container_error": d.ContainerError, "backups": d.Backups,
+	})
+	if d, err = h.q.ServersGetDeletion(ctx, d.ServerID); err != nil {
+		httpx.Internal(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, toDeletionJSON(d))
+}
+
+// openDeletion loads the open deletion of the {id} path parameter and takes its admission lock;
+// on failure it has written the answer (404 unknown, 409 complete or another attempt runs).
+func (h *Handler) openDeletion(w http.ResponseWriter, r *http.Request) (store.ServerDeletion, func(), bool) {
 	ctx := r.Context()
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
 		httpx.WriteError(w, r, http.StatusNotFound, httpx.CodeNotFound, "deletion not found")
-		return
+		return store.ServerDeletion{}, nil, false
+	}
+	unlock, err := h.admission.Lock(ctx, id)
+	if err != nil {
+		if !WriteDataStateError(w, r, err) {
+			h.log.DebugContext(ctx, "servers: deletion request ended with the request", "err", err)
+		}
+		return store.ServerDeletion{}, nil, false
 	}
 	d, err := h.q.ServersGetDeletion(ctx, id)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		httpx.WriteError(w, r, http.StatusNotFound, httpx.CodeNotFound, "deletion not found")
-		return
 	case err != nil:
 		httpx.Internal(w, r, err)
-		return
 	case d.CompletedAt.Valid:
 		writeConflict(w, r, "the deletion is complete")
-		return
+	default:
+		return d, unlock, true
 	}
-	unlock, err := h.admission.Lock(ctx, id)
-	if err != nil {
-		if !WriteDataStateError(w, r, err) {
-			h.log.DebugContext(ctx, "servers: deletion retry ended with the request", "err", err)
-		}
-		return
-	}
-	defer unlock()
-	h.dels.reset(id)
-	ctx = context.WithoutCancel(ctx)
-	if d.Backups == delPending || d.Backups == delFailed {
-		h.extendWrite(w, r, purgeTimeout+purgeAnswerSlack)
-	}
-	if d, err = h.attemptDeletion(ctx, id); err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
-	h.KickDeletions()
-	httpx.WriteJSON(w, http.StatusOK, toDeletionJSON(d))
+	unlock()
+	return store.ServerDeletion{}, nil, false
 }
