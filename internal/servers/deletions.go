@@ -222,8 +222,8 @@ func (h *Handler) DeletionPass(ctx context.Context) {
 }
 
 // attemptDeletion makes one cleanup attempt for deletion id (the caller holds its admission
-// lock) and returns the stored result. An error is a database error only; cleanup failures
-// are stored in the row.
+// lock) and returns the stored result. An error is a database error or ctx's (shut down);
+// cleanup failures are stored in the row.
 func (h *Handler) attemptDeletion(ctx context.Context, id int64) (store.ServerDeletion, error) {
 	d, err := h.q.ServersGetDeletion(ctx, id)
 	if err != nil || d.CompletedAt.Valid {
@@ -244,7 +244,7 @@ func (h *Handler) attemptDeletion(ctx context.Context, id int64) (store.ServerDe
 		case err == nil:
 			d.Backups, d.BackupsError = delPurged, ""
 		case ctx.Err() != nil:
-			return d, nil // shut down: nothing learned
+			return d, ctx.Err() // shut down: nothing learned, nothing stored
 		default:
 			h.log.Error("servers: deletion: purging the backups failed", "server_id", id, "err", err)
 			d.Backups, d.BackupsError = delFailed, "the backups could not be purged; retried later"
