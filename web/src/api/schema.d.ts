@@ -571,6 +571,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/servers/deletions/{id}/abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Closes an open deletion that cannot finish (for example a container named mcpanel-mc-<id> that mc-panel does not manage, or data that cannot be archived) as abandoned, and frees the name. Nothing is removed: the leftovers are the operator's (docs/install.md, "A server deletion does not finish"). Admin, sudo; audited. */
+        post: operations["abandonServerDeletion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/servers/memory": {
         parameters: {
             query?: never;
@@ -1956,7 +1973,7 @@ export interface components {
             name: string;
             state: components["schemas"]["ServerDeletionState"];
             /**
-             * @description none: the server had no instance; pending: removal not confirmed by the agent yet; removed: container gone, data moved to deleted/; foreign: the container belongs to another server and is left alone
+             * @description none: nothing to remove (the server had no instance, or the agent manages no containers: make dev without Docker); pending: removal not confirmed by the agent yet; removed: container gone, data moved to deleted/; foreign: the container belongs to another server and is left alone
              * @enum {string}
              */
             container: "none" | "pending" | "removed" | "foreign";
@@ -1976,10 +1993,10 @@ export interface components {
             completed_at: number | null;
         };
         /**
-         * @description pending: cleanup in progress; failed: the container could not be removed yet (retried); partial: the container is gone but the backups could not be purged (retried); done: complete
+         * @description pending: cleanup in progress; failed: the container could not be removed yet (retried); partial: the container is gone but the backups could not be purged (retried); done: complete; abandoned: an admin closed it unfinished (leftovers stay on the host). A deletion still failed or partial 10 minutes after the request sends server.delete_failed once.
          * @enum {string}
          */
-        ServerDeletionState: "pending" | "failed" | "partial" | "done";
+        ServerDeletionState: "pending" | "failed" | "partial" | "done" | "abandoned";
         Recovery: {
             /** @description Journal phase of the unresolved restore, or "unreadable" */
             phase: string;
@@ -4224,6 +4241,42 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description The cleanup state after the attempt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerDeletion"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description conflict (the deletion is complete, or another attempt is running) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    abandonServerDeletion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The closed deletion (state abandoned) */
             200: {
                 headers: {
                     [name: string]: unknown;

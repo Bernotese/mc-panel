@@ -486,6 +486,21 @@ export const serverOperations: MockOperation[] = [
   ),
 
   op(
+    'abandonServerDeletion',
+    http.post(`${API}/servers/deletions/:id/abandon`, ({ request, params }) => {
+      const g = guard(request, { admin: true, sudo: true })
+      if (g instanceof Response) return g
+      const d = db.deletions.find((x) => x.server_id === idParam(params))
+      if (!d) return apiError(404, 'not_found', 'deletion not found')
+      if (d.completed_at !== null) return apiError(409, 'conflict', 'the deletion is complete')
+      const now = Date.now()
+      Object.assign(d, { state: 'abandoned', updated_at: now, completed_at: now })
+      recordAudit(g.user, 'server.delete_abandon', `server:${d.server_id}`, 'success', { name: d.name })
+      return HttpResponse.json<ServerDeletion>(d)
+    }),
+  ),
+
+  op(
     'retryServerDeletion',
     http.post(`${API}/servers/deletions/:id/retry`, ({ request, params }) => {
       const g = guard(request, { admin: true, sudo: true })

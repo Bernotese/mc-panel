@@ -237,6 +237,8 @@ type ServerDeletion struct {
 	ContainerError string
 	Backups        string
 	BackupsError   string
+	Abandoned      int64
+	Notified       int64
 	RequestedAt    int64
 	UpdatedAt      int64
 	CompletedAt    sql.NullInt64

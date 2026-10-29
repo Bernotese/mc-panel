@@ -493,6 +493,20 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'conflict (the deletion is complete, or another attempt is running)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/deletions/{id}/abandon:
+    post:
+      operationId: abandonServerDeletion
+      tags: [servers]
+      description: 'Closes an open deletion that cannot finish (for example a container named mcpanel-mc-<id> that mc-panel does not manage, or data that cannot be archived) as abandoned, and frees the name. Nothing is removed: the leftovers are the operator''s (docs/install.md, "A server deletion does not finish"). Admin, sudo; audited.'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '200': { description: 'The closed deletion (state abandoned)', content: { application/json: { schema: { $ref: '#/components/schemas/ServerDeletion' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'conflict (the deletion is complete, or another attempt is running)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /servers/memory:
     get:
       operationId: getServerMemoryLimits
@@ -1938,7 +1952,7 @@ components:
         server_id: { type: integer, format: int64, description: 'ID of the deleted server (never handed out again)' }
         name: { type: string }
         state: { $ref: '#/components/schemas/ServerDeletionState' }
-        container: { type: string, enum: [none, pending, removed, foreign], description: 'none: the server had no instance; pending: removal not confirmed by the agent yet; removed: container gone, data moved to deleted/; foreign: the container belongs to another server and is left alone' }
+        container: { type: string, enum: [none, pending, removed, foreign], description: 'none: nothing to remove (the server had no instance, or the agent manages no containers: make dev without Docker); pending: removal not confirmed by the agent yet; removed: container gone, data moved to deleted/; foreign: the container belongs to another server and is left alone' }
         container_error: { type: [string, 'null'], description: 'Why the container is not removed yet (retried)' }
         backups: { type: string, enum: [none, pending, purged, failed], description: 'none: no purge requested; failed: the last purge failed (retried)' }
         backups_error: { type: [string, 'null'] }
@@ -1947,8 +1961,8 @@ components:
         completed_at: { type: [integer, 'null'], format: int64 }
     ServerDeletionState:
       type: string
-      enum: [pending, failed, partial, done]
-      description: 'pending: cleanup in progress; failed: the container could not be removed yet (retried); partial: the container is gone but the backups could not be purged (retried); done: complete'
+      enum: [pending, failed, partial, done, abandoned]
+      description: 'pending: cleanup in progress; failed: the container could not be removed yet (retried); partial: the container is gone but the backups could not be purged (retried); done: complete; abandoned: an admin closed it unfinished (leftovers stay on the host). A deletion still failed or partial 10 minutes after the request sends server.delete_failed once.'
     Recovery:
       type: object
       required: [phase, since]

@@ -26,6 +26,8 @@ var (
 	ErrRecoveryRequired = errors.New("a restore of this server could not be completed")
 	// ErrDataStateUnknown: the files service did not report the data state (fail closed).
 	ErrDataStateUnknown = errors.New("the files service did not report whether this server's data is safe")
+	// ErrDeleted: the server was deleted; its deletion may still be cleaning up (issue #148).
+	ErrDeleted = errors.New("the server was deleted")
 )
 
 // WriteError answers an admission error (data safety spec §4) and reports whether err was one.
@@ -37,6 +39,8 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) bool {
 		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeConflict, "a file or backup job is rewriting this server's data; try again when it is done")
 	case errors.Is(err, ErrRecoveryRequired):
 		httpx.WriteError(w, r, http.StatusConflict, httpx.CodeRecoveryRequired, "a restore of this server could not be completed; resolve it first")
+	case errors.Is(err, ErrDeleted):
+		httpx.WriteError(w, r, http.StatusNotFound, httpx.CodeNotFound, "server not found")
 	case errors.Is(err, ErrDataStateUnknown):
 		httpx.WriteError(w, r, http.StatusServiceUnavailable, httpx.CodeDataStateUnknown, "the files service did not report whether this server's data is safe; try again")
 	default:

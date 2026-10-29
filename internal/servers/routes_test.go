@@ -15,19 +15,20 @@ import (
 
 // wantRoutes are exactly the server operations of api/openapi.yaml with their rules.
 var wantRoutes = map[string]rbac.Rule{
-	"GET /api/servers":                        rbac.Authenticated(),
-	"POST /api/servers":                       rbac.Admin().WithSudo(),
-	"GET /api/servers/catalog/{type}":         rbac.Admin(),
-	"GET /api/servers/memory":                 rbac.Admin(),
-	"GET /api/servers/settings":               rbac.Admin(),
-	"PUT /api/servers/settings":               rbac.Admin().WithSudo(),
-	"GET /api/servers/{id}":                   rbac.Server(rbac.PermServerView, "id"),
-	"PATCH /api/servers/{id}":                 rbac.Admin().WithSudo(),
-	"DELETE /api/servers/{id}":                rbac.Admin().WithSudo(),
-	"GET /api/servers/deletions":              rbac.Admin(),
-	"POST /api/servers/deletions/{id}/retry":  rbac.Admin().WithSudo(),
-	"POST /api/servers/{id}/power":            rbac.Server(rbac.PermServerPower, "id"),
-	"POST /api/servers/{id}/recovery/resolve": rbac.Admin().WithSudo(),
+	"GET /api/servers":                         rbac.Authenticated(),
+	"POST /api/servers":                        rbac.Admin().WithSudo(),
+	"GET /api/servers/catalog/{type}":          rbac.Admin(),
+	"GET /api/servers/memory":                  rbac.Admin(),
+	"GET /api/servers/settings":                rbac.Admin(),
+	"PUT /api/servers/settings":                rbac.Admin().WithSudo(),
+	"GET /api/servers/{id}":                    rbac.Server(rbac.PermServerView, "id"),
+	"PATCH /api/servers/{id}":                  rbac.Admin().WithSudo(),
+	"DELETE /api/servers/{id}":                 rbac.Admin().WithSudo(),
+	"GET /api/servers/deletions":               rbac.Admin(),
+	"POST /api/servers/deletions/{id}/retry":   rbac.Admin().WithSudo(),
+	"POST /api/servers/deletions/{id}/abandon": rbac.Admin().WithSudo(),
+	"POST /api/servers/{id}/power":             rbac.Server(rbac.PermServerPower, "id"),
+	"POST /api/servers/{id}/recovery/resolve":  rbac.Admin().WithSudo(),
 }
 
 func TestRouteContract(t *testing.T) {

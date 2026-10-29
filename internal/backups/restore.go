@@ -35,6 +35,8 @@ func (h *Handler) admit(ctx context.Context, id int64, fn func(context.Context) 
 		return failf(codeFilesBusy, "a file job is rewriting the server's data")
 	case errors.Is(err, admit.ErrRecoveryRequired):
 		return failf(codeFilesBusy, "a restore of this server could not be completed; resolve it first")
+	case errors.Is(err, admit.ErrDeleted):
+		return errServerDeleted
 	case errors.Is(err, admit.ErrDataStateUnknown):
 		return failf(codeFiles, "the files service did not report whether the server's data is safe")
 	}

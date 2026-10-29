@@ -111,8 +111,16 @@ SELECT * FROM server_deletions WHERE completed_at IS NULL ORDER BY server_id;
 
 -- name: ServersUpdateDeletion :exec
 UPDATE server_deletions
-SET container = ?, container_error = ?, backups = ?, backups_error = ?, updated_at = ?, completed_at = ?
-WHERE server_id = ?;
+SET container = ?, container_error = ?, backups = ?, backups_error = ?, notified = ?, updated_at = ?, completed_at = ?
+WHERE server_id = ? AND completed_at IS NULL;
+
+-- name: ServersAbandonDeletion :execrows
+-- An admin closes an open deletion without finishing it; the name is free again.
+UPDATE server_deletions SET abandoned = 1, updated_at = ?, completed_at = ?
+WHERE server_id = ? AND completed_at IS NULL;
+
+-- name: ServersDeletionOpen :one
+SELECT count(*) FROM server_deletions WHERE server_id = ? AND completed_at IS NULL;
 
 -- name: ServersPruneDeletions :exec
 -- Completed deletions are kept for a week to be listed, then forgotten.

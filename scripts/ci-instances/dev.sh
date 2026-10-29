@@ -266,7 +266,7 @@ pwait_for 180 "dev container removed" d_gone
 papi GET "/servers/$psrv" "$dout/prod.json"
 [ "$pcode" = 200 ] || fail "get prod: HTTP $pcode $(cat "$dout/prod.json")"
 jcheck "$dout/prod.json" "the prod has no dev any more" 'd.get("dev_id") is None and d["status"]["state"] == "running"'
-echo "OK: backups 409 dev_managed on the dev; delete prod 409 dev_exists; delete dev 204; prod still running"
+echo "OK: backups 409 dev_managed on the dev; delete prod 409 dev_exists; delete dev 202; prod still running"
 
 echo "== dev: audit entries"
 papi GET "/audit?action=dev.&limit=200" "$dout/audit.json"

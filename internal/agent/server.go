@@ -347,7 +347,7 @@ func (noInstances) DockerStatus() string { return agentapi.DockerUnavailable }
 func (noInstances) Status(context.Context) agentapi.InstancesResponse {
 	return agentapi.InstancesResponse{
 		Docker: agentapi.DockerUnavailable, Instances: []agentapi.InstanceStatus{},
-		Router: agentapi.RouterStatus{State: agentapi.StateMissing},
+		Router: agentapi.RouterStatus{State: agentapi.StateMissing}, Disabled: true,
 	}
 }
 
