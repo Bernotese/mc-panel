@@ -254,12 +254,15 @@ echo "== backups: delete the server with purge_backups=1 removes repo and key"
 [ -d "$work/mc/backups/repos/$psrv" ] && [ -f "$work/mc/backups/keys/$psrv" ] || fail "repo or key missing before the purge"
 p_sudo
 papi DELETE "/servers/$psrv?purge_backups=1" "$po/sdel.json"
-[ "$pcode" = 204 ] || fail "delete server: HTTP $pcode $(cat "$po/sdel.json")"
+[ "$pcode" = 202 ] || fail "delete server: HTTP $pcode $(cat "$po/sdel.json")"
+jcheck "$po/sdel.json" "deletion of server $psrv purged its backups in the request" '
+  d["server_id"] == int(a[0]) and d["backups"] == "purged" and d["backups_error"] is None' "$psrv"
 pwait_for 180 "container of the deleted server removed" p_gone
+pwait_for 60 "deletion of server $psrv complete" deletion_done "$psrv"
 if [ -e "$work/mc/backups/repos/$psrv" ] || [ -e "$work/mc/backups/keys/$psrv" ]; then
   fail "repo or key left after purge_backups: $(ls -la "$work/mc/backups/repos" "$work/mc/backups/keys")"
 fi
-echo "OK: server $psrv deleted, repo and key purged"
+echo "OK: server $psrv deleted (202), repo and key purged, deletion confirmed by the agent"
 
 echo "== backups: audit entries and hash chain"
 papi GET "/audit?action=backup.&limit=200" "$po/baudit.json"
@@ -270,10 +273,11 @@ jcheck "$po/baudit.json" "backup.* audit entries (scheduled runs are not audited
   and all(e["target"] == "server:" + a[0] and e["actor_name"] == "ci-admin" for e in d["items"])' "$psrv"
 papi GET "/audit?action=server.delete&limit=10" "$po/sdaudit.json"
 [ "$pcode" = 200 ] || fail "audit: HTTP $pcode $(cat "$po/sdaudit.json")"
-jcheck "$po/sdaudit.json" "server.delete with backups_purged" '
-  [e["details"].get("backups_purged") for e in d["items"] if e["target"] == "server:" + a[0]] == [True]' "$psrv"
+jcheck "$po/sdaudit.json" "server.delete with backups_purged, server.delete_completed by the system" '
+  [e["details"].get("backups_purged") for e in d["items"] if e["target"] == "server:" + a[0] and e["action"] == "server.delete"] == [True]
+  and [e["actor_name"] for e in d["items"] if e["target"] == "server:" + a[0] and e["action"] == "server.delete_completed"] == ["system"]' "$psrv"
 setpriv --reuid=mcpanel --regid=mcpanel --init-groups \
   "$work/bin/panel" audit verify -config "$work/panel.toml" >"$po/verify.txt" 2>&1 ||
   fail "panel audit verify: $(cat "$po/verify.txt")"
-echo "OK: backup.create/restore/download/schedule_update/pin/delete by ci-admin on server:$psrv, server.delete backups_purged=true; audit verify OK"
+echo "OK: backup.create/restore/download/schedule_update/pin/delete by ci-admin on server:$psrv, server.delete backups_purged=true, completion by the system; audit verify OK"
 

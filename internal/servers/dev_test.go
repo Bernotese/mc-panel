@@ -386,7 +386,7 @@ func TestDeleteProdWithDev(t *testing.T) {
 		t.Fatalf("agent asked to remove: %v", calls)
 	}
 	e.rec.Entries = nil
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", devID), nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", devID), nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete dev: %d %s", rec.Code, rec.Body)
 	}
 	if got := e.rec.Actions(); !slices.Equal(got, []string{audit.ActionServerDelete, audit.ActionDevDelete}) {
@@ -395,7 +395,7 @@ func TestDeleteProdWithDev(t *testing.T) {
 	if n := e.count(t, "dev_instances") + e.count(t, "dev_ops"); n != 0 {
 		t.Fatalf("dev rows left: %d", n)
 	}
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", prodID), nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", prodID), nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete prod after its dev: %d %s", rec.Code, rec.Body)
 	}
 }

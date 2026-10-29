@@ -81,7 +81,7 @@ func TestDeleteWaitsForRunningReconcilePass(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	close(e.agent.blockEnsure)
 	wg.Wait()
-	if code := <-deleted; code != http.StatusNoContent {
+	if code := <-deleted; code != http.StatusAccepted {
 		t.Fatalf("delete: %d", code)
 	}
 	var beta []string

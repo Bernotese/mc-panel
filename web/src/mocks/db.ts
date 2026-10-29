@@ -34,6 +34,7 @@ import type {
   SecondFactor,
   SecuritySettings,
   ServerDataState,
+  ServerDeletion,
   ServerProperties,
   ServerStatus,
   Session,
@@ -530,6 +531,7 @@ export interface MockDb {
   pluginJobs: Record<number, MockPluginJob> // running or last plugin job per server id
   backups: Record<number, MockBackups> // per server id (created on first access)
   backupJobs: Record<number, MockBackupJob> // queued, running or last job per server id
+  deletions: ServerDeletion[] // tombstones of deleted servers, newest first
   monitoring: MockMonitoring
   serverSettings: MockServerSettings
   catalogs: Partial<Record<InstanceType, Catalog>>
@@ -758,6 +760,7 @@ function seed(now: number): MockDb {
     pluginJobs: {},
     backups: seedBackups(now),
     backupJobs: {},
+    deletions: [],
     monitoring: defaultMonitoring(),
     serverSettings: { base_domain: 'mc.example.com', curseforge_api_key_set: false, backup_timezone: 'Europe/Berlin', docker: 'ok' },
     catalogs: {
@@ -858,6 +861,53 @@ export function seedRecoveryScenario(target: MockDb = db, now: number = Date.now
   }
   target.servers.push(archive)
   return archive
+}
+
+/**
+ * Durable deletion (#148): a deletion whose container could not be removed (failed), one whose backups could not be
+ * purged (partial) and a completed one. Seeded only for the browser mock and by the tests that need them.
+ */
+export function seedDeletionScenario(target: MockDb = db, now: number = Date.now()): ServerDeletion[] {
+  const deletions: ServerDeletion[] = [
+    {
+      server_id: 41,
+      name: 'old-lobby',
+      state: 'failed',
+      container: 'pending',
+      container_error: 'docker stop mcpanel-mc-41: context deadline exceeded',
+      backups: 'none',
+      backups_error: null,
+      requested_at: now - 25 * MINUTE,
+      updated_at: now - 2 * MINUTE,
+      completed_at: null,
+    },
+    {
+      server_id: 42,
+      name: 'event-2025',
+      state: 'partial',
+      container: 'removed',
+      container_error: null,
+      backups: 'failed',
+      backups_error: 'restic forget: repository is already locked by PID 4242',
+      requested_at: now - 3 * HOUR,
+      updated_at: now - 40 * MINUTE,
+      completed_at: null,
+    },
+    {
+      server_id: 40,
+      name: 'testwelt',
+      state: 'done',
+      container: 'removed',
+      container_error: null,
+      backups: 'purged',
+      backups_error: null,
+      requested_at: now - 2 * DAY,
+      updated_at: now - 2 * DAY + MINUTE,
+      completed_at: now - 2 * DAY + MINUTE,
+    },
+  ]
+  target.deletions.push(...deletions)
+  return deletions
 }
 
 export function resetDb(now: number = Date.now()): void {

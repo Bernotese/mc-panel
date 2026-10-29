@@ -537,6 +537,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/servers/deletions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Deletions whose cleanup is still open and those completed within the last 7 days, newest first (admins). */
+        get: operations["listServerDeletions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/deletions/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Runs the next cleanup attempt of an open deletion right away instead of waiting for the retry delay (admin, sudo: it may purge backups). */
+        post: operations["retryServerDeletion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/servers/deletions/{id}/abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Closes an open deletion that cannot finish (for example a container named mcpanel-mc-<id> that mc-panel does not manage, or data that cannot be archived) as abandoned, and frees the name. Nothing is removed: the leftovers are the operator's (docs/install.md, "A server deletion does not finish"). Admin, sudo; audited. */
+        post: operations["abandonServerDeletion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/servers/memory": {
         parameters: {
             query?: never;
@@ -580,6 +631,7 @@ export interface paths {
         get: operations["getServer"];
         put?: never;
         post?: never;
+        /** @description The server disappears at once; the cleanup is durable (issue #148): the container is removed through the agent (its data goes to deleted/ on the host) and, with purge_backups, the backups are purged. A first attempt runs before the answer; whatever is not confirmed yet is retried until it is, see GET /servers/deletions. A container of another server is never removed. The name stays taken until the deletion is done. */
         delete: operations["deleteServer"];
         options?: never;
         head?: never;
@@ -1912,6 +1964,39 @@ export interface components {
          * @enum {string}
          */
         ServerDataState: "safe" | "busy" | "recovery_required" | "unknown";
+        ServerDeletion: {
+            /**
+             * Format: int64
+             * @description ID of the deleted server (never handed out again)
+             */
+            server_id: number;
+            name: string;
+            state: components["schemas"]["ServerDeletionState"];
+            /**
+             * @description none: nothing to remove (the server had no instance, or the agent manages no containers: make dev without Docker); pending: removal not confirmed by the agent yet; removed: container gone, data moved to deleted/; foreign: the container belongs to another server and is left alone
+             * @enum {string}
+             */
+            container: "none" | "pending" | "removed" | "foreign";
+            /** @description Why the container is not removed yet (retried) */
+            container_error: string | null;
+            /**
+             * @description none: no purge requested; failed: the last purge failed (retried)
+             * @enum {string}
+             */
+            backups: "none" | "pending" | "purged" | "failed";
+            backups_error: string | null;
+            /** Format: int64 */
+            requested_at: number;
+            /** Format: int64 */
+            updated_at: number;
+            /** Format: int64 */
+            completed_at: number | null;
+        };
+        /**
+         * @description pending: cleanup in progress; failed: the container could not be removed yet (retried); partial: the container is gone but the backups could not be purged (retried); done: complete; abandoned: an admin closed it unfinished (leftovers stay on the host). A deletion still failed or partial 10 minutes after the request sends server.delete_failed once.
+         * @enum {string}
+         */
+        ServerDeletionState: "pending" | "failed" | "partial" | "done" | "abandoned";
         Recovery: {
             /** @description Journal phase of the unresolved restore, or "unreadable" */
             phase: string;
@@ -4125,6 +4210,100 @@ export interface operations {
             };
         };
     };
+    listServerDeletions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerDeletion"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    retryServerDeletion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The cleanup state after the attempt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerDeletion"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description conflict (the deletion is complete, or another attempt is running) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    abandonServerDeletion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The closed deletion (state abandoned) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerDeletion"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description conflict (the deletion is complete, or another attempt is running) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getServerMemoryLimits: {
         parameters: {
             query?: never;
@@ -4239,18 +4418,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No content */
-            204: {
+            /** @description Deleted; the cleanup state after the first attempt */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ServerDeletion"];
+                };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description conflict (a job rewrites the data directory: an archive is extracted or a backup restored) */
+            /** @description conflict (a job rewrites the data directory: an archive is extracted or a backup restored), dev_exists */
             409: {
                 headers: {
                     [name: string]: unknown;

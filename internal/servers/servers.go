@@ -237,6 +237,9 @@ func (h *Handler) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if err := nameFree(ctx, q, req.Name); err != nil {
+			return err
+		}
 		if s, err = q.ServersCreateServer(ctx, store.ServersCreateServerParams{ID: id, Name: req.Name, CreatedAt: now}); err != nil {
 			return err
 		}
@@ -249,6 +252,10 @@ func (h *Handler) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	})
 	if store.IsUniqueViolation(err) {
 		writeConflict(w, r, "server name already taken")
+		return
+	}
+	if errors.Is(err, errNameDeleting) {
+		writeConflict(w, r, errNameDeleting.Error())
 		return
 	}
 	if err != nil {
@@ -584,16 +591,17 @@ func purgeBackupsParam(r *http.Request) (purge, ok bool) {
 	return false, false
 }
 
-// handleDeleteServer deletes the rows in a transaction and asks the agent to remove the
-// container (data goes to deleted/ on the host) while it is open: the rows are committed away
-// only once the agent accepted the remove, and a remove is only sent for rows that are gone.
-// Without the agent a configured server cannot be deleted, so no container is orphaned; a
-// server without instance needs no agent. A container of another server is never removed.
-// With ?purge_backups=1 the server's backups are deleted after the commit (backups spec §5.6).
-// The delete is admitted like a start (data safety spec §3), but a server whose restore could
-// not be completed (recovery_required) may be deleted too: its half-swapped folders are first
-// moved to backups/recovery/ by the files service (never deleted with the server, D4) and the
-// audit entry names the folder.
+// handleDeleteServer deletes a server durably (issue #148): under the server's admission lock
+// and the reconcile lock, its rows go and a tombstone (server_deletions) is written in one
+// transaction; then the first cleanup attempt runs right away (the agent is asked to remove the
+// container, data goes to deleted/ on the host; with ?purge_backups=1 the backups are purged,
+// backups spec §5.6) and the answer is 202 with the deletion. Whatever does not succeed now is
+// retried by the deletion loop until the agent confirms the removal; GET /servers/deletions
+// shows the progress. A container of another server is never removed. The delete is admitted
+// like a start (data safety spec §3), but a server whose restore could not be completed
+// (recovery_required) may be deleted too: its half-swapped folders are first moved to
+// backups/recovery/ by the files service (never deleted with the server, D4), audited on their
+// own.
 func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	purge, ok := purgeBackupsParam(r)
@@ -605,7 +613,7 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Answered before the agent is asked; deleteServerRows checks again in its transaction.
+	// Answered before anything is locked; deleteServerRows checks again in its transaction.
 	if _, err := h.q.DevGetBySource(ctx, s.ID); err == nil {
 		writeDevExists(w, r)
 		return
@@ -619,92 +627,86 @@ func (h *Handler) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	configured, recovery, ok := h.deleteServerRows(w, r, s)
-	if !ok {
-		return
-	}
-	// The rows are gone: neither the purge nor the audit entry may be cut short by a client that
-	// goes away.
-	ctx = context.WithoutCancel(ctx)
-	details := map[string]any{"name": s.Name, "configured": configured}
-	if recovery != nil {
-		// the half-swapped folders of the restore stay on the host, below backups/recovery/
-		details["recovery_required"], details["recovery_folder"] = true, recovery.Folder
-	}
-	if purge {
-		// After the commit and outside the reconcile lock: deleting a large repository can take
-		// minutes, longer than the server's WriteTimeout. The purge gets its own deadline and the
-		// answer a write deadline past it. A failure leaves an orphaned repository (as without the
-		// option); the server stays deleted.
-		h.extendWrite(w, r, purgeTimeout+purgeAnswerSlack)
-		pctx, cancel := context.WithTimeout(ctx, purgeTimeout)
-		err := h.backups.PurgeBackups(pctx, s.ID)
-		cancel()
-		if err != nil {
-			h.log.Error("servers: delete: purging the backups failed", "server_id", s.ID, "err", err)
-			details["backups_purged"] = false
-		} else {
-			details["backups_purged"] = true
-		}
-	}
-	h.record(ctx, audit.ActionServerDelete, serverTarget(s.ID), audit.ResultSuccess, details)
-	if wasDev {
-		h.record(ctx, audit.ActionDevDelete, serverTarget(s.ID), audit.ResultSuccess,
-			map[string]any{"name": s.Name, "source_id": dev.SourceID})
-	}
-	h.Trigger() // the next pass drops the server's web route
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// deleteServerRows deletes the rows of s and (if configured and not foreign) its container under
-// the server's admission lock and the reconcile lock (in that order, data safety spec §3). A
-// server in recovery_required has its restore resolved once every check that can refuse the
-// delete has passed; recovery is the files service's answer then (nil otherwise). On failure it
-// has written the error answer and returns ok = false.
-func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s store.Server) (configured bool, recovery *filesapi.Recovery, ok bool) {
-	ctx := r.Context()
 	// A refusal that needs no lock comes at once (no 5 s wait behind a restore).
 	if !h.deleteAllowed(w, r, s.ID) {
-		return false, nil, false
+		return
 	}
 	unlock, err := h.admission.Lock(ctx, s.ID)
 	if err != nil {
 		if !WriteDataStateError(w, r, err) {
 			h.log.DebugContext(ctx, "servers: delete admission ended with the request", "err", err)
 		}
-		return false, nil, false
+		return
 	}
 	defer unlock()
-	// Exclude a concurrent reconcile pass or restart: one that read this server before the
-	// delete would otherwise recreate the container after the remove (orphan container).
+	configured, recovery, ok := h.deleteServerRows(w, r, s, purge)
+	if !ok {
+		return
+	}
+	// The rows are gone: neither the first cleanup attempt nor the audit entry may be cut short
+	// by a client that goes away. A purge can take minutes, longer than the server's
+	// WriteTimeout: the answer gets a write deadline past it.
+	ctx = context.WithoutCancel(ctx)
+	if purge {
+		h.extendWrite(w, r, purgeTimeout+purgeAnswerSlack)
+	}
+	d, completed, err := h.attemptDeletion(ctx, s.ID, nil)
+	if err != nil {
+		h.log.Error("servers: delete: first cleanup attempt", "server_id", s.ID, "err", err)
+	}
+	details := map[string]any{"name": s.Name, "configured": configured}
+	if recovery != nil {
+		// the half-swapped folders of the restore stay on the host, below backups/recovery/
+		details["recovery_required"], details["recovery_folder"] = true, recovery.Folder
+	}
+	if purge {
+		details["backups_purged"] = d.Backups == delPurged
+	}
+	// a cleanup that finishes later gets a server.delete_completed entry of its own
+	details["completed"] = completed
+	h.record(ctx, audit.ActionServerDelete, serverTarget(s.ID), audit.ResultSuccess, details)
+	if wasDev {
+		h.record(ctx, audit.ActionDevDelete, serverTarget(s.ID), audit.ResultSuccess,
+			map[string]any{"name": s.Name, "source_id": dev.SourceID})
+	}
+	h.Trigger() // the next pass drops the server's web route
+	h.KickDeletions()
+	if err != nil { // the tombstone could not be read back: describe it from the request
+		d = store.ServerDeletion{ServerID: s.ID, Name: s.Name, Container: delPending, Backups: delNone}
+		if !configured {
+			d.Container = delNone
+		}
+		if purge {
+			d.Backups = delPending
+		}
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, toDeletionJSON(d))
+}
+
+// deleteServerRows deletes the rows of s under the reconcile lock (the caller holds the
+// server's admission lock) and writes its tombstone in the same transaction: a reconcile pass
+// or restart that read this server before can no longer recreate its container, and the
+// deletion loop removes it. A server in recovery_required has its restore resolved first;
+// recovery is the files service's answer then (nil otherwise). On failure it has written the
+// error answer and returns ok = false.
+func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s store.Server, purge bool) (configured bool, recovery *filesapi.Recovery, ok bool) {
+	ctx := r.Context()
 	h.reconcile.mu.Lock()
 	defer h.reconcile.mu.Unlock()
 	info, ok := h.deleteState(w, r, s.ID)
 	if !ok {
 		return false, nil, false
 	}
-	_, err = h.q.ServersGetInstance(ctx, s.ID)
+	_, err := h.q.ServersGetInstance(ctx, s.ID)
 	configured = err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		httpx.Internal(w, r, err)
 		return false, nil, false
 	}
-	remove := configured
-	if configured {
-		foreign, err := h.isForeign(ctx, s)
-		if err != nil {
-			writeAgentError(w, r, err)
-			return false, nil, false
-		}
-		if foreign {
-			h.log.Warn("servers: delete leaves the container of another server alone", "server_id", s.ID, "name", s.Name)
-			remove = false
-		}
-	}
 	if info.State == StateRecoveryRequired {
-		// Last before the rows and the container go (data safety spec D4). Should the delete
-		// still fail afterwards, the server is safe again but must not start with a half-swapped
-		// world: its wish to run is dropped first.
+		// Last before the rows go (data safety spec D4). Should the transaction still fail, the
+		// server is safe again but must not start with a half-swapped world: its wish to run is
+		// dropped first.
 		if configured {
 			if _, err := h.q.ServersSetDesiredState(ctx, store.ServersSetDesiredStateParams{
 				DesiredState: desiredStopped, UpdatedAt: h.clock.Now().UnixMilli(), ServerID: s.ID,
@@ -723,16 +725,17 @@ func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s sto
 		return false, nil, false
 	}
 	defer func() { _ = tx.Rollback() }()
+	q := h.q.WithTx(tx)
 	// A dev created since the check in handleDeleteServer: its source stays (dev_instances has no
 	// cascade on source_id).
-	if _, err := h.q.WithTx(tx).DevGetBySource(ctx, s.ID); err == nil {
+	if _, err := q.DevGetBySource(ctx, s.ID); err == nil {
 		writeDevExists(w, r)
 		return false, nil, false
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		httpx.Internal(w, r, err)
 		return false, nil, false
 	}
-	n, err := h.q.WithTx(tx).RbacDeleteServer(ctx, s.ID)
+	n, err := q.RbacDeleteServer(ctx, s.ID)
 	if err != nil {
 		httpx.Internal(w, r, err)
 		return false, nil, false
@@ -741,18 +744,25 @@ func (h *Handler) deleteServerRows(w http.ResponseWriter, r *http.Request, s sto
 		writeNotFound(w, r)
 		return false, nil, false
 	}
-	if err := deleteMonitoring(ctx, h.q.WithTx(tx), s.ID); err != nil {
+	if err := deleteMonitoring(ctx, q, s.ID); err != nil {
 		httpx.Internal(w, r, err)
 		return false, nil, false
 	}
-	if remove {
-		if err := h.inst.Remove(ctx, s.ID); err != nil {
-			writeAgentError(w, r, err) // the rollback keeps the rows
-			return false, nil, false
-		}
+	container, backups := delNone, delNone
+	if configured {
+		container = delPending
+	}
+	if purge {
+		backups = delPending
+	}
+	now := h.clock.Now().UnixMilli()
+	if err := q.ServersCreateDeletion(ctx, store.ServersCreateDeletionParams{
+		ServerID: s.ID, Name: s.Name, Container: container, Backups: backups, RequestedAt: now, UpdatedAt: now,
+	}); err != nil {
+		httpx.Internal(w, r, err)
+		return false, nil, false
 	}
 	if err := tx.Commit(); err != nil {
-		h.log.Error("servers: delete: commit failed after the agent accepted the remove", "server_id", s.ID, "err", err)
 		httpx.Internal(w, r, err)
 		return false, nil, false
 	}
@@ -825,17 +835,4 @@ func deleteMonitoring(ctx context.Context, q *store.Queries, id int64) error {
 
 func writeDevExists(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, r, http.StatusConflict, httpx.CodeDevExists, "the server has a dev instance: delete the dev instance first")
-}
-
-// isForeign asks the agent whether the container with the server's ID belongs to another
-// server (see foreignContainer).
-func (h *Handler) isForeign(ctx context.Context, s store.Server) (bool, error) {
-	resp, snap, err := h.refreshStatus(ctx)
-	if err != nil {
-		return false, err
-	}
-	if resp.Docker != agentapi.DockerOK {
-		return false, agentapi.ErrDockerUnavailable
-	}
-	return foreignContainer(snap.actualStatus(s.ID), s.Name), nil
 }

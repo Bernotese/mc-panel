@@ -7,6 +7,7 @@ import { errorMessage } from '@/lib/error-message'
 import { BackupTimezoneCard } from './backup-timezone-card'
 import { BaseDomainCard } from './base-domain-card'
 import { CurseForgeCard } from './curseforge-card'
+import { DeletionsCard } from './deletions-card'
 import { InstanceStatusCard } from './instance-status-card'
 import { MonitoringCard } from './monitoring-card'
 
@@ -47,6 +48,8 @@ export function SettingsPage() {
               {t('settings.minecraft.title')}
             </h2>
             {content}
+            {/* Loads on its own, like the monitoring card. */}
+            <DeletionsCard />
           </section>
           {/* Loads on its own: a failure of the server settings does not hide it. */}
           <section aria-labelledby={monitoringHeadingId} className="min-w-0 space-y-4">

@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest'
 import type { BackupJob, BackupOverview, BackupSnapshot } from '@/api/types'
 import type { LiveMetrics, MetricsSeries, MonitoringOverview, MonitoringSettings } from '@/api/types'
 import type { PluginInventory, PluginJob, PluginResolution, PluginSearchResult, PluginUpdates, PluginVersionList } from '@/api/types'
-import type { Server } from '@/api/types'
+import type { Server, ServerDeletion } from '@/api/types'
 import { callApi, field } from '@/test/call-api'
-import { db, defaultMonitoring, loginAs, seedRecoveryScenario } from './db'
+import { db, defaultMonitoring, loginAs, seedDeletionScenario, seedRecoveryScenario } from './db'
 import { operations } from './handlers'
 
 const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../api/openapi.yaml'), 'utf8')
@@ -14,12 +14,45 @@ const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../
 describe('mock coverage', () => {
   it('mocks every operationId of api/openapi.yaml exactly once', () => {
     const ids = [...openapiYaml.matchAll(/operationId:\s*(\w+)/g)].map((m) => m[1]).sort()
-    expect(ids).toHaveLength(114)
+    expect(ids).toHaveLength(117)
     expect(operations.map((o) => o.operationId).sort()).toEqual(ids)
   })
 })
 
 describe('mock behaviour', () => {
+  it('keeps a deletion pending until the mock agent confirms it and the name taken until then (#148)', async () => {
+    db.servers = db.servers.filter((s) => s.id !== 5) // survival's dev goes first
+    const me = loginAs('admin', { sudo: true })
+    const deleted = await callApi('DELETE', '/servers/2', { csrf: me.csrf_token })
+    expect(deleted.status).toBe(202)
+    expect(deleted.body).toMatchObject({ server_id: 2, name: 'creative', state: 'pending', container: 'pending', completed_at: null })
+    const create = { name: 'creative', type: 'paper', version: '1.21.11', memory_mib: 2048, eula_accepted: true }
+    expect(field((await callApi('POST', '/servers', { body: create, csrf: me.csrf_token })).body, 'error')).toBe('conflict')
+
+    const d = db.deletions.find((x) => x.server_id === 2)
+    if (!d) throw new Error('no tombstone')
+    d.updated_at -= 5_000 // the mock agent confirms after a few seconds
+    const list = (await callApi('GET', '/servers/deletions')).body as ServerDeletion[]
+    expect(list.find((x) => x.server_id === 2)).toMatchObject({ state: 'done', container: 'removed' })
+    expect((await callApi('POST', '/servers', { body: create, csrf: me.csrf_token })).status).toBe(201)
+    // A server without an instance has nothing to remove: done at once.
+    expect((await callApi('DELETE', '/servers/3', { csrf: me.csrf_token })).body).toMatchObject({ state: 'done', container: 'none' })
+  })
+
+  it('abandons an open deletion once and frees its name (#148)', async () => {
+    const me = loginAs('admin', { sudo: true })
+    seedDeletionScenario()
+    const abandon = (id: number) => callApi('POST', `/servers/deletions/${id}/abandon`, { csrf: me.csrf_token })
+    const create = { name: 'old-lobby', type: 'paper', version: '1.21.11', memory_mib: 2048, eula_accepted: true }
+    expect(field((await callApi('POST', '/servers', { body: create, csrf: me.csrf_token })).body, 'error')).toBe('conflict')
+    const res = await abandon(41)
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({ state: 'abandoned', completed_at: expect.any(Number) })
+    expect(field((await abandon(41)).body, 'error')).toBe('conflict')
+    expect((await callApi('POST', '/servers', { body: create, csrf: me.csrf_token })).status).toBe(201)
+    expect(field((await abandon(40)).body, 'error')).toBe('conflict') // already done
+  })
+
   it('locks start and restart outside the safe data state and resolves a stuck restore once', async () => {
     seedRecoveryScenario()
     const me = loginAs('admin', { sudo: true })
@@ -750,11 +783,11 @@ describe('mock behaviour', () => {
     expect(field(held.body, 'error')).toBe('conflict')
     db.backupJobs[1].startedMs -= 60_000
     // an empty value means no purge (like the panel)
-    expect((await callApi('DELETE', '/servers/2?purge_backups=', { csrf: me.csrf_token })).status).toBe(204)
+    expect((await callApi('DELETE', '/servers/2?purge_backups=', { csrf: me.csrf_token })).status).toBe(202)
     expect(db.backups[2]).toBeDefined()
     // survival's dev goes first (409 dev_exists otherwise)
-    expect((await callApi('DELETE', '/servers/5', { csrf: me.csrf_token })).status).toBe(204)
-    expect((await callApi('DELETE', '/servers/1?purge_backups=1', { csrf: me.csrf_token })).status).toBe(204)
+    expect((await callApi('DELETE', '/servers/5', { csrf: me.csrf_token })).status).toBe(202)
+    expect((await callApi('DELETE', '/servers/1?purge_backups=1', { csrf: me.csrf_token })).status).toBe(202)
     expect(db.backups[1]).toBeUndefined()
     expect(db.audit.at(-1)).toMatchObject({ action: 'server.delete', details: { backups_purged: true } })
   })

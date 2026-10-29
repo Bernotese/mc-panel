@@ -41,10 +41,13 @@ func CreateUser(t testing.TB, db *sql.DB, username, role string) int64 {
 
 func CreateServer(t testing.TB, db *sql.DB, name string) int64 {
 	t.Helper()
-	res, err := db.ExecContext(context.Background(), `INSERT INTO servers (name, created_at) VALUES (?, 0)`, name)
+	// The ID comes from server_ids like in production: never one of a deleted server.
+	id, err := store.New(db).ServersNextServerID(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, _ := res.LastInsertId()
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO servers (id, name, created_at) VALUES (?, ?, 0)`, id, name); err != nil {
+		t.Fatal(err)
+	}
 	return id
 }

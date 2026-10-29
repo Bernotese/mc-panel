@@ -470,6 +470,43 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: 'No catalog for modrinth/curseforge (the pack decides the version)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: 'catalog_unavailable: upstream not reachable or invalid; the form falls back to free text', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/deletions:
+    get:
+      operationId: listServerDeletions
+      tags: [servers]
+      description: 'Deletions whose cleanup is still open and those completed within the last 7 days, newest first (admins).'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ServerDeletion' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /servers/deletions/{id}/retry:
+    post:
+      operationId: retryServerDeletion
+      tags: [servers]
+      description: 'Runs the next cleanup attempt of an open deletion right away instead of waiting for the retry delay (admin, sudo: it may purge backups).'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '200': { description: 'The cleanup state after the attempt', content: { application/json: { schema: { $ref: '#/components/schemas/ServerDeletion' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'conflict (the deletion is complete, or another attempt is running)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /servers/deletions/{id}/abandon:
+    post:
+      operationId: abandonServerDeletion
+      tags: [servers]
+      description: 'Closes an open deletion that cannot finish (for example a container named mcpanel-mc-<id> that mc-panel does not manage, or data that cannot be archived) as abandoned, and frees the name. Nothing is removed: the leftovers are the operator''s (docs/install.md, "A server deletion does not finish"). Admin, sudo; audited.'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '200': { description: 'The closed deletion (state abandoned)', content: { application/json: { schema: { $ref: '#/components/schemas/ServerDeletion' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'conflict (the deletion is complete, or another attempt is running)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /servers/memory:
     get:
       operationId: getServerMemoryLimits
@@ -540,13 +577,14 @@ paths:
         - $ref: '#/components/parameters/IdPath'
         - { name: purge_backups, in: query, required: false, description: 'true or 1: also delete the restic repository and key of the server (default false: they stay on the host)', schema: { type: boolean } }
         - $ref: '#/components/parameters/CSRF'
+      description: 'The server disappears at once; the cleanup is durable (issue #148): the container is removed through the agent (its data goes to deleted/ on the host) and, with purge_backups, the backups are purged. A first attempt runs before the answer; whatever is not confirmed yet is retried until it is, see GET /servers/deletions. A container of another server is never removed. The name stays taken until the deletion is done.'
       responses:
-        '204': { description: No content }
+        '202': { description: 'Deleted; the cleanup state after the first attempt', content: { application/json: { schema: { $ref: '#/components/schemas/ServerDeletion' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: 'conflict (a job rewrites the data directory: an archive is extracted or a backup restored)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'conflict (a job rewrites the data directory: an archive is extracted or a backup restored), dev_exists', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /servers/{id}/recovery/resolve:
@@ -1907,6 +1945,24 @@ components:
       type: string
       enum: [safe, busy, recovery_required, unknown]
       description: 'Safety of the data directory (data safety spec §2). Only safe admits a start or a data job; stop and reads always work. unknown = the files service did not answer; never treated as safe.'
+    ServerDeletion:
+      type: object
+      required: [server_id, name, state, container, container_error, backups, backups_error, requested_at, updated_at, completed_at]
+      properties:
+        server_id: { type: integer, format: int64, description: 'ID of the deleted server (never handed out again)' }
+        name: { type: string }
+        state: { $ref: '#/components/schemas/ServerDeletionState' }
+        container: { type: string, enum: [none, pending, removed, foreign], description: 'none: nothing to remove (the server had no instance, or the agent manages no containers: make dev without Docker); pending: removal not confirmed by the agent yet; removed: container gone, data moved to deleted/; foreign: the container belongs to another server and is left alone' }
+        container_error: { type: [string, 'null'], description: 'Why the container is not removed yet (retried)' }
+        backups: { type: string, enum: [none, pending, purged, failed], description: 'none: no purge requested; failed: the last purge failed (retried)' }
+        backups_error: { type: [string, 'null'] }
+        requested_at: { type: integer, format: int64 }
+        updated_at: { type: integer, format: int64 }
+        completed_at: { type: [integer, 'null'], format: int64 }
+    ServerDeletionState:
+      type: string
+      enum: [pending, failed, partial, done, abandoned]
+      description: 'pending: cleanup in progress; failed: the container could not be removed yet (retried); partial: the container is gone but the backups could not be purged (retried); done: complete; abandoned: an admin closed it unfinished (leftovers stay on the host). A deletion still failed or partial 10 minutes after the request sends server.delete_failed once.'
     Recovery:
       type: object
       required: [phase, since]

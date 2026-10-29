@@ -263,13 +263,13 @@ papi DELETE "/servers/$psrv" "$dout/pdel.json"
 is_perror "$dout/pdel.json" "$pcode" 409 dev_exists || fail "delete prod with a dev: HTTP $pcode $(cat "$dout/pdel.json")"
 p_running || fail "the refused delete touched the prod"
 papi DELETE "/servers/$dsrv" "$dout/ddel.json"
-[ "$pcode" = 204 ] || fail "delete dev: HTTP $pcode $(cat "$dout/ddel.json")"
+[ "$pcode" = 202 ] || fail "delete dev: HTTP $pcode $(cat "$dout/ddel.json")"
 d_gone() { [ "$(inst_field "$dsrv" i)" = absent ] && ! docker inspect "mcpanel-mc-$dsrv" >/dev/null 2>&1; }
 pwait_for 180 "dev container removed" d_gone
 papi GET "/servers/$psrv" "$dout/prod.json"
 [ "$pcode" = 200 ] || fail "get prod: HTTP $pcode $(cat "$dout/prod.json")"
 jcheck "$dout/prod.json" "the prod has no dev any more" 'd.get("dev_id") is None and d["status"]["state"] == "running"'
-echo "OK: backups 409 dev_managed on the dev; delete prod 409 dev_exists; delete dev 204; prod still running"
+echo "OK: backups 409 dev_managed on the dev; delete prod 409 dev_exists; delete dev 202; prod still running"
 
 echo "== dev: audit entries"
 papi GET "/audit?action=dev.&limit=200" "$dout/audit.json"

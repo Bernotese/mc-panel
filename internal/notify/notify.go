@@ -28,6 +28,7 @@ const (
 	EventServerRecovered        EventType = "server.recovered"
 	EventServerCrashLoop        EventType = "server.crash_loop"
 	EventServerRecoveryRequired EventType = "server.recovery_required"
+	EventServerDeleteFailed     EventType = "server.delete_failed"
 	EventHostDiskLow            EventType = "host.disk_low"
 	EventHostDiskOK             EventType = "host.disk_ok"
 	EventTest                   EventType = "test"

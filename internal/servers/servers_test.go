@@ -123,7 +123,7 @@ func TestServerCRUDAsAdmin(t *testing.T) {
 	if got := e.get(t, s.ID); got.Name != "survival" {
 		t.Fatalf("get = %+v", got)
 	}
-	if rec := e.do(http.MethodDelete, path, nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, path, nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}
 	if rec := e.do(http.MethodDelete, path, nil, &admin); rec.Code != http.StatusNotFound {
@@ -410,27 +410,16 @@ func TestUpdateServerRejects(t *testing.T) {
 	}
 }
 
-func TestDeleteServerRemovesContainerFirst(t *testing.T) {
+// The rows go and the agent is asked to remove the container in the same request (issue #148:
+// failures are retried from the tombstone, deletions_test.go).
+func TestDeleteServerRemovesContainer(t *testing.T) {
 	e := newEnv(t)
 	setBaseDomain(t, e.db, "mc.example.com")
 	admin := e.admin()
 	s := e.create(t, paper("survival"))
 	path := fmt.Sprintf("/servers/%d", s.ID)
 
-	e.agent.setErr(agentapi.ErrUnavailable)
-	if rec := e.do(http.MethodDelete, path, nil, &admin); rec.Code != http.StatusServiceUnavailable || errCode(t, rec) != "agent_unavailable" {
-		t.Fatalf("agent down: %d %s", rec.Code, rec.Body)
-	}
-	e.agent.setErr(nil)
-	e.agent.setActionErr(agentapi.ErrDockerUnavailable)
-	if rec := e.do(http.MethodDelete, path, nil, &admin); rec.Code != http.StatusServiceUnavailable || errCode(t, rec) != "docker_unavailable" {
-		t.Fatalf("docker down: %d %s", rec.Code, rec.Body)
-	}
-	if n := e.count(t, "instances"); n != 1 {
-		t.Fatalf("failed deletes removed rows (instances=%d)", n)
-	}
-	e.agent.setActionErr(nil)
-	if rec := e.do(http.MethodDelete, path, nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, path, nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}
 	if calls := e.agent.takeCalls(); !slices.Equal(calls, []string{fmt.Sprintf("remove %d", s.ID)}) {
@@ -447,7 +436,7 @@ func TestDeleteServerRemovesContainerFirst(t *testing.T) {
 	// a server without instance needs no agent
 	stub := storetest.CreateServer(t, e.db, "lobby")
 	e.agent.setErr(agentapi.ErrUnavailable)
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", stub), nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", stub), nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete stub without agent: %d %s", rec.Code, rec.Body)
 	}
 	if calls := e.agent.takeCalls(); len(calls) != 0 {

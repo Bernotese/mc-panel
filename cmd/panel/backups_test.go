@@ -94,7 +94,7 @@ func TestBackupsEndToEnd(t *testing.T) {
 		t.Fatalf("download = %d %q %q", resp.StatusCode, resp.Header.Get("Content-Type"), body)
 	}
 
-	admin.must(204, "DELETE", fmt.Sprintf("/servers/%d?purge_backups=1", id), nil)
+	admin.must(202, "DELETE", fmt.Sprintf("/servers/%d?purge_backups=1", id), nil)
 	if !e.backups.purged(id) {
 		t.Fatal("deleting the server with purge_backups did not purge the repository")
 	}

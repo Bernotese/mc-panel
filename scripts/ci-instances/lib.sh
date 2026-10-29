@@ -475,6 +475,16 @@ print((n.hour * 60 + n.minute + int(sys.argv[2])) % 1440)' "$1" "$2"
 
 p_gone() { [ "$(inst_field "$psrv" i)" = absent ] && ! docker inspect "mcpanel-mc-$psrv" >/dev/null 2>&1; }
 
+# deletion_done <server id>: GET /servers/deletions reports the server's deletion as complete
+# (issue #148: only once the agent confirmed the removal and requested backups are purged).
+deletion_done() {
+  papi GET /servers/deletions "$po/deletions.json"
+  [ "$pcode" = 200 ] || fail "deletions: HTTP $pcode $(cat "$po/deletions.json")"
+  python3 -I -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+sys.exit(0 if any(x["server_id"] == int(sys.argv[2]) and x["state"] == "done" for x in d) else 1)' "$po/deletions.json" "$1"
+}
+
 # mon_settings <json body>: PUT /monitoring/settings with a fresh sudo (the route needs sudo);
 # fails on != 200, counts the successful updates for the audit check.
 mon_settings() {

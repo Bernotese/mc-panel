@@ -16,6 +16,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/secretbox"
 	"github.com/Bernotese/mc-panel/internal/servers/catalog"
@@ -39,6 +40,8 @@ type Deps struct {
 	// DataStates answers whether a server's data directory is safe (data safety spec §2.3):
 	// only then are starts admitted. nil = every server is safe (no files service).
 	DataStates DataStates
+	// Notifier sends server.delete_failed for a stuck deletion; nil = notify.Nop{}.
+	Notifier notify.Notifier
 	// Files resolves a stuck restore (POST /servers/{id}/recovery/resolve); nil = that answers
 	// 503 files_unavailable.
 	Files filesapi.StateClient
@@ -63,6 +66,7 @@ type Handler struct {
 	catalog   CatalogSource
 	data      DataStates
 	files     filesapi.StateClient
+	notifier  notify.Notifier
 	admission *Admission
 	backups   BackupPurger
 	log       *slog.Logger
@@ -70,8 +74,10 @@ type Handler struct {
 	hostMemory func() (uint64, error)
 	power      *powerLimiter
 	kick       chan struct{} // Trigger -> reconcile loop (buffer 1, never blocks)
-	status     statusCache   // last actual state reported by the agent
-	webs       webState      // last answer of the agent per web route
+	delKick    chan struct{} // KickDeletions -> deletion loop (buffer 1, never blocks)
+	dels       deletionRetries
+	status     statusCache // last actual state reported by the agent
+	webs       webState    // last answer of the agent per web route
 
 	reconcile reconcileState
 }
@@ -97,14 +103,18 @@ func NewHandler(d Deps) *Handler {
 	if data == nil {
 		data = safeStates{}
 	}
+	notifier := d.Notifier
+	if notifier == nil {
+		notifier = notify.Nop{}
+	}
 	purger := d.Backups
 	if purger == nil {
 		purger = noPurger{}
 	}
 	return &Handler{
 		db: d.DB, q: store.New(d.DB), clock: d.Clock, rec: d.Audit, box: d.Box, inst: inst, web: web, catalog: cat, log: log,
-		data: data, files: d.Files, admission: NewAdmission(), backups: purger, ioClock: clock.Real{}, hostMemory: d.HostMemory,
-		power: newPowerLimiter(), kick: make(chan struct{}, 1),
+		data: data, files: d.Files, notifier: notifier, admission: NewAdmission(), backups: purger, ioClock: clock.Real{}, hostMemory: d.HostMemory,
+		power: newPowerLimiter(), kick: make(chan struct{}, 1), delKick: make(chan struct{}, 1),
 		reconcile: reconcileState{attempts: map[int64]attempt{}, warned: map[int64]bool{}, foreign: map[int64]bool{}, unknown: map[int64]bool{}},
 	}
 }
@@ -129,6 +139,9 @@ func (h *Handler) Routes(api *rbac.Router) {
 	api.Get("/servers/{id}", rbac.Server(rbac.PermServerView, "id"), h.handleGetServer)
 	api.Patch("/servers/{id}", rbac.Admin().WithSudo(), h.handleUpdateServer)
 	api.Delete("/servers/{id}", rbac.Admin().WithSudo(), h.handleDeleteServer)
+	api.Get("/servers/deletions", rbac.Admin(), h.handleListDeletions)
+	api.Post("/servers/deletions/{id}/retry", rbac.Admin().WithSudo(), h.handleRetryDeletion)
+	api.Post("/servers/deletions/{id}/abandon", rbac.Admin().WithSudo(), h.handleAbandonDeletion)
 	api.Post("/servers/{id}/power", rbac.Server(rbac.PermServerPower, "id"), h.handleServerPower)
 	api.Post("/servers/{id}/recovery/resolve", rbac.Admin().WithSudo(), h.handleResolveRecovery)
 }

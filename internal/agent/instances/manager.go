@@ -160,7 +160,14 @@ type Manager struct {
 	dockerOK  bool
 	routerErr string
 	errSeq    uint64 // orders error-only tracker entries for eviction
+	// removed are the instances whose last job was a successful remove (Status, issue #148), at
+	// most maxRemoved; any other job of an instance drops it.
+	removed map[int64]bool
 }
+
+// maxRemoved bounds Manager.removed; the oldest (lowest) IDs go first. The panel confirms a
+// removal within one reconcile interval, and asks again for one it missed.
+const maxRemoved = 1024
 
 func New(cfg Config) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -181,6 +188,7 @@ func New(cfg Config) *Manager {
 		rconTimeout:   cmp.Or(cfg.RconTimeout, RconTimeout),
 		cancel:        cancel,
 		inst:          map[int64]*instanceState{},
+		removed:       map[int64]bool{},
 		stats:         map[int64]sample{},
 		web:           cfg.Web,
 		webAsk:        cfg.WebAsk,
@@ -798,6 +806,10 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 		op, queued := st.snapshot()
 		work[id] = workState{op: op, queued: queued, lastError: st.lastError, name: st.name}
 	}
+	for id := range m.removed {
+		resp.Removed = append(resp.Removed, id)
+	}
+	slices.Sort(resp.Removed)
 	stats := make(map[int64]sample, len(m.stats))
 	for id, s := range m.stats {
 		stats[id] = s

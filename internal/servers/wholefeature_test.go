@@ -26,7 +26,7 @@ func TestServerIDsAreNeverReused(t *testing.T) {
 	admin := e.admin()
 	e.create(t, paper("alpha"))
 	b := e.create(t, paper("beta"))
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", b.ID), nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", b.ID), nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}
 	c := e.create(t, paper("gamma"))
@@ -58,7 +58,7 @@ func TestForeignContainerIsNeverTouched(t *testing.T) {
 	if code, ec := e.power(id, "restart", &admin); code != http.StatusConflict || ec != "conflict" {
 		t.Fatalf("restart of a foreign container: %d %s, want 409 conflict", code, ec)
 	}
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", id), nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", id), nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}
 	if calls, failed := e.agent.takeCalls(), e.agent.failedCalls(); len(calls) != 0 || len(failed) != 0 {
@@ -81,7 +81,7 @@ func TestDeleteForgetsReconcileBackoff(t *testing.T) {
 	if n := servers.Attempts(e.h); n != 1 {
 		t.Fatalf("attempts = %d, want 1", n)
 	}
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", id), nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", id), nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}
 	if n := servers.Attempts(e.h); n != 0 {

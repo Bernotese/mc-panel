@@ -373,6 +373,7 @@ Services: `mcpanel-panel.service` (+ `.socket`), `mcpanel-agent.service`, `mcpan
 - **Admin allowlist:** with "Admin access only from the allowlist" every admin request from another network is refused (`403`; logging out still works), and saving the setting ends admin sessions from outside it. `panel admin unlock` turns it off.
 - **Update exit code 3 or 4:** see [Rollback](#rollback); the details are in `/var/log/mc-panel-install.log`.
 - **A restore is stuck** ("the files service is busy for this server"): follow the runbook in [`docs/dev/README.md`](dev/README.md) ("Backups").
+- **A deleted server keeps its name / its container still runs:** its deletion is not finished; see [A server deletion does not finish](#a-server-deletion-does-not-finish).
 - **"Recovery required" on a server** (start refused with `recovery_required`): see [A restore could not be completed](#a-restore-could-not-be-completed).
 - **"Data state unknown"** (start refused with `data_state_unknown`): the panel could not ask the files service whether the server's data is safe, so it starts nothing. Check `systemctl status mcpanel-files mcpanel-files.socket` and `journalctl -u mcpanel-files`; once the service answers, the servers start again by themselves. Stopping servers and reading files keep working meanwhile.
 - **Another reverse proxy instead of Caddy:** it must set `X-Forwarded-For` without a port, must not buffer uploads, downloads or the console's Server-Sent Events, and needs a body limit of at least 4 GiB. Details in [`docs/dev/README.md`](dev/README.md) ("Production").
@@ -387,3 +388,13 @@ A restore swaps the top-level entries of a server's data directory by renames an
 4. When you no longer need it, delete `/srv/mc-panel/backups/recovery/<id>-<time>/` by hand.
 
 Deleting such a server also moves the folder there first. If you would rather go back to a snapshot: resolve, then restore the snapshot you want.
+
+### A server deletion does not finish
+
+Deleting a server removes it from the panel at once; the cleanup goes on until the agent confirms it: the container is stopped and removed, the data directory is moved to `/srv/mc-panel/deleted/<name>-<time>/` and, if requested, the backups are purged. `GET /api/servers/deletions` (admin) shows every open deletion with its state (`pending`, `failed`, `partial`) and the reason; the panel retries by itself (the container after 10 s, doubling up to 5 minutes; the backups after a minute, up to an hour), `POST /api/servers/deletions/<id>/retry` tries again at once, and a deletion still stuck after 10 minutes sends `server.delete_failed` once. The server's name stays taken until the deletion is done.
+
+If a deletion cannot finish, for example because a container `mcpanel-mc-<id>` exists that mc-panel did not create, or the data directory cannot be moved:
+
+1. Find the reason in `container_error` / `backups_error` of the deletion and in `journalctl -u mcpanel-agent` (or `-files` for backups).
+2. Clean up by hand as root: `docker rm -f mcpanel-mc-<id>` only if you are sure the container is not needed, move `/srv/mc-panel/instances/<id>/` away, delete `/srv/mc-panel/backups/repos/<id>` and `/srv/mc-panel/backups/keys/<id>` if you wanted the backups gone.
+3. Either retry the deletion (it completes once the agent confirms the removal), or abandon it (admin, sudo): `POST /api/servers/deletions/<id>/abandon` closes it as `abandoned` and frees the name. Abandoning removes nothing; whatever is left on the host is yours to remove (audited as `server.delete_abandon`).

@@ -11,6 +11,7 @@ import { withDevsAfterSources } from '@/features/dev/model'
 import { monitoringOverviewQueryOptions, OVERVIEW_POLL_MS } from '@/features/monitoring/api'
 import { HostCard } from '@/features/monitoring/host-card'
 import { serverSettingsQueryOptions, serversQueryOptions } from '@/features/servers/api'
+import { OpenDeletionsSection } from '@/features/servers/deletions'
 import { pollInterval } from '@/features/servers/status'
 import { errorMessage } from '@/lib/error-message'
 import { freshnessOf, isStale } from '@/lib/freshness'
@@ -87,6 +88,7 @@ export function DashboardPage() {
         ) : null}
         <StaleNotice freshness={freshness} />
         {host ? <HostCard host={host} stale={metricsStale} /> : null}
+        <OpenDeletionsSection isAdmin={isAdmin} />
         {content}
       </div>
     </>

@@ -50,9 +50,11 @@ UPDATE instance_settings SET base_domain = ?, curseforge_api_key = ?, updated_at
 UPDATE instance_settings SET backup_timezone = ?, updated_at = ? WHERE id = 1;
 
 -- name: ServersNextServerID :one
--- Allocates the ID of a new server: never one that was used before (see migration 00003).
+-- Allocates the ID of a new server: never one that was used before (see migration 00003), also
+-- not the ID of a deleted server whose tombstone is still kept (migration 00015).
 UPDATE server_ids
-SET last_id = max(last_id, (SELECT COALESCE(MAX(id), 0) FROM servers)) + 1
+SET last_id = max(last_id, (SELECT COALESCE(MAX(id), 0) FROM servers),
+                  (SELECT COALESCE(MAX(server_id), 0) FROM server_deletions)) + 1
 WHERE id = 1
 RETURNING last_id;
 
@@ -89,3 +91,42 @@ UPDATE instances SET properties = sqlc.arg(properties), revision = revision + 1,
 WHERE instances.server_id = sqlc.arg(server_id)
   AND instances.server_id IN (SELECT d.server_id FROM dev_instances d)
 RETURNING *;
+
+-- name: ServersCreateDeletion :exec
+-- Durable deletion (issue #148): written in the transaction that removes the server's rows.
+INSERT INTO server_deletions (server_id, name, container, backups, requested_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?);
+
+-- name: ServersGetDeletion :one
+SELECT * FROM server_deletions WHERE server_id = ?;
+
+-- name: ServersListDeletions :many
+-- Open deletions and those completed at or after the given time, newest first.
+SELECT * FROM server_deletions
+WHERE completed_at IS NULL OR completed_at >= ?
+ORDER BY requested_at DESC, server_id DESC;
+
+-- name: ServersListOpenDeletions :many
+SELECT * FROM server_deletions WHERE completed_at IS NULL ORDER BY server_id;
+
+-- name: ServersUpdateDeletion :exec
+UPDATE server_deletions
+SET container = ?, container_error = ?, backups = ?, backups_error = ?, notified = ?, updated_at = ?, completed_at = ?
+WHERE server_id = ? AND completed_at IS NULL;
+
+-- name: ServersAbandonDeletion :execrows
+-- An admin closes an open deletion without finishing it; the name is free again.
+UPDATE server_deletions SET abandoned = 1, updated_at = ?, completed_at = ?
+WHERE server_id = ? AND completed_at IS NULL;
+
+-- name: ServersDeletionOpen :one
+SELECT count(*) FROM server_deletions WHERE server_id = ? AND completed_at IS NULL;
+
+-- name: ServersPruneDeletions :exec
+-- Completed deletions are kept for a week to be listed, then forgotten.
+DELETE FROM server_deletions WHERE completed_at IS NOT NULL AND completed_at < ?;
+
+-- name: ServersOpenDeletionByName :one
+-- A server name is taken until its deletion is complete: the old container may still be routed
+-- under the same address.
+SELECT count(*) FROM server_deletions WHERE completed_at IS NULL AND name = ?;

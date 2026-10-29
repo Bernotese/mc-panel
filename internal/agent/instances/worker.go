@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -105,12 +107,16 @@ func (m *Manager) work(id int64) {
 		j := st.pending[0]
 		st.pending = st.pending[1:]
 		st.op = initialOp(j)
+		delete(m.removed, id) // only a remove that just succeeded counts as removed
 		m.mu.Unlock()
 
 		err := m.run(id, j)
 
 		m.mu.Lock()
 		st.op = agentapi.OpNone
+		if err == nil && j.kind == jobRemove {
+			m.markRemovedLocked(id)
+		}
 		if err != nil {
 			st.lastError = sanitizeError(err, secretsOf(j)...)
 			m.errSeq++
@@ -147,6 +153,14 @@ func (st *instanceState) snapshot() (agentapi.Operation, []agentapi.PowerAction)
 		}
 	}
 	return op, queued
+}
+
+// markRemovedLocked records a successful remove of id for Status; the caller holds m.mu.
+func (m *Manager) markRemovedLocked(id int64) {
+	m.removed[id] = true
+	for len(m.removed) > maxRemoved {
+		delete(m.removed, slices.Min(slices.Collect(maps.Keys(m.removed))))
+	}
 }
 
 // evictErrorOnly drops the oldest entry that only keeps a last_error (no queued or

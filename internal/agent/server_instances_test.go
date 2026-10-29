@@ -198,7 +198,7 @@ func TestServerWithoutInstanceBackend(t *testing.T) {
 	fw, _ := newNoop()
 	srv := agent.NewServer(fw, "test", testLogger(io.Discard))
 	rec := serve(srv, http.MethodGet, agentapi.PathInstances, "", "")
-	want := `{"docker":"unavailable","instances":[],"router":{"state":"missing","last_error":""}}` + "\n"
+	want := `{"docker":"unavailable","instances":[],"router":{"state":"missing","last_error":""},"disabled":true}` + "\n"
 	if rec.Code != http.StatusOK || rec.Body.String() != want {
 		t.Fatalf("GET instances: %d %s", rec.Code, rec.Body)
 	}

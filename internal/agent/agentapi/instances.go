@@ -149,6 +149,13 @@ type InstancesResponse struct {
 	Docker    string           `json:"docker"`
 	Instances []InstanceStatus `json:"instances"`
 	Router    RouterStatus     `json:"router"`
+	// Removed are the instances whose last job since the agent started was a remove that
+	// succeeded (container gone, data archived), ascending. The panel completes a deletion only
+	// on this confirmation; after an agent restart it asks for the remove again (issue #148).
+	Removed []int64 `json:"removed,omitempty"`
+	// Disabled: this agent manages no containers at all (make dev without Docker); there is
+	// nothing to remove for a deleted server.
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // InstancesClient is the panel-side view of the instance endpoints. It is separate from

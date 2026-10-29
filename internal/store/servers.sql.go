@@ -10,6 +10,26 @@ import (
 	"database/sql"
 )
 
+const serversAbandonDeletion = `-- name: ServersAbandonDeletion :execrows
+UPDATE server_deletions SET abandoned = 1, updated_at = ?, completed_at = ?
+WHERE server_id = ? AND completed_at IS NULL
+`
+
+type ServersAbandonDeletionParams struct {
+	UpdatedAt   int64
+	CompletedAt sql.NullInt64
+	ServerID    int64
+}
+
+// An admin closes an open deletion without finishing it; the name is free again.
+func (q *Queries) ServersAbandonDeletion(ctx context.Context, arg ServersAbandonDeletionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, serversAbandonDeletion, arg.UpdatedAt, arg.CompletedAt, arg.ServerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const serversBumpAllRevisions = `-- name: ServersBumpAllRevisions :exec
 UPDATE instances SET revision = revision + 1, updated_at = ?
 `
@@ -25,6 +45,33 @@ UPDATE instances SET revision = revision + 1, updated_at = ? WHERE type = 'curse
 
 func (q *Queries) ServersBumpCurseForgeRevisions(ctx context.Context, updatedAt int64) error {
 	_, err := q.db.ExecContext(ctx, serversBumpCurseForgeRevisions, updatedAt)
+	return err
+}
+
+const serversCreateDeletion = `-- name: ServersCreateDeletion :exec
+INSERT INTO server_deletions (server_id, name, container, backups, requested_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+`
+
+type ServersCreateDeletionParams struct {
+	ServerID    int64
+	Name        string
+	Container   string
+	Backups     string
+	RequestedAt int64
+	UpdatedAt   int64
+}
+
+// Durable deletion (issue #148): written in the transaction that removes the server's rows.
+func (q *Queries) ServersCreateDeletion(ctx context.Context, arg ServersCreateDeletionParams) error {
+	_, err := q.db.ExecContext(ctx, serversCreateDeletion,
+		arg.ServerID,
+		arg.Name,
+		arg.Container,
+		arg.Backups,
+		arg.RequestedAt,
+		arg.UpdatedAt,
+	)
 	return err
 }
 
@@ -108,6 +155,40 @@ func (q *Queries) ServersDeleteWebRoutes(ctx context.Context, serverID int64) er
 	return err
 }
 
+const serversDeletionOpen = `-- name: ServersDeletionOpen :one
+SELECT count(*) FROM server_deletions WHERE server_id = ? AND completed_at IS NULL
+`
+
+func (q *Queries) ServersDeletionOpen(ctx context.Context, serverID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, serversDeletionOpen, serverID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const serversGetDeletion = `-- name: ServersGetDeletion :one
+SELECT server_id, name, container, container_error, backups, backups_error, abandoned, notified, requested_at, updated_at, completed_at FROM server_deletions WHERE server_id = ?
+`
+
+func (q *Queries) ServersGetDeletion(ctx context.Context, serverID int64) (ServerDeletion, error) {
+	row := q.db.QueryRowContext(ctx, serversGetDeletion, serverID)
+	var i ServerDeletion
+	err := row.Scan(
+		&i.ServerID,
+		&i.Name,
+		&i.Container,
+		&i.ContainerError,
+		&i.Backups,
+		&i.BackupsError,
+		&i.Abandoned,
+		&i.Notified,
+		&i.RequestedAt,
+		&i.UpdatedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const serversGetInstance = `-- name: ServersGetInstance :one
 SELECT server_id, type, version, loader_version, modpack, java, memory_mib, properties, desired_state, revision, created_at, updated_at FROM instances WHERE server_id = ?
 `
@@ -164,6 +245,48 @@ func (q *Queries) ServersInsertWebRoute(ctx context.Context, arg ServersInsertWe
 	return err
 }
 
+const serversListDeletions = `-- name: ServersListDeletions :many
+SELECT server_id, name, container, container_error, backups, backups_error, abandoned, notified, requested_at, updated_at, completed_at FROM server_deletions
+WHERE completed_at IS NULL OR completed_at >= ?
+ORDER BY requested_at DESC, server_id DESC
+`
+
+// Open deletions and those completed at or after the given time, newest first.
+func (q *Queries) ServersListDeletions(ctx context.Context, completedAt sql.NullInt64) ([]ServerDeletion, error) {
+	rows, err := q.db.QueryContext(ctx, serversListDeletions, completedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ServerDeletion{}
+	for rows.Next() {
+		var i ServerDeletion
+		if err := rows.Scan(
+			&i.ServerID,
+			&i.Name,
+			&i.Container,
+			&i.ContainerError,
+			&i.Backups,
+			&i.BackupsError,
+			&i.Abandoned,
+			&i.Notified,
+			&i.RequestedAt,
+			&i.UpdatedAt,
+			&i.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const serversListInstances = `-- name: ServersListInstances :many
 SELECT s.name, i.server_id, i.type, i.version, i.loader_version, i.modpack, i.java, i.memory_mib,
        i.properties, i.desired_state, i.revision, i.created_at, i.updated_at
@@ -210,6 +333,45 @@ func (q *Queries) ServersListInstances(ctx context.Context) ([]ServersListInstan
 			&i.Revision,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const serversListOpenDeletions = `-- name: ServersListOpenDeletions :many
+SELECT server_id, name, container, container_error, backups, backups_error, abandoned, notified, requested_at, updated_at, completed_at FROM server_deletions WHERE completed_at IS NULL ORDER BY server_id
+`
+
+func (q *Queries) ServersListOpenDeletions(ctx context.Context) ([]ServerDeletion, error) {
+	rows, err := q.db.QueryContext(ctx, serversListOpenDeletions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ServerDeletion{}
+	for rows.Next() {
+		var i ServerDeletion
+		if err := rows.Scan(
+			&i.ServerID,
+			&i.Name,
+			&i.Container,
+			&i.ContainerError,
+			&i.Backups,
+			&i.BackupsError,
+			&i.Abandoned,
+			&i.Notified,
+			&i.RequestedAt,
+			&i.UpdatedAt,
+			&i.CompletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -280,17 +442,42 @@ func (q *Queries) ServersListWebRoutes(ctx context.Context) ([]WebRoute, error) 
 
 const serversNextServerID = `-- name: ServersNextServerID :one
 UPDATE server_ids
-SET last_id = max(last_id, (SELECT COALESCE(MAX(id), 0) FROM servers)) + 1
+SET last_id = max(last_id, (SELECT COALESCE(MAX(id), 0) FROM servers),
+                  (SELECT COALESCE(MAX(server_id), 0) FROM server_deletions)) + 1
 WHERE id = 1
 RETURNING last_id
 `
 
-// Allocates the ID of a new server: never one that was used before (see migration 00003).
+// Allocates the ID of a new server: never one that was used before (see migration 00003), also
+// not the ID of a deleted server whose tombstone is still kept (migration 00015).
 func (q *Queries) ServersNextServerID(ctx context.Context) (int64, error) {
 	row := q.db.QueryRowContext(ctx, serversNextServerID)
 	var last_id int64
 	err := row.Scan(&last_id)
 	return last_id, err
+}
+
+const serversOpenDeletionByName = `-- name: ServersOpenDeletionByName :one
+SELECT count(*) FROM server_deletions WHERE completed_at IS NULL AND name = ?
+`
+
+// A server name is taken until its deletion is complete: the old container may still be routed
+// under the same address.
+func (q *Queries) ServersOpenDeletionByName(ctx context.Context, name string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, serversOpenDeletionByName, name)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const serversPruneDeletions = `-- name: ServersPruneDeletions :exec
+DELETE FROM server_deletions WHERE completed_at IS NOT NULL AND completed_at < ?
+`
+
+// Completed deletions are kept for a week to be listed, then forgotten.
+func (q *Queries) ServersPruneDeletions(ctx context.Context, completedAt sql.NullInt64) error {
+	_, err := q.db.ExecContext(ctx, serversPruneDeletions, completedAt)
+	return err
 }
 
 const serversSetBackupTimezone = `-- name: ServersSetBackupTimezone :exec
@@ -323,6 +510,37 @@ func (q *Queries) ServersSetDesiredState(ctx context.Context, arg ServersSetDesi
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const serversUpdateDeletion = `-- name: ServersUpdateDeletion :exec
+UPDATE server_deletions
+SET container = ?, container_error = ?, backups = ?, backups_error = ?, notified = ?, updated_at = ?, completed_at = ?
+WHERE server_id = ? AND completed_at IS NULL
+`
+
+type ServersUpdateDeletionParams struct {
+	Container      string
+	ContainerError string
+	Backups        string
+	BackupsError   string
+	Notified       int64
+	UpdatedAt      int64
+	CompletedAt    sql.NullInt64
+	ServerID       int64
+}
+
+func (q *Queries) ServersUpdateDeletion(ctx context.Context, arg ServersUpdateDeletionParams) error {
+	_, err := q.db.ExecContext(ctx, serversUpdateDeletion,
+		arg.Container,
+		arg.ContainerError,
+		arg.Backups,
+		arg.BackupsError,
+		arg.Notified,
+		arg.UpdatedAt,
+		arg.CompletedAt,
+		arg.ServerID,
+	)
+	return err
 }
 
 const serversUpdateDevInstance = `-- name: ServersUpdateDevInstance :one

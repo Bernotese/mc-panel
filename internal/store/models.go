@@ -230,6 +230,20 @@ type ServerAlert struct {
 	DownAlerts int64
 }
 
+type ServerDeletion struct {
+	ServerID       int64
+	Name           string
+	Container      string
+	ContainerError string
+	Backups        string
+	BackupsError   string
+	Abandoned      int64
+	Notified       int64
+	RequestedAt    int64
+	UpdatedAt      int64
+	CompletedAt    sql.NullInt64
+}
+
 type ServerID struct {
 	ID     int64
 	LastID int64
