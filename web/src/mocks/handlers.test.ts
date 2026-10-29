@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { BackupJob, BackupOverview, BackupSnapshot } from '@/api/types'
 import type { LiveMetrics, MetricsSeries, MonitoringOverview, MonitoringSettings } from '@/api/types'
 import type { PluginInventory, PluginJob, PluginResolution, PluginSearchResult, PluginUpdates, PluginVersionList } from '@/api/types'
-import type { Server } from '@/api/types'
+import type { Server, ServerDeletion } from '@/api/types'
 import { callApi, field } from '@/test/call-api'
 import { db, defaultMonitoring, loginAs, seedRecoveryScenario } from './db'
 import { operations } from './handlers'
@@ -20,6 +20,25 @@ describe('mock coverage', () => {
 })
 
 describe('mock behaviour', () => {
+  it('keeps a deletion pending until the mock agent confirms it and the name taken until then (#148)', async () => {
+    db.servers = db.servers.filter((s) => s.id !== 5) // survival's dev goes first
+    const me = loginAs('admin', { sudo: true })
+    const deleted = await callApi('DELETE', '/servers/2', { csrf: me.csrf_token })
+    expect(deleted.status).toBe(202)
+    expect(deleted.body).toMatchObject({ server_id: 2, name: 'creative', state: 'pending', container: 'pending', completed_at: null })
+    const create = { name: 'creative', type: 'paper', version: '1.21.11', memory_mib: 2048, eula_accepted: true }
+    expect(field((await callApi('POST', '/servers', { body: create, csrf: me.csrf_token })).body, 'error')).toBe('conflict')
+
+    const d = db.deletions.find((x) => x.server_id === 2)
+    if (!d) throw new Error('no tombstone')
+    d.updated_at -= 5_000 // the mock agent confirms after a few seconds
+    const list = (await callApi('GET', '/servers/deletions')).body as ServerDeletion[]
+    expect(list.find((x) => x.server_id === 2)).toMatchObject({ state: 'done', container: 'removed' })
+    expect((await callApi('POST', '/servers', { body: create, csrf: me.csrf_token })).status).toBe(201)
+    // A server without an instance has nothing to remove: done at once.
+    expect((await callApi('DELETE', '/servers/3', { csrf: me.csrf_token })).body).toMatchObject({ state: 'done', container: 'none' })
+  })
+
   it('locks start and restart outside the safe data state and resolves a stuck restore once', async () => {
     seedRecoveryScenario()
     const me = loginAs('admin', { sudo: true })

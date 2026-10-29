@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import { unwrap, unwrapVoid } from '@/api/errors'
+import { unwrap } from '@/api/errors'
 import type {
   CreateServerRequest,
   InstanceType,
@@ -8,6 +8,7 @@ import type {
   PowerResponse,
   Recovery,
   Server,
+  ServerDeletion,
   ServerSettings,
   UpdateServerRequest,
   UpdateServerSettingsRequest,
@@ -70,8 +71,22 @@ export function resolveRecovery(id: number): Promise<Recovery> {
 }
 
 /** purgeBackups also removes the server's restic repository (backups spec §5.6); the parameter is only sent when true. */
-export function deleteServer(id: number, purgeBackups = false): Promise<void> {
-  return unwrapVoid(api.DELETE('/servers/{id}', { params: { path: { id }, query: purgeBackups ? { purge_backups: true } : undefined } }))
+/** 202 with the deletion's first state (#148): the server is gone from the panel, its cleanup may still be running. */
+export function deleteServer(id: number, purgeBackups = false): Promise<ServerDeletion> {
+  return unwrap(api.DELETE('/servers/{id}', { params: { path: { id }, query: purgeBackups ? { purge_backups: true } : undefined } }))
+}
+
+/** Under the list prefix, so the list's invalidations refresh it too. Admins only. */
+export const serverDeletionsKey = ['servers', 'deletions'] as const
+
+export const serverDeletionsQueryOptions = queryOptions<ServerDeletion[]>({
+  queryKey: serverDeletionsKey,
+  queryFn: () => unwrap(api.GET('/servers/deletions')),
+})
+
+/** Admin, sudo: runs the next cleanup attempt of a deletion at once. */
+export function retryServerDeletion(id: number): Promise<ServerDeletion> {
+  return unwrap(api.POST('/servers/deletions/{id}/retry', { params: { path: { id } } }))
 }
 
 export function powerServer(id: number, action: PowerAction): Promise<PowerResponse> {
