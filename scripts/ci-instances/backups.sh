@@ -273,10 +273,11 @@ jcheck "$po/baudit.json" "backup.* audit entries (scheduled runs are not audited
   and all(e["target"] == "server:" + a[0] and e["actor_name"] == "ci-admin" for e in d["items"])' "$psrv"
 papi GET "/audit?action=server.delete&limit=10" "$po/sdaudit.json"
 [ "$pcode" = 200 ] || fail "audit: HTTP $pcode $(cat "$po/sdaudit.json")"
-jcheck "$po/sdaudit.json" "server.delete with backups_purged" '
-  [e["details"].get("backups_purged") for e in d["items"] if e["target"] == "server:" + a[0]] == [True]' "$psrv"
+jcheck "$po/sdaudit.json" "server.delete with backups_purged, server.delete_completed by the system" '
+  [e["details"].get("backups_purged") for e in d["items"] if e["target"] == "server:" + a[0] and e["action"] == "server.delete"] == [True]
+  and [e["actor_name"] for e in d["items"] if e["target"] == "server:" + a[0] and e["action"] == "server.delete_completed"] == ["system"]' "$psrv"
 setpriv --reuid=mcpanel --regid=mcpanel --init-groups \
   "$work/bin/panel" audit verify -config "$work/panel.toml" >"$po/verify.txt" 2>&1 ||
   fail "panel audit verify: $(cat "$po/verify.txt")"
-echo "OK: backup.create/restore/download/schedule_update/pin/delete by ci-admin on server:$psrv, server.delete backups_purged=true; audit verify OK"
+echo "OK: backup.create/restore/download/schedule_update/pin/delete by ci-admin on server:$psrv, server.delete backups_purged=true, completion by the system; audit verify OK"
 
