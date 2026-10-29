@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
@@ -143,10 +144,12 @@ func (s *Service) Read(ctx context.Context, id int64, p string) (filesapi.ReadRe
 	if isServerProps(clean) {
 		content = redactProperties(content)
 	}
-	return filesapi.ReadResponse{Content: content, MTime: st.ModTime().UnixMilli(), Size: st.Size()}, nil
+	return filesapi.ReadResponse{Content: content, MTime: st.ModTime().UnixMilli(), Size: st.Size(), Version: versionOf(st)}, nil
 }
 
-// Write saves editor content atomically (temp file, fsync, rename/link) with an mtime check.
+// Write saves editor content atomically (temp file, fsync, rename/link). Its base (expected
+// mtime and/or version, none = a new file) is checked before staging and again under the
+// commit lock right before the rename, so of two saves with the same base only one succeeds.
 func (s *Service) Write(ctx context.Context, req filesapi.WriteRequest) (filesapi.WriteResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return filesapi.WriteResponse{}, err
@@ -175,79 +178,100 @@ func (s *Service) Write(ctx context.Context, req filesapi.WriteRequest) (filesap
 		return filesapi.WriteResponse{}, err
 	}
 
-	content := req.Content
-	fi, err := lstat(root, clean)
-	switch {
-	case errors.Is(err, filesapi.ErrNotFound):
-		if req.ExpectedMTime != nil {
-			return filesapi.WriteResponse{}, fmt.Errorf("%w: %s was deleted meanwhile", filesapi.ErrModified, clean)
-		}
-		if isServerProps(clean) { // a new file never gets the placeholder as its password
-			content = restorePassword(content, "")
-		}
-	case err != nil:
+	// An early check, so a conflict costs no temp copy; the base is checked again at commit.
+	fi, err := checkBase(root, clean, req)
+	if err != nil {
 		return filesapi.WriteResponse{}, err
-	case !fi.Mode().IsRegular():
-		return filesapi.WriteResponse{}, fmt.Errorf("%w: %s is not a regular file", filesapi.ErrNotRegular, clean)
-	case req.ExpectedMTime == nil:
-		return filesapi.WriteResponse{}, fmt.Errorf("%w: %s", filesapi.ErrExists, clean)
-	case *req.ExpectedMTime != fi.ModTime().UnixMilli():
-		return filesapi.WriteResponse{}, fmt.Errorf("%w: %s was changed meanwhile", filesapi.ErrModified, clean)
-	case isServerProps(clean):
-		cur, _, rerr := readSmall(root, clean, s.cfg.Limits.MaxTextBytes)
-		if rerr != nil && !errors.Is(rerr, filesapi.ErrTooLarge) {
-			return filesapi.WriteResponse{}, rerr
+	}
+	content := req.Content
+	if isServerProps(clean) {
+		cur := []byte(nil) // a new file never gets the placeholder as its password
+		if fi != nil {
+			cur, _, err = readSmall(root, clean, s.cfg.Limits.MaxTextBytes)
+			if err != nil && !errors.Is(err, filesapi.ErrTooLarge) {
+				return filesapi.WriteResponse{}, err
+			}
 		}
 		content = restorePassword(content, string(cur))
 	}
-	// Only growth needs the reserve (SEC-04): a server whose disk is already below it can still
-	// shorten or save its files unchanged.
-	grow := int64(len(content))
-	if fi != nil {
-		grow -= fi.Size()
-	}
-	if grow > 0 {
-		res, err := s.reserve(req.ID, grow)
+	// The temp copy exists next to the old file until the rename, so the whole new content
+	// needs the reserve (SEC-04, #153), even when the file shrinks: a save refused here leaves
+	// the old file as it was. An empty file stages no data.
+	var res *reservation
+	if n := int64(len(content)); n > 0 {
+		res, err = s.reserve(req.ID, n)
 		if err != nil {
 			return filesapi.WriteResponse{}, err
 		}
 		defer res.release()
 	}
-	if err := s.writeAtomic(root, clean, []byte(content), req.ExpectedMTime != nil); err != nil {
+	tmp, staged, err := s.stage(root, clean, []byte(content), res)
+	if err != nil {
 		return filesapi.WriteResponse{}, err
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = root.Remove(tmp)
+		}
+	}()
+	if s.commitHook != nil {
+		s.commitHook(clean)
+	}
+	unlock := s.commits.lock(req.ID)
+	defer unlock()
+	// Under the commit lock, nothing the service does changes clean between this check and
+	// the rename (#149); the server's own writes are not covered.
+	cur, err := checkBase(root, clean, req)
+	if err != nil {
+		return filesapi.WriteResponse{}, err
+	}
+	if cur != nil {
+		if err := moveMTimeForward(root, tmp, staged, cur); err != nil {
+			return filesapi.WriteResponse{}, err
+		}
+	}
+	if err := commit(root, tmp, clean, cur != nil); err != nil {
+		return filesapi.WriteResponse{}, err
+	}
+	committed = true
 	st, err := lstat(root, clean)
 	if err != nil {
 		return filesapi.WriteResponse{}, err
 	}
-	return filesapi.WriteResponse{MTime: st.ModTime().UnixMilli(), Size: st.Size()}, nil
+	return filesapi.WriteResponse{MTime: st.ModTime().UnixMilli(), Size: st.Size(), Version: versionOf(st)}, nil
 }
 
-// writeAtomic writes data to a temp file next to clean, syncs it and commits it.
-func (s *Service) writeAtomic(root *os.Root, clean string, data []byte, overwrite bool) error {
+// stage writes data to a fresh temp file next to clean and syncs it; it returns the temp name
+// and its mtime. The bytes land on res (nil: none reserved). On error nothing is left behind.
+func (s *Service) stage(root *os.Root, clean string, data []byte, res *reservation) (string, time.Time, error) {
 	tmp, err := s.tempName(parentOf(clean))
 	if err != nil {
-		return err
+		return "", time.Time{}, err
 	}
 	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode) //nolint:gosec // G302/G304: new temp file in the instance's os.Root, 0644 like the server's own files
 	if err != nil {
-		return fsErr(err)
+		return "", time.Time{}, fsErr(err)
 	}
-	_, err = f.Write(data)
+	n, err := f.Write(data)
+	if res != nil {
+		res.landed(int64(n))
+	}
 	if err == nil {
 		err = f.Sync()
+	}
+	var st fs.FileInfo
+	if err == nil {
+		st, err = f.Stat()
 	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	if err == nil {
-		err = commit(root, tmp, clean, overwrite)
-	}
 	if err != nil {
 		_ = root.Remove(tmp)
-		return fsErr(err)
+		return "", time.Time{}, fsErr(err)
 	}
-	return nil
+	return tmp, st.ModTime(), nil
 }
 
 // Mkdir creates one folder (the parent must exist).
@@ -278,7 +302,8 @@ func (s *Service) Mkdir(ctx context.Context, id int64, p string) error {
 	return fsErr(root.Mkdir(clean, dirMode)) //nolint:gosec // G301: folders are 0755 like the server's own (umask 0027 applies)
 }
 
-// Rename moves a file, folder or symlink (the link itself); the target must not exist.
+// Rename moves a file, folder or symlink (the link itself); the target must not exist, and a
+// target that appears meanwhile is never replaced (renameNoReplace).
 func (s *Service) Rename(ctx context.Context, req filesapi.RenameRequest) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -311,6 +336,8 @@ func (s *Service) Rename(ctx context.Context, req filesapi.RenameRequest) error 
 		return err
 	}
 	defer root.Close()
+	unlock := s.commits.lock(req.ID)
+	defer unlock()
 	if _, err := lstat(root, from); err != nil {
 		return err
 	}
@@ -322,7 +349,12 @@ func (s *Service) Rename(ctx context.Context, req filesapi.RenameRequest) error 
 	} else if !errors.Is(err, filesapi.ErrNotFound) {
 		return err
 	}
-	return fsErr(root.Rename(from, to))
+	if s.renameHook != nil {
+		s.renameHook()
+	}
+	// The check above gives the clear answer; only this rename guarantees that a target
+	// created meanwhile (by the server) is never replaced (#149).
+	return s.renameNoReplace(root, from, to)
 }
 
 // Delete removes a file, symlink (the link itself) or folder with its content.
@@ -347,6 +379,8 @@ func (s *Service) Delete(ctx context.Context, id int64, p string) error {
 		return err
 	}
 	defer root.Close()
+	unlock := s.commits.lock(id) // a save of a file in it cannot bring the file back afterwards
+	defer unlock()
 	if _, err := lstat(root, clean); err != nil {
 		return err
 	}
