@@ -167,24 +167,30 @@ describe('FileEditor', () => {
   describe('after a conflicting save', () => {
     function mockConflict(secondRead: 'ok' | 'fail') {
       let reads = 0
-      const writes: { expected_mtime: number | null; content: string }[] = []
+      const writes: { expected_mtime: number | null; expected_version?: string; content: string }[] = []
       server.use(
         http.get('*/api/servers/:id/files/content', ({ request }) => {
           reads += 1
           if (reads > 1 && secondRead === 'fail') return HttpResponse.json({ error: 'agent_unavailable', message: 'down' }, { status: 503 })
-          return HttpResponse.json({ path: new URL(request.url).searchParams.get('path'), content: 'a: 1\n', mtime: reads === 1 ? 100 : 200, size: 5 })
+          return HttpResponse.json({
+            path: new URL(request.url).searchParams.get('path'),
+            content: 'a: 1\n',
+            mtime: reads === 1 ? 100 : 200,
+            size: 5,
+            version: reads === 1 ? 'v1' : 'v2',
+          })
         }),
         http.put('*/api/servers/:id/files/content', async ({ request }) => {
-          writes.push((await request.json()) as { expected_mtime: number | null; content: string })
+          writes.push((await request.json()) as { expected_mtime: number | null; expected_version?: string; content: string })
           return writes.length === 1
             ? HttpResponse.json({ error: 'file_modified', message: 'modified' }, { status: 409 })
-            : HttpResponse.json({ mtime: 300, size: 6 })
+            : HttpResponse.json({ mtime: 300, size: 6, version: 'v3' })
         }),
       )
       return writes
     }
 
-    it('overwrites with the fresh mtime and clears the unsaved marker', async () => {
+    it('overwrites with the fresh version and clears the unsaved marker', async () => {
       const writes = mockConflict('ok')
       const { user, editor } = await openConfig()
       await user.type(editor, 'x')
@@ -192,10 +198,15 @@ describe('FileEditor', () => {
       const dialog = await screen.findByRole('dialog', { name: 'Datei wurde geändert' })
       await user.click(within(dialog).getByRole('button', { name: 'Überschreiben' }))
       await waitFor(() => expect(writes).toHaveLength(2))
-      expect(writes[0].expected_mtime).toBe(100)
-      expect(writes[1].expected_mtime).toBe(200)
+      expect(writes[0]).toMatchObject({ expected_mtime: 100, expected_version: 'v1' })
+      expect(writes[1]).toMatchObject({ expected_mtime: 200, expected_version: 'v2' })
       await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
       await waitFor(() => expect(screen.queryByText('Ungespeicherte Änderungen')).not.toBeInTheDocument())
+      // The next save builds on the version the save answered with.
+      await user.type(editor, 'y')
+      await user.click(screen.getByRole('button', { name: 'Speichern' }))
+      await waitFor(() => expect(writes).toHaveLength(3))
+      expect(writes[2]).toMatchObject({ expected_mtime: 300, expected_version: 'v3' })
     })
 
     it('keeps the draft when reloading fails', async () => {

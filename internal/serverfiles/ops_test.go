@@ -144,19 +144,20 @@ type contentJSON struct {
 	Content string `json:"content"`
 	MTime   int64  `json:"mtime"`
 	Size    int64  `json:"size"`
+	Version string `json:"version"`
 }
 
 func TestReadFile(t *testing.T) {
 	e := newEnv(t)
 	id := createInstance(t, e.db, "survival")
 	admin := e.admin()
-	e.files.read = filesapi.ReadResponse{Content: "motd=hi\nrcon.password=********\n", MTime: 1_760_184_000_000, Size: 31}
+	e.files.read = filesapi.ReadResponse{Content: "motd=hi\nrcon.password=********\n", MTime: 1_760_184_000_000, Size: 31, Version: "v1"}
 	rec := e.do(http.MethodGet, srvPath(id, "/files/content?path=server.properties"), nil, &admin)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("read: %d %s", rec.Code, rec.Body)
 	}
 	got := decode[contentJSON](t, rec)
-	if got.Path != "server.properties" || got.Content != e.files.read.Content || got.MTime != 1_760_184_000_000 || got.Size != 31 {
+	if got.Path != "server.properties" || got.Content != e.files.read.Content || got.MTime != 1_760_184_000_000 || got.Size != 31 || got.Version != "v1" {
 		t.Fatalf("read = %+v", got)
 	}
 	if calls := e.files.takeCalls(); !slices.Equal(calls, []string{fmt.Sprintf("read %d server.properties", id)}) {
@@ -172,16 +173,17 @@ func TestWriteFile(t *testing.T) {
 	id := createInstance(t, e.db, "survival")
 	admin := e.admin()
 	mt := int64(1_760_184_000_000)
-	e.files.writeRes = filesapi.WriteResponse{MTime: mt + 1, Size: 5}
-	rec := e.do(http.MethodPut, srvPath(id, "/files/content"), map[string]any{"path": "bukkit.yml", "content": "a: 1\n", "expected_mtime": mt}, &admin)
+	e.files.writeRes = filesapi.WriteResponse{MTime: mt + 1, Size: 5, Version: "v2"}
+	rec := e.do(http.MethodPut, srvPath(id, "/files/content"), map[string]any{"path": "bukkit.yml", "content": "a: 1\n", "expected_mtime": mt, "expected_version": "v1"}, &admin)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("write: %d %s", rec.Code, rec.Body)
 	}
-	if got := decode[filesapi.WriteResponse](t, rec); got.MTime != mt+1 || got.Size != 5 {
+	if got := decode[map[string]any](t, rec); len(got) != 3 || got["mtime"] != float64(mt+1) || got["size"] != float64(5) || got["version"] != "v2" {
 		t.Fatalf("write result = %+v", got)
 	}
 	w := e.files.writes[0]
-	if w.ID != id || w.Path != "bukkit.yml" || w.Content != "a: 1\n" || w.ExpectedMTime == nil || *w.ExpectedMTime != mt {
+	if w.ID != id || w.Path != "bukkit.yml" || w.Content != "a: 1\n" || w.ExpectedMTime == nil || *w.ExpectedMTime != mt ||
+		w.ExpectedVersion == nil || *w.ExpectedVersion != "v1" {
 		t.Fatalf("write request = %+v", w)
 	}
 	last := e.lastEntry()
@@ -192,8 +194,8 @@ func TestWriteFile(t *testing.T) {
 
 	// a new file: expected_mtime null
 	e.do(http.MethodPut, srvPath(id, "/files/content"), map[string]any{"path": "new.txt", "content": "x", "expected_mtime": nil}, &admin)
-	if got := e.files.writes[1]; got.ExpectedMTime != nil {
-		t.Fatalf("new file expected_mtime = %v", *got.ExpectedMTime)
+	if got := e.files.writes[1]; got.ExpectedMTime != nil || got.ExpectedVersion != nil {
+		t.Fatalf("new file expected_mtime = %v, expected_version = %v", got.ExpectedMTime, got.ExpectedVersion)
 	}
 
 	// conflict → 409 file_modified, audited as failure
@@ -239,6 +241,10 @@ func TestWriteFileRequiresFields(t *testing.T) {
 		{"content missing", `{"path":"a.yml","expected_mtime":1}`, http.StatusBadRequest, httpx.CodeValidation},
 		{"content null", `{"path":"a.yml","content":null,"expected_mtime":1}`, http.StatusBadRequest, httpx.CodeValidation},
 		{"expected_mtime not a number", `{"path":"a.yml","content":"x","expected_mtime":"1"}`, http.StatusBadRequest, httpx.CodeBadRequest},
+		{"expected_version with a new file", `{"path":"a.yml","content":"x","expected_mtime":null,"expected_version":"v1"}`, http.StatusBadRequest, httpx.CodeValidation},
+		{"expected_version null", `{"path":"a.yml","content":"x","expected_mtime":1,"expected_version":null}`, http.StatusBadRequest, httpx.CodeValidation},
+		{"expected_version empty", `{"path":"a.yml","content":"x","expected_mtime":1,"expected_version":""}`, http.StatusBadRequest, httpx.CodeValidation},
+		{"expected_version too long", `{"path":"a.yml","content":"x","expected_mtime":1,"expected_version":"` + strings.Repeat("a", 65) + `"}`, http.StatusBadRequest, httpx.CodeValidation},
 	} {
 		rec := e.doRaw(http.MethodPut, srvPath(id, "/files/content"), strings.NewReader(tc.body), &admin)
 		if rec.Code != tc.code || errCode(t, rec) != tc.ec {

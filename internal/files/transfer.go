@@ -93,7 +93,7 @@ func (s *Service) UploadChecked(ctx context.Context, id int64, p string, overwri
 	committed := false
 	defer func() {
 		if !committed {
-			_ = root.Remove(tmp)
+			_ = root.Remove(tmp) // by path; after a rename of its folder CleanupTemp removes it at the next start
 		}
 	}()
 	src := &bodyReader{r: body}
@@ -124,11 +124,37 @@ func (s *Service) UploadChecked(ctx context.Context, id int64, p string, overwri
 	if err == nil {
 		err = f.Sync()
 	}
+	var st os.FileInfo
+	if err == nil {
+		st, err = f.Stat()
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
 		return filesapi.UploadResponse{}, fsErr(err)
+	}
+	if s.commitHook != nil {
+		s.commitHook(clean)
+	}
+	unlock, err := s.commits.lock(ctx, id)
+	if err != nil {
+		return filesapi.UploadResponse{}, err
+	}
+	defer unlock()
+	if overwrite {
+		// Replacing a file moves its millisecond mtime forward, like an editor save, so an
+		// editor still holding the old one gets a conflict (#149).
+		switch cur, err := lstat(root, clean); {
+		case err == nil && cur.Mode().IsRegular():
+			if err := moveMTimeForward(root, tmp, st.ModTime(), cur); err != nil {
+				return filesapi.UploadResponse{}, err
+			}
+		case err == nil:
+			return filesapi.UploadResponse{}, fmt.Errorf("%w: %s is not a regular file", filesapi.ErrNotRegular, clean)
+		case !errors.Is(err, filesapi.ErrNotFound):
+			return filesapi.UploadResponse{}, err
+		}
 	}
 	if err := commit(root, tmp, clean, overwrite); err != nil {
 		return filesapi.UploadResponse{}, err

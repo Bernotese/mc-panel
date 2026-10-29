@@ -9,6 +9,11 @@ const TEXT_EXT = /\.(properties|ya?ml|json|toml|txt|cfg|conf|ini|log|md|sk|mcmet
 const CONTROL_RE = /[\u0000-\u001f\u007f\\]/
 const TOP_HIDDEN = new Set(['.rcon-cli.env', '.rcon-cli.yaml'])
 
+/** The mock's version token of a file (the files service hashes device, inode, size and times). */
+function versionOf(node: MockNode): string {
+  return `${node.mtime.toString(36)}-${node.size}`
+}
+
 type Params = Parameters<typeof idParam>[0]
 
 /** Same rules as filesapi.CleanPath; null if invalid. "" = root. */
@@ -138,7 +143,7 @@ export const filesOperations: MockOperation[] = [
       if (!node) return apiError(404, 'not_found', 'no such file')
       if (node.type !== 'file') return apiError(400, 'not_regular', 'not a regular file')
       if (node.content === undefined) return apiError(415, 'not_text', 'not a text file')
-      return HttpResponse.json({ path: p, content: node.content, mtime: node.mtime, size: node.size })
+      return HttpResponse.json({ path: p, content: node.content, mtime: node.mtime, size: node.size, version: versionOf(node) })
     }),
   ),
   op(
@@ -149,7 +154,9 @@ export const filesOperations: MockOperation[] = [
       const body = await readJson<WriteFileRequest>(request)
       const p = cleanPath(body?.path)
       const expected: unknown = body?.expected_mtime
+      const version: unknown = body?.expected_version
       if (!body || p === null || p === '' || typeof body.content !== 'string' || (expected !== null && typeof expected !== 'number')) return invalid()
+      if (version !== undefined && (typeof version !== 'string' || version.length < 1 || version.length > 64 || expected === null)) return invalid()
       if (!a.root) return noData()
       if (isHidden(p)) return hidden()
       const parent = parentDir(a.root, p)
@@ -160,16 +167,17 @@ export const filesOperations: MockOperation[] = [
       if (body.expected_mtime !== null) {
         if (!existing) return apiError(404, 'not_found', 'no such file')
         if (existing.type !== 'file') return apiError(400, 'not_regular', 'not a regular file')
-        if (existing.mtime !== body.expected_mtime) {
+        if (existing.mtime !== body.expected_mtime || (version !== undefined && version !== versionOf(existing))) {
           recordAudit(a.g.user, 'file.write', target(a.server), 'failure', { path: p })
           return apiError(409, 'file_modified', 'file changed since it was opened')
         }
       }
       const mtime = Math.max(Date.now(), (existing?.mtime ?? 0) + 1)
       const size = new TextEncoder().encode(body.content).length
-      parent.children[name] = { type: 'file', mtime, size, content: body.content }
+      const node: MockNode = { type: 'file', mtime, size, content: body.content }
+      parent.children[name] = node
       recordAudit(a.g.user, 'file.write', target(a.server), 'success', { path: p })
-      return HttpResponse.json({ mtime, size })
+      return HttpResponse.json({ mtime, size, version: versionOf(node) })
     }),
   ),
   op(

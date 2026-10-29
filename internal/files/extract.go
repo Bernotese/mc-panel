@@ -270,9 +270,9 @@ func (s *Service) extract(ctx context.Context, root *os.Root, zr *zip.Reader, id
 	if err := destUsable(root, dest); err != nil { // something appeared meanwhile
 		return err
 	}
-	// os.Root.Rename never replaces an existing folder (EEXIST), so an empty dest is removed
-	// first - with rmdir, which fails for a folder that got content meanwhile; content that
-	// appears at the last moment is never lost, the job fails with exists instead.
+	// The rename never replaces anything (renameNoReplace), so an empty dest is removed first -
+	// with rmdir, which fails for a folder that got content meanwhile; content that appears at
+	// the last moment is never lost, the job fails with exists instead.
 	exists := func(err error) bool {
 		return errors.Is(err, fs.ErrExist) || errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.ENOTDIR)
 	}
@@ -284,7 +284,7 @@ func (s *Service) extract(ctx context.Context, root *os.Root, zr *zip.Reader, id
 			return fsErr(err)
 		}
 	}
-	if err := root.Rename(tmp, dest); err != nil {
+	if err := s.renameNoReplace(root, tmp, dest); err != nil {
 		if exists(err) {
 			return fmt.Errorf("%w: %s exists now: %w", filesapi.ErrExists, dest, err)
 		}

@@ -87,6 +87,15 @@ type Service struct {
 	// a restore swap (tests: swap folders, fail a step).
 	backupHook func(p string)
 	swapHook   func(step int) error
+	// commitHook runs right before an operation takes the commit lock (an editor save or upload
+	// after staging its temp file); renameHook inside Rename right before the rename itself;
+	// deleteHook in Delete after the target was moved aside, outside the lock (tests).
+	commitHook func(clean string)
+	renameHook func()
+	deleteHook func()
+	commits    commitLocks // one per instance (commit.go)
+	// noReplaceOnce logs once that the file system has no atomic no-replace rename.
+	noReplaceOnce sync.Once
 	// tempToken is part of every temp name this process creates, so CleanupTemp, which runs
 	// while the service already serves, removes only the leftovers of earlier runs.
 	tempToken string
@@ -341,7 +350,8 @@ func (s *Service) publicMessage(msg string) string {
 }
 
 // commit moves the finished temp file tmp to clean. With overwrite it renames over clean;
-// without, it hard-links (fails atomically if clean exists meanwhile) and removes tmp.
+// without, it hard-links (fails atomically if clean exists meanwhile) and removes tmp. The
+// caller holds the commit lock (commitLocks).
 func commit(root *os.Root, tmp, clean string, overwrite bool) error {
 	if overwrite {
 		return fsErr(root.Rename(tmp, clean))
@@ -391,21 +401,24 @@ func (s *Service) reserveBytes(dir string) (uint64, error) {
 
 // reserve checks that need more bytes still leave the reserve (reserveBytes) free, counting
 // the bytes that running operations announced but have not written yet (all data directories
-// share one file system). The caller reports written bytes with landed and must release the
-// reservation when it ends.
+// share one file system). The free space is sampled under the same lock that landed takes, so
+// bytes that left pending are always in the sample (#153). Bytes that are on disk but not yet
+// reported by landed count twice, so near the limit a request may be refused that would have
+// fit; it is never admitted beyond the reserve. The caller reports written bytes with landed
+// and must release the reservation when it ends.
 func (s *Service) reserve(id, need int64) (*reservation, error) {
 	need = max(need, 0)
 	dir := s.instanceDir(id)
-	avail, err := s.disk.Available(dir)
-	if err != nil {
-		return nil, fmt.Errorf("check free space: %w", err)
-	}
 	keep, err := s.reserveBytes(dir)
 	if err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	avail, err := s.disk.Available(dir)
+	if err != nil {
+		return nil, fmt.Errorf("check free space: %w", err)
+	}
 	want := uint64(need) + keep + uint64(s.pending)
 	if avail < want {
 		return nil, fmt.Errorf("%w: %d bytes free, %d bytes needed including the reserve and running operations",

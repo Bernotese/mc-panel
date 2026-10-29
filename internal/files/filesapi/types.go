@@ -82,18 +82,26 @@ type ReadResponse struct {
 	Content string `json:"content"`
 	MTime   int64  `json:"mtime"`
 	Size    int64  `json:"size"`
+	// Version identifies this state of the file (opaque; device, inode, size, mtime and ctime
+	// in ns). Every save through the service changes it; so does almost any other write.
+	Version string `json:"version"`
 }
 
+// WriteRequest saves editor content. With neither ExpectedMTime nor ExpectedVersion the file
+// must not exist yet; each one that is given must match the current file (ErrModified). Both
+// are checked again right before the new file replaces the old one.
 type WriteRequest struct {
-	ID            int64  `json:"id"`
-	Path          string `json:"path"`
-	Content       string `json:"content"`
-	ExpectedMTime *int64 `json:"expected_mtime"` // nil = must not exist yet
+	ID              int64   `json:"id"`
+	Path            string  `json:"path"`
+	Content         string  `json:"content"`
+	ExpectedMTime   *int64  `json:"expected_mtime"`             // Unix ms from Read or Write
+	ExpectedVersion *string `json:"expected_version,omitempty"` // Version from Read or Write
 }
 
 type WriteResponse struct {
-	MTime int64 `json:"mtime"`
-	Size  int64 `json:"size"`
+	MTime   int64  `json:"mtime"`
+	Size    int64  `json:"size"`
+	Version string `json:"version"`
 }
 
 type RenameRequest struct {

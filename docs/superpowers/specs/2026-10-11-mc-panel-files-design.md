@@ -109,13 +109,13 @@ Fixed paths, `DisallowUnknownFields`, errors `{error, code}` as with the agent. 
 | Method, path | Body / query | Response |
 |---|---|---|
 | `POST /v1/list` | `{id, path}` | `{entries: [{name, type, size, mtime}], truncated}`; `type` ∈ `file\|dir\|symlink\|other`; `mtime` Unix ms; sorted: folders first, then name; at most `max_list_entries` |
-| `POST /v1/read` | `{id, path}` | `{content, mtime, size}`; only regular files ≤ `max_text_bytes` with valid UTF-8 and without NUL, otherwise `415 not_text` |
-| `POST /v1/write` | `{id, path, content, expected_mtime}` | `{mtime, size}`; `expected_mtime` = `null` means "new file" (if it exists → `409 exists`), otherwise it must match the current value (`409 modified`); atomic: temp file, `fsync`, `rename`, mode 0644 |
+| `POST /v1/read` | `{id, path}` | `{content, mtime, size, version}` (now, #149: `version` is an opaque token from device, inode, size, mtime and ctime in ns); only regular files ≤ `max_text_bytes` with valid UTF-8 and without NUL, otherwise `415 not_text` |
+| `POST /v1/write` | `{id, path, content, expected_mtime}` | `{mtime, size}`; `expected_mtime` = `null` means "new file" (if it exists → `409 exists`), otherwise it must match the current value (`409 modified`); atomic: temp file, `fsync`, `rename`, mode 0644. (Now, #149: optional `expected_version`, which must match as well, and `version` in the response; the base is checked again under a per-server commit lock right before the rename, so of two saves with the same base exactly one succeeds; a commit always moves the millisecond mtime past the replaced file's. The lock covers the service's own requests, not a running server writing the file itself.) |
 | `PUT /v1/upload` | Query `id`, `path`, `overwrite` (`0\|1`); body = file, `Content-Length` required, ≤ `max_upload_bytes` | `201 {size}`; without `overwrite` and with an existing target → `409 exists`; abort/error → temp file gone, target unchanged |
 | `GET /v1/download` | Query `id`, `path` | File: stream with `Content-Length`; folder: zip stream (`application/zip`, on the fly, without a temp file; symlinks and special files are left out, hidden files as well, and also names that cannot be stored safely in a zip: components with `:`, with a trailing `.` or space, and Windows device names such as `CON`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, also with an extension). Folder with more than `max_extract_entries` entries or 16 MiB of names → `413 too_large`, folder with an invalid name of its own → `400 invalid`, each before the first byte; too many concurrent downloads → `429 busy` |
 | `POST /v1/mkdir` | `{id, path}` | `201`; exists → `409 exists` |
-| `POST /v1/rename` | `{id, from, to}` | `204`; target exists → `409 exists`; folder not into itself |
-| `POST /v1/delete` | `{id, path}` | `204`; folders recursively (`root.RemoveAll`); the root cannot be deleted (`400`) |
+| `POST /v1/rename` | `{id, from, to}` | `204`; target exists → `409 exists`; folder not into itself. (Now, #149: the rename itself never replaces a target that appeared meanwhile: `renameat2(RENAME_NOREPLACE)` on Linux, `renameatx_np(RENAME_EXCL)` on macOS, on the parent folders opened without following symlinks; on other platforms or a file system without the flag, a check and rename under the commit lock.) |
+| `POST /v1/delete` | `{id, path}` | `204`; folders recursively (`root.RemoveAll`); the root cannot be deleted (`400`). (Now, #149: under the commit lock the target is only renamed to a hidden temp name next to it; the removal runs outside the lock, and a leftover of a failed removal goes at the next start. Every operation that waits for the commit lock gives up when its caller does and then does not commit.) |
 | `POST /v1/extract` | `{id, path, dest}` | Pre-check synchronous (§4.2): errors → `400 invalid` (archive invalid/not allowed), `409 exists` (`dest` not empty), `413 too_large`, `507`; otherwise `202 {job}`; `path` must be a regular `.zip`, `dest` a new or empty folder |
 | `GET /v1/jobs` | Query `id` | `{job: null \| {id, state, path, dest, bytes, entries, total_bytes, total_entries, error, started_at, finished_at}}`; `state` ∈ `running\|done\|failed` |
 | `GET /v1/health` | – | `{status, version}` |
@@ -126,6 +126,7 @@ Error codes of the service: `not_found` (404), `exists` (409), `modified` (409),
 
 - Before an upload (`Content-Length`), a write and an extract (`total_bytes` from the central directory), the service checks via `statfs` on the instance directory that `reserve_bytes` are still free afterwards, otherwise `507 insufficient_storage`. During an upload it also counts and aborts on more bytes than announced.
   (Now, security review SEC-04: the reserve is the larger of `reserve_bytes` (2 GiB) and `reserve_percent` (new key under `[limits]`, default 5, 0..50) of the file system. Only writes that **grow** data are refused below it: uploads, plugin installs (`UploadChecked`), extracts, restores, new backups and editor saves that make a file larger. Reading, deleting, renaming, shrinking a file and starting the server keep working on a full disk.)
+  (Now, #153: an editor save reserves its whole temp copy, the peak while old and new file both exist, so a save that shrinks a file or keeps its size is refused with `507` too instead of eating into the reserve (the old file stays, the temp file is removed); only emptying a file stages no data. Reading, deleting and renaming keep working. The free space is sampled under the same lock as the pending bytes of running writes, so bytes that left the pending count are always in the sample; bytes already on disk but not yet reported count twice, so near the limit a write may be refused that would have fit, but none is admitted beyond the reserve.)
 - Streams: deadline per read/write operation 60 s; no overall deadline.
   (Now, SEC-24: a client must also move at least 64 KiB per minute spent waiting for it, after a grace of 2 minutes; an upload ends after at most 6 h, a download after 12 h. Slow clients can no longer hold the global slots.)
 - At most 4 concurrent uploads in the service (otherwise `429 busy`). (Now: uploads with a checksum, i.e. plugin installs, have their own 4 slots.)
@@ -150,8 +151,8 @@ All routes through `*rbac.Router` with `rbac.Server(rbac.PermServerFiles, "id")`
 | Route | Content |
 |---|---|
 | `GET /servers/{id}/files?path=` | List |
-| `GET /servers/{id}/files/content?path=` | `{content, mtime, size}` |
-| `PUT /servers/{id}/files/content` | `{path, content, expected_mtime}` → `{mtime, size}` |
+| `GET /servers/{id}/files/content?path=` | `{content, mtime, size}` (now also `version`, #149) |
+| `PUT /servers/{id}/files/content` | `{path, content, expected_mtime}` → `{mtime, size}` (now, #149: optional `expected_version` with a non-null `expected_mtime`, and `version` in the response; the editor sends the version it loaded) |
 | `POST /servers/{id}/files/upload?path=&overwrite=` | raw body (`application/octet-stream`), `Content-Length` required → `201` |
 | `GET /servers/{id}/files/download?path=` | Stream; `Content-Disposition: attachment; filename*=UTF-8''<name>` (folder: `<name>.zip`; now without Unicode format characters (category Cf, e.g. right-to-left overrides), SEC-38; the UI shows them visibly as ⟨U+…⟩) |
 | `POST /servers/{id}/files/mkdir` | `{path}` |

@@ -3,6 +3,7 @@ package serverfiles
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -25,7 +26,18 @@ type contentJSON struct {
 	Content string `json:"content"`
 	MTime   int64  `json:"mtime"`
 	Size    int64  `json:"size"`
+	Version string `json:"version"`
 }
+
+// writeResultJSON is the OpenAPI schema FileWriteResult.
+type writeResultJSON struct {
+	MTime   int64  `json:"mtime"`
+	Size    int64  `json:"size"`
+	Version string `json:"version"`
+}
+
+// maxVersionLen bounds expected_version (the files service's tokens are 24 hex characters).
+const maxVersionLen = 64
 
 // optional is a JSON value whose presence is known. The contract requires content and
 // expected_mtime; a missing expected_mtime must not be read as null ("create a new file").
@@ -50,9 +62,10 @@ func (o *optional[T]) UnmarshalJSON(b []byte) error {
 
 // writeRequest is the OpenAPI schema WriteFileRequest.
 type writeRequest struct {
-	Path          string           `json:"path"`
-	Content       optional[string] `json:"content"`
-	ExpectedMTime optional[int64]  `json:"expected_mtime"`
+	Path            string           `json:"path"`
+	Content         optional[string] `json:"content"`
+	ExpectedMTime   optional[int64]  `json:"expected_mtime"`
+	ExpectedVersion optional[string] `json:"expected_version"` // optional, from readFile/writeFile; not null
 }
 
 type pathRequest struct {
@@ -107,7 +120,7 @@ func (h *Handler) handleRead(w http.ResponseWriter, r *http.Request) {
 		h.writeFilesError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, contentJSON{Path: p, Content: res.Content, MTime: res.MTime, Size: res.Size})
+	httpx.WriteJSON(w, http.StatusOK, contentJSON{Path: p, Content: res.Content, MTime: res.MTime, Size: res.Size, Version: res.Version})
 }
 
 func (h *Handler) handleWrite(w http.ResponseWriter, r *http.Request) {
@@ -153,12 +166,26 @@ func (h *Handler) handleWrite(w http.ResponseWriter, r *http.Request) {
 		writeValidation(w, r, "expected_mtime is required (null creates a new file)")
 		return
 	}
+	if req.ExpectedVersion.Set {
+		switch v := req.ExpectedVersion.Value; {
+		case v == nil:
+			writeValidation(w, r, "expected_version must be a string (leave it out for none)")
+			return
+		case req.ExpectedMTime.Value == nil:
+			writeValidation(w, r, "expected_version needs expected_mtime (null creates a new file)")
+			return
+		case *v == "" || len(*v) > maxVersionLen:
+			writeValidation(w, r, fmt.Sprintf("expected_version must be 1 to %d characters", maxVersionLen))
+			return
+		}
+	}
 	p, ok := cleanItemPath(w, r, req.Path)
 	if !ok {
 		return
 	}
 	res, err := h.files.Write(context.WithoutCancel(ctx), filesapi.WriteRequest{
 		ID: s.ID, Path: p, Content: *req.Content.Value, ExpectedMTime: req.ExpectedMTime.Value,
+		ExpectedVersion: req.ExpectedVersion.Value,
 	})
 	h.extendWrite(w, r)
 	h.recordResult(ctx, audit.ActionFileWrite, s.ID, err, map[string]any{"path": p})
@@ -166,7 +193,7 @@ func (h *Handler) handleWrite(w http.ResponseWriter, r *http.Request) {
 		h.writeFilesError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, res)
+	httpx.WriteJSON(w, http.StatusOK, writeResultJSON{MTime: res.MTime, Size: res.Size, Version: res.Version})
 }
 
 func (h *Handler) handleMkdir(w http.ResponseWriter, r *http.Request) {
