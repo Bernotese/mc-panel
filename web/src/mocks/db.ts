@@ -34,6 +34,7 @@ import type {
   SecondFactor,
   SecuritySettings,
   ServerDataState,
+  ServerDeletion,
   ServerProperties,
   ServerStatus,
   Session,
@@ -530,6 +531,7 @@ export interface MockDb {
   pluginJobs: Record<number, MockPluginJob> // running or last plugin job per server id
   backups: Record<number, MockBackups> // per server id (created on first access)
   backupJobs: Record<number, MockBackupJob> // queued, running or last job per server id
+  deletions: ServerDeletion[] // tombstones of deleted servers, newest first
   monitoring: MockMonitoring
   serverSettings: MockServerSettings
   catalogs: Partial<Record<InstanceType, Catalog>>
@@ -758,6 +760,7 @@ function seed(now: number): MockDb {
     pluginJobs: {},
     backups: seedBackups(now),
     backupJobs: {},
+    deletions: [],
     monitoring: defaultMonitoring(),
     serverSettings: { base_domain: 'mc.example.com', curseforge_api_key_set: false, backup_timezone: 'Europe/Berlin', docker: 'ok' },
     catalogs: {

@@ -26,7 +26,7 @@ func TestDeletePurgesBackupsOnlyOnRequest(t *testing.T) {
 	e := newEnv(t)
 	admin := e.admin()
 	keep := storetest.CreateServer(t, e.db, "keep")
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", keep), nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", keep), nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete without purge: %d %s", rec.Code, rec.Body)
 	}
 	if calls := e.purger.takeCalls(); len(calls) != 0 {
@@ -39,7 +39,7 @@ func TestDeletePurgesBackupsOnlyOnRequest(t *testing.T) {
 	for _, v := range []string{"1", "true"} {
 		id := storetest.CreateServer(t, e.db, "purge-"+v)
 		rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d?purge_backups=%s", id, v), nil, &admin)
-		if rec.Code != http.StatusNoContent {
+		if rec.Code != http.StatusAccepted {
 			t.Fatalf("purge_backups=%s: %d %s", v, rec.Code, rec.Body)
 		}
 		if calls := e.purger.takeCalls(); !slices.Equal(calls, []int64{id}) {
@@ -52,7 +52,7 @@ func TestDeletePurgesBackupsOnlyOnRequest(t *testing.T) {
 	}
 	for _, v := range []string{"0", "false"} {
 		id := storetest.CreateServer(t, e.db, "nopurge-"+v)
-		if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d?purge_backups=%s", id, v), nil, &admin); rec.Code != http.StatusNoContent {
+		if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d?purge_backups=%s", id, v), nil, &admin); rec.Code != http.StatusAccepted {
 			t.Fatalf("purge_backups=%s: %d", v, rec.Code)
 		}
 		if calls := e.purger.takeCalls(); len(calls) != 0 {
@@ -68,7 +68,7 @@ func TestDeleteSurvivesAFailedPurge(t *testing.T) {
 	admin := e.admin()
 	id := storetest.CreateServer(t, e.db, "lobby")
 	e.purger.setErr(errors.New("files service down"))
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d?purge_backups=1", id), nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d?purge_backups=1", id), nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete with failing purge: %d %s", rec.Code, rec.Body)
 	}
 	if n := e.count(t, "servers"); n != 0 {
@@ -83,8 +83,8 @@ func TestDeleteSurvivesAFailedPurge(t *testing.T) {
 	}
 }
 
-// An invalid value is refused before anything happens; a delete that fails does not purge.
-func TestDeletePurgeValidationAndFailedDelete(t *testing.T) {
+// An invalid value is refused before anything happens.
+func TestDeletePurgeValidationAndAgentDown(t *testing.T) {
 	e := newEnv(t)
 	setBaseDomain(t, e.db, "mc.example.com")
 	admin := e.admin()
@@ -96,13 +96,19 @@ func TestDeletePurgeValidationAndFailedDelete(t *testing.T) {
 	if n := e.count(t, "servers"); n != 1 {
 		t.Fatalf("refused delete removed rows: %d", n)
 	}
+	// issue #148: the agent being down does not hold the purge back; the container is removed
+	// later from the tombstone
 	s := e.create(t, paper("survival"))
 	e.agent.setErr(agentapi.ErrUnavailable)
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d?purge_backups=1", s.ID), nil, &admin); rec.Code != http.StatusServiceUnavailable {
+	rec = e.do(http.MethodDelete, fmt.Sprintf("/servers/%d?purge_backups=1", s.ID), nil, &admin)
+	if rec.Code != http.StatusAccepted {
 		t.Fatalf("delete with agent down: %d %s", rec.Code, rec.Body)
 	}
-	if calls := e.purger.takeCalls(); len(calls) != 0 {
-		t.Fatalf("a failed delete purged: %v", calls)
+	if d := decode[deletionResp](t, rec); d.Container != "pending" || d.Backups != "purged" {
+		t.Fatalf("deletion = %+v", d)
+	}
+	if calls := e.purger.takeCalls(); !slices.Equal(calls, []int64{s.ID}) {
+		t.Fatalf("purges = %v", calls)
 	}
 }
 
@@ -151,7 +157,7 @@ func TestDeletePurgeOutlastsWriteTimeout(t *testing.T) {
 		t.Fatalf("delete with a slow purge: %v (the answer was lost to the WriteTimeout)", err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
+	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("delete with a slow purge: %d", resp.StatusCode)
 	}
 	s := <-got

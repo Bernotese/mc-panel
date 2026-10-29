@@ -357,7 +357,7 @@ func TestWebRoutesReconcile(t *testing.T) {
 	}
 
 	// Deleting a server drops its route.
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", c), nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", c), nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}
 	e.pass()

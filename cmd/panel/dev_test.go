@@ -7,7 +7,7 @@ import (
 )
 
 // Create a dev through the real wiring (servers, backups queue, devinst), see it in the server
-// list, pause its sync, and the delete rules: prod with a dev 409 dev_exists, dev 204, then prod.
+// list, pause its sync, and the delete rules: prod with a dev 409 dev_exists, dev 202, then prod.
 func TestDevInstanceLifecycle(t *testing.T) {
 	e := newEnv(t)
 	admin, secret := loginAdminWithTOTP(e)
@@ -71,12 +71,12 @@ func TestDevInstanceLifecycle(t *testing.T) {
 			if got["last_sync_status"] == nil {
 				t.Fatalf("no sync result after the first sync: %v", got)
 			}
-			admin.must(204, "DELETE", fmt.Sprintf("/servers/%d", devID), nil)
+			admin.must(202, "DELETE", fmt.Sprintf("/servers/%d", devID), nil)
 			break
 		}
 		switch code, out := admin.do("DELETE", fmt.Sprintf("/servers/%d", devID), nil); code {
 		case 409: // still pending
-		case 204: // the sync ended between the two requests
+		case 202: // the sync ended between the two requests
 			deleted = true
 		default:
 			t.Fatalf("DELETE dev while its sync is pending = %d %v", code, out)
@@ -91,5 +91,5 @@ func TestDevInstanceLifecycle(t *testing.T) {
 	if code, _ := admin.do("GET", fmt.Sprintf("/servers/%d/dev", devID), nil); code != 404 {
 		t.Fatalf("GET dev after delete = %d", code)
 	}
-	admin.must(204, "DELETE", fmt.Sprintf("/servers/%d", prodID), nil)
+	admin.must(202, "DELETE", fmt.Sprintf("/servers/%d", prodID), nil)
 }

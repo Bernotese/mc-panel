@@ -91,8 +91,11 @@ func isUnavailable(err error) bool {
 }
 
 // Run runs the reconcile loop until ctx is cancelled: one pass right away, then every
-// ReconcileInterval and after every Trigger.
+// ReconcileInterval and after every Trigger. The deletion loop (runDeletions) runs beside it.
 func (h *Handler) Run(ctx context.Context) {
+	done := make(chan struct{})
+	go func() { defer close(done); h.runDeletions(ctx) }()
+	defer func() { <-done }()
 	t := time.NewTicker(ReconcileInterval)
 	defer t.Stop()
 	for {
@@ -144,7 +147,7 @@ func (h *Handler) reconcileInstances(ctx context.Context) {
 		h.log.Error("servers: reconcile: load settings", "err", err)
 		return
 	}
-	h.warnUnknown(resp, rows)
+	h.warnUnknown(ctx, resp, rows)
 	now := h.clock.Now()
 	seen := make(map[int64]bool, len(rows))
 	acted := false
@@ -294,11 +297,20 @@ func (h *Handler) apply(ctx context.Context, name string, in store.Instance, act
 
 // warnUnknown logs every container with the mcpanel.instance label that the database does
 // not know, once per container. Such containers are never touched (spec §5.3). Entries in
-// state "missing" are queued work or a remembered error of the agent, not containers.
-func (h *Handler) warnUnknown(resp agentapi.InstancesResponse, rows []store.ServersListInstancesRow) {
+// state "missing" are queued work or a remembered error of the agent, not containers; the
+// containers of deleted servers are the deletion loop's (deletions.go).
+func (h *Handler) warnUnknown(ctx context.Context, resp agentapi.InstancesResponse, rows []store.ServersListInstancesRow) {
 	known := make(map[int64]bool, len(rows))
 	for _, r := range rows {
 		known[r.ServerID] = true
+	}
+	open, err := h.q.ServersListOpenDeletions(ctx)
+	if err != nil {
+		h.log.Error("servers: reconcile: list open deletions", "err", err)
+		return
+	}
+	for _, d := range open {
+		known[d.ServerID] = true
 	}
 	for _, st := range resp.Instances {
 		if st.State != agentapi.StateMissing && !known[st.ID] && !h.reconcile.warned[st.ID] {

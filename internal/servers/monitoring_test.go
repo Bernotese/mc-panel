@@ -73,7 +73,7 @@ func TestDeleteRemovesMonitoringData(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", gone), nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", gone), nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}
 	for _, tc := range []struct {

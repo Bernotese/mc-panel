@@ -291,7 +291,7 @@ jcheck "$po/maudit.json" "plugin.mrpack_import audited" '
       and e["details"]["skipped"] == 2 and e["details"]["failed"] == 0 for e in d["items"])' "$fsrv"
 p_sudo
 papi DELETE "/servers/$fsrv" "$po/fdel.json"
-[ "$pcode" = 204 ] || fail "delete fabric server: HTTP $pcode $(cat "$po/fdel.json")"
+[ "$pcode" = 202 ] || fail "delete fabric server: HTTP $pcode $(cat "$po/fdel.json")"
 f_gone() { [ "$(inst_field "$fsrv" i)" = absent ]; }
 pwait_for 180 "container of the fabric server removed" f_gone
 echo "OK: mrpack preview (install/client_only/not_on_modrinth, 1 ignored), NeoForge pack 409, import job wrote $f_fapi via the files service, audited"

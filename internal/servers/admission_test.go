@@ -417,7 +417,7 @@ func TestDeleteDataStates(t *testing.T) {
 	refuse("recovery, files busy", http.StatusConflict, "conflict")
 	e.files.resolveErr = nil
 	e.files.recovery = filesapi.Recovery{Phase: "stuck", Since: 1, Folder: fmt.Sprintf("%d-1793000000", s.ID)}
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", s.ID), nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", s.ID), nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete in recovery_required: %d %s", rec.Code, rec.Body)
 	}
 	if !slices.Equal(e.files.resolved, []int64{s.ID, s.ID, s.ID}) {
@@ -429,7 +429,7 @@ func TestDeleteDataStates(t *testing.T) {
 		t.Fatalf("audit = %+v", en)
 	}
 	other := e.create(t, paper("creative"))
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", other.ID), nil, &admin); rec.Code != http.StatusNoContent {
+	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", other.ID), nil, &admin); rec.Code != http.StatusAccepted {
 		t.Fatalf("delete when safe: %d %s", rec.Code, rec.Body)
 	}
 	if _, ok := e.rec.Entries[len(e.rec.Entries)-1].Details["recovery_required"]; ok || len(e.files.resolved) != 3 {
@@ -583,10 +583,10 @@ func TestResolveEndpoint(t *testing.T) {
 	}
 }
 
-// Data safety review: a delete of a server in recovery_required resolves only once every check
-// that can refuse it has passed, and drops the wish to run first, so a delete that still fails
-// afterwards never lets the half-swapped world start; the move is audited on its own.
-func TestDeleteRecoveryFailsAfterResolve(t *testing.T) {
+// Data safety review and issue #148: a delete of a server in recovery_required drops the wish
+// to run and resolves the restore (audited on its own) before the rows go; with the agent down
+// the delete still goes through and the container is removed later.
+func TestDeleteRecoveryResolvesBeforeRows(t *testing.T) {
 	e := newEnv(t)
 	setBaseDomain(t, e.db, "mc.example.com")
 	admin := e.admin()
@@ -594,37 +594,19 @@ func TestDeleteRecoveryFailsAfterResolve(t *testing.T) {
 	e.agent.set(container("survival", id, 1, agentapi.StateExited, ""))
 	e.data.set(id, servers.StateRecoveryRequired)
 	e.files.recovery = filesapi.Recovery{Phase: "stuck", Folder: fmt.Sprintf("%d-1793000000", id)}
-
-	// the agent is down: the delete is refused before anything is moved or changed
 	e.agent.setErr(agentapi.ErrUnavailable)
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", id), nil, &admin); rec.Code != http.StatusServiceUnavailable {
+	rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", id), nil, &admin)
+	if rec.Code != http.StatusAccepted {
 		t.Fatalf("delete with the agent down: %d %s", rec.Code, rec.Body)
 	}
-	if len(e.files.resolved) != 0 || instanceRow(t, e.db, id).DesiredState != "running" {
-		t.Fatalf("a refused delete resolved (%v) or changed the desired state", e.files.resolved)
+	if d := decode[deletionResp](t, rec); d.State != "failed" || d.Container != "pending" {
+		t.Fatalf("deletion = %+v", d)
 	}
-	e.agent.setErr(nil)
-
-	// the agent refuses the remove after the move: the server stays, stopped, the move is audited
-	e.agent.setActionErr(agentapi.ErrUnavailable)
-	if rec := e.do(http.MethodDelete, fmt.Sprintf("/servers/%d", id), nil, &admin); rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("delete with a failing remove: %d %s", rec.Code, rec.Body)
+	if !slices.Equal(e.files.resolved, []int64{id}) || e.count(t, "servers") != 0 {
+		t.Fatalf("resolved %v, servers %d", e.files.resolved, e.count(t, "servers"))
 	}
-	e.agent.setActionErr(nil)
-	if n := e.count(t, "servers"); n != 1 {
-		t.Fatalf("servers = %d", n)
-	}
-	if !slices.Equal(e.files.resolved, []int64{id}) || instanceRow(t, e.db, id).DesiredState != "stopped" {
-		t.Fatalf("resolved %v, desired %s", e.files.resolved, instanceRow(t, e.db, id).DesiredState)
-	}
-	last := e.rec.Entries[len(e.rec.Entries)-1]
-	if last.Action != audit.ActionServerRecoveryResolve || last.Result != audit.ResultSuccess || last.Details["folder"] != e.files.recovery.Folder {
-		t.Fatalf("audit = %+v", last)
-	}
-	e.data.set(id, servers.StateSafe) // what the files service reports after the move
-	e.agent.takeCalls()
-	if got := e.pass(); len(got) != 0 {
-		t.Fatalf("the reconcile loop acted on the resolved server: %v", got)
+	if got := e.rec.Actions(); !slices.Equal(got[len(got)-2:], []string{audit.ActionServerRecoveryResolve, audit.ActionServerDelete}) {
+		t.Fatalf("audit = %v", got)
 	}
 }
 

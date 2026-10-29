@@ -218,6 +218,9 @@ func (h *Handler) CreateDev(ctx context.Context, prodID int64, memoryMiB *int) (
 			return err
 		}
 		ms := now.UnixMilli()
+		if err := nameFree(ctx, q, name); err != nil {
+			return fmt.Errorf("%w (%w)", ErrNameTaken, err)
+		}
 		dev, err = q.ServersCreateServer(ctx, store.ServersCreateServerParams{ID: id, Name: name, CreatedAt: ms})
 		if store.IsUniqueViolation(err) {
 			return ErrNameTaken

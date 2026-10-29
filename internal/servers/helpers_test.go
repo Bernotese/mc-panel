@@ -195,6 +195,7 @@ type fakeAgent struct {
 	webErr    error
 	webStatus func(agentapi.WebRoute) agentapi.WebRouteStatus
 	webReqs   []agentapi.WebRoutesRequest
+	removed   []int64 // InstancesResponse.Removed (confirmed removals)
 }
 
 func newFakeAgent() *fakeAgent {
@@ -232,7 +233,15 @@ func (f *fakeAgent) Instances(context.Context) (agentapi.InstancesResponse, erro
 		list = append(list, st)
 	}
 	slices.SortFunc(list, func(a, b agentapi.InstanceStatus) int { return cmp.Compare(a.ID, b.ID) })
-	return agentapi.InstancesResponse{Docker: f.docker, Instances: list}, nil
+	return agentapi.InstancesResponse{Docker: f.docker, Instances: list, Removed: slices.Clone(f.removed)}, nil
+}
+
+// confirmRemoved makes the agent report id as removed: its container is gone.
+func (f *fakeAgent) confirmRemoved(id int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.inst, id)
+	f.removed = append(f.removed, id)
 }
 
 func (f *fakeAgent) record(call string) error {

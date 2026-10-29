@@ -260,7 +260,7 @@ papi DELETE "/servers/$psrv" "$dout/pdel.json"
 is_perror "$dout/pdel.json" "$pcode" 409 dev_exists || fail "delete prod with a dev: HTTP $pcode $(cat "$dout/pdel.json")"
 p_running || fail "the refused delete touched the prod"
 papi DELETE "/servers/$dsrv" "$dout/ddel.json"
-[ "$pcode" = 204 ] || fail "delete dev: HTTP $pcode $(cat "$dout/ddel.json")"
+[ "$pcode" = 202 ] || fail "delete dev: HTTP $pcode $(cat "$dout/ddel.json")"
 d_gone() { [ "$(inst_field "$dsrv" i)" = absent ] && ! docker inspect "mcpanel-mc-$dsrv" >/dev/null 2>&1; }
 pwait_for 180 "dev container removed" d_gone
 papi GET "/servers/$psrv" "$dout/prod.json"

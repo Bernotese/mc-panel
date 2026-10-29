@@ -7,6 +7,7 @@ import type {
   PowerAction,
   Recovery,
   Server,
+  ServerDeletion,
   ServerMemoryLimits,
   ServerSettings,
   UpdateServerRequest,
@@ -17,7 +18,7 @@ import { javaFor } from '@/features/servers/java'
 import { db, emptyPlayers, nextId, recordAudit, resolveProperties, runningStatus, stoppedStatus, type MockServer } from '../db'
 import { restoreActive } from './backups'
 import { DEV_PREFIX, devOf, devSummary, settleDev } from './dev-model'
-import { API, apiError, guard, idParam, noContent, op, readJson, serverPermissions, type MockOperation } from './util'
+import { API, apiError, guard, idParam, op, readJson, serverPermissions, type MockOperation } from './util'
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/
 const ACTIONS: PowerAction[] = ['start', 'stop', 'restart']
@@ -438,7 +439,41 @@ export const serverOperations: MockOperation[] = [
       }
       recordAudit(g.user, 'server.delete', `server:${server.id}`, 'success', details)
       if (server.dev) recordAudit(g.user, 'dev.delete', `server:${server.id}`, 'success', { name: server.name })
-      return noContent()
+      // Like the panel: a tombstone; the mock agent confirms the removal at once.
+      const now = Date.now()
+      const deletion: ServerDeletion = {
+        server_id: id, name: server.name, state: 'done', container: server.instance ? 'removed' : 'none', container_error: null,
+        backups: purge ? 'purged' : 'none', backups_error: null, requested_at: now, updated_at: now, completed_at: now,
+      }
+      db.deletions.unshift(deletion)
+      return HttpResponse.json<ServerDeletion>(deletion, { status: 202 })
+    }),
+  ),
+
+  op(
+    'listServerDeletions',
+    http.get(`${API}/servers/deletions`, ({ request }) => {
+      const g = guard(request, { admin: true })
+      if (g instanceof Response) return g
+      const since = Date.now() - 7 * 24 * 3600 * 1000
+      return HttpResponse.json<ServerDeletion[]>(db.deletions.filter((d) => d.completed_at === null || d.completed_at >= since))
+    }),
+  ),
+
+  op(
+    'retryServerDeletion',
+    http.post(`${API}/servers/deletions/:id/retry`, ({ request, params }) => {
+      const g = guard(request, { admin: true, sudo: true })
+      if (g instanceof Response) return g
+      const d = db.deletions.find((x) => x.server_id === idParam(params))
+      if (!d) return apiError(404, 'not_found', 'deletion not found')
+      if (d.completed_at !== null) return apiError(409, 'conflict', 'the deletion is complete')
+      // The mock's cleanup always succeeds on a retry.
+      const now = Date.now()
+      if (d.container === 'pending') d.container = 'removed'
+      if (d.backups === 'pending' || d.backups === 'failed') d.backups = 'purged'
+      Object.assign(d, { state: 'done', container_error: null, backups_error: null, updated_at: now, completed_at: now })
+      return HttpResponse.json<ServerDeletion>(d)
     }),
   ),
 
