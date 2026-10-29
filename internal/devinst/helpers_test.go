@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -400,11 +401,15 @@ func (f *fakeWaker) requests() []agentapi.WakerRequest {
 	return slices.Clone(f.reqs)
 }
 
-// fakeConsole records RCON commands per server; fail makes every call fail.
+// fakeConsole records RCON commands per server; fail makes every RCON call fail. An "op <name>"
+// adds name to the server's ops.json (Players) unless the server cannot resolve it (unknown).
 type fakeConsole struct {
 	mu   sync.Mutex
 	fail bool
 	cmds []string // "<id> <command>"
+
+	ops     map[int64][]string
+	unknown map[string]bool
 }
 
 func (f *fakeConsole) Logs(context.Context, agentapi.LogsRequest) (agentapi.LogStream, error) {
@@ -418,11 +423,47 @@ func (f *fakeConsole) Rcon(_ context.Context, id int64, cmd string) (string, err
 		return "", errors.New("rcon down")
 	}
 	f.cmds = append(f.cmds, fmt.Sprintf("%d %s", id, cmd))
+	if name, ok := strings.CutPrefix(cmd, "op "); ok {
+		if f.unknown[name] {
+			return "That player does not exist", nil
+		}
+		if !slices.Contains(f.ops[id], name) {
+			if f.ops == nil {
+				f.ops = map[int64][]string{}
+			}
+			f.ops[id] = append(f.ops[id], name)
+		}
+	}
 	return "", nil
 }
 
-func (f *fakeConsole) Players(context.Context, int64) (agentapi.PlayersResponse, error) {
-	return agentapi.PlayersResponse{}, agentapi.ErrUnavailable
+func (f *fakeConsole) Players(_ context.Context, id int64) (agentapi.PlayersResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out agentapi.PlayersResponse
+	for _, n := range f.ops[id] {
+		out.Ops = append(out.Ops, agentapi.PlayerOp{Name: n, Level: 4})
+	}
+	return out, nil
+}
+
+// setOps replaces the server's ops.json (a sync copies prod's).
+func (f *fakeConsole) setOps(id int64, names ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ops == nil {
+		f.ops = map[int64][]string{}
+	}
+	f.ops[id] = names
+}
+
+func (f *fakeConsole) setUnknown(names ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unknown = map[string]bool{}
+	for _, n := range names {
+		f.unknown[n] = true
+	}
 }
 
 func (f *fakeConsole) sent() []string {

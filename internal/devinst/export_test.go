@@ -20,6 +20,9 @@ var (
 	ErrInvalid        = fmt.Errorf("%w: at most 1536 on this host", servers.ErrInvalidMemory)
 )
 
+// OpsWindow is how long after a start missing dev ops are sent again on every pass.
+var OpsWindow = opsWindow
+
 // Tick runs one schedule tick (Run does it every minute).
 func Tick(ctx context.Context, h *Handler) { h.tick(ctx) }
 

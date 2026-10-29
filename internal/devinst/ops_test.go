@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/devinst"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/monitoring"
 )
@@ -115,7 +116,9 @@ func TestOpsReappliedOncePerStart(t *testing.T) {
 		t.Fatalf("re-applied twice for one start: %q", c)
 	}
 
-	// A new start: again, and an RCON failure is retried on the next pass.
+	// A new start after a sync (prod's ops.json, without the dev ops): again, and an RCON
+	// failure is retried on the next pass.
+	e.console.setOps(devID)
 	e.console.reset()
 	e.console.fail = true
 	s2 := e.clk.Now()
@@ -126,5 +129,65 @@ func TestOpsReappliedOncePerStart(t *testing.T) {
 	e.pass(up(s2))
 	if c := e.console.sent(); !slices.Equal(c, want) {
 		t.Fatalf("after the second start rcon %q, want %q", c, want)
+	}
+}
+
+// The server answers op for an account it cannot resolve (a failed profile lookup at Mojang)
+// with a message, not an error: the name is sent again until it shows up in ops.json, and a
+// name already there is never sent.
+func TestOpsRetriedUntilInOpsJSON(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	for _, n := range []string{"Notch", "alex"} {
+		e.must(200, "POST", path(devID, "/ops"), map[string]any{"name": n}, e.admin())
+	}
+	e.console.setOps(devID, "alex")
+	e.console.setUnknown("Notch")
+	started := e.clk.Now()
+	notch := fmt.Sprintf("%d op Notch", devID)
+	for i := 1; i <= 3; i++ {
+		e.clk.Advance(30 * time.Second)
+		e.pass(running(devID, started, ptr(0)))
+		if c := e.console.sent(); len(c) != i || c[i-1] != notch {
+			t.Fatalf("pass %d: rcon %q", i, c)
+		}
+	}
+	e.console.setUnknown() // the lookup works again
+	for range 3 {
+		e.clk.Advance(30 * time.Second)
+		e.pass(running(devID, started, ptr(0)))
+	}
+	if c := e.console.sent(); len(c) != 4 || slices.Contains(c, fmt.Sprintf("%d op alex", devID)) {
+		t.Fatalf("rcon %q, want op Notch 4 times and never op alex", c)
+	}
+}
+
+func TestOpsSentOnceMoreAfterTheWindow(t *testing.T) {
+	e := newEnv(t)
+	_, devID := e.dev("survival")
+	e.must(200, "POST", path(devID, "/ops"), map[string]any{"name": "Nobody_42"}, e.admin())
+	e.console.setUnknown("Nobody_42")
+	started := e.clk.Now()
+	want := 0
+	for done := false; !done; {
+		e.clk.Advance(30 * time.Second)
+		done = e.clk.Now().Sub(started) >= devinst.OpsWindow
+		e.pass(running(devID, started, ptr(1)))
+		want++
+	}
+	for range 3 {
+		e.clk.Advance(30 * time.Second)
+		e.pass(running(devID, started, ptr(1)))
+	}
+	if c := e.console.sent(); len(c) != want {
+		t.Fatalf("%d op rounds, want %d (one per pass within the window and one after it)", len(c), want)
+	}
+
+	// The next run tries again.
+	e.console.reset()
+	e.clk.Advance(30 * time.Second)
+	e.pass(running(devID, e.clk.Now(), ptr(1)))
+	if c := e.console.sent(); len(c) != 1 {
+		t.Fatalf("after a restart rcon %q", c)
 	}
 }
