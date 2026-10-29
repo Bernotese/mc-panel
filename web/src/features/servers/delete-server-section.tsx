@@ -34,8 +34,8 @@ export function DeleteServerSection({ server }: { server: Server }) {
     onSuccess: (deletion) => {
       const name = server.name
       const details = { label: t('servers.delete.details'), onClick: () => void navigate({ to: '/settings' }) }
-      if (deletion.state === 'done') toast.success(t('servers.delete.deleted', { name }))
-      else if (deletion.state === 'pending') toast.success(t('servers.delete.deleted_pending', { name }), { action: details })
+      if (deletion.state === 'pending') toast.success(t('servers.delete.deleted_pending', { name }), { action: details })
+      else if (deletion.state !== 'failed' && deletion.state !== 'partial') toast.success(t('servers.delete.deleted', { name }))
       else
         toast.warning(t(`servers.delete.deleted_${deletion.state}`, { name }), {
           description: deletion.container_error ?? deletion.backups_error ?? undefined,

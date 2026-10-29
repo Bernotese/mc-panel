@@ -99,6 +99,9 @@ export const de = {
     subject_single: 'Aktion: {{action}}',
     subject_multiple: '{{n}} Aktionen: {{actions}}',
     action: {
+      deletion_retry: 'Löschung erneut versuchen',
+      deletion_abandon: 'Löschung aufgeben',
+      recovery_resolve: 'Wiederherstellung auflösen',
       generic: 'Aktion bestätigen',
       notifier_create: 'Benachrichtigung anlegen',
       notifier_update: 'Benachrichtigung ändern',
@@ -572,9 +575,9 @@ export const de = {
       all_link: 'Alle Löschungen',
       list_label: 'Löschungen',
       none: 'Keine Löschungen in den letzten 7 Tagen.',
-      state: { pending: 'Läuft', failed: 'Fehlgeschlagen', partial: 'Teilweise', done: 'Erledigt' },
+      state: { pending: 'Läuft', failed: 'Fehlgeschlagen', partial: 'Teilweise', done: 'Erledigt', abandoned: 'Aufgegeben' },
       container: {
-        none: 'Keine Instanz – kein Container abzubauen.',
+        none: 'Kein Container abzubauen (keine Instanz, oder der Agent verwaltet keine Container).',
         pending: 'Der Container wird entfernt …',
         removed: 'Container entfernt, Daten nach deleted/ verschoben.',
         foreign: 'Der Container gehört zu einem anderen Server und bleibt unberührt.',
@@ -588,6 +591,15 @@ export const de = {
       retry_label: 'Löschung von {{name}} erneut versuchen',
       retried_done: 'Löschung von „{{name}}“ abgeschlossen.',
       retried_open: 'Neuer Versuch für „{{name}}“ gestartet.',
+      abandon: 'Aufgeben …',
+      abandon_label: 'Löschung von {{name}} aufgeben',
+      abandon_title: 'Löschung von „{{name}}“ aufgeben?',
+      abandon_description:
+        'Das Panel versucht es dann nicht mehr und gibt den Namen frei. Was übrig ist – ein Container, Daten oder Backups –, bleibt auf dem Host liegen; darum kümmerst du dich selbst (siehe Anleitung).',
+      abandon_confirm: 'Aufgeben',
+      abandoned_done: 'Löschung von „{{name}}“ aufgegeben. Reste bleiben auf dem Host.',
+      abandoned_hint: 'Aufgegeben: Das Panel räumt hier nichts mehr auf. Was übrig ist, liegt noch auf dem Host.',
+      runbook: 'Anleitung: Eine Löschung wird nicht fertig',
     },
     delete: {
       title: 'Server löschen',

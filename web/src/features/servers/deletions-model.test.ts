@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ServerDeletion } from '@/api/types'
-import { DELETION_FAST_POLL_MS, DELETION_SLOW_POLL_MS, deletionsPollInterval, isRetryable, sortDeletions } from './deletions-model'
+import { DELETION_FAST_POLL_MS, DELETION_SLOW_POLL_MS, deletionsPollInterval, isOpen, isRetryable, sortDeletions } from './deletions-model'
 
 function deletion(over: Partial<ServerDeletion>): ServerDeletion {
   return {
@@ -26,8 +26,14 @@ describe('deletions model (#148)', () => {
     expect(deletionsPollInterval([deletion({ state: 'failed' }), deletion({ state: 'pending' })])).toBe(DELETION_FAST_POLL_MS)
   })
 
-  it('offers a retry only for failed and partial deletions', () => {
-    expect((['pending', 'failed', 'partial', 'done'] as const).filter((state) => isRetryable(deletion({ state })))).toEqual(['failed', 'partial'])
+  it('offers a retry and abandon only for failed and partial deletions', () => {
+    expect((['pending', 'failed', 'partial', 'done', 'abandoned'] as const).filter((state) => isRetryable(deletion({ state })))).toEqual(['failed', 'partial'])
+  })
+
+  it('counts an abandoned deletion as closed: no polling, not open', () => {
+    const abandoned = deletion({ state: 'abandoned', container: 'pending' })
+    expect(isOpen(abandoned)).toBe(false)
+    expect(deletionsPollInterval([abandoned])).toBe(false)
   })
 
   it('lists open deletions first, newest first', () => {

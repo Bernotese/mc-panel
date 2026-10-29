@@ -6,7 +6,7 @@ import type { LiveMetrics, MetricsSeries, MonitoringOverview, MonitoringSettings
 import type { PluginInventory, PluginJob, PluginResolution, PluginSearchResult, PluginUpdates, PluginVersionList } from '@/api/types'
 import type { Server, ServerDeletion } from '@/api/types'
 import { callApi, field } from '@/test/call-api'
-import { db, defaultMonitoring, loginAs, seedRecoveryScenario } from './db'
+import { db, defaultMonitoring, loginAs, seedDeletionScenario, seedRecoveryScenario } from './db'
 import { operations } from './handlers'
 
 const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../api/openapi.yaml'), 'utf8')
@@ -37,6 +37,20 @@ describe('mock behaviour', () => {
     expect((await callApi('POST', '/servers', { body: create, csrf: me.csrf_token })).status).toBe(201)
     // A server without an instance has nothing to remove: done at once.
     expect((await callApi('DELETE', '/servers/3', { csrf: me.csrf_token })).body).toMatchObject({ state: 'done', container: 'none' })
+  })
+
+  it('abandons an open deletion once and frees its name (#148)', async () => {
+    const me = loginAs('admin', { sudo: true })
+    seedDeletionScenario()
+    const abandon = (id: number) => callApi('POST', `/servers/deletions/${id}/abandon`, { csrf: me.csrf_token })
+    const create = { name: 'old-lobby', type: 'paper', version: '1.21.11', memory_mib: 2048, eula_accepted: true }
+    expect(field((await callApi('POST', '/servers', { body: create, csrf: me.csrf_token })).body, 'error')).toBe('conflict')
+    const res = await abandon(41)
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({ state: 'abandoned', completed_at: expect.any(Number) })
+    expect(field((await abandon(41)).body, 'error')).toBe('conflict')
+    expect((await callApi('POST', '/servers', { body: create, csrf: me.csrf_token })).status).toBe(201)
+    expect(field((await abandon(40)).body, 'error')).toBe('conflict') // already done
   })
 
   it('locks start and restart outside the safe data state and resolves a stuck restore once', async () => {

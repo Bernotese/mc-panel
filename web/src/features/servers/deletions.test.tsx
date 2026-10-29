@@ -76,6 +76,7 @@ describe('open deletions on the dashboard (#148)', () => {
     expect(items[1]).toHaveTextContent('Container entfernt, Daten nach deleted/ verschoben.')
     expect(items[1]).toHaveTextContent('Backups: restic forget: repository is already locked by PID 4242')
     expect(within(section).queryByText('testwelt')).not.toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: 'Löschung von old-lobby aufgeben' })).toBeInTheDocument()
 
     await user.click(within(section).getByRole('button', { name: 'Löschung von old-lobby erneut versuchen' }))
     expect(await screen.findByText('Löschung von „old-lobby“ abgeschlossen.')).toBeInTheDocument()
@@ -106,8 +107,9 @@ describe('open deletions on the dashboard (#148)', () => {
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Löschungen in Arbeit' })).not.toBeInTheDocument())
   })
 
-  it('shows nothing when every deletion is done', async () => {
+  it('shows nothing when every deletion is done or abandoned', async () => {
     db.deletions.push(deletion({ state: 'done', container: 'removed', completed_at: Date.now() }))
+    db.deletions.push(deletion({ server_id: 51, name: 'left', state: 'abandoned', completed_at: Date.now() }))
     await renderWithProviders(<DashboardPage />, { me: loginAs('admin') })
     await screen.findByRole('article', { name: 'survival' })
     expect(screen.queryByRole('region', { name: 'Löschungen in Arbeit' })).not.toBeInTheDocument()
@@ -143,6 +145,30 @@ describe('deleted servers in the settings (#148)', () => {
     expect(items[2]).toHaveTextContent('Erledigt')
     expect(items[2]).toHaveTextContent('Backups gelöscht.')
     expect(within(items[2]).queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('abandons a deletion that cannot finish after a confirmation that the leftovers stay', async () => {
+    seedDeletionScenario()
+    const user = userEvent.setup()
+    await renderWithProviders(<SettingsPage />, { me: loginAs('admin', { sudo: true }) })
+    const card = await screen.findByRole('region', { name: 'Gelöschte Server' })
+    const item = () => within(card).getAllByRole('listitem').find((i) => i.textContent?.includes('old-lobby')) as HTMLElement
+    await within(card).findByRole('list', { name: 'Löschungen' })
+    expect(within(item()).getByRole('link', { name: /Eine Löschung wird nicht fertig/ })).toHaveAttribute(
+      'href',
+      'https://github.com/Bernotese/mc-panel/blob/main/docs/install.md#a-server-deletion-does-not-finish',
+    )
+
+    await user.click(within(item()).getByRole('button', { name: 'Löschung von old-lobby aufgeben' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Löschung von „old-lobby“ aufgeben?' })
+    expect(dialog).toHaveTextContent('bleibt auf dem Host liegen')
+    await user.click(within(dialog).getByRole('button', { name: 'Aufgeben' }))
+    expect(await screen.findByText('Löschung von „old-lobby“ aufgegeben. Reste bleiben auf dem Host.')).toBeInTheDocument()
+    await waitFor(() => expect(item()).toHaveTextContent('Aufgegeben'))
+    expect(item()).toHaveTextContent('Das Panel räumt hier nichts mehr auf.')
+    expect(within(item()).queryByRole('button')).not.toBeInTheDocument()
+    expect(db.deletions.find((d) => d.name === 'old-lobby')?.state).toBe('abandoned')
+    expect(db.audit.at(-1)).toMatchObject({ action: 'server.delete_abandon' })
   })
 
   it('says when there is nothing to show', async () => {

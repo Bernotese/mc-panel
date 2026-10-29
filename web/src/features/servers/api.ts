@@ -84,6 +84,14 @@ export const serverDeletionsQueryOptions = queryOptions<ServerDeletion[]>({
   queryFn: () => unwrap(api.GET('/servers/deletions')),
 })
 
+/**
+ * Admin, sudo: closes a deletion that cannot finish as abandoned and frees the name; nothing is removed, the leftovers
+ * stay on the host for the operator.
+ */
+export function abandonServerDeletion(id: number): Promise<ServerDeletion> {
+  return unwrap(api.POST('/servers/deletions/{id}/abandon', { params: { path: { id } } }))
+}
+
 /** Admin, sudo: runs the next cleanup attempt of a deletion at once. */
 export function retryServerDeletion(id: number): Promise<ServerDeletion> {
   return unwrap(api.POST('/servers/deletions/{id}/retry', { params: { path: { id } } }))

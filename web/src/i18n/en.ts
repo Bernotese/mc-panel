@@ -101,6 +101,9 @@ export const en: Messages = {
     subject_single: 'Action: {{action}}',
     subject_multiple: '{{n}} actions: {{actions}}',
     action: {
+      deletion_retry: 'Retry a deletion',
+      deletion_abandon: 'Abandon a deletion',
+      recovery_resolve: 'Resolve a recovery',
       generic: 'Confirm action',
       notifier_create: 'Create notifier',
       notifier_update: 'Change notifier',
@@ -573,9 +576,9 @@ export const en: Messages = {
       all_link: 'All deletions',
       list_label: 'Deletions',
       none: 'No deletions in the last 7 days.',
-      state: { pending: 'Running', failed: 'Failed', partial: 'Partial', done: 'Done' },
+      state: { pending: 'Running', failed: 'Failed', partial: 'Partial', done: 'Done', abandoned: 'Abandoned' },
       container: {
-        none: 'No instance – no container to remove.',
+        none: 'No container to remove (no instance, or the agent manages no containers).',
         pending: 'Removing the container …',
         removed: 'Container removed, data moved to deleted/.',
         foreign: 'The container belongs to another server and is left alone.',
@@ -589,6 +592,15 @@ export const en: Messages = {
       retry_label: 'Try the deletion of {{name}} again',
       retried_done: 'Deletion of “{{name}}” completed.',
       retried_open: 'New attempt for “{{name}}” started.',
+      abandon: 'Abandon …',
+      abandon_label: 'Abandon the deletion of {{name}}',
+      abandon_title: 'Abandon the deletion of “{{name}}”?',
+      abandon_description:
+        'The panel then stops trying and frees the name. Whatever is left – a container, data or backups – stays on the host; that is yours to handle (see the guide).',
+      abandon_confirm: 'Abandon',
+      abandoned_done: 'Deletion of “{{name}}” abandoned. Leftovers stay on the host.',
+      abandoned_hint: 'Abandoned: the panel cleans up nothing more here. Whatever is left is still on the host.',
+      runbook: 'Guide: A server deletion does not finish',
     },
     delete: {
       title: 'Delete server',
