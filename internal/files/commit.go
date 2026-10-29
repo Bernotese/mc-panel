@@ -1,6 +1,7 @@
 package files
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -17,7 +18,8 @@ import (
 
 // commitLocks serializes the moments at which plain mutations change the tree of one data
 // directory (#149): an editor save checks its base again and replaces the file under it, an
-// upload replaces its target, and Rename and Delete check and act under it. The lock covers
+// upload replaces its target, Mkdir creates and Rename checks and moves under it, and Delete
+// moves its target out of the way under it (the removal itself runs outside). The lock covers
 // only the service's own requests: a running Minecraft server writes its files itself.
 type commitLocks struct {
 	mu sync.Mutex
@@ -25,32 +27,47 @@ type commitLocks struct {
 }
 
 type commitLock struct {
-	sync.Mutex
-	refs int // guarded by commitLocks.mu
+	ch   chan struct{} // holds one token while the lock is taken
+	refs int           // guarded by commitLocks.mu
 }
 
-// lock takes the commit lock of instance id; unlock gives it back.
-func (c *commitLocks) lock(id int64) (unlock func()) {
+// lock takes the commit lock of instance id; unlock gives it back. It gives up when ctx ends
+// while it waits, and never returns the lock to a caller whose ctx has ended: an operation
+// whose caller gave up (the panel's deadline) does not commit afterwards.
+func (c *commitLocks) lock(ctx context.Context, id int64) (unlock func(), err error) {
 	c.mu.Lock()
 	if c.m == nil {
 		c.m = map[int64]*commitLock{}
 	}
 	l := c.m[id]
 	if l == nil {
-		l = &commitLock{}
+		l = &commitLock{ch: make(chan struct{}, 1)}
 		c.m[id] = l
 	}
 	l.refs++
 	c.mu.Unlock()
-	l.Lock()
-	return func() {
-		l.Unlock()
+	put := func() {
 		c.mu.Lock()
 		if l.refs--; l.refs == 0 {
 			delete(c.m, id)
 		}
 		c.mu.Unlock()
 	}
+	select {
+	case l.ch <- struct{}{}:
+	case <-ctx.Done():
+		put()
+		return nil, ctx.Err()
+	}
+	unlock = func() {
+		<-l.ch
+		put()
+	}
+	if err := ctx.Err(); err != nil {
+		unlock()
+		return nil, err
+	}
+	return unlock, nil
 }
 
 // versionOf is the version token of a file (filesapi.ReadResponse.Version): a hash of device,
@@ -108,9 +125,10 @@ var noReplaceDisabled bool
 // renameNoReplace moves from to to (cleaned paths inside root) and fails with ErrExists if to
 // exists, atomically where the kernel offers it (Linux: renameat2 RENAME_NOREPLACE, macOS:
 // renameatx_np RENAME_EXCL) on the parent folders opened like openDir, so no symlink is
-// followed. Elsewhere, and on a file system that refuses the flag, it checks and renames under
-// the commit lock the caller holds: safe against the service's own requests, not against
-// another process creating to in between.
+// followed. Elsewhere, and on a file system that refuses the flag, it checks and renames: safe
+// against the service's own requests because the caller excludes them (Rename and Delete hold
+// the commit lock, an extract has drained every lease), not against another process creating
+// to in between.
 func (s *Service) renameNoReplace(root *os.Root, from, to string) error {
 	if !noReplaceDisabled {
 		err := renameAtNoReplace(root, from, to)

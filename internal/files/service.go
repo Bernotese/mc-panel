@@ -87,10 +87,12 @@ type Service struct {
 	// a restore swap (tests: swap folders, fail a step).
 	backupHook func(p string)
 	swapHook   func(step int) error
-	// commitHook runs after an editor save or upload staged its temp file, before the commit
-	// lock; renameHook inside Rename right before the rename itself (tests).
+	// commitHook runs right before an operation takes the commit lock (an editor save or upload
+	// after staging its temp file); renameHook inside Rename right before the rename itself;
+	// deleteHook in Delete after the target was moved aside, outside the lock (tests).
 	commitHook func(clean string)
 	renameHook func()
+	deleteHook func()
 	commits    commitLocks // one per instance (commit.go)
 	// noReplaceOnce logs once that the file system has no atomic no-replace rename.
 	noReplaceOnce sync.Once
@@ -400,8 +402,10 @@ func (s *Service) reserveBytes(dir string) (uint64, error) {
 // reserve checks that need more bytes still leave the reserve (reserveBytes) free, counting
 // the bytes that running operations announced but have not written yet (all data directories
 // share one file system). The free space is sampled under the same lock that landed takes, so
-// a landing is either in both the sample and pending or in neither (#153). The caller reports
-// written bytes with landed and must release the reservation when it ends.
+// bytes that left pending are always in the sample (#153). Bytes that are on disk but not yet
+// reported by landed count twice, so near the limit a request may be refused that would have
+// fit; it is never admitted beyond the reserve. The caller reports written bytes with landed
+// and must release the reservation when it ends.
 func (s *Service) reserve(id, need int64) (*reservation, error) {
 	need = max(need, 0)
 	dir := s.instanceDir(id)

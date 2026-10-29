@@ -93,7 +93,7 @@ func (s *Service) UploadChecked(ctx context.Context, id int64, p string, overwri
 	committed := false
 	defer func() {
 		if !committed {
-			_ = root.Remove(tmp)
+			_ = root.Remove(tmp) // by path; after a rename of its folder CleanupTemp removes it at the next start
 		}
 	}()
 	src := &bodyReader{r: body}
@@ -137,7 +137,10 @@ func (s *Service) UploadChecked(ctx context.Context, id int64, p string, overwri
 	if s.commitHook != nil {
 		s.commitHook(clean)
 	}
-	unlock := s.commits.lock(id)
+	unlock, err := s.commits.lock(ctx, id)
+	if err != nil {
+		return filesapi.UploadResponse{}, err
+	}
 	defer unlock()
 	if overwrite {
 		// Replacing a file moves its millisecond mtime forward, like an editor save, so an

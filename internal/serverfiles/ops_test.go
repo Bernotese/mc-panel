@@ -242,6 +242,7 @@ func TestWriteFileRequiresFields(t *testing.T) {
 		{"content null", `{"path":"a.yml","content":null,"expected_mtime":1}`, http.StatusBadRequest, httpx.CodeValidation},
 		{"expected_mtime not a number", `{"path":"a.yml","content":"x","expected_mtime":"1"}`, http.StatusBadRequest, httpx.CodeBadRequest},
 		{"expected_version with a new file", `{"path":"a.yml","content":"x","expected_mtime":null,"expected_version":"v1"}`, http.StatusBadRequest, httpx.CodeValidation},
+		{"expected_version null", `{"path":"a.yml","content":"x","expected_mtime":1,"expected_version":null}`, http.StatusBadRequest, httpx.CodeValidation},
 		{"expected_version empty", `{"path":"a.yml","content":"x","expected_mtime":1,"expected_version":""}`, http.StatusBadRequest, httpx.CodeValidation},
 		{"expected_version too long", `{"path":"a.yml","content":"x","expected_mtime":1,"expected_version":"` + strings.Repeat("a", 65) + `"}`, http.StatusBadRequest, httpx.CodeValidation},
 	} {

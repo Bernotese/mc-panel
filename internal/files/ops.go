@@ -212,13 +212,18 @@ func (s *Service) Write(ctx context.Context, req filesapi.WriteRequest) (filesap
 	committed := false
 	defer func() {
 		if !committed {
+			// By path: if the parent folder was renamed meanwhile, the temp file stays (hidden)
+			// until CleanupTemp removes it at the next start.
 			_ = root.Remove(tmp)
 		}
 	}()
 	if s.commitHook != nil {
 		s.commitHook(clean)
 	}
-	unlock := s.commits.lock(req.ID)
+	unlock, err := s.commits.lock(ctx, req.ID)
+	if err != nil {
+		return filesapi.WriteResponse{}, err
+	}
 	defer unlock()
 	// Under the commit lock, nothing the service does changes clean between this check and
 	// the rename (#149); the server's own writes are not covered.
@@ -299,6 +304,15 @@ func (s *Service) Mkdir(ctx context.Context, id int64, p string) error {
 	if err := requireDir(root, parentOf(clean)); err != nil {
 		return err
 	}
+	if s.commitHook != nil {
+		s.commitHook(clean)
+	}
+	// Under the commit lock, so a rename's fallback check cannot miss a folder made meanwhile.
+	unlock, err := s.commits.lock(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	return fsErr(root.Mkdir(clean, dirMode)) //nolint:gosec // G301: folders are 0755 like the server's own (umask 0027 applies)
 }
 
@@ -336,7 +350,13 @@ func (s *Service) Rename(ctx context.Context, req filesapi.RenameRequest) error 
 		return err
 	}
 	defer root.Close()
-	unlock := s.commits.lock(req.ID)
+	if s.commitHook != nil {
+		s.commitHook(from)
+	}
+	unlock, err := s.commits.lock(ctx, req.ID)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 	if _, err := lstat(root, from); err != nil {
 		return err
@@ -357,7 +377,11 @@ func (s *Service) Rename(ctx context.Context, req filesapi.RenameRequest) error 
 	return s.renameNoReplace(root, from, to)
 }
 
-// Delete removes a file, symlink (the link itself) or folder with its content.
+// Delete removes a file, symlink (the link itself) or folder with its content. Under the commit
+// lock it only moves the target to a hidden temp name next to it, so a save of a file in it
+// cannot bring the file back afterwards; the removal itself, which can take minutes for a
+// world, runs outside the lock. A removal that fails leaves the hidden temp entry, which
+// CleanupTemp removes at the next start.
 func (s *Service) Delete(ctx context.Context, id int64, p string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -379,10 +403,35 @@ func (s *Service) Delete(ctx context.Context, id int64, p string) error {
 		return err
 	}
 	defer root.Close()
-	unlock := s.commits.lock(id) // a save of a file in it cannot bring the file back afterwards
-	defer unlock()
-	if _, err := lstat(root, clean); err != nil {
+	if s.commitHook != nil {
+		s.commitHook(clean)
+	}
+	tmp, err := s.moveAside(ctx, root, id, clean)
+	if err != nil {
 		return err
 	}
-	return fsErr(root.RemoveAll(clean))
+	if s.deleteHook != nil {
+		s.deleteHook()
+	}
+	return fsErr(root.RemoveAll(tmp))
+}
+
+// moveAside renames clean to a fresh hidden temp name in its folder under the commit lock.
+func (s *Service) moveAside(ctx context.Context, root *os.Root, id int64, clean string) (string, error) {
+	unlock, err := s.commits.lock(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	if _, err := lstat(root, clean); err != nil {
+		return "", err
+	}
+	tmp, err := s.tempName(parentOf(clean))
+	if err != nil {
+		return "", err
+	}
+	if err := s.renameNoReplace(root, clean, tmp); err != nil {
+		return "", err
+	}
+	return tmp, nil
 }

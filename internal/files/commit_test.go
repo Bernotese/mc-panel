@@ -1,9 +1,11 @@
 package files
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -262,5 +264,113 @@ func TestRenameNoReplacePrimitive(t *testing.T) {
 	}
 	if v, _ := get(t, data, "b"); v != "b" {
 		t.Fatalf("target changed %q", v)
+	}
+}
+
+// #149 review: Delete holds the commit lock only to move its target aside; the slow removal
+// runs outside it, so saves on the same server go on meanwhile, and the deleted name is gone
+// at once.
+func TestDeleteRemovesOutsideTheCommitLock(t *testing.T) {
+	s, data := newService(t)
+	put(t, data, "world/region/r.0.0.mca", "region")
+	put(t, data, "notes.txt", "base")
+	rd, _ := s.Read(ctx, 1, "notes.txt")
+	saved := make(chan error, 1)
+	s.deleteHook = func() {
+		if _, ok := get(t, data, "world/region/r.0.0.mca"); ok {
+			t.Error("the deleted folder is still visible under its name")
+		}
+		go func() {
+			m := rd.MTime
+			_, err := s.Write(ctx, filesapi.WriteRequest{ID: 1, Path: "notes.txt", Content: "saved", ExpectedMTime: &m})
+			saved <- err
+		}()
+		select {
+		case err := <-saved:
+			if err != nil {
+				t.Errorf("save during the removal: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Error("a save waited for the removal of a folder")
+		}
+	}
+	if err := s.Delete(ctx, 1, "world"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := get(t, data, "notes.txt"); v != "saved" {
+		t.Fatalf("content %q", v)
+	}
+	if _, err := os.Lstat(filepath.Join(data, "world")); !os.IsNotExist(err) {
+		t.Fatalf("world: %v", err)
+	}
+	noTemp(t, data)
+}
+
+// #149 review: an operation whose caller gave up while it waited for the commit lock does not
+// commit afterwards.
+func TestCommitLockGivesUpWithTheCaller(t *testing.T) {
+	type op func(ctx context.Context, s *Service) error
+	for name, run := range map[string]op{
+		"write": func(ctx context.Context, s *Service) error {
+			rd, _ := s.Read(ctx, 1, "a.txt")
+			m := rd.MTime
+			_, err := s.Write(ctx, filesapi.WriteRequest{ID: 1, Path: "a.txt", Content: "new", ExpectedMTime: &m})
+			return err
+		},
+		"upload": func(ctx context.Context, s *Service) error {
+			_, err := s.Upload(ctx, 1, "a.txt", true, 3, strings.NewReader("new"))
+			return err
+		},
+		"rename": func(ctx context.Context, s *Service) error {
+			return s.Rename(ctx, filesapi.RenameRequest{ID: 1, From: "a.txt", To: "b.txt"})
+		},
+		"mkdir":  func(ctx context.Context, s *Service) error { return s.Mkdir(ctx, 1, "d") },
+		"delete": func(ctx context.Context, s *Service) error { return s.Delete(ctx, 1, "a.txt") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, data := newService(t)
+			put(t, data, "a.txt", "old")
+			unlock, err := s.commits.lock(ctx, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			opCtx, cancel := context.WithCancel(ctx)
+			s.commitHook = func(string) { cancel() } // the caller gives up while the lock is held
+			if err := run(opCtx, s); !errors.Is(err, context.Canceled) {
+				t.Fatalf("%v, want context.Canceled", err)
+			}
+			unlock()
+			assertFiles(t, data, map[string]string{"a.txt": "old"}, "b.txt", "d")
+			noTemp(t, data)
+			if len(s.commits.m) != 0 {
+				t.Fatalf("lock entries left: %v", s.commits.m)
+			}
+		})
+	}
+}
+
+// #149 review: Mkdir takes the commit lock, so a rename's fallback check cannot miss a folder
+// the service creates meanwhile (which rename(2) would replace if it is empty).
+func TestMkdirWaitsForRename(t *testing.T) {
+	old := noReplaceDisabled
+	noReplaceDisabled = true
+	t.Cleanup(func() { noReplaceDisabled = old })
+	s, data := newService(t)
+	put(t, data, "src/a.txt", "source")
+	arrived := make(chan struct{})
+	mkdir := make(chan error, 1)
+	s.renameHook = func() {
+		s.commitHook = func(string) { close(arrived) }
+		go func() { mkdir <- s.Mkdir(ctx, 1, "dst") }()
+		<-arrived // Mkdir is about to take the lock that Rename holds
+	}
+	if err := s.Rename(ctx, filesapi.RenameRequest{ID: 1, From: "src", To: "dst"}); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if err := <-mkdir; !errors.Is(err, filesapi.ErrExists) {
+		t.Fatalf("mkdir: %v, want ErrExists", err)
+	}
+	if v, _ := get(t, data, "dst/a.txt"); v != "source" {
+		t.Fatalf("moved folder %q", v)
 	}
 }

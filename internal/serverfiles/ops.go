@@ -65,7 +65,7 @@ type writeRequest struct {
 	Path            string           `json:"path"`
 	Content         optional[string] `json:"content"`
 	ExpectedMTime   optional[int64]  `json:"expected_mtime"`
-	ExpectedVersion *string          `json:"expected_version"` // optional, from readFile/writeFile
+	ExpectedVersion optional[string] `json:"expected_version"` // optional, from readFile/writeFile; not null
 }
 
 type pathRequest struct {
@@ -166,8 +166,11 @@ func (h *Handler) handleWrite(w http.ResponseWriter, r *http.Request) {
 		writeValidation(w, r, "expected_mtime is required (null creates a new file)")
 		return
 	}
-	if v := req.ExpectedVersion; v != nil {
-		switch {
+	if req.ExpectedVersion.Set {
+		switch v := req.ExpectedVersion.Value; {
+		case v == nil:
+			writeValidation(w, r, "expected_version must be a string (leave it out for none)")
+			return
 		case req.ExpectedMTime.Value == nil:
 			writeValidation(w, r, "expected_version needs expected_mtime (null creates a new file)")
 			return
@@ -182,7 +185,7 @@ func (h *Handler) handleWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.files.Write(context.WithoutCancel(ctx), filesapi.WriteRequest{
 		ID: s.ID, Path: p, Content: *req.Content.Value, ExpectedMTime: req.ExpectedMTime.Value,
-		ExpectedVersion: req.ExpectedVersion,
+		ExpectedVersion: req.ExpectedVersion.Value,
 	})
 	h.extendWrite(w, r)
 	h.recordResult(ctx, audit.ActionFileWrite, s.ID, err, map[string]any{"path": p})
