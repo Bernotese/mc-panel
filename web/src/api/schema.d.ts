@@ -2216,6 +2216,8 @@ export interface components {
             mtime: number;
             /** Format: int64 */
             size: number;
+            /** @description Opaque version token of this state of the file; every save changes it */
+            version: string;
         };
         WriteFileRequest: {
             path: string;
@@ -2225,12 +2227,15 @@ export interface components {
              * @description mtime from readFile; null = create a new file
              */
             expected_mtime: number | null;
+            /** @description Optional version from readFile/writeFile (needs a non-null expected_mtime); must match as well. Both are checked again right before the file is replaced */
+            expected_version?: string;
         };
         FileWriteResult: {
             /** Format: int64 */
             mtime: number;
             /** Format: int64 */
             size: number;
+            version: string;
         };
         UploadResult: {
             /** Format: int64 */

@@ -41,7 +41,7 @@ export function FileEditor({ server, path, onClose, onDirtyChange }: FileEditorP
   const file = useQuery({
     queryKey: contentKey,
     queryFn: () => readFile(server.id, path),
-    // The loaded mtime is the base for conflict detection: never refresh it behind the user's back.
+    // The loaded version (and mtime) is the base for conflict detection: never refresh it behind the user's back.
     staleTime: Infinity,
     gcTime: 0,
     refetchOnWindowFocus: false,
@@ -61,9 +61,12 @@ export function FileEditor({ server, path, onClose, onDirtyChange }: FileEditorP
   // Route changes and reloads are asked by the files area (useBlocker in FilesTab, fed by onDirtyChange).
 
   const save = useMutation({
-    mutationFn: ({ content, mtime }: { content: string; mtime: number }) => writeFile(server.id, { path, content, expected_mtime: mtime }),
+    // The version token is the stronger base (it changes with every save, also within one millisecond); the mtime
+    // goes along for servers that answer without one.
+    mutationFn: ({ content, base }: { content: string; base: Pick<FileContent, 'mtime' | 'version'> }) =>
+      writeFile(server.id, { path, content, expected_mtime: base.mtime, ...(base.version ? { expected_version: base.version } : {}) }),
     onSuccess: (result, { content }) => {
-      queryClient.setQueryData<FileContent>(contentKey, { path, content, mtime: result.mtime, size: result.size })
+      queryClient.setQueryData<FileContent>(contentKey, { path, content, mtime: result.mtime, size: result.size, version: result.version })
       // Text typed while the request ran stays a draft.
       setDraft((current) => (current === content ? null : current))
       toast.success(t('files.editor.saved'))
@@ -74,7 +77,7 @@ export function FileEditor({ server, path, onClose, onDirtyChange }: FileEditorP
 
   function doSave() {
     if (!file.data || draft === null || !dirty || save.isPending) return
-    save.mutate({ content: draft, mtime: file.data.mtime })
+    save.mutate({ content: draft, base: file.data })
   }
 
   /** Ctrl/Cmd+S anywhere in the editor area, also while a button has the focus (CodeMirror handles its own). */
@@ -89,7 +92,7 @@ export function FileEditor({ server, path, onClose, onDirtyChange }: FileEditorP
     if (draft === null) return
     try {
       const current = await readFile(server.id, path)
-      save.mutate({ content: draft, mtime: current.mtime })
+      save.mutate({ content: draft, base: current })
     } catch (err) {
       notifyError(err)
     }

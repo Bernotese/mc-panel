@@ -2172,12 +2172,13 @@ components:
         truncated: { type: boolean, description: More than 10 000 entries; only the first are listed }
     FileContent:
       type: object
-      required: [path, content, mtime, size]
+      required: [path, content, mtime, size, version]
       properties:
         path: { type: string }
         content: { type: string }
         mtime: { type: integer, format: int64 }
         size: { type: integer, format: int64 }
+        version: { type: string, description: 'Opaque version token of this state of the file; every save changes it' }
     WriteFileRequest:
       type: object
       additionalProperties: false
@@ -2186,12 +2187,14 @@ components:
         path: { type: string, minLength: 1, maxLength: 4096 }
         content: { type: string }
         expected_mtime: { type: [integer, 'null'], format: int64, description: mtime from readFile; null = create a new file }
+        expected_version: { type: string, minLength: 1, maxLength: 64, description: 'Optional version from readFile/writeFile (needs a non-null expected_mtime); must match as well. Both are checked again right before the file is replaced' }
     FileWriteResult:
       type: object
-      required: [mtime, size]
+      required: [mtime, size, version]
       properties:
         mtime: { type: integer, format: int64 }
         size: { type: integer, format: int64 }
+        version: { type: string }
     UploadResult:
       type: object
       required: [size]
