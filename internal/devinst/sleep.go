@@ -87,13 +87,6 @@ func (h *Handler) OnPass(ctx context.Context, s monitoring.Snapshot) {
 		h.log.InfoContext(ctx, "devinst: dev fell asleep", "server_id", id)
 	}
 	for _, id := range ops {
-		if !h.applyOps(ctx, id) {
-			continue
-		}
-		h.mu.Lock()
-		if st := h.devs[id]; st != nil {
-			st.opsFor = opsStart[id]
-		}
-		h.mu.Unlock()
+		h.applyOps(ctx, id, opsStart[id], now)
 	}
 }

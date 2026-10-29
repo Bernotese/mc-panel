@@ -218,8 +218,9 @@ papi POST "/servers/$dsrv/dev/ops" "$dout/badop.json" '{"name": "x; stop"}'
 if ! is_perror "$dout/badop.json" "$pcode" 400 validation_failed && ! is_perror "$dout/badop.json" "$pcode" 400 bad_request; then
   fail "invalid op name: HTTP $pcode $(cat "$dout/badop.json")"
 fi
-papi PATCH "/servers/$dsrv/dev" "$dout/patch.json" '{"idle_minutes": 5}'
-[ "$pcode" = 200 ] || fail "idle minutes: HTTP $pcode $(cat "$dout/patch.json")"
+# The dev keeps the default idle_minutes (15) while it starts: once it answers pings without
+# players, it falls asleep after idle_minutes (scaled: 15 min / ts = 90 s), so 5 (30 s) would
+# leave the op far less time than the wait below and race the sleep. Set to 5 after the checks.
 papi POST "/servers/$dsrv/power" "$dout/power.json" '{"action": "start"}'
 [ "$pcode" = 202 ] || fail "start dev: HTTP $pcode $(cat "$dout/power.json")"
 pwait_for 600 "dev running" d_running
@@ -234,6 +235,8 @@ if [ -z "$dev_rcon_pw" ] || [ "$dev_rcon_pw" = "$prod_rcon_pw" ] || [ "$dev_rcon
   fail "the dev's rcon.password is not its own"
 fi
 echo "OK: op Notch in ops.json after the start, motd \"$(d_props motd)\", view/simulation distance 4/3, own RCON password"
+papi PATCH "/servers/$dsrv/dev" "$dout/patch.json" '{"idle_minutes": 5}'
+[ "$pcode" = 200 ] || fail "idle minutes: HTTP $pcode $(cat "$dout/patch.json")"
 
 echo "== dev: falls asleep without players (idle 5 alert minutes, scaled)"
 pwait_for $((120 + 3000 / ts)) "dev asleep" d_sleeping

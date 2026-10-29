@@ -4,6 +4,9 @@ import (
 	"context"
 	"net/http"
 	"regexp"
+	"slices"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -11,6 +14,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/store"
+	"github.com/Bernotese/mc-panel/internal/timescale"
 )
 
 // playerName is the Minecraft name rule of the Players tab; only such a name ever follows
@@ -140,22 +144,66 @@ func (h *Handler) sendOp(ctx context.Context, devID int64, verb, name string) {
 	}
 }
 
-// applyOps sends op <name> for every entry of the dev ops list; it reports whether all went
-// through (otherwise the next pass tries again).
-func (h *Handler) applyOps(ctx context.Context, devID int64) bool {
-	names, err := h.q.DevOpsList(ctx, devID)
+// opsWindow is how long after a dev's start a listed name missing from ops.json is sent
+// again on every pass; after it, missing names are sent once more and the run counts as done
+// (an unknown account is not sent forever, and a dev seen late, after a panel restart, still
+// gets its ops). Shortened in acceptance builds only (internal/timescale).
+var opsWindow = timescale.D(15 * time.Minute)
+
+// applyOps brings the dev ops list into the server's ops.json for the run started at
+// startedAt: it sends op <name> for every listed name ops.json lacks, and the run counts as
+// done once none is missing. A successful RCON round trip proves nothing, since the server
+// answers a failed profile lookup at Mojang with a message, not an error. An agent or RCON
+// error is retried on the next pass.
+func (h *Handler) applyOps(ctx context.Context, devID, startedAt int64, now time.Time) {
+	missing, err := h.missingOps(ctx, devID)
 	if err != nil {
-		h.log.ErrorContext(ctx, "devinst: list dev ops", "server_id", devID, "err", err)
-		return false
+		h.log.WarnContext(ctx, "devinst: re-apply dev ops", "server_id", devID, "err", err)
+		return
 	}
+	for _, n := range missing {
+		if err := h.rcon(ctx, devID, "op "+n); err != nil {
+			h.log.WarnContext(ctx, "devinst: re-apply dev ops", "server_id", devID, "err", err)
+			return
+		}
+	}
+	if len(missing) > 0 {
+		if now.Sub(time.UnixMilli(startedAt)) < opsWindow {
+			return // checked against ops.json on the next pass
+		}
+		h.log.WarnContext(ctx, "devinst: dev ops still missing from ops.json, sent a last time", "server_id", devID, "names", missing)
+	}
+	h.mu.Lock()
+	if st := h.devs[devID]; st != nil {
+		st.opsFor = startedAt
+	}
+	h.mu.Unlock()
+}
+
+// missingOps returns the names of the dev ops list that the server's ops.json lacks (names
+// compare case-insensitively, as on the server); ops.json is not read for an empty list.
+func (h *Handler) missingOps(ctx context.Context, devID int64) ([]string, error) {
+	names, err := h.q.DevOpsList(ctx, devID)
+	if err != nil || len(names) == 0 {
+		return nil, err
+	}
+	if h.console == nil {
+		return nil, agentapi.ErrUnavailable
+	}
+	pctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	pl, err := h.console.Players(pctx, devID)
+	if err != nil {
+		return nil, err
+	}
+	var missing []string
 	for _, n := range names {
 		if !playerName.MatchString(n) {
 			continue // never stored by the API; skipped rather than sent
 		}
-		if err := h.rcon(ctx, devID, "op "+n); err != nil {
-			h.log.WarnContext(ctx, "devinst: re-apply dev ops", "server_id", devID, "err", err)
-			return false
+		if !slices.ContainsFunc(pl.Ops, func(o agentapi.PlayerOp) bool { return strings.EqualFold(o.Name, n) }) {
+			missing = append(missing, n)
 		}
 	}
-	return true
+	return missing, nil
 }
