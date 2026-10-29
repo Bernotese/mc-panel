@@ -14,7 +14,7 @@ const openapiYaml = fs.readFileSync(path.resolve(import.meta.dirname, '../../../
 describe('mock coverage', () => {
   it('mocks every operationId of api/openapi.yaml exactly once', () => {
     const ids = [...openapiYaml.matchAll(/operationId:\s*(\w+)/g)].map((m) => m[1]).sort()
-    expect(ids).toHaveLength(114)
+    expect(ids).toHaveLength(116)
     expect(operations.map((o) => o.operationId).sort()).toEqual(ids)
   })
 })
@@ -750,11 +750,11 @@ describe('mock behaviour', () => {
     expect(field(held.body, 'error')).toBe('conflict')
     db.backupJobs[1].startedMs -= 60_000
     // an empty value means no purge (like the panel)
-    expect((await callApi('DELETE', '/servers/2?purge_backups=', { csrf: me.csrf_token })).status).toBe(204)
+    expect((await callApi('DELETE', '/servers/2?purge_backups=', { csrf: me.csrf_token })).status).toBe(202)
     expect(db.backups[2]).toBeDefined()
     // survival's dev goes first (409 dev_exists otherwise)
-    expect((await callApi('DELETE', '/servers/5', { csrf: me.csrf_token })).status).toBe(204)
-    expect((await callApi('DELETE', '/servers/1?purge_backups=1', { csrf: me.csrf_token })).status).toBe(204)
+    expect((await callApi('DELETE', '/servers/5', { csrf: me.csrf_token })).status).toBe(202)
+    expect((await callApi('DELETE', '/servers/1?purge_backups=1', { csrf: me.csrf_token })).status).toBe(202)
     expect(db.backups[1]).toBeUndefined()
     expect(db.audit.at(-1)).toMatchObject({ action: 'server.delete', details: { backups_purged: true } })
   })
