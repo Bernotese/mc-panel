@@ -11,25 +11,26 @@ import (
 type EventType string
 
 const (
-	EventNewDeviceLogin     EventType = "login.new_device"
-	EventJailed             EventType = "security.jailed"
-	EventPermissionsChanged EventType = "rbac.changed"
-	EventUserCreated        EventType = "user.created"
-	EventUserDeleted        EventType = "user.deleted"
-	Event2FAChanged         EventType = "auth.2fa_changed"
-	Event2FALockout         EventType = "auth.2fa_lockout"
-	Event2FAFailed          EventType = "auth.2fa_failed" // correct password, wrong second factor
-	EventRecoveryCodeUsed   EventType = "auth.recovery_code_used"
-	EventPasswordChanged    EventType = "auth.password_changed"
-	EventAuditChainBroken   EventType = "audit.chain_broken"
-	EventBackupFailed       EventType = "backup.failed"
-	EventDevSyncFailed      EventType = "dev.sync_failed"
-	EventServerDown         EventType = "server.down"
-	EventServerRecovered    EventType = "server.recovered"
-	EventServerCrashLoop    EventType = "server.crash_loop"
-	EventHostDiskLow        EventType = "host.disk_low"
-	EventHostDiskOK         EventType = "host.disk_ok"
-	EventTest               EventType = "test"
+	EventNewDeviceLogin         EventType = "login.new_device"
+	EventJailed                 EventType = "security.jailed"
+	EventPermissionsChanged     EventType = "rbac.changed"
+	EventUserCreated            EventType = "user.created"
+	EventUserDeleted            EventType = "user.deleted"
+	Event2FAChanged             EventType = "auth.2fa_changed"
+	Event2FALockout             EventType = "auth.2fa_lockout"
+	Event2FAFailed              EventType = "auth.2fa_failed" // correct password, wrong second factor
+	EventRecoveryCodeUsed       EventType = "auth.recovery_code_used"
+	EventPasswordChanged        EventType = "auth.password_changed"
+	EventAuditChainBroken       EventType = "audit.chain_broken"
+	EventBackupFailed           EventType = "backup.failed"
+	EventDevSyncFailed          EventType = "dev.sync_failed"
+	EventServerDown             EventType = "server.down"
+	EventServerRecovered        EventType = "server.recovered"
+	EventServerCrashLoop        EventType = "server.crash_loop"
+	EventServerRecoveryRequired EventType = "server.recovery_required"
+	EventHostDiskLow            EventType = "host.disk_low"
+	EventHostDiskOK             EventType = "host.disk_ok"
+	EventTest                   EventType = "test"
 )
 
 type Event struct {

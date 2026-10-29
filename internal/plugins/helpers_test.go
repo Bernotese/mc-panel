@@ -269,6 +269,8 @@ type fakeFiles struct {
 	calls     []string
 	truncated bool
 	onUpload  func(id int64, path string) // runs before an upload is stored (outside the lock)
+	// onQueued runs after a call was answered with a queued error (outside the lock)
+	onQueued func(op string)
 }
 
 func newFakeFiles() *fakeFiles {
@@ -352,6 +354,11 @@ func (f *fakeFiles) begin(ctx context.Context, op, call string) error {
 	f.calls = append(f.calls, call)
 	if q := f.errQueue[op]; len(q) > 0 {
 		f.errQueue[op] = q[1:]
+		if hook := f.onQueued; hook != nil {
+			f.mu.Unlock()
+			hook(op)
+			f.mu.Lock()
+		}
 		return q[0]
 	}
 	if err, ok := f.callErrs[call]; ok {

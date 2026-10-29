@@ -142,6 +142,21 @@ export function defaultPropertiesDraft(): PropertiesDraft {
   }
 }
 
+/**
+ * Issue #159: an optional lower-load starting point for small or shared hosts – a benchmark candidate, not a measured
+ * gain. It only fills the two fields; the defaults stay 10/10 and stored servers keep their values.
+ */
+export const LOW_LOAD_DISTANCES = { view_distance: '8', simulation_distance: '6' } as const
+
+export function withLowLoadDistances(p: PropertiesDraft): PropertiesDraft {
+  return { ...p, ...LOW_LOAD_DISTANCES }
+}
+
+export function isLowLoadDistances(p: PropertiesDraft): boolean {
+  const n = (text: string) => text.trim().replace(/^0+(?=\d)/, '') // " 08" is 8
+  return n(p.view_distance) === LOW_LOAD_DISTANCES.view_distance && n(p.simulation_distance) === LOW_LOAD_DISTANCES.simulation_distance
+}
+
 export function emptyServerForm(): ServerFormValue {
   return {
     name: '',
@@ -267,6 +282,56 @@ export function resolveServerForm(value: ServerFormValue, ctx: FormContext): Ser
   }
 }
 
+/** The fields an edit can change; manualVersion only says how the version is entered. */
+const EDIT_KEYS = ['version', 'loaderVersion', 'modpack', 'javaOverride', 'memoryGiB'] as const
+export type FormChangeKey = (typeof EDIT_KEYS)[number] | `properties.${keyof PropertiesDraft}`
+
+/** A whole number as typed ("010", " 10 ") compares as the number it saves; anything else as typed. */
+function comparableText(text: string): string | number {
+  return /^\s*\d+\s*$/.test(text) ? Number(text) : text
+}
+
+/**
+ * Issue #154: a field as it would be saved – memory in MiB, whole numbers parsed, java as its effective value (an
+ * explicit override equal to the derived java saves the same) – so that only real changes count.
+ */
+function comparable(v: ServerFormValue, key: FormChangeKey): unknown {
+  if (key === 'memoryGiB') return memoryMiBFromGiB(v.memoryGiB) ?? v.memoryGiB
+  if (key === 'javaOverride') return effectiveJava(v, undefined)
+  if (key.startsWith('properties.')) {
+    const value = v.properties[key.slice('properties.'.length) as keyof PropertiesDraft]
+    return typeof value === 'string' ? comparableText(value) : value
+  }
+  return v[key as (typeof EDIT_KEYS)[number]]
+}
+
+/** Issue #154: the edit fields in which two form values would save differently, properties one by one, in form order. */
+export function changedFormKeys(a: ServerFormValue, b: ServerFormValue): FormChangeKey[] {
+  const keys: FormChangeKey[] = [...EDIT_KEYS, ...(Object.keys(a.properties) as (keyof PropertiesDraft)[]).map((k) => `properties.${k}` as const)]
+  // An automatic java on both sides follows the version: a version change is reported once, as the version.
+  const bothAuto = a.javaOverride === '' && b.javaOverride === ''
+  return keys.filter((k) => !(k === 'javaOverride' && bothAuto) && comparable(a, k) !== comparable(b, k))
+}
+
+/** Both values save the same edit (name, type and EULA belong to creating and compare as typed). */
 export function sameFormValue(a: ServerFormValue, b: ServerFormValue): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
+  return a.name === b.name && a.type === b.type && a.eulaAccepted === b.eulaAccepted && changedFormKeys(a, b).length === 0
+}
+
+/**
+ * Issue #154, "keep my changes": the stored value (`remote`) with every field the draft changed against the value it
+ * was edited from (`base`); a field changed on both sides keeps the own value.
+ */
+export function rebaseServerForm(base: ServerFormValue, draft: ServerFormValue, remote: ServerFormValue): ServerFormValue {
+  let out = remote
+  for (const key of changedFormKeys(base, draft)) {
+    if (key.startsWith('properties.')) {
+      const p = key.slice('properties.'.length) as keyof PropertiesDraft
+      out = { ...out, properties: { ...out.properties, [p]: draft.properties[p] } }
+    } else {
+      const k = key as (typeof EDIT_KEYS)[number]
+      out = { ...out, [k]: draft[k], ...(k === 'version' ? { manualVersion: draft.manualVersion } : {}) }
+    }
+  }
+  return out
 }

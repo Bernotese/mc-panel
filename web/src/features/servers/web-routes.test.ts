@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { toWebRoutes, webPathError, webPortError, webRouteUrl } from './web-routes'
+import { rebaseWebDraft, sameWebDraft, toWebRoutes, webDraftFromRoutes, webDraftRoutes, webPathError, webPortError, webRouteUrl } from './web-routes'
 
 describe('webPathError', () => {
   it('accepts one lower-case segment of up to 32 characters', () => {
@@ -51,5 +51,48 @@ describe('webRouteUrl', () => {
   it('ends every URL in a slash', () => {
     expect(webRouteUrl('survival.mc.example.com', '')).toBe('https://survival.mc.example.com/')
     expect(webRouteUrl('survival.mc.example.com', 'afk-smoke')).toBe('https://survival.mc.example.com/afk-smoke/')
+  })
+})
+
+describe('web route drafts (issue #154)', () => {
+  const base = webDraftFromRoutes([
+    { path: '', port: 8100 },
+    { path: 'map', port: 8123 },
+    { path: 'old', port: 8200 },
+  ])
+
+  it('compares the routes they publish', () => {
+    expect(sameWebDraft(base, { ...base, rootPort: '08100' })).toBe(true)
+    expect(sameWebDraft(base, { ...base, rows: base.rows.map((r) => ({ ...r, touched: false })) })).toBe(true)
+    expect(sameWebDraft(base, { ...base, rootOn: false })).toBe(false)
+  })
+
+  it('puts only the own changes onto the stored routes', () => {
+    // Mine: map re-ported, old removed, new added. Theirs: root re-ported, extra added.
+    const draft = {
+      ...base,
+      rows: [
+        { key: 0, path: 'map', port: '8124', touched: true },
+        { key: 5, path: 'new', port: '8300', touched: false },
+      ],
+    }
+    const remote = webDraftFromRoutes([
+      { path: '', port: 8101 },
+      { path: 'extra', port: 8400 },
+      { path: 'map', port: 8123 },
+      { path: 'old', port: 8200 },
+    ])
+    expect(webDraftRoutes(rebaseWebDraft(base, draft, remote))).toEqual([
+      { path: '', port: 8101 },
+      { path: 'extra', port: 8400 },
+      { path: 'map', port: 8124 },
+      { path: 'new', port: 8300 },
+    ])
+  })
+
+  it('keeps an own root change and leaves paths it did not touch to the stored list', () => {
+    const draft = { ...base, rootOn: false }
+    const remote = webDraftFromRoutes([{ path: '', port: 8100 }, { path: 'map', port: 8125 }])
+    expect(webDraftRoutes(rebaseWebDraft(base, draft, remote))).toEqual([{ path: 'map', port: 8125 }])
   })
 })

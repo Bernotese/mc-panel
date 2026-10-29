@@ -81,6 +81,7 @@ type Service struct {
 	resticPaths    []string // the configured and the resolved restic binary: publicMessage hides them
 	backupMu       sync.Mutex
 	journalMu      sync.Mutex             // every operation on the restore journal (restorejournal.go)
+	journalList    *journalList           // cached listing of the journal (journalEntryOf); guarded by journalMu
 	backupStat     filesapi.BackupsStatus // set by InitBackups
 	// backupHook runs before every entry of a backup stream; swapHook before every rename of
 	// a restore swap (tests: swap folders, fail a step).

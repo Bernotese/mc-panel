@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import type { Catalog, InstanceConfig, ServerMemoryLimits } from '@/api/types'
 import {
+  changedFormKeys,
   containerMiB,
+  defaultPropertiesDraft,
   effectiveJava,
   effectiveVersion,
   emptyServerForm,
   formFromInstance,
+  isLowLoadDistances,
+  LOW_LOAD_DISTANCES,
+  withLowLoadDistances,
   memoryLimitsFrom,
   memoryOvercommit,
+  rebaseServerForm,
   resolveServerForm,
   sameFormValue,
   validateServerForm,
@@ -245,5 +251,69 @@ describe('memory limits', () => {
     const first = { ...limits, allocated_mib: 7168, allocated_container_mib: 8960 }
     // 14 GiB of heap < 16 GiB of RAM, but 17.5 GiB of container limits > 15 GiB
     expect(memoryOvercommit(7168, first, 0)).toEqual({ totalMiB: 17920, budgetMiB: 15360, hostMiB: 16384, reserveMiB: 1024 })
+  })
+})
+
+describe('draft changes (issue #154)', () => {
+  const base = formFromInstance('survival', survival)
+
+  it('names the changed fields, properties one by one', () => {
+    const other = { ...base, version: '1.20.4', memoryGiB: '6', properties: { ...base.properties, pvp: !base.properties.pvp } }
+    expect(changedFormKeys(base, other)).toEqual(['version', 'memoryGiB', 'properties.pvp'])
+    expect(changedFormKeys(base, { ...base, manualVersion: true })).toEqual([])
+  })
+
+  it('puts the own changes onto the stored value, field by field', () => {
+    const draft = { ...base, memoryGiB: '6', manualVersion: true, properties: { ...base.properties, motd: 'mine' } }
+    const remote = { ...base, version: '1.20.4', properties: { ...base.properties, max_players: '50', motd: 'theirs' } }
+    const merged = rebaseServerForm(base, draft, remote)
+    expect(merged.memoryGiB).toBe('6')
+    expect(merged.version).toBe('1.20.4')
+    expect(merged.manualVersion).toBe(false)
+    expect(merged.properties.max_players).toBe('50')
+    expect(merged.properties.motd).toBe('mine')
+  })
+
+  it('compares values as they would be saved (issue #154 review)', () => {
+    expect(sameFormValue(base, { ...base, memoryGiB: '4.250' })).toBe(true)
+    expect(sameFormValue(base, { ...base, properties: { ...base.properties, max_players: `0${base.properties.max_players}` } })).toBe(true)
+    expect(sameFormValue(base, { ...base, manualVersion: true })).toBe(true)
+    expect(sameFormValue(base, { ...base, memoryGiB: '5' })).toBe(false)
+    expect(changedFormKeys(base, { ...base, memoryGiB: '4.250', properties: { ...base.properties, view_distance: ` ${base.properties.view_distance}` } })).toEqual([])
+  })
+
+  it('does not report java as changed while its effective value stays the same', () => {
+    // The stored java of a version change made elsewhere can stay the old one: explicit in the form, but equal in effect.
+    const explicit = { ...base, javaOverride: 'java21' as const }
+    expect(changedFormKeys(base, explicit)).toEqual([])
+    expect(changedFormKeys(base, { ...base, javaOverride: 'java25' as const })).toEqual(['javaOverride'])
+  })
+
+  it('keeps the own version together with its input mode', () => {
+    const draft = { ...base, version: '1.21.99', manualVersion: true }
+    const merged = rebaseServerForm(base, draft, { ...base, version: '1.20.4' })
+    expect(merged).toMatchObject({ version: '1.21.99', manualVersion: true })
+  })
+})
+
+describe('lower-load distance preset (issue #159)', () => {
+  it('fills 8/6 into the distance fields and leaves the rest alone', () => {
+    const d = defaultPropertiesDraft()
+    expect(LOW_LOAD_DISTANCES).toEqual({ view_distance: '8', simulation_distance: '6' })
+    const low = withLowLoadDistances(d)
+    expect(low).toEqual({ ...d, view_distance: '8', simulation_distance: '6' })
+    expect(isLowLoadDistances(low)).toBe(true)
+  })
+
+  it('keeps the defaults at 10/10 and recognises typed equivalents', () => {
+    const d = defaultPropertiesDraft()
+    expect([d.view_distance, d.simulation_distance]).toEqual(['10', '10'])
+    expect(isLowLoadDistances(d)).toBe(false)
+    expect(isLowLoadDistances({ ...d, view_distance: ' 08', simulation_distance: '6 ' })).toBe(true)
+  })
+
+  it('never changes stored distances when loading a server', () => {
+    const value = formFromInstance('survival', { ...survival, properties: { ...survival.properties, view_distance: 12, simulation_distance: 9 } })
+    expect([value.properties.view_distance, value.properties.simulation_distance]).toEqual(['12', '9'])
   })
 })

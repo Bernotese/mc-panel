@@ -96,6 +96,7 @@ const (
 	// Monitoring (TP5).
 	ActionMonitoringSettingsUpdate = "monitoring.settings_update"
 	ActionServerAlertsUpdate       = "server.alerts_update"
+	ActionServerRecoveryResolve    = "server.recovery_resolve"
 
 	// Dev instances.
 	ActionDevCreate         = "dev.create"

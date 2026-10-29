@@ -5,6 +5,7 @@ import type {
   InstanceType,
   Permission,
   PowerAction,
+  Recovery,
   Server,
   ServerMemoryLimits,
   ServerSettings,
@@ -204,6 +205,8 @@ export function toServer(s: MockServer, permissions: Permission[], admin = true)
     ...webFields(s, admin),
     ...(s.dev ? { dev: devSummary(s.dev) } : {}),
     ...withDevId(s.id),
+    data_state: s.dataState ?? 'safe',
+    data_job: s.dataState === 'busy' ? (s.dataJob ?? null) : null,
   }
 }
 
@@ -440,6 +443,24 @@ export const serverOperations: MockOperation[] = [
   ),
 
   op(
+    'resolveServerRecovery',
+    http.post(`${API}/servers/:id/recovery/resolve`, ({ request, params }) => {
+      const g = guard(request, { admin: true, sudo: true })
+      if (g instanceof Response) return g
+      const server = db.servers.find((s) => s.id === idParam(params))
+      if (!server) return apiError(404, 'not_found', 'server not found')
+      if (server.dataState === 'unknown') return apiError(503, 'data_state_unknown', 'the files service did not report the data state')
+      if (server.dataState !== 'recovery_required' || !server.recovery) return apiError(409, 'recovery_required', 'the server has no unresolved restore')
+      // Like the files service: the half-swapped folders move to backups/recovery/<id>-<unix>, the journal entry goes.
+      const recovery: Recovery = { ...server.recovery, folder: `${server.id}-${Math.floor(Date.now() / 1000)}` }
+      server.dataState = 'safe'
+      server.recovery = undefined
+      recordAudit(g.user, 'server.recovery_resolve', `server:${server.id}`, 'success', { name: server.name, folder: recovery.folder })
+      return HttpResponse.json(recovery)
+    }),
+  ),
+
+  op(
     'serverPower',
     http.post(`${API}/servers/:id/power`, async ({ request, params }) => {
       const g = guard(request)
@@ -451,6 +472,12 @@ export const serverOperations: MockOperation[] = [
       const body = await readJson<{ action?: PowerAction }>(request)
       if (!body?.action || !ACTIONS.includes(body.action)) return apiError(400, 'validation_failed', 'action must be start, stop or restart')
       if (!server.instance) return apiError(409, 'conflict', 'server is not configured (no instance)')
+      // Data safety spec §1.1: only a safe data directory admits a start or restart; stop always works.
+      if (body.action !== 'stop') {
+        if (server.dataState === 'recovery_required') return apiError(409, 'recovery_required', 'a restore of this server could not be completed; resolve it first')
+        if (server.dataState === 'unknown') return apiError(503, 'data_state_unknown', 'the files service did not report the data state')
+        if (server.dataState === 'busy') return apiError(409, 'conflict', 'a job is rewriting the data directory')
+      }
       settle(server)
       // A dev that is stopped by hand sleeps (its waker wakes it); a start wakes it.
       if (server.dev) server.dev.sleeping = body.action === 'stop'

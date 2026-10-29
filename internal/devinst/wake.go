@@ -2,9 +2,12 @@ package devinst
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/audit"
+	"github.com/Bernotese/mc-panel/internal/servers"
+	"github.com/Bernotese/mc-panel/internal/servers/admit"
 )
 
 // wakeTick sends the complete list of sleeping devs to the agent (PUT /v1/waker; the agent
@@ -54,11 +57,14 @@ func (h *Handler) wakeTick(ctx context.Context) {
 	}
 }
 
-// wake wakes devID unless its data gate is held (a sync or restore rewrites its data), it was
-// woken less than wakeGap ago, or wakeCap wakes happened panel-wide within wakeWindow.
+// wake wakes devID unless its data is not safe (a sync or restore rewrites it, a restore is
+// unresolved or the files service does not answer; data safety spec §3), it was woken less
+// than wakeGap ago, or wakeCap wakes happened panel-wide within wakeWindow. The wish to run is
+// stored under the dev's admission lock (like a user's start) and the reconcile loop admits
+// the start itself again.
 func (h *Handler) wake(ctx context.Context, devID int64) {
-	if h.gate.DataJobRunning(ctx, devID) {
-		h.log.DebugContext(ctx, "devinst: wake ignored while the data gate is held", "server_id", devID)
+	if st, err := h.data.State(ctx, devID); st != servers.StateSafe {
+		h.log.DebugContext(ctx, "devinst: wake ignored, the dev's data is not safe", "server_id", devID, "state", st, "err", err)
 		return
 	}
 	now := h.clock.Now()
@@ -85,8 +91,14 @@ func (h *Handler) wake(ctx context.Context, devID int64) {
 	h.wakes = append(h.wakes, now)
 	h.mu.Unlock()
 
-	if err := h.servers.SetDevSleeping(ctx, devID, false, now); err != nil {
-		h.log.WarnContext(ctx, "devinst: wake a dev", "server_id", devID, "err", err)
+	err := h.admit(ctx, devID, func(ctx context.Context) error { return h.servers.SetDevSleeping(ctx, devID, false, now) })
+	if err != nil {
+		if refused := errors.Is(err, admit.ErrAdmissionBusy) || errors.Is(err, admit.ErrDataBusy) ||
+			errors.Is(err, admit.ErrRecoveryRequired) || errors.Is(err, admit.ErrDataStateUnknown); refused {
+			h.log.DebugContext(ctx, "devinst: wake not admitted", "server_id", devID, "err", err)
+		} else {
+			h.log.WarnContext(ctx, "devinst: wake a dev", "server_id", devID, "err", err)
+		}
 		h.mu.Lock()
 		st.lastWake = prevWake // a failed wake does not use up the limits
 		for i := len(h.wakes) - 1; i >= 0; i-- {
@@ -102,4 +114,12 @@ func (h *Handler) wake(ctx context.Context, devID int64) {
 		Action: audit.ActionDevWake, Target: serverTarget(devID), Result: audit.ResultSuccess, ActorType: audit.ActorSystem,
 		ActorName: "system",
 	})
+}
+
+// admit runs fn under the admission of server id (Deps.Admit).
+func (h *Handler) admit(ctx context.Context, id int64, fn func(context.Context) error) error {
+	if h.admitFn == nil {
+		return fn(ctx)
+	}
+	return h.admitFn(ctx, id, fn)
 }

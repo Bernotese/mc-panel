@@ -37,6 +37,17 @@ func crashedRestore(t *testing.T, s *Service, data, phase string, top, old, nw m
 	}
 }
 
+// journalOf reads the journal entry of server id (a zero entry when there is none).
+func journalOf(t *testing.T, s *Service, id int64) (restoreJournal, bool) {
+	t.Helper()
+	entries, err := s.readJournals(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := entries[id]
+	return e.restoreJournal, ok
+}
+
 func journalExists(t *testing.T, s *Service) bool {
 	t.Helper()
 	_, err := os.Lstat(filepath.Join(s.backupsDir(), journalDir, "1"))
@@ -117,7 +128,7 @@ func TestRecoverRestorePhases(t *testing.T) {
 		}
 		noTemp(t, data)
 	})
-	t.Run("broken entries are dropped", func(t *testing.T) {
+	t.Run("broken entries stay, unfinished writes and junk go", func(t *testing.T) {
 		s, _ := newService(t)
 		dir := filepath.Join(s.backupsDir(), journalDir)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -128,6 +139,7 @@ func TestRecoverRestorePhases(t *testing.T) {
 			"2":     `not json`,
 			"3":     `{"tmp":".mcpanel-tmp-x","phase":"later"}`,
 			"4.new": `{}`,
+			"junk":  `{}`,
 		} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 				t.Fatal(err)
@@ -136,7 +148,7 @@ func TestRecoverRestorePhases(t *testing.T) {
 		if n := s.RecoverRestores(); n != 0 {
 			t.Fatalf("recovered %d", n)
 		}
-		if left, _ := os.ReadDir(dir); len(left) != 0 {
+		if left := names(t, dir); strings.Join(left, ",") != "1,2,3" {
 			t.Fatalf("left in the journal: %v", left)
 		}
 	})
@@ -154,7 +166,7 @@ func TestFakeRestoreLeftoverIsRemoved(t *testing.T) {
 }
 
 // TestStuckRestoreIsKept: a swap whose undo failed keeps its temp folder through recovery and
-// CleanupTemp, and a new restore of the server is refused until a person removes the entry.
+// CleanupTemp, and a new restore of the server is refused until it is resolved.
 func TestStuckRestoreIsKept(t *testing.T) {
 	s, data, f := newBackupService(t)
 	put(t, data, "a.txt", "current a")
@@ -175,7 +187,7 @@ func TestStuckRestoreIsKept(t *testing.T) {
 	if job := waitJob(t, s, 1); !strings.HasPrefix(job.Error, errRestoreStuck.Error()) || !strings.Contains(job.Error, "stuck") {
 		t.Fatalf("job = %+v", job)
 	}
-	j, ok := s.readJournals(false)[1]
+	j, ok := journalOf(t, s, 1)
 	if !ok || j.Phase != phaseStuck {
 		t.Fatalf("journal = %+v %v", j, ok)
 	}
@@ -186,7 +198,7 @@ func TestStuckRestoreIsKept(t *testing.T) {
 		t.Fatalf("the previous state was removed: %q", got)
 	}
 	if _, err := s.RestoreBackup(context.Background(), filesapi.SnapshotRequest{ID: 1, Snapshot: sid}); !errors.Is(err, filesapi.ErrBusy) ||
-		!strings.Contains(err.Error(), "a previous restore of this server could not be completed") {
+		!strings.Contains(err.Error(), "a restore of this server could not be completed") {
 		t.Fatalf("restore while stuck: %v", err)
 	}
 	// Purging the server's backups removes the stuck entry as well.
@@ -207,7 +219,8 @@ func TestRestoreJournalFollowsTheSwap(t *testing.T) {
 	sid := snapshotOf(t, s, f, makeTar(t, reg("a.txt", "old a"), reg("c.txt", "old c")))
 	var phases []string
 	s.swapHook = func(step int) error {
-		phases = append(phases, fmt.Sprintf("%d:%s", step, s.readJournals(false)[1].Phase))
+		j, _ := journalOf(t, s, 1)
+		phases = append(phases, fmt.Sprintf("%d:%s", step, j.Phase))
 		return nil
 	}
 	if _, err := s.RestoreBackup(context.Background(), filesapi.SnapshotRequest{ID: 1, Snapshot: sid}); err != nil {

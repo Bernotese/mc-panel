@@ -126,6 +126,7 @@ export function ServerRow({
               </Fact>
             ) : null}
             {status.restart_required ? <Fact className="text-mc-6">{t('servers.restart_required')}</Fact> : null}
+            {server.data_state === 'recovery_required' ? <Fact className="text-destructive">{t('servers.data.recovery_title')}</Fact> : null}
             {server.dev ? (
               <Fact className="text-status-dev">
                 {server.dev.sync_paused

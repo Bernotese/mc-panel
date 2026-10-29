@@ -1,7 +1,7 @@
 # mc-panel: per-server data safety (design spec)
 
 - **Date:** 2026-10-28
-- **Status:** draft (for review in #157)
+- **Status:** implemented (2026-10-28)
 - **Author:** Jannes (with Claude)
 - **Issues:** #145 (A02 stuck restore), #146 (A03 unknown job state), #147 (A04 atomic coordination); reused by #149 (A06) and #153 (A10)
 - **Builds on:** files (`2026-10-11-…-files-design.md`), backups (`2026-10-12-…-backups-design.md`), dev instances (`2026-10-27-…-dev-instances-design.md`)
@@ -72,7 +72,7 @@ Every action that can start a container or rewrite a data directory is **admitte
 | delete | `DataState ∈ {safe, recovery_required}` (deleting a broken server is allowed; its recovery folder is kept and reported) |
 | stop | no lock needed (always allowed) |
 
-- **Lock order (panel):** `reconcile.mu` → `Admission(id)` → (`queue.mu` | extract pending) → files/agent I/O. The reconcile pass takes a server's admission lock with `TryLock` and skips that server for this pass when it is held, so a long stop-wait of a restore does not stall the pass for all servers. Handlers take it with a 5 s timeout and answer `409 conflict` ("another operation on this server is being admitted") on timeout.
+- **Lock order (panel):** `Admission(id)` → `reconcile.mu` → (`queue.mu` | extract pending) → files/agent I/O. The reconcile pass already holds `reconcile.mu` and therefore only `TryLock`s a server's admission (never waits; it skips that server for this pass when it is held), so the order cannot invert and a long stop-wait of a restore does not stall the pass for all servers, so a long stop-wait of a restore does not stall the pass for all servers. Handlers take it with a 5 s timeout and answer `409 conflict` ("another operation on this server is being admitted") on timeout.
 - After the files service has accepted a job, the files state `busy` carries the exclusion; the panel lock is released. A panel restart therefore loses nothing that matters: a job that was admitted is visible as `busy`, a job that was not admitted never touched data.
 - A files service restart cancels running jobs (as today); a restore in its commit phase is rolled forward/back by `RecoverRestores` or ends `recovery_required`.
 

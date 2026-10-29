@@ -24,6 +24,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/httpx"
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/rbac"
+	"github.com/Bernotese/mc-panel/internal/servers/admit"
 	"github.com/Bernotese/mc-panel/internal/store"
 	"github.com/Bernotese/mc-panel/internal/timescale"
 )
@@ -37,7 +38,12 @@ type Deps struct {
 	Instances agentapi.InstancesClient // actual state + power stop; nil = treat as stopped, restore fails agent_unavailable
 	Console   agentapi.ConsoleClient   // RCON; nil = running servers fail rcon_unavailable
 	Reconcile func()                   // asks servers for an immediate reconcile pass; nil = no-op
-	Log       *slog.Logger             // nil = slog.Default()
+	// Admit runs fn under the server's admission lock once its data state, without this
+	// handler's own hold, is safe (servers.Handler.Admit, data safety spec §3); restore and dev
+	// sync stop the server and hand the job to the service under it. nil = no admission (fn
+	// runs at once).
+	Admit admit.Func
+	Log   *slog.Logger // nil = slog.Default()
 	// MaxDuration bounds the service job of one backup (panel.toml backups.max_duration;
 	// 0 = defaultMaxDuration).
 	MaxDuration time.Duration
@@ -78,6 +84,7 @@ type Handler struct {
 	rconT     agentapi.RconTimeoutClient // the console with per-command timeouts (*agent.Client); nil = Rcon with the agent's 10 s
 	saveLocks keyedLocks                 // per server: save-off ... save-on of a job vs. the save-on retry of a tick
 	reconcile func()
+	admitFn   admit.Func
 	log       *slog.Logger
 	queue     *queue
 	tickMu    sync.Mutex // serialises ticks (Run and tests)
@@ -111,7 +118,7 @@ func NewHandler(d Deps) *Handler {
 	}
 	h := &Handler{
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, notifier: n, files: d.Files, inst: d.Instances,
-		console: con, reconcile: rf, log: log, queue: newQueue(d.Clock), alerts: newAlerts(), downloads: newUserSlots(maxDownloadsPerUser),
+		console: con, reconcile: rf, admitFn: d.Admit, log: log, queue: newQueue(d.Clock), alerts: newAlerts(), downloads: newUserSlots(maxDownloadsPerUser),
 		manual:    newCooldowns(),
 		tickEvery: timescale.D(tickEvery), pollEvery: pollEvery, rconTimeout: rconTimeout, stopTimeout: stopTimeout,
 		shutdownWait: shutdownWait, ioTimeout: ioTimeout, ioClock: clock.Real{},

@@ -28,8 +28,8 @@ func (s *Service) CleanupTemp(ctx context.Context) int {
 		}
 		return 0
 	}
-	// RecoverRestores ran before: only stuck restores are left in the journal.
-	journaled := s.journaledTemps()
+	// RecoverRestores ran before: only restores that need recovery are left in the journal.
+	keep := s.journaledTemps()
 	removed := 0
 	for _, e := range entries {
 		if ctx.Err() != nil {
@@ -44,19 +44,20 @@ func (s *Service) CleanupTemp(ctx context.Context) int {
 			s.log.Warn("files: temp cleanup skipped an instance", "id", id, "err", err)
 			continue
 		}
-		removed += s.cleanupRoot(ctx, root, id, journaled[id])
+		removed += s.cleanupRoot(ctx, root, id, func(p string) bool { return keep.keeps(id, p) })
 		_ = root.Close()
 	}
 	return removed
 }
 
 // cleanupRoot walks one data directory without following symlinks (walkTree) and removes
-// every temp entry of an earlier run it finds except keep (the top-level temp folder of a stuck
-// restore, "" = none); a temp-named symlink is removed as a link. A temp folder without a
-// journal entry is removed whatever it holds, never rolled back: a container can fake one.
+// every temp entry of an earlier run it finds except those keep reports (the top-level temp
+// folders a restore journal entry may refer to: tempKeep); a temp-named symlink is removed as a
+// link. A temp folder without a journal entry is removed whatever it holds, never rolled back: a
+// container can fake one.
 // Leftovers are removed per batch while the walk goes on; a data directory with more names
 // than the walk budget is left with a warning (SEC-23).
-func (s *Service) cleanupRoot(ctx context.Context, root *os.Root, id int64, keep string) int {
+func (s *Service) cleanupRoot(ctx context.Context, root *os.Root, id int64, keep func(p string) bool) int {
 	var victims []string
 	n := 0
 	flush := func() {
@@ -64,8 +65,8 @@ func (s *Service) cleanupRoot(ctx context.Context, root *os.Root, id int64, keep
 			if ctx.Err() != nil {
 				break
 			}
-			if v == keep {
-				continue // a stuck restore: the journal entry protects its previous state
+			if keep(v) {
+				continue // a restore that needs recovery: the journal entry protects its folder
 			}
 			// The container may have made the leftover or its folder read-only (unlockTree).
 			err := unlockDir(root, rootName(parentOf(v)))

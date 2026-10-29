@@ -141,6 +141,9 @@ What CI covers: files service (tar over `os.Root` with symlinks, special files, 
 - [ ] **Only `server.view`:** `friend` has no backups area; `/api/servers/<id>/backups` answers `403`.
 - [ ] **Audit:** `backup.create` (note), `backup.restore`, `backup.download`, `backup.pin`, `backup.schedule_update`, `backup.delete`; scheduled runs are not audited; the time zone change is in `server.settings_update`.
 - [ ] **Mobile:** snapshot list as cards, schedule form and restore dialog usable.
+- [ ] **Data safety – busy:** during a restore the server header says a job rewrites the data (restore), start/restart are disabled with that reason, an editor save or upload on that server is refused (`429 busy`), stopping still works.
+- [ ] **Data safety – unknown:** `sudo systemctl stop mcpanel-files.socket mcpanel-files` → servers show "Datenzustand unbekannt", start answers `503 data_state_unknown`, the reconcile loop starts nothing, a down alert for a stopped server still fires; start the service again → states turn `safe` and desired-running servers start.
+- [ ] **Data safety – recovery:** stop a throwaway server, plant `printf x | sudo -u mcpanel-mc tee /srv/mc-panel/backups/restore-journal/<id>` and `sudo -u mcpanel-mc mkdir /srv/mc-panel/instances/<id>/.mcpanel-tmp-test` → "Wiederherstellung nötig", start `409 recovery_required`, notification `server.recovery_required`; restart panel and files → still blocked; as admin tick the check box and resolve (sudo) → folder under `backups/recovery/<id>-<time>/mcpanel-tmp-test`, journal gone, server starts; audit `server.recovery_resolve`. Non-admins see no resolve button.
 
 ## Monitoring and alerts
 

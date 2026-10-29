@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
@@ -21,6 +22,11 @@ type powerRequest struct {
 }
 
 var errBaseDomainMissing = errors.New("no base domain configured: set one in the server settings")
+
+// errRateLimited: the user's power limiter refused the action (retryAfter in Retry-After).
+type errRateLimited struct{ retryAfter time.Duration }
+
+func (errRateLimited) Error() string { return "too many power actions" }
 
 // handleServerPower stores the user's wish (desired_state) and lets the reconcile loop apply
 // it, so start and stop work while the agent is down. Restart needs the agent right away.
@@ -41,36 +47,13 @@ func (h *Handler) handleServerPower(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.loadInstance(w, r, s); !ok { // 409 for a server without instance
 		return
 	}
-	// Before the limiter: a refusal costs no token and is not audited.
-	if req.Action != agentapi.PowerStop && h.gate.DataJobRunning(ctx, s.ID) {
-		writeConflict(w, r, "a file or backup job is rewriting this server's data; try again when it is done")
+	if req.Action == agentapi.PowerStop {
+		// A stop is always allowed (data safety spec §1.1) and needs no admission.
+		if !h.takePower(w, r) {
+			return
+		}
+	} else if !h.admitPower(w, r, s, req.Action) {
 		return
-	}
-	p, _ := principal.From(ctx) // guaranteed by the rbac rule
-	if d := h.power.take(p.UserID, h.clock.Now()); d > 0 {
-		secs := int(math.Ceil(d.Seconds()))
-		w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
-		httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "too many power actions, try again later")
-		return
-	}
-	if req.Action == agentapi.PowerRestart {
-		// Like a reconcile pass, a restart must not overlap a delete: under the lock the row is
-		// read again, so a server deleted meanwhile gets no agent call (no orphan container).
-		h.reconcile.mu.Lock()
-		defer h.reconcile.mu.Unlock()
-		in, err := h.q.ServersGetInstance(ctx, s.ID)
-		if errors.Is(err, sql.ErrNoRows) {
-			writeNotFound(w, r)
-			return
-		}
-		if err != nil {
-			httpx.Internal(w, r, err)
-			return
-		}
-		if err := h.restart(ctx, s, in); err != nil {
-			writeAgentError(w, r, err)
-			return
-		}
 	}
 	desired := desiredRunning
 	if req.Action == agentapi.PowerStop {
@@ -87,6 +70,81 @@ func (h *Handler) handleServerPower(w http.ResponseWriter, r *http.Request) {
 		map[string]any{"action": string(req.Action), "name": s.Name})
 	h.Trigger()
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+}
+
+// takePower takes a token of the user's power limiter; without one it writes 429.
+func (h *Handler) takePower(w http.ResponseWriter, r *http.Request) bool {
+	p, _ := principal.From(r.Context()) // guaranteed by the rbac rule
+	if d := h.power.take(p.UserID, h.clock.Now()); d > 0 {
+		writeRateLimited(w, r, d)
+		return false
+	}
+	return true
+}
+
+func writeRateLimited(w http.ResponseWriter, r *http.Request, d time.Duration) {
+	secs := int(math.Ceil(d.Seconds()))
+	w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
+	httpx.WriteError(w, r, http.StatusTooManyRequests, httpx.CodeRateLimited, "too many power actions, try again later")
+}
+
+// admitPower admits a start or restart under the server's admission lock (data safety spec
+// §3): only a safe data state takes a limiter token (a refusal costs none and is not audited),
+// and a restart reaches the agent while the lock is held. A state that is not safe is refused
+// before waiting for the lock. A start only stores the wish; the reconcile loop admits the
+// actual start again. On failure it has written the answer.
+func (h *Handler) admitPower(w http.ResponseWriter, r *http.Request, s store.Server, action agentapi.PowerAction) bool {
+	ctx := r.Context()
+	err := h.checkData(ctx, s.ID, nil)
+	if err == nil {
+		err = h.admitPowerLocked(ctx, s, action)
+	}
+	var rl errRateLimited
+	switch {
+	case err == nil:
+		return true
+	case WriteDataStateError(w, r, err):
+	case errors.As(err, &rl):
+		writeRateLimited(w, r, rl.retryAfter)
+	case errors.Is(err, sql.ErrNoRows):
+		writeNotFound(w, r)
+	case r.Context().Err() != nil:
+		h.log.DebugContext(ctx, "servers: power admission ended with the request", "err", err)
+	default:
+		writeAgentError(w, r, err)
+	}
+	return false
+}
+
+// admitPowerLocked is admitPower under the locks: the admission lock first, then (restart) the
+// reconcile lock, so a restart waiting for a long data job never stalls the reconcile pass.
+func (h *Handler) admitPowerLocked(ctx context.Context, s store.Server, action agentapi.PowerAction) error {
+	unlock, err := h.admission.Lock(ctx, s.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if action == agentapi.PowerRestart {
+		// Like a reconcile pass, a restart must not overlap a delete: under the lock the row is
+		// read again, so a server deleted meanwhile gets no agent call (no orphan container).
+		h.reconcile.mu.Lock()
+		defer h.reconcile.mu.Unlock()
+	}
+	if err := h.checkData(ctx, s.ID, nil); err != nil {
+		return err
+	}
+	p, _ := principal.From(ctx) // guaranteed by the rbac rule
+	if d := h.power.take(p.UserID, h.clock.Now()); d > 0 {
+		return errRateLimited{d}
+	}
+	if action != agentapi.PowerRestart {
+		return nil
+	}
+	in, err := h.q.ServersGetInstance(ctx, s.ID)
+	if err != nil {
+		return err
+	}
+	return h.restart(ctx, s, in)
 }
 
 // setDesired stores a user's power wish. On a dev instance a stop is falling asleep (the waker

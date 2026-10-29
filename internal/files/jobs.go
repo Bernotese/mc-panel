@@ -23,6 +23,14 @@ const (
 // of every kind but counts against no slot.
 const jobLock filesapi.JobKind = "lock"
 
+// jobResolve takes an instance while ResolveRecovery moves the folders of a stuck restore out of
+// it: like jobLock, but it also refuses mutation leases (it rewrites the data directory).
+const jobResolve filesapi.JobKind = "resolve"
+
+// defaultDrainWait is how long a restore or extract waits for the mutation leases of its
+// instance to end (data safety spec §2.1).
+const defaultDrainWait = 30 * time.Second
+
 var (
 	errShuttingDown = errors.New("the files service is shutting down")
 	errCanceled     = errors.New("the job was canceled")
@@ -50,7 +58,12 @@ type jobs struct {
 	cancels   map[int64]context.CancelFunc
 	committed map[int64]bool // restores in their swap: cancel has no effect any more
 	readers   map[int64]int  // running backup downloads per instance
-	closed    bool           // Close was called: no new jobs (wg.Add only happens under mu)
+	// leases counts the plain file mutations per instance (lease); drained is signalled (on
+	// mu) whenever one ends, the jobs close or a waiting drain times out.
+	leases    map[int64]int
+	drained   *sync.Cond
+	drainWait time.Duration // defaultDrainWait; tests lower it
+	closed    bool          // Close was called: no new jobs (wg.Add only happens under mu)
 	ctx       context.Context
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
@@ -60,10 +73,19 @@ type jobs struct {
 
 func newJobs(maxRestic int) *jobs {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &jobs{
+	j := &jobs{
 		last: map[int64]*filesapi.Job{}, busy: map[int64]filesapi.JobKind{}, maxRestic: max(maxRestic, 1),
-		cancels: map[int64]context.CancelFunc{}, committed: map[int64]bool{}, readers: map[int64]int{}, ctx: ctx, cancel: cancel,
+		cancels: map[int64]context.CancelFunc{}, committed: map[int64]bool{}, readers: map[int64]int{},
+		leases: map[int64]int{}, drainWait: defaultDrainWait, ctx: ctx, cancel: cancel,
 	}
+	j.drained = sync.NewCond(&j.mu)
+	return j
+}
+
+// rewrites reports whether a job of kind k rewrites the data directory (restore, extract, a
+// resolve): it makes the instance busy and excludes mutation leases.
+func rewrites(k filesapi.JobKind) bool {
+	return k == filesapi.JobRestore || k == filesapi.JobExtract || k == jobResolve
 }
 
 func isResticKind(k filesapi.JobKind) bool {
@@ -81,6 +103,8 @@ func busyText(k filesapi.JobKind) string {
 		return "a restore is running for this server"
 	case filesapi.JobForget:
 		return "backups of this server are being deleted"
+	case jobResolve:
+		return "an unfinished restore of this server is being resolved"
 	}
 	return "another backup operation is running for this server"
 }
@@ -252,6 +276,7 @@ func (j *jobs) finish(id int64, err error, now time.Time) {
 func (j *jobs) close() {
 	j.mu.Lock()
 	j.closed = true
+	j.drained.Broadcast()
 	j.mu.Unlock()
 	j.cancel()
 	j.wg.Wait()
@@ -331,4 +356,92 @@ func (j *jobs) addReader(id int64) (func(), error) {
 			delete(j.readers, id)
 		}
 	}, nil
+}
+
+// rewriting reports whether a restore, extract or resolve holds instance id (also during its
+// pre-check and while it waits for leases to drain).
+func (j *jobs) rewriting(id int64) bool {
+	_, ok := j.rewritingJob(id)
+	return ok
+}
+
+// rewritingJob reports whether a restore, extract or resolve holds instance id and returns the
+// job that holds it: the running job of that kind, one standing for its pre-check (no id yet),
+// or nil for a resolve (not a job the panel shows, data safety spec §2.3).
+func (j *jobs) rewritingJob(id int64) (*filesapi.Job, bool) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	kind := j.busy[id]
+	switch {
+	case !rewrites(kind):
+		return nil, false
+	case kind == jobResolve:
+		return nil, true
+	}
+	if last := j.last[id]; last != nil && last.Kind == kind && last.State == filesapi.JobRunning {
+		c := *last
+		return &c, true
+	}
+	return &filesapi.Job{Kind: kind, State: filesapi.JobRunning}, true
+}
+
+// lease takes a shared mutation lease on instance id for a plain file mutation (data safety
+// spec §2.1): refused at once while a restore, extract or resolve holds the instance; while
+// leases are held, those wait in drain. release may be called more than once.
+func (j *jobs) lease(id int64) (release func(), err error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if k := j.busy[id]; rewrites(k) {
+		return nil, fmt.Errorf("%w: %s", filesapi.ErrBusy, busyText(k))
+	}
+	j.leases[id]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			j.mu.Lock()
+			defer j.mu.Unlock()
+			if j.leases[id]--; j.leases[id] <= 0 {
+				delete(j.leases, id)
+			}
+			j.drained.Broadcast()
+		})
+	}, nil
+}
+
+// drain waits until no mutation lease of instance id is held. The caller holds the instance's
+// slot for a kind that rewrites it (acquire), so no new lease starts meanwhile. After drainWait
+// it gives up with ErrBusy; it also ends when ctx ends or the jobs close. The caller gives the
+// slot back on error. mu is released while it waits (Cond.Wait), never held across I/O.
+func (j *jobs) drain(ctx context.Context, id int64) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.leases[id] == 0 {
+		return nil
+	}
+	expired := false // guarded by mu
+	wake := func() {
+		j.mu.Lock()
+		defer j.mu.Unlock()
+		j.drained.Broadcast()
+	}
+	t := time.AfterFunc(j.drainWait, func() {
+		j.mu.Lock()
+		defer j.mu.Unlock()
+		expired = true
+		j.drained.Broadcast()
+	})
+	defer t.Stop()
+	defer context.AfterFunc(ctx, wake)()
+	for j.leases[id] > 0 {
+		switch {
+		case j.closed:
+			return errShuttingDown
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case expired:
+			return fmt.Errorf("%w: file operations on this server are still running; try again", filesapi.ErrBusy)
+		}
+		j.drained.Wait()
+	}
+	return nil
 }

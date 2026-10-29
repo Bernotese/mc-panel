@@ -44,6 +44,11 @@ type Update = (patch: Partial<ServerFormValue>, ...fields: FormField[]) => void
 export interface ServerFormProps {
   mode: 'create' | 'edit'
   initial: ServerFormValue
+  /** edit only: the stored value the draft is compared with (dirty, own memory); default `initial`. It differs after the
+   * own changes were put onto a newer stored value (issue #154). */
+  baseline?: ServerFormValue
+  /** Every change of the draft, for the caller's draft tracking (issue #154). */
+  onDraftChange?(value: ServerFormValue): void
   /** create only: live address preview */
   baseDomain?: string | null
   /** create only: CurseForge can only be chosen with a stored API key */
@@ -60,6 +65,8 @@ export interface ServerFormProps {
 export function ServerForm({
   mode,
   initial,
+  baseline = initial,
+  onDraftChange,
   baseDomain = null,
   curseforgeKeySet = false,
   submitLabel,
@@ -85,11 +92,13 @@ export function ServerForm({
   const ctx: FormContext = { mode, catalog: catalog.data, curseforgeKeySet, memory: memoryLimitsFrom(memoryLimits.data) }
   const errors = validateServerForm(value, ctx)
   const hasErrors = Object.keys(errors).length > 0
-  const dirty = mode === 'create' || !sameFormValue(value, initial)
+  const dirty = mode === 'create' || !sameFormValue(value, baseline)
   const shown: Shown = (field) => (submitted || touched.has(field) ? errors[field] : undefined)
 
   const update: Update = (patch, ...fields) => {
-    setValue({ ...value, ...patch })
+    const next = { ...value, ...patch }
+    setValue(next)
+    onDraftChange?.(next)
     if (fields.length > 0) setTouched(new Set([...touched, ...fields]))
   }
 
@@ -111,82 +120,87 @@ export function ServerForm({
         if (result) onSubmit(result)
       }}
     >
-      <Section title={t('servers.form.section.basics')} className={LEFT}>
-        <div className="flex flex-col gap-4">
-          {mode === 'create' ? (
-            <>
-              <NameField id={`${id}-name`} name={value.name} baseDomain={baseDomain} error={shown('name')} onChange={(name) => update({ name }, 'name')} />
-              <TypeField id={`${id}-type`} type={value.type} curseforgeKeySet={curseforgeKeySet} error={shown('type')} onChange={changeType} />
-            </>
-          ) : (
-            <p className="text-sm">
-              <span className="font-medium">{t('servers.form.type')}:</span> {t(`servers.type.${value.type}`)}
-            </p>
-          )}
-          <VersionFields
-            id={id}
-            value={value}
-            catalog={catalog.data}
-            catalogPending={!modpack && catalog.isPending}
-            catalogFailed={catalog.isError}
-            shown={shown}
-            update={update}
+      {/* Locked while saving: an edit typed meanwhile would be replaced by the saved value (issue #154). `contents` keeps
+          the sections direct grid items of the form. */}
+      <fieldset disabled={pending} className="contents">
+        <Section title={t('servers.form.section.basics')} className={LEFT}>
+          <div className="flex flex-col gap-4">
+            {mode === 'create' ? (
+              <>
+                <NameField id={`${id}-name`} name={value.name} baseDomain={baseDomain} error={shown('name')} onChange={(name) => update({ name }, 'name')} />
+                <TypeField id={`${id}-type`} type={value.type} curseforgeKeySet={curseforgeKeySet} error={shown('type')} onChange={changeType} />
+              </>
+            ) : (
+              <p className="text-sm">
+                <span className="font-medium">{t('servers.form.type')}:</span> {t(`servers.type.${value.type}`)}
+              </p>
+            )}
+            <VersionFields
+              id={id}
+              value={value}
+              catalog={catalog.data}
+              catalogPending={!modpack && catalog.isPending}
+              catalogFailed={catalog.isError}
+              shown={shown}
+              update={update}
+            />
+          </div>
+        </Section>
+        <Section title={t('servers.form.section.resources')} className={RIGHT}>
+          <MemoryField
+            id={`${id}-memory`}
+            text={value.memoryGiB}
+            error={shown('memory')}
+            limits={memoryLimits.data}
+            ownMiB={mode === 'edit' ? (memoryMiBFromGiB(baseline.memoryGiB) ?? 0) : 0}
+            recommendedMiB={recommendedMiB}
+            onChange={(memoryGiB) => update({ memoryGiB }, 'memory')}
           />
+        </Section>
+        <CollapsibleSection
+          className={RIGHT}
+          title={t('servers.form.advanced')}
+          description={t('servers.form.advanced_description')}
+          forceOpen={submitted && (errors.java !== undefined || (value.type === 'neoforge' && errors.loader_version !== undefined))}
+        >
+          <AdvancedFields id={id} value={value} catalog={catalog.data} shown={shown} update={update} />
+        </CollapsibleSection>
+        <CollapsibleSection
+          className={RIGHT}
+          title={t('servers.form.properties')}
+          description={t('servers.form.properties_description')}
+          forceOpen={submitted && PROPERTY_FIELDS.some((f) => errors[f] !== undefined)}
+        >
+          <PropertiesFields
+            idPrefix={`${id}-prop`}
+            mode={mode}
+            serverName={value.name.trim()}
+            type={value.type}
+            value={value.properties}
+            error={shown}
+            onChange={(patch, ...fields) => update({ properties: { ...value.properties, ...patch } }, ...fields)}
+          />
+        </CollapsibleSection>
+        {mode === 'create' ? (
+          <EulaField className={FULL} id={`${id}-eula`} checked={value.eulaAccepted} error={shown('eula')} onChange={(eulaAccepted) => update({ eulaAccepted }, 'eula')} />
+        ) : null}
+        <div className={cn('flex flex-col items-start gap-3', FULL)}>
+          {notice ? <p className="text-muted-foreground text-sm">{notice}</p> : null}
+          {submitted && hasErrors ? (
+            <p role="alert" className="text-destructive text-sm">
+              {t('servers.form.fix_errors')}
+            </p>
+          ) : null}
+          {error && !isSudoCancelled(error) ? (
+            <p role="alert" className="text-destructive text-sm">
+              {errorMessage(error, t)}
+            </p>
+          ) : null}
+          <Button type="submit" disabled={pending || !dirty}>
+            {submitLabel}
+          </Button>
         </div>
-      </Section>
-      <Section title={t('servers.form.section.resources')} className={RIGHT}>
-        <MemoryField
-          id={`${id}-memory`}
-          text={value.memoryGiB}
-          error={shown('memory')}
-          limits={memoryLimits.data}
-          ownMiB={mode === 'edit' ? (memoryMiBFromGiB(initial.memoryGiB) ?? 0) : 0}
-          recommendedMiB={recommendedMiB}
-          onChange={(memoryGiB) => update({ memoryGiB }, 'memory')}
-        />
-      </Section>
-      <CollapsibleSection
-        className={RIGHT}
-        title={t('servers.form.advanced')}
-        description={t('servers.form.advanced_description')}
-        forceOpen={submitted && (errors.java !== undefined || (value.type === 'neoforge' && errors.loader_version !== undefined))}
-      >
-        <AdvancedFields id={id} value={value} catalog={catalog.data} shown={shown} update={update} />
-      </CollapsibleSection>
-      <CollapsibleSection
-        className={RIGHT}
-        title={t('servers.form.properties')}
-        description={t('servers.form.properties_description')}
-        forceOpen={submitted && PROPERTY_FIELDS.some((f) => errors[f] !== undefined)}
-      >
-        <PropertiesFields
-          idPrefix={`${id}-prop`}
-          mode={mode}
-          serverName={value.name.trim()}
-          value={value.properties}
-          error={shown}
-          onChange={(patch, field) => update({ properties: { ...value.properties, ...patch } }, ...(field ? [field] : []))}
-        />
-      </CollapsibleSection>
-      {mode === 'create' ? (
-        <EulaField className={FULL} id={`${id}-eula`} checked={value.eulaAccepted} error={shown('eula')} onChange={(eulaAccepted) => update({ eulaAccepted }, 'eula')} />
-      ) : null}
-      <div className={cn('flex flex-col items-start gap-3', FULL)}>
-        {notice ? <p className="text-muted-foreground text-sm">{notice}</p> : null}
-        {submitted && hasErrors ? (
-          <p role="alert" className="text-destructive text-sm">
-            {t('servers.form.fix_errors')}
-          </p>
-        ) : null}
-        {error && !isSudoCancelled(error) ? (
-          <p role="alert" className="text-destructive text-sm">
-            {errorMessage(error, t)}
-          </p>
-        ) : null}
-        <Button type="submit" disabled={pending || !dirty}>
-          {submitLabel}
-        </Button>
-      </div>
+      </fieldset>
     </form>
   )
 }

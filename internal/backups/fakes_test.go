@@ -395,9 +395,21 @@ type fakeAgent struct {
 	docker   string // Docker status of Instances ("" = DockerOK)
 	// blipAfterStop: after a stop, that many Instances calls answer Docker unavailable
 	blipAfterStop, blips int
+	// ops and queued are the agent's operation and queued power actions per server (setStatus).
+	ops    map[int64]agentapi.Operation
+	queued map[int64][]agentapi.PowerAction
 }
 
-func newFakeAgent() *fakeAgent { return &fakeAgent{state: map[int64]agentapi.ContainerState{}} }
+func newFakeAgent() *fakeAgent {
+	return &fakeAgent{state: map[int64]agentapi.ContainerState{}, ops: map[int64]agentapi.Operation{}, queued: map[int64][]agentapi.PowerAction{}}
+}
+
+// setStatus sets the container state and what the agent works on and has queued for it.
+func (a *fakeAgent) setStatus(id int64, s agentapi.ContainerState, op agentapi.Operation, queued ...agentapi.PowerAction) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.state[id], a.ops[id], a.queued[id] = s, op, queued
+}
 
 func (a *fakeAgent) set(id int64, s agentapi.ContainerState) {
 	a.mu.Lock()
@@ -427,7 +439,7 @@ func (a *fakeAgent) Instances(context.Context) (agentapi.InstancesResponse, erro
 		return out, nil // no Docker: no instances
 	}
 	for id, s := range a.state {
-		out.Instances = append(out.Instances, agentapi.InstanceStatus{ID: id, State: s})
+		out.Instances = append(out.Instances, agentapi.InstanceStatus{ID: id, State: s, Operation: a.ops[id], Queued: slices.Clone(a.queued[id])})
 	}
 	return out, nil
 }
@@ -549,4 +561,49 @@ func (c *fakeConsole) Logs(context.Context, agentapi.LogsRequest) (agentapi.LogS
 
 func (c *fakeConsole) Players(context.Context, int64) (agentapi.PlayersResponse, error) {
 	return agentapi.PlayersResponse{}, agentapi.ErrUnavailable
+}
+
+// fakeAdmit is servers.Handler.Admit: fn runs under a per-server lock unless refuse returns an
+// error for the call (n counts the calls per server from 1); log (may be nil) gets "admit <id>"
+// before fn and "admitted <id>" after it.
+type fakeAdmit struct {
+	mu     sync.Mutex
+	locks  map[int64]*sync.Mutex
+	n      map[int64]int
+	refuse func(id int64, n int) error
+	log    *orderLog
+}
+
+func newFakeAdmit() *fakeAdmit { return &fakeAdmit{locks: map[int64]*sync.Mutex{}, n: map[int64]int{}} }
+
+func (f *fakeAdmit) setRefuse(fn func(id int64, n int) error) {
+	f.mu.Lock()
+	f.refuse = fn
+	f.mu.Unlock()
+}
+
+func (f *fakeAdmit) calls(id int64) int { f.mu.Lock(); defer f.mu.Unlock(); return f.n[id] }
+
+func (f *fakeAdmit) Admit(ctx context.Context, id int64, fn func(context.Context) error) error {
+	f.mu.Lock()
+	l := f.locks[id]
+	if l == nil {
+		l = &sync.Mutex{}
+		f.locks[id] = l
+	}
+	f.n[id]++
+	n, refuse := f.n[id], f.refuse
+	f.mu.Unlock()
+	l.Lock()
+	defer l.Unlock()
+	if refuse != nil {
+		if err := refuse(id, n); err != nil {
+			return err
+		}
+	}
+	if f.log != nil {
+		f.log.add("admit %d", id)
+		defer f.log.add("admitted %d", id)
+	}
+	return fn(ctx)
 }

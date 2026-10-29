@@ -54,6 +54,7 @@ function CreateDevForm({ server }: { server: Server }) {
   const mib = memoryMiBFromGiB(value)
   const error = validateMemoryMiB(mib, bounds) ?? undefined
   const allowed = canHaveDev(server.name)
+  const locked = server.data_state !== 'safe'
   const name = devName(server.name)
 
   const create = useMutation({
@@ -74,7 +75,7 @@ function CreateDevForm({ server }: { server: Server }) {
           noValidate
           onSubmit={(e) => {
             e.preventDefault()
-            if (!error && mib !== null) create.mutate(mib)
+            if (!locked && !error && mib !== null) create.mutate(mib)
           }}
         >
           <ul className="text-muted-foreground list-disc space-y-1 pl-5 text-sm">
@@ -105,8 +106,10 @@ function CreateDevForm({ server }: { server: Server }) {
               {errorMessage(create.error, t)}
             </p>
           ) : null}
+          {/* The first sync restores the prod's data into the dev: only while the prod's data is safe (data safety spec §2). */}
+          {locked ? <p className="text-muted-foreground text-sm">{t(`dev.create.lock_${server.data_state}`)}</p> : null}
           <div>
-            <Button type="submit" disabled={create.isPending || error !== undefined}>
+            <Button type="submit" disabled={create.isPending || locked || error !== undefined}>
               {t('dev.create.submit', { name })}
             </Button>
           </div>

@@ -54,6 +54,11 @@ func (s *Service) RestoreBackup(ctx context.Context, req filesapi.SnapshotReques
 			releaseSource()
 		}
 	}()
+	// Waits for running file operations and refuses a server whose earlier restore needs
+	// recovery (data safety spec §2.1).
+	if err := s.acquireRewrite(ctx, req.ID); err != nil {
+		return filesapi.Job{}, err
+	}
 	root, err := s.open(req.ID)
 	if err != nil {
 		return filesapi.Job{}, err
@@ -64,9 +69,6 @@ func (s *Service) RestoreBackup(ctx context.Context, req filesapi.SnapshotReques
 			_ = root.Close()
 		}
 	}()
-	if j, ok := s.readJournals(false)[req.ID]; ok && j.Phase == phaseStuck {
-		return filesapi.Job{}, fmt.Errorf("%w: a previous restore of this server could not be completed; its old state is kept in a hidden folder - see the files service log", filesapi.ErrBusy)
-	}
 	snap, err := s.findSnapshot(ctx, repo, req.Snapshot)
 	if err != nil {
 		return filesapi.Job{}, err

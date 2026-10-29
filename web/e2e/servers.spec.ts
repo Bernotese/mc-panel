@@ -159,3 +159,26 @@ test('a user without file permission sees no files tab', async ({ page }) => {
   await expect(serverSectionLink(page, 'survival', 'Übersicht')).toBeVisible()
   await expect(serverSectionLink(page, 'survival', 'Dateien')).toHaveCount(0)
 })
+
+test('unsaved settings survive polling and leaving asks first (issue #154)', async ({ page }) => {
+  await signIn(page, 'admin', true)
+  await openServer(page, 'survival')
+  await openServerSection(page, 'survival', 'Einstellungen')
+  const memory = page.getByRole('spinbutton', { name: 'Arbeitsspeicher (GiB)' })
+  await memory.fill('5')
+
+  // The detail page polls the server (15 s); the answer must not reset the draft.
+  await page.waitForResponse((r) => /\/api\/servers\/1$/.test(new URL(r.url()).pathname) && r.request().method() === 'GET', { timeout: 30_000 })
+  await expect(memory).toHaveValue('5')
+
+  await openServerSection(page, 'survival', 'Übersicht')
+  const dialog = page.getByRole('dialog', { name: 'Ungespeicherte Änderungen verwerfen?' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Abbrechen' }).click()
+  await expect(page).toHaveURL(/\/servers\/1\/settings$/)
+  await expect(memory).toHaveValue('5')
+
+  await openServerSection(page, 'survival', 'Übersicht')
+  await page.getByRole('dialog', { name: 'Ungespeicherte Änderungen verwerfen?' }).getByRole('button', { name: 'Verwerfen und verlassen' }).click()
+  await expect(page).toHaveURL(/\/servers\/1$/)
+})

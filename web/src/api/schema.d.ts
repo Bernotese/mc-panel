@@ -593,6 +593,26 @@ export interface paths {
         patch: operations["updateServer"];
         trace?: never;
     };
+    "/servers/{id}/recovery/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release a server whose restore could not be completed (admin, sudo; audited)
+         * @description Moves the half-swapped folders of the unresolved restore out of the data directory to backups/recovery/ (never deletes them) and clears the hold. The visible data directory is not touched: check it before resolving (docs/install.md, "A restore could not be completed").
+         */
+        post: operations["resolveServerRecovery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/servers/{id}/power": {
         parameters: {
             query?: never;
@@ -1621,7 +1641,7 @@ export interface components {
     schemas: {
         Error: {
             /** @enum {string} */
-            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "password_change_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "files_unavailable" | "file_exists" | "file_modified" | "not_text" | "not_regular" | "instance_running" | "insufficient_storage" | "plugins_unsupported" | "plugin_source_unavailable" | "plugin_not_downloadable" | "plugin_incompatible" | "mrpack_incompatible" | "mrpack_version_mismatch" | "backups_unavailable" | "backup_running" | "dev_exists" | "not_dev" | "dev_managed" | "server_modified" | "internal";
+            error: "bad_request" | "validation_failed" | "unauthorized" | "invalid_credentials" | "invalid_code" | "forbidden" | "sudo_required" | "setup_2fa_required" | "password_change_required" | "csrf_invalid" | "not_found" | "conflict" | "payload_too_large" | "rate_limited" | "jailed" | "ip_blocked" | "agent_unavailable" | "docker_unavailable" | "base_domain_missing" | "catalog_unavailable" | "instance_not_running" | "rcon_unavailable" | "files_unavailable" | "file_exists" | "file_modified" | "not_text" | "not_regular" | "instance_running" | "insufficient_storage" | "plugins_unsupported" | "plugin_source_unavailable" | "plugin_not_downloadable" | "plugin_incompatible" | "mrpack_incompatible" | "mrpack_version_mismatch" | "backups_unavailable" | "backup_running" | "dev_exists" | "not_dev" | "dev_managed" | "server_modified" | "data_state_unknown" | "recovery_required" | "internal";
             message: string;
             request_id?: string;
         };
@@ -1883,6 +1903,25 @@ export interface components {
              * @description Present only when the server has a dev instance: its id
              */
             dev_id?: number;
+            data_state: components["schemas"]["ServerDataState"];
+            /** @description While data_state is busy: the kind of job that holds the data directory (restore, extract, dev_sync) */
+            data_job: string | null;
+        };
+        /**
+         * @description Safety of the data directory (data safety spec §2). Only safe admits a start or a data job; stop and reads always work. unknown = the files service did not answer; never treated as safe.
+         * @enum {string}
+         */
+        ServerDataState: "safe" | "busy" | "recovery_required" | "unknown";
+        Recovery: {
+            /** @description Journal phase of the unresolved restore, or "unreadable" */
+            phase: string;
+            /**
+             * Format: int64
+             * @description Unix ms of the journal entry; 0 = unknown
+             */
+            since: number;
+            /** @description After a resolve: where the half-swapped folders were moved (below backups/recovery/) */
+            folder?: string;
         };
         DevSummary: {
             /** Format: int64 */
@@ -2706,7 +2745,7 @@ export interface components {
             tps_source: components["schemas"]["TpsSource"];
         };
         /** @enum {string} */
-        AlertKind: "server.down" | "server.crash_loop" | "host.disk_low";
+        AlertKind: "server.down" | "server.crash_loop" | "server.recovery_required" | "host.disk_low";
         /** @description [at (Unix ms), players] */
         SparklinePoint: number[];
         OverviewServer: {
@@ -4251,6 +4290,51 @@ export interface operations {
             404: components["responses"]["NotFound"];
             /** @description server_modified (expected_revision is not the stored revision), dev_managed (a dev instance and a field other than memory_mib), conflict (server not configured, or web routes without a base domain) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    resolveServerRecovery: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRF"];
+            };
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Recovery"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description recovery_required (the server has no unresolved restore) or conflict (a job holds its data, or another operation on it is being admitted) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description data_state_unknown (the files service did not report the state, or cannot read the restore journal) or files_unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

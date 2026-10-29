@@ -2,6 +2,7 @@ package servers
 
 import (
 	"context"
+	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/agent/instancespec"
@@ -71,6 +72,9 @@ type serverJSON struct {
 	// Dev instances: Dev only on a dev, DevID only on a server that has a dev (devData.apply).
 	Dev   *devSummaryJSON `json:"dev,omitempty"`
 	DevID *int64          `json:"dev_id,omitempty"`
+	// Data safety (data safety spec §2.3): the data state and, while busy, the kind of the job.
+	DataState State   `json:"data_state"`
+	DataJob   *string `json:"data_job"`
 }
 
 // webRouteJSON is the OpenAPI schema WebRoute; url is absent without base domain.
@@ -88,6 +92,10 @@ type viewData struct {
 	snap       Snapshot
 	downAlerts map[int64]bool // server_alerts rows (missing = on)
 	dev        devData
+	data       DataStates
+	// dataBy bounds all data state lookups of one response together (stateTimeout): a files
+	// service that hangs makes every later server unknown at once instead of one by one.
+	dataBy time.Time
 }
 
 func (h *Handler) loadViewData(ctx context.Context) (viewData, error) {
@@ -99,7 +107,10 @@ func (h *Handler) loadViewData(ctx context.Context) (viewData, error) {
 	if err != nil {
 		return viewData{}, err
 	}
-	d := viewData{baseDomain: nullString(set.BaseDomain), instances: make(map[int64]store.Instance, len(rows)), snap: h.snapshot()}
+	d := viewData{
+		baseDomain: nullString(set.BaseDomain), instances: make(map[int64]store.Instance, len(rows)), snap: h.snapshot(),
+		data: h.data, dataBy: h.ioClock.Now().Add(stateTimeout),
+	}
 	for _, r := range rows {
 		d.instances[r.ServerID] = instanceFromListRow(r)
 	}
@@ -122,7 +133,7 @@ func (h *Handler) loadViewData(ctx context.Context) (viewData, error) {
 	return d, nil
 }
 
-func (d viewData) server(s store.Server, perms []rbac.Permission) (serverJSON, error) {
+func (d viewData) server(ctx context.Context, s store.Server, perms []rbac.Permission) (serverJSON, error) {
 	var in *store.Instance
 	if row, ok := d.instances[s.ID]; ok {
 		in = &row
@@ -137,13 +148,30 @@ func (d viewData) server(s store.Server, perms []rbac.Permission) (serverJSON, e
 	}
 	out.DownAlerts = &on
 	d.dev.apply(&out)
+	d.applyData(ctx, &out)
 	return out, nil
+}
+
+// applyData sets data_state and data_job; a dev whose data is busy (its sync holds it) shows
+// sync_pending.
+func (d viewData) applyData(ctx context.Context, out *serverJSON) {
+	ctx, cancel := context.WithDeadline(ctx, d.dataBy)
+	defer cancel()
+	info, _ := d.data.Lookup(ctx, out.ID, nil) // an error comes with StateUnknown
+	out.DataState = info.State
+	if info.State == StateBusy && info.Job != "" {
+		job := info.Job
+		out.DataJob = &job
+	}
+	if out.Dev != nil && info.State == StateBusy {
+		out.Dev.SyncPending = true
+	}
 }
 
 // view builds the Server schema; in == nil is a server without instance ("not configured",
 // all instance fields null). routes are the server's web routes, root first.
 func view(s store.Server, perms []rbac.Permission, in *store.Instance, routes []agentapi.WebTarget, baseDomain *string, snap Snapshot) (serverJSON, error) {
-	out := serverJSON{ID: s.ID, Name: s.Name, Permissions: perms, Status: deriveStatus(s.Name, in, snap)}
+	out := serverJSON{ID: s.ID, Name: s.Name, Permissions: perms, Status: deriveStatus(s.Name, in, snap), DataState: StateSafe}
 	applyWebView(&out, s.Name, in, routes, baseDomain, snap.Web)
 	if in == nil {
 		return out, nil
