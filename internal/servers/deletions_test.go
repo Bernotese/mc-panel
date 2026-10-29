@@ -230,7 +230,9 @@ func TestDeletionAuditAndNotify(t *testing.T) {
 	id := e.create(t, paper("survival")).ID
 	e.agent.setErr(agentapi.ErrUnavailable)
 	e.deleteServer(t, id, "")
-	if en := e.rec.Entries[len(e.rec.Entries)-1]; en.Action != audit.ActionServerDelete || en.Details["completed"] != false {
+	if en := e.rec.Entries[len(e.rec.Entries)-1]; en.Action != audit.ActionServerDelete {
+		t.Fatalf("audit = %+v", en)
+	} else if completed, ok := en.Details["completed"].(bool); !ok || completed {
 		t.Fatalf("audit = %+v", en)
 	}
 	e.clk.Advance(5 * time.Minute)
