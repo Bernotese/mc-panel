@@ -358,4 +358,17 @@ Services: `mcpanel-panel.service` (+ `.socket`), `mcpanel-agent.service`, `mcpan
 - **Admin allowlist:** with "Admin access only from the allowlist" every admin request from another network is refused (`403`; logging out still works), and saving the setting ends admin sessions from outside it. `panel admin unlock` turns it off.
 - **Update exit code 3 or 4:** see [Rollback](#rollback); the details are in `/var/log/mc-panel-install.log`.
 - **A restore is stuck** ("the files service is busy for this server"): follow the runbook in [`docs/dev/README.md`](dev/README.md) ("Backups").
+- **"Recovery required" on a server** (start refused with `recovery_required`): see [A restore could not be completed](#a-restore-could-not-be-completed).
+- **"Data state unknown"** (start refused with `data_state_unknown`): the panel could not ask the files service whether the server's data is safe, so it starts nothing. Check `systemctl status mcpanel-files mcpanel-files.socket` and `journalctl -u mcpanel-files`; once the service answers, the servers start again by themselves. Stopping servers and reading files keep working meanwhile.
 - **Another reverse proxy instead of Caddy:** it must set `X-Forwarded-For` without a port, must not buffer uploads, downloads or the console's Server-Sent Events, and needs a body limit of at least 4 GiB. Details in [`docs/dev/README.md`](dev/README.md) ("Production").
+
+### A restore could not be completed
+
+A restore swaps the top-level entries of a server's data directory by renames and records each step in a journal (`/srv/mc-panel/backups/restore-journal/<id>`). If the swap was interrupted and could neither be completed nor undone, or the journal entry cannot be read, the server shows **Wiederherstellung nötig / Recovery required**: it does not start (also not after a reboot), no restore, extract or file change runs on it, and you get the notification `server.recovery_required` (repeated every 24 h). Nothing is deleted automatically.
+
+1. Look at the data directory `/srv/mc-panel/instances/<id>/` (the server's id is in the panel's URL). The hidden folder `.mcpanel-tmp-<…>` next to it holds the halves of the swap: `old/` (the state before the restore) and `new/` (the restored state), depending on how far the swap got.
+2. Put the directory into the state you want, as root or `sudo -u mcpanel-mc`: keep what is there, or move entries back from `old/` or over from `new/`. Do not start the server by hand.
+3. In the panel (admin, sudo), open the server, tick "Ich habe das Datenverzeichnis geprüft" and choose **Wiederherstellung auflösen**. The panel moves the hidden folder out of the data directory to `/srv/mc-panel/backups/recovery/<id>-<time>/` (it is never deleted), clears the hold and starts the server if it should run.
+4. When you no longer need it, delete `/srv/mc-panel/backups/recovery/<id>-<time>/` by hand.
+
+Deleting such a server also moves the folder there first. If you would rather go back to a snapshot: resolve, then restore the snapshot you want.

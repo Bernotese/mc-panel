@@ -268,3 +268,9 @@ func storeServer(t *testing.T, e *env, name string) int64 {
 	t.Helper()
 	return storetest.CreateServer(t, e.db, name)
 }
+
+// holding reports whether h holds server id with a restore or dev sync (servers.Hold).
+func holding(h *backups.Handler, id int64) bool {
+	_, ok := h.Holding(id)
+	return ok
+}

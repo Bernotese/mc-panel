@@ -79,6 +79,8 @@ export const en: Messages = {
     not_dev: 'This server is not a dev instance.',
     dev_managed: 'A dev instance takes this from its source and has no backups.',
     server_modified: 'The server was changed in the meantime. Reload it and apply your changes again.',
+    data_state_unknown: 'The files service did not report whether this server\'s data is safe. Please try again in a moment.',
+    recovery_required: 'A restore of this server could not be completed. Resolve the recovery first.',
     internal: 'Internal server error.',
     network: 'Server unreachable. Please check your connection.',
     unknown: 'Unexpected error (HTTP {{status}}).',
@@ -542,6 +544,27 @@ export const en: Messages = {
       leave_title: 'Discard unsaved changes?',
       leave_description: 'The settings have changes that are not saved yet. If you leave the page, they are lost.',
       leave: 'Discard and leave',
+    },
+    data: {
+      busy: 'A job is rewriting the data right now ({{job}}). Starting is locked until it is done.',
+      job: { restore: 'restoring a backup', extract: 'extracting', dev_sync: 'dev sync', other: 'job' },
+      unknown: 'Data state unknown – the files service does not answer; starting is locked.',
+      unknown_hint: 'Stopping and reading still work; once the service answers again, the server is free.',
+      recovery_title: 'Recovery required',
+      recovery_text:
+        'A restore of this server could not be completed. So that nothing is lost, the server stays stopped: starting, restores and file changes are locked until an admin resolves the recovery.',
+      recovery_runbook: 'Guide: A restore could not be completed',
+      recovery_resolve_text:
+        'Resolving moves the half-swapped folders to backups/recovery/ in the instances directory and frees the server. It does not change the data folder itself – check it first, following the guide.',
+      recovery_checked: 'I have checked the data directory',
+      recovery_resolve: 'Resolve recovery',
+      recovery_admin_only: 'Only an admin can resolve this.',
+      resolved_title: 'Recovery resolved',
+      resolved_text_before: 'The half-swapped folders are now in',
+      resolved_text_after: 'in the instances directory. Delete them yourself once you no longer need them.',
+      lock_busy: 'Starting is locked while a job rewrites the data.',
+      lock_unknown: 'Starting is locked while the data state is unknown.',
+      lock_recovery_required: 'Starting is locked until the recovery is resolved.',
     },
     delete: {
       title: 'Delete server',
@@ -1211,6 +1234,9 @@ export const en: Messages = {
       services_warning:
         'Plugins and mods that use external services (e.g. a shared MySQL database or a Discord bot) run on the dev instance with the same credentials and can change data of {{source}} there.',
       submit: 'Create {{name}}',
+      lock_busy: 'A dev instance can only be created once no job is rewriting the data any more.',
+      lock_unknown: 'A dev instance can only be created once the data state is known again.',
+      lock_recovery_required: 'A dev instance can only be created once the recovery is resolved.',
       created: '{{name}} created. The first sync is running.',
       exists: 'This server has a dev instance:',
       name_too_long: '{{name}} would be longer than 32 characters. Servers with names over 28 characters get no dev instance.',
@@ -1267,6 +1293,7 @@ export const en: Messages = {
     alert: {
       server_down: 'Server down',
       server_crash_loop: 'Crash loop',
+      server_recovery_required: 'Recovery required',
       host_disk_low: 'Disk low',
     },
     host: {

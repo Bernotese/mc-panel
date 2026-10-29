@@ -43,8 +43,8 @@ func needsRecreate(revision int64, st agentapi.InstanceStatus) bool {
 // up is recreated before it is started, so it never starts with an old configuration.
 func decide(desired string, revision int64, st agentapi.InstanceStatus) action {
 	switch {
-	case st.Operation != agentapi.OpNone:
-		return actNone // the agent is working on it
+	case !st.Settled():
+		return actNone // the agent is working on it or has actions queued
 	case st.State == agentapi.StateMissing:
 		return actEnsure
 	case !isUp(st.State) && needsRecreate(revision, st):
@@ -73,6 +73,7 @@ type reconcileState struct {
 	attempts  map[int64]attempt
 	warned    map[int64]bool // unknown containers already logged
 	foreign   map[int64]bool // foreign containers already logged
+	unknown   map[int64]bool // starts held because the data state is unknown (logged once)
 	agentDown bool
 	webDown   bool // the last route list did not reach the agent (logged once)
 }
@@ -166,21 +167,39 @@ func (h *Handler) reconcileInstances(ctx context.Context) {
 		if act == actNone {
 			// An operation in progress is the agent working on the last action, not its
 			// success: keep the attempt, or a permanently failing action loses its backoff.
-			if st.Operation == agentapi.OpNone {
+			if st.Settled() {
 				delete(rs.attempts, in.ServerID)
 				h.setPanelError(in.ServerID, "")
 			}
 			continue
 		}
-		if act == actStart && h.gate.DataJobRunning(ctx, in.ServerID) {
-			// A job rewrites the data directory (extract or restore): the wish to run stays and
-			// is applied on the first pass after the job; no backoff.
-			continue
+		var unlock func()
+		if act == actStart {
+			// A start is admitted (data safety spec §3): a server whose admission another
+			// operation holds is skipped for this pass, one whose data is not safe (a job
+			// rewrites it, a restore is unresolved, the files service does not answer) keeps
+			// its wish to run, applied on the first pass after; neither counts for the backoff.
+			var ok bool
+			if unlock, ok = h.admission.TryLock(in.ServerID); !ok {
+				continue
+			}
+			err := h.checkData(ctx, in.ServerID, nil)
+			h.warnDataUnknown(in.ServerID, err)
+			if err != nil {
+				unlock()
+				continue
+			}
 		}
 		if !rs.allow(in, act, now) {
+			if unlock != nil {
+				unlock()
+			}
 			continue
 		}
 		err := h.apply(ctx, row.Name, in, act, set)
+		if unlock != nil {
+			unlock()
+		}
 		var pe panelError
 		switch {
 		case err == nil:
@@ -210,9 +229,29 @@ func (h *Handler) reconcileInstances(ctx context.Context) {
 			delete(rs.foreign, id)
 		}
 	}
+	for id := range rs.unknown {
+		if !seen[id] {
+			delete(rs.unknown, id)
+		}
+	}
 	h.keepPanelErrors(seen)
 	if acted {
 		h.Trigger() // look again soon: the agent may already be done
+	}
+}
+
+// warnDataUnknown logs once that a start is held because the files service does not report
+// the data state of server id (err of checkData), and once when it does again (caller holds
+// reconcile.mu).
+func (h *Handler) warnDataUnknown(id int64, err error) {
+	rs := &h.reconcile
+	switch unknown := errors.Is(err, ErrDataStateUnknown); {
+	case unknown && !rs.unknown[id]:
+		rs.unknown[id] = true
+		h.log.Warn("servers: start held, the files service does not report whether the data is safe", "server_id", id)
+	case !unknown && rs.unknown[id]:
+		delete(rs.unknown, id)
+		h.log.Info("servers: data state known again", "server_id", id)
 	}
 }
 

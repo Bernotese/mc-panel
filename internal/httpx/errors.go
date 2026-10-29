@@ -48,6 +48,8 @@ const (
 	CodeDevExists               = "dev_exists"
 	CodeNotDev                  = "not_dev"
 	CodeDevManaged              = "dev_managed"
+	CodeDataStateUnknown        = "data_state_unknown"
+	CodeRecoveryRequired        = "recovery_required"
 	CodeServerModified          = "server_modified"
 	CodeInternal                = "internal"
 )

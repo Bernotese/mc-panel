@@ -13,6 +13,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/clock"
 	"github.com/Bernotese/mc-panel/internal/notify"
+	"github.com/Bernotese/mc-panel/internal/servers"
 	"github.com/Bernotese/mc-panel/internal/store"
 	"github.com/Bernotese/mc-panel/internal/store/storetest"
 )
@@ -635,4 +636,76 @@ func TestProdAlertsUnchanged(t *testing.T) {
 		e.pass(time.Duration(5+m)*time.Minute, aCrashing(prod, c))
 	}
 	aWantEvents(t, e.events(), notify.EventServerDown, notify.EventServerRecovered, notify.EventServerCrashLoop)
+}
+
+// aData sets the data state of s as the collector does (busy and recovery_required gate it).
+func aData(s ServerSample, st servers.State) ServerSample {
+	s.DataState, s.Gated = st, st == servers.StateBusy || st == servers.StateRecoveryRequired
+	return s
+}
+
+// An unknown data state (files service not answering) does not silence a real outage; busy
+// and recovery_required do (data safety spec §2.3).
+func TestMonitoringUnknownNotSilenced(t *testing.T) {
+	e := newAlertEnv(t)
+	unknown := e.server("survival")
+	busy := e.server("creative")
+	for m := 0; m <= 10; m++ {
+		e.pass(time.Duration(m)*time.Minute,
+			aData(aExited(aSample(unknown, "survival")), servers.StateUnknown),
+			aData(aExited(aSample(busy, "creative")), servers.StateBusy))
+	}
+	aWantEvents(t, e.events(), notify.EventServerDown)
+	if ev := e.notes.Events[0]; !strings.Contains(ev.Title, "survival") {
+		t.Fatalf("down alert for the wrong server: %+v", ev)
+	}
+}
+
+// server.recovery_required fires once when a server enters that state, also for a dev and with
+// down alerts off, is repeated every 24 h although the server is gated, survives unknown passes
+// and is dropped without a message once a known state shows the server left it.
+func TestRecoveryAlertFiresAndResolves(t *testing.T) {
+	e := newAlertEnv(t)
+	id := e.server("survival")
+	dev := e.server("dev-survival")
+	e.aMakeDev(dev, id)
+	e.setDownAlerts(id, false)
+	key := alertKey(alertRecovery, id)
+	devKey := alertKey(alertRecovery, dev)
+	stuck := aData(aExited(aSample(id, "survival")), servers.StateRecoveryRequired)
+	devStuck := aData(aExited(aSample(dev, "dev-survival")), servers.StateRecoveryRequired)
+	for m := 0; m <= 5; m++ {
+		e.pass(time.Duration(m)*time.Minute, stuck, devStuck)
+	}
+	aWantEvents(t, e.events(), notify.EventServerRecoveryRequired, notify.EventServerRecoveryRequired)
+	if ev := e.notes.Events[0]; !strings.Contains(ev.Title, "survival") || !strings.Contains(ev.Message, "A restore could not be completed") {
+		t.Fatalf("alert = %+v", ev)
+	}
+	if got := e.stateKeys(); !slices.Contains(got, key) || !slices.Contains(got, devKey) {
+		t.Fatalf("state = %v", got)
+	}
+	// unknown changes nothing, also not across a restart of the panel (alert_state)
+	e.a = e.newAlerter(e.notes)
+	e.pass(10*time.Minute, aData(aExited(aSample(id, "survival")), servers.StateUnknown), devStuck)
+	aWantEvents(t, e.events(), notify.EventServerRecoveryRequired, notify.EventServerRecoveryRequired)
+	if got := e.stateKeys(); !slices.Contains(got, key) {
+		t.Fatalf("an unknown pass dropped the alert: %v", got)
+	}
+	// reminder although gated
+	e.pass(24*time.Hour+time.Minute, stuck, aData(aExited(aSample(dev, "dev-survival")), servers.StateSafe))
+	aWantEvents(t, e.events(), notify.EventServerRecoveryRequired, notify.EventServerRecoveryRequired, notify.EventServerRecoveryRequired)
+	if ev := e.notes.Events[2]; !strings.HasPrefix(ev.Title, "Restore still not resolved: survival") {
+		t.Fatalf("reminder = %+v", ev)
+	}
+	if got := e.stateKeys(); slices.Contains(got, devKey) {
+		t.Fatalf("the dev's alert was not dropped once it was safe: %v", got)
+	}
+	// resolved: dropped silently; entering the state again fires again
+	e.pass(24*time.Hour+2*time.Minute, aData(aExited(aSample(id, "survival")), servers.StateSafe))
+	if got := e.stateKeys(); slices.Contains(got, key) {
+		t.Fatalf("state after resolve = %v", got)
+	}
+	e.pass(24*time.Hour+3*time.Minute, stuck)
+	aWantEvents(t, e.events(), notify.EventServerRecoveryRequired, notify.EventServerRecoveryRequired,
+		notify.EventServerRecoveryRequired, notify.EventServerRecoveryRequired)
 }

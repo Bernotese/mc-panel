@@ -82,6 +82,8 @@ const KNOWN_CODES: Record<ErrorCode, true> = {
   backups_unavailable: true,
   backup_running: true,
   server_modified: true,
+  data_state_unknown: true,
+  recovery_required: true,
   dev_exists: true,
   not_dev: true,
   dev_managed: true,

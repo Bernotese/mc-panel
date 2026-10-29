@@ -213,6 +213,43 @@ jcheck "$po/bover.json" "list after deleting" '
   sorted(s["kind"] for s in d["snapshots"]) == ["pre-restore", "scheduled"] and a[0] not in [s["id"] for s in d["snapshots"]]' "$snap_manual"
 echo "OK: manual snapshot deleted, pre-restore and pinned scheduled snapshot kept"
 
+echo "== backups: an unresolved restore blocks starts until an admin resolves it (data safety)"
+p_down() { [ "$(inst_field "$psrv" 'i["state"]')" != running ]; }
+p_data_state() { # p_data_state <state>: the server view reports this data_state
+  papi GET "/servers/$psrv" "$po/sview.json"
+  [ "$pcode" = 200 ] && python3 -I -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["data_state"] != sys.argv[2])' "$po/sview.json" "$1"
+}
+papi POST "/servers/$psrv/power" "$po/power.json" '{"action": "stop"}'
+[ "$pcode" = 202 ] || fail "stop before planting a journal: HTTP $pcode $(cat "$po/power.json")"
+pwait_for 180 "plugins server stopped" p_down
+# A journal entry the service cannot read stands for an interrupted swap (data safety spec
+# §2.1): the server must not start, and the half-swapped temp folder must survive.
+setpriv --reuid=mcpanel-mc --regid=mcpanel-mc --clear-groups sh -c '
+  umask 077 && mkdir -p "$1/backups/restore-journal" && printf "not json" >"$1/backups/restore-journal/$2" &&
+  mkdir -p "$1/instances/$2/.mcpanel-tmp-ci" && printf "old half" >"$1/instances/$2/.mcpanel-tmp-ci/marker"' sh "$work/mc" "$psrv" ||
+  fail "planting the journal entry"
+pwait_for 30 "data_state recovery_required" p_data_state recovery_required
+papi POST "/servers/$psrv/power" "$po/power.json" '{"action": "start"}'
+is_perror "$po/power.json" "$pcode" 409 recovery_required || fail "start with an unresolved restore: HTTP $pcode $(cat "$po/power.json")"
+sleep 25 # several reconcile passes (time scale 10): none may start it
+p_down || fail "the reconcile loop started a server with an unresolved restore"
+p_sudo
+papi POST "/servers/$psrv/recovery/resolve" "$po/resolve.json"
+[ "$pcode" = 200 ] || fail "resolve: HTTP $pcode $(cat "$po/resolve.json")"
+rfolder=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["folder"])' "$po/resolve.json")
+[ -n "$rfolder" ] && [ -f "$work/mc/backups/recovery/$rfolder/mcpanel-tmp-ci/marker" ] ||
+  fail "resolve did not move the temp folder: $(cat "$po/resolve.json"); $(ls -laR "$work/mc/backups/recovery" 2>&1 | head -20)"
+[ ! -e "$work/mc/instances/$psrv/.mcpanel-tmp-ci" ] || fail "temp folder still in the data directory after resolve"
+[ ! -e "$work/mc/backups/restore-journal/$psrv" ] || fail "journal entry left after resolve"
+pwait_for 30 "data_state safe after resolve" p_data_state safe
+papi POST "/servers/$psrv/power" "$po/power.json" '{"action": "start"}'
+[ "$pcode" = 202 ] || fail "start after resolve: HTTP $pcode $(cat "$po/power.json")"
+pwait_for 300 "plugins server running after resolve" p_running
+papi GET "/audit?action=server.recovery_resolve&limit=10" "$po/raudit.json"
+jcheck "$po/raudit.json" "server.recovery_resolve audited" '
+  [e["result"] for e in d["items"] if e["target"] == "server:" + a[0]] == ["success"]' "$psrv"
+echo "OK: unreadable journal -> recovery_required, start 409 and no reconcile start; resolve moved the folder to backups/recovery/$rfolder; started again"
+
 echo "== backups: delete the server with purge_backups=1 removes repo and key"
 [ -d "$work/mc/backups/repos/$psrv" ] && [ -f "$work/mc/backups/keys/$psrv" ] || fail "repo or key missing before the purge"
 p_sudo

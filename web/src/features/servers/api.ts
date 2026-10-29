@@ -6,6 +6,7 @@ import type {
   InstanceType,
   PowerAction,
   PowerResponse,
+  Recovery,
   Server,
   ServerSettings,
   UpdateServerRequest,
@@ -61,6 +62,11 @@ export function createServer(body: CreateServerRequest): Promise<Server> {
 
 export function updateServer(id: number, body: UpdateServerRequest): Promise<Server> {
   return unwrap(api.PATCH('/servers/{id}', { params: { path: { id } }, body }))
+}
+
+/** Data safety spec §2.3 (admin, sudo): moves the half-swapped folders of a stuck restore out and frees the server. */
+export function resolveRecovery(id: number): Promise<Recovery> {
+  return unwrap(api.POST('/servers/{id}/recovery/resolve', { params: { path: { id } } }))
 }
 
 /** purgeBackups also removes the server's restic repository (backups spec §5.6); the parameter is only sent when true. */

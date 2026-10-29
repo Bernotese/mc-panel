@@ -219,27 +219,9 @@ func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err e
 	if err != nil {
 		return err
 	}
-	// The name must still be free unless it is the jar this task replaces (Review Focus #2/#3).
-	list, err := h.listJars(ctx, srv)
+	replaces, err := h.checkTarget(ctx, srv, e)
 	if err != nil {
 		return err
-	}
-	// The replaced jar must still be the planned one: a jar the user swapped in meanwhile is
-	// neither overwritten nor deleted; one that is gone leaves nothing to replace.
-	replaces := e.replaces
-	if replaces != "" {
-		i := slices.IndexFunc(list.Jars, func(j filesapi.Jar) bool { return j.Name == replaces })
-		switch {
-		case i < 0:
-			replaces = ""
-		case e.replacesSHA512 != "" && list.Jars[i].SHA512 != e.replacesSHA512:
-			return fmt.Errorf("%w: %s was changed since the job started", errFileExists, replaces)
-		}
-	}
-	for _, jar := range list.Jars {
-		if jar.Name != replaces && strings.EqualFold(baseOf(jar.Name), e.Filename) {
-			return fmt.Errorf("%w: %s", errFileExists, jar.Name)
-		}
 	}
 	// Recorded before the upload too: a lost answer may hide a jar that is on disk (spec §6.2).
 	h.markChanged(ctx, srv.ID)
@@ -250,6 +232,11 @@ func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err e
 			break
 		}
 		if werr := wait(ctx, h.busyBackoff<<attempt); werr != nil {
+			return err
+		}
+		// Busy may also mean that a restore or extract held the server (data safety spec §2.1)
+		// and has rewritten its jars meanwhile: the plan is checked against the disk again.
+		if replaces, err = h.checkTarget(ctx, srv, e); err != nil {
 			return err
 		}
 	}
@@ -285,6 +272,33 @@ func (h *Handler) installTask(ctx context.Context, srv server, t jobTask) (err e
 		return err
 	}
 	return nil
+}
+
+// checkTarget checks the plan of e against the jars on disk: the name must still be free unless
+// it is the jar this task replaces (Review Focus #2/#3), and the replaced jar must still be the
+// planned one (a jar the user swapped in meanwhile is neither overwritten nor deleted; one that
+// is gone leaves nothing to replace). It returns the jar to replace ("" = none).
+func (h *Handler) checkTarget(ctx context.Context, srv server, e planEntry) (string, error) {
+	list, err := h.listJars(ctx, srv)
+	if err != nil {
+		return "", err
+	}
+	replaces := e.replaces
+	if replaces != "" {
+		i := slices.IndexFunc(list.Jars, func(j filesapi.Jar) bool { return j.Name == replaces })
+		switch {
+		case i < 0:
+			replaces = ""
+		case e.replacesSHA512 != "" && list.Jars[i].SHA512 != e.replacesSHA512:
+			return "", fmt.Errorf("%w: %s was changed since the job started", errFileExists, replaces)
+		}
+	}
+	for _, jar := range list.Jars {
+		if jar.Name != replaces && strings.EqualFold(baseOf(jar.Name), e.Filename) {
+			return "", fmt.Errorf("%w: %s", errFileExists, jar.Name)
+		}
+	}
+	return replaces, nil
 }
 
 // transfer downloads the jar and streams it to the service with its checksum.

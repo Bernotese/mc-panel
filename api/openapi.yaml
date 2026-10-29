@@ -549,6 +549,22 @@ paths:
         '409': { description: 'conflict (a job rewrites the data directory: an archive is extracted or a backup restored)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /servers/{id}/recovery/resolve:
+    post:
+      operationId: resolveServerRecovery
+      tags: [servers]
+      summary: Release a server whose restore could not be completed (admin, sudo; audited)
+      description: 'Moves the half-swapped folders of the unresolved restore out of the data directory to backups/recovery/ (never deletes them) and clears the hold. The visible data directory is not touched: check it before resolving (docs/install.md, "A restore could not be completed").'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Recovery' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'recovery_required (the server has no unresolved restore) or conflict (a job holds its data, or another operation on it is being admitted)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { description: 'data_state_unknown (the files service did not report the state, or cannot read the restore journal) or files_unavailable', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /servers/{id}/power:
     post:
       operationId: serverPower
@@ -1669,7 +1685,7 @@ components:
       type: object
       required: [error, message]
       properties:
-        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, password_change_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, files_unavailable, file_exists, file_modified, not_text, not_regular, instance_running, insufficient_storage, plugins_unsupported, plugin_source_unavailable, plugin_not_downloadable, plugin_incompatible, mrpack_incompatible, mrpack_version_mismatch, backups_unavailable, backup_running, dev_exists, not_dev, dev_managed, server_modified, internal] }
+        error: { type: string, enum: [bad_request, validation_failed, unauthorized, invalid_credentials, invalid_code, forbidden, sudo_required, setup_2fa_required, password_change_required, csrf_invalid, not_found, conflict, payload_too_large, rate_limited, jailed, ip_blocked, agent_unavailable, docker_unavailable, base_domain_missing, catalog_unavailable, instance_not_running, rcon_unavailable, files_unavailable, file_exists, file_modified, not_text, not_regular, instance_running, insufficient_storage, plugins_unsupported, plugin_source_unavailable, plugin_not_downloadable, plugin_incompatible, mrpack_incompatible, mrpack_version_mismatch, backups_unavailable, backup_running, dev_exists, not_dev, dev_managed, server_modified, data_state_unknown, recovery_required, internal] }
         message: { type: string }
         request_id: { type: string }
     Role: { type: string, enum: [admin, user] }
@@ -1863,7 +1879,7 @@ components:
         cpu_percent: { type: number }
     Server:
       type: object
-      required: [id, name, permissions, address, instance, status, down_alerts, web_status]
+      required: [id, name, permissions, address, instance, status, down_alerts, web_status, data_state, data_job]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
@@ -1885,6 +1901,19 @@ components:
         web_error: { type: string, description: "The agent's reason for web_status error, sanitized like last_error; admins only, absent when there is none" }
         dev: { $ref: '#/components/schemas/DevSummary', description: 'Present only when the server is a dev instance' }
         dev_id: { type: integer, format: int64, description: 'Present only when the server has a dev instance: its id' }
+        data_state: { $ref: '#/components/schemas/ServerDataState' }
+        data_job: { type: [string, 'null'], description: 'While data_state is busy: the kind of job that holds the data directory (restore, extract, dev_sync)' }
+    ServerDataState:
+      type: string
+      enum: [safe, busy, recovery_required, unknown]
+      description: 'Safety of the data directory (data safety spec §2). Only safe admits a start or a data job; stop and reads always work. unknown = the files service did not answer; never treated as safe.'
+    Recovery:
+      type: object
+      required: [phase, since]
+      properties:
+        phase: { type: string, description: 'Journal phase of the unresolved restore, or "unreadable"' }
+        since: { type: integer, format: int64, description: 'Unix ms of the journal entry; 0 = unknown' }
+        folder: { type: string, description: 'After a resolve: where the half-swapped folders were moved (below backups/recovery/)' }
     DevSummary:
       type: object
       required: [source_id, source_name, sync_paused, next_sync_at, last_sync_at, last_sync_status, sync_pending, sleeping]
@@ -2637,7 +2666,7 @@ components:
         memory_bytes: { type: [integer, 'null'], format: int64 }
         memory_limit_bytes: { type: [integer, 'null'], format: int64 }
         tps_source: { $ref: '#/components/schemas/TpsSource' }
-    AlertKind: { type: string, enum: [server.down, server.crash_loop, host.disk_low] }
+    AlertKind: { type: string, enum: [server.down, server.crash_loop, server.recovery_required, host.disk_low] }
     SparklinePoint:
       type: array
       description: '[at (Unix ms), players]'

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -73,13 +75,17 @@ func TestJobsGuaranteesForThePanel(t *testing.T) {
 		t.Fatalf("second extract for the same server: %d %s", status, body)
 	}
 
-	// (3) Fill every upload slot with stalled uploads, then ask for the job again.
+	// (3) Fill every upload slot with stalled uploads, then ask for the job again. They go to
+	// another server: the extract refuses uploads to its own (mutation lease).
+	if err := os.Mkdir(filepath.Join(filepath.Dir(data), "2"), 0o750); err != nil {
+		t.Fatal(err)
+	}
 	stall := make(chan struct{})
 	done := make(chan struct{}, maxUploads)
 	for i := range maxUploads {
 		go func() {
 			defer func() { done <- struct{}{} }()
-			_, _ = s.Upload(context.Background(), 1, "slow"+string(rune('a'+i)), false, 5, blockingReader{stall})
+			_, _ = s.Upload(context.Background(), 2, "slow"+string(rune('a'+i)), false, 5, blockingReader{stall})
 		}()
 	}
 	deadline := time.Now().Add(5 * time.Second)

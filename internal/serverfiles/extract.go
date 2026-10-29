@@ -5,17 +5,13 @@ import (
 	"errors"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/files/filesapi"
 	"github.com/Bernotese/mc-panel/internal/httpx"
+	"github.com/Bernotese/mc-panel/internal/servers/admit"
 )
-
-// gateTimeout bounds the job query of DataJobRunning: power actions and the reconcile loop
-// must not hang on an unreachable service.
-const gateTimeout = 2 * time.Second
 
 type extractRequest struct {
 	Path string `json:"path"`
@@ -54,10 +50,6 @@ func toFileJob(j filesapi.Job) fileJobJSON {
 // isExtract: "" is an extract job of a service before sub-project 4.
 func isExtract(k filesapi.JobKind) bool { return k == "" || k == filesapi.JobExtract }
 
-// rewritesData reports whether a job of this kind writes into the data directory: an extract
-// or a restore. A backup only reads it, a forget never touches it.
-func rewritesData(k filesapi.JobKind) bool { return isExtract(k) || k == filesapi.JobRestore }
-
 var errRunning = errors.New("the server is running")
 
 func (h *Handler) handleExtract(w http.ResponseWriter, r *http.Request) {
@@ -78,22 +70,53 @@ func (h *Handler) handleExtract(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// From the state check until the job exists, the server counts as extracting: a start
-	// asking the gate meanwhile is held (Review Focus #5).
-	defer h.pending.add(s.ID)()
-	if err := h.checkStopped(ctx, s.ID); err != nil {
-		h.writeStateError(w, r, err)
+	// Admitted (data safety spec §3): under the server's admission lock the data must be safe,
+	// the server stopped and settled, and the service takes the job; from the state check until
+	// the service answers the server shows as busy (Holding, Review Focus #5).
+	var job filesapi.Job
+	called := false
+	var filesErr error
+	err := h.admit(ctx, s.ID, func(ctx context.Context) error {
+		defer h.pending.add(s.ID)()
+		if err := h.checkStopped(ctx, s.ID); err != nil {
+			return stateError{err}
+		}
+		called = true
+		// The pre-check of a large archive can take minutes (filesapi.ExtractTimeout).
+		job, filesErr = h.files.Extract(context.WithoutCancel(ctx), filesapi.ExtractRequest{ID: s.ID, Path: p, Dest: dest})
+		return filesErr
+	})
+	if !called {
+		var se stateError
+		switch {
+		case admit.WriteError(w, r, err):
+		case errors.As(err, &se):
+			h.writeStateError(w, r, se.err)
+		default:
+			h.log.DebugContext(ctx, "extract admission ended with the request", "err", err)
+		}
 		return
 	}
-	// The pre-check of a large archive can take minutes (filesapi.ExtractTimeout).
-	job, err := h.files.Extract(context.WithoutCancel(ctx), filesapi.ExtractRequest{ID: s.ID, Path: p, Dest: dest})
 	h.extendWrite(w, r)
-	h.recordResult(ctx, audit.ActionFileExtract, s.ID, err, map[string]any{"path": p, "dest": dest})
-	if err != nil {
-		h.writeFilesError(w, r, err)
+	h.recordResult(ctx, audit.ActionFileExtract, s.ID, filesErr, map[string]any{"path": p, "dest": dest})
+	if filesErr != nil {
+		h.writeFilesError(w, r, filesErr)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusAccepted, toFileJob(job))
+}
+
+// stateError is a refusal of checkStopped inside the extract's admission.
+type stateError struct{ err error }
+
+func (e stateError) Error() string { return e.err.Error() }
+
+// admit runs fn under the admission of server id (Deps.Admit).
+func (h *Handler) admit(ctx context.Context, id int64, fn func(context.Context) error) error {
+	if h.admitFn == nil {
+		return fn(ctx)
+	}
+	return h.admitFn(ctx, id, fn)
 }
 
 func (h *Handler) handleJobs(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +139,8 @@ func (h *Handler) handleJobs(w http.ResponseWriter, r *http.Request) {
 
 // checkStopped asks the agent for the actual state (spec §5.1): only a server whose container
 // is exited, created or missing – or that the agent does not list at all – and that the agent
-// is not working on may be extracted into.
+// is not working on and has no power action queued for (settled, data safety spec §2.2) may be
+// extracted into.
 func (h *Handler) checkStopped(ctx context.Context, id int64) error {
 	resp, err := h.inst.Instances(ctx)
 	if err != nil {
@@ -129,7 +153,7 @@ func (h *Handler) checkStopped(ctx context.Context, id int64) error {
 		if st.ID != id {
 			continue
 		}
-		if st.Operation != agentapi.OpNone {
+		if !st.Settled() {
 			return errRunning
 		}
 		switch st.State {
@@ -183,21 +207,12 @@ func (p *pendingExtracts) has(id int64) bool {
 	return p.n[id] > 0
 }
 
-// DataJobRunning reports whether a job that rewrites the data directory runs for the server (an
-// extract, files spec §5.1, or a restore, backups spec §5.5; a backup does not count), or an
-// extract request is between its state check and the service's answer. An unreachable service
-// counts as "no job". It implements servers.DataGate.
-func (h *Handler) DataJobRunning(ctx context.Context, serverID int64) bool {
+// Holding reports an extract request of the server between its admission and the service's
+// answer (servers.Hold, kind "extract"): until the service holds the job itself, the panel shows
+// the server as busy. The service's own jobs are part of servers.DataStates.
+func (h *Handler) Holding(serverID int64) (kind string, ok bool) {
 	if h.pending.has(serverID) {
-		return true
+		return string(filesapi.JobExtract), true
 	}
-	ctx, cancel := context.WithTimeout(ctx, gateTimeout)
-	defer cancel()
-	job, err := h.files.Job(ctx, serverID)
-	if err != nil {
-		h.log.WarnContext(ctx, "files: data gate open, job state unknown (file service unreachable)",
-			"server_id", serverID, "err", err)
-		return false
-	}
-	return job != nil && job.State == filesapi.JobRunning && rewritesData(job.Kind)
+	return "", false
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/Bernotese/mc-panel/internal/notify"
 	"github.com/Bernotese/mc-panel/internal/rbac"
 	"github.com/Bernotese/mc-panel/internal/servers"
+	"github.com/Bernotese/mc-panel/internal/servers/admit"
 	"github.com/Bernotese/mc-panel/internal/store"
 	"github.com/Bernotese/mc-panel/internal/timescale"
 )
@@ -40,8 +41,11 @@ type Deps struct {
 	ServerView func(ctx context.Context, id int64) (any, error)
 	Waker      agentapi.WakerClient   // nil = no wake loop
 	Console    agentapi.ConsoleClient // RCON; nil = warnings and ops are not sent
-	Gate       servers.DataGate       // nil = never held
-	Log        *slog.Logger           // nil = slog.Default()
+	DataStates servers.DataStates     // nil = every dev's data is safe
+	// Admit runs fn under the dev's admission lock once its data is safe (servers.Handler.Admit,
+	// data safety spec §3); a wake stores the start under it. nil = no admission.
+	Admit admit.Func
+	Log   *slog.Logger // nil = slog.Default()
 }
 
 // Timings (dev instances plan, Global Constraints). The minute of the schedule tick and of
@@ -84,7 +88,8 @@ type Handler struct {
 	view     func(ctx context.Context, id int64) (any, error)
 	waker    agentapi.WakerClient
 	console  agentapi.ConsoleClient
-	gate     servers.DataGate
+	data     servers.DataStates
+	admitFn  admit.Func
 	log      *slog.Logger
 
 	tickEvery, fastEvery time.Duration
@@ -129,7 +134,7 @@ type delayedSync struct {
 func NewHandler(d Deps) *Handler {
 	h := &Handler{
 		q: store.New(d.DB), clock: d.Clock, rec: d.Audit, notifier: d.Notifier, servers: d.Servers,
-		syncer: d.Syncer, view: d.ServerView, waker: d.Waker, console: d.Console, gate: d.Gate, log: d.Log,
+		syncer: d.Syncer, view: d.ServerView, waker: d.Waker, console: d.Console, data: d.DataStates, admitFn: d.Admit, log: d.Log,
 		tickEvery: tickEvery, fastEvery: fastEvery, devs: map[int64]*devState{},
 	}
 	if h.clock == nil {
@@ -141,8 +146,8 @@ func NewHandler(d Deps) *Handler {
 	if h.notifier == nil {
 		h.notifier = notify.Nop{}
 	}
-	if h.gate == nil {
-		h.gate = noGate{}
+	if h.data == nil {
+		h.data = safeStates{}
 	}
 	if h.log == nil {
 		h.log = slog.Default()
@@ -315,6 +320,10 @@ type nopRecorder struct{}
 
 func (nopRecorder) Record(context.Context, audit.Entry) error { return nil }
 
-type noGate struct{}
+// safeStates stands in for missing DataStates: every dev's data is safe.
+type safeStates struct{}
 
-func (noGate) DataJobRunning(context.Context, int64) bool { return false }
+func (safeStates) State(context.Context, int64) (servers.State, error) { return servers.StateSafe, nil }
+func (safeStates) Lookup(context.Context, int64, servers.Hold) (servers.DataInfo, error) {
+	return servers.DataInfo{State: servers.StateSafe}, nil
+}

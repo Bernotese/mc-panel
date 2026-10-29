@@ -128,6 +128,27 @@ func (m *Manager) work(id int64) {
 	}
 }
 
+// snapshot reports the operation and the queued power actions of st for Status; the
+// caller holds m.mu. Operation is the running job's operation. Between two jobs (one
+// finished, the worker has not picked up the next) it is the next job's operation, and
+// that job is then not in queued as well, so every job shows up exactly once. Queued holds
+// only power actions, in order: an ensure or remove job is no power action and shows up
+// only as the operation once it runs. Settled stays exact all the same, because the
+// operation is never none while a job waits.
+func (st *instanceState) snapshot() (agentapi.Operation, []agentapi.PowerAction) {
+	op, pending := st.op, st.pending
+	if op == agentapi.OpNone && len(pending) > 0 {
+		op, pending = initialOp(pending[0]), pending[1:]
+	}
+	var queued []agentapi.PowerAction
+	for _, j := range pending {
+		if j.kind == jobPower {
+			queued = append(queued, j.action)
+		}
+	}
+	return op, queued
+}
+
 // evictErrorOnly drops the oldest entry that only keeps a last_error (no queued or
 // running work), so stale errors never make the agent busy. The caller holds m.mu.
 func (m *Manager) evictErrorOnly() bool {

@@ -33,6 +33,7 @@ import type {
   Role,
   SecondFactor,
   SecuritySettings,
+  ServerDataState,
   ServerProperties,
   ServerStatus,
   Session,
@@ -133,6 +134,11 @@ export interface MockServer {
   webError?: string
   /** Set only on a dev instance (dev instances spec §3.1): whether a server is a dev is decided by this alone. */
   dev?: MockDev
+  /** Data safety spec §2; absent = safe. `dataJob` names the job while busy. */
+  dataState?: ServerDataState
+  dataJob?: string | null
+  /** While recovery_required: the stuck restore's journal (phase, since). */
+  recovery?: { phase: string; since: number }
 }
 
 /** The dev_instances row of a dev; its memory stays in instance.memory_mib, which a sync never overwrites. */
@@ -832,6 +838,27 @@ function seed(now: number): MockDb {
 }
 
 export const db: MockDb = seed(Date.now())
+
+/**
+ * Data safety spec §2: archive, a stopped server whose restore got stuck halfway through the swap (recovery_required).
+ * Seeded only for the browser mock (dev:mock, e2e, screenshots) and by the tests that need it: the unit tests' host
+ * memory budget is computed from the default servers.
+ */
+export function seedRecoveryScenario(target: MockDb = db, now: number = Date.now()): MockServer {
+  const archive: MockServer = {
+    id: 6,
+    name: 'archive',
+    instance: { type: 'paper', version: '1.21.11', loader_version: null, modpack: null, java: 'java21', memory_mib: 2048, properties: resolveProperties('archive') },
+    status: stoppedStatus(),
+    revision: 1,
+    runningRevision: 1,
+    players: emptyPlayers(),
+    dataState: 'recovery_required',
+    recovery: { phase: 'swap', since: now - 3 * HOUR },
+  }
+  target.servers.push(archive)
+  return archive
+}
 
 export function resetDb(now: number = Date.now()): void {
   Object.assign(db, seed(now))

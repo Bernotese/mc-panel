@@ -1,15 +1,19 @@
 package devinst_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Bernotese/mc-panel/internal/agent/agentapi"
 	"github.com/Bernotese/mc-panel/internal/audit"
 	"github.com/Bernotese/mc-panel/internal/devinst"
+	"github.com/Bernotese/mc-panel/internal/servers"
+	"github.com/Bernotese/mc-panel/internal/servers/admit"
 )
 
 func (e *env) wakesOf(devID int64) int {
@@ -131,22 +135,72 @@ func TestWakeRateLimits(t *testing.T) {
 	}
 }
 
-func TestWakeIgnoredWhileGated(t *testing.T) {
+// A wake is refused unless the dev's data is safe (data safety spec §3): busy (a sync or
+// restore), recovery_required and unknown (files service down) all ignore it.
+func TestWakeRefusedUnlessSafe(t *testing.T) {
 	e := newEnv(t)
 	e.setBaseDomain("example.com")
 	_, devID := e.dev("survival")
-	e.gate.set(devID, true)
-	e.waker.wake(devID)
-	devinst.FastTick(e.ctx(), e.h)
-	if n := e.wakesOf(devID); n != 0 {
-		t.Fatal("woken while gated")
+	for _, st := range []servers.State{servers.StateBusy, servers.StateRecoveryRequired, servers.StateUnknown} {
+		if st == servers.StateUnknown {
+			e.data.setErr(errors.New("files down"))
+		} else {
+			e.data.set(devID, st)
+		}
+		e.waker.wake(devID)
+		devinst.FastTick(e.ctx(), e.h)
+		if n := e.wakesOf(devID); n != 0 {
+			t.Fatalf("woken while %s", st)
+		}
 	}
-	// The ignored attempt does not use up the dev's wake slot.
-	e.gate.set(devID, false)
+	// The ignored attempts do not use up the dev's wake slot.
+	e.data.setErr(nil)
+	e.data.set(devID, servers.StateSafe)
 	e.waker.wake(devID)
 	devinst.FastTick(e.ctx(), e.h)
 	if n := e.wakesOf(devID); n != 1 {
-		t.Fatal("not woken after the gate opened")
+		t.Fatal("not woken once the data was safe")
+	}
+}
+
+// The wake stores the wish to run under the dev's admission (data safety spec §3); a refused
+// admission ignores the wake without using up its slot.
+func TestWakeAdmitted(t *testing.T) {
+	e := newEnv(t)
+	e.setBaseDomain("example.com")
+	_, devID := e.dev("survival")
+	var mu sync.Mutex
+	var refuse error
+	var ids []int64
+	e.admit = func(ctx context.Context, id int64, fn func(context.Context) error) error {
+		mu.Lock()
+		ids = append(ids, id)
+		err := refuse
+		mu.Unlock()
+		if err != nil {
+			return err
+		}
+		return fn(ctx)
+	}
+	e.h = e.newHandler()
+	refuse = admit.ErrRecoveryRequired
+	e.waker.wake(devID)
+	devinst.FastTick(e.ctx(), e.h)
+	if n := e.wakesOf(devID); n != 0 {
+		t.Fatal("woken although the admission was refused")
+	}
+	mu.Lock()
+	refuse = nil
+	mu.Unlock()
+	e.waker.wake(devID)
+	devinst.FastTick(e.ctx(), e.h)
+	if n := e.wakesOf(devID); n != 1 {
+		t.Fatal("not woken once admitted")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(ids, []int64{devID, devID}) {
+		t.Fatalf("admitted ids = %v", ids)
 	}
 }
 

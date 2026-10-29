@@ -28,8 +28,8 @@ var (
 
 // QueueDevSync queues the sync of dev instance s.DevID from its source s.SourceID (dev
 // instances spec §4.1) as a job of the backup queue, keyed by the dev: while it waits or runs,
-// DataJobRunning(DevID) is true (no start, no wake, no reconcile start of the dev); the source
-// is never gated, stopped or restored. A dev with a queued or running job answers
+// Holding(DevID) reports it (the dev's data is busy: no start, no wake, no reconcile start);
+// the source is never held, stopped or restored. A dev with a queued or running job answers
 // ErrBackupRunning (409 backup_running).
 //
 // The job takes a snapshot of the source (or reuses a fresh scheduled or dev-sync one), stops
@@ -103,17 +103,23 @@ func (h *Handler) runDevSync(ctx context.Context, j *job, s DevSync) (snapshot s
 	if err := h.step(ctx, j, stepStopping); err != nil {
 		return used.ID, err
 	}
-	if err := h.stop(ctx, s.DevID); err != nil {
-		return used.ID, err
-	}
-	if err := h.step(ctx, j, stepRestoring); err != nil {
-		return used.ID, err
-	}
-	rj, err := h.files.RestoreFrom(ctx, s.DevID, s.SourceID, used.ID)
+	// Admitted like a restore (data safety spec §3): the dev is stopped and settled and the
+	// service takes the restore job under the dev's admission lock.
+	var rj filesapi.Job
+	err = h.admit(ctx, s.DevID, func(ctx context.Context) error {
+		if err := h.stopSettled(ctx, s.DevID); err != nil {
+			return err
+		}
+		if err := h.step(ctx, j, stepRestoring); err != nil {
+			return err
+		}
+		rj, err = h.files.RestoreFrom(ctx, s.DevID, s.SourceID, used.ID)
+		return err
+	})
 	if err != nil {
 		return used.ID, err
 	}
-	// untilEnd: the gate stays closed until a poll shows that the service's restore ended
+	// the queue's hold stays until a poll shows that the service's restore ended
 	if _, err := h.waitService(ctx, j, s.DevID, rj.ID, waitRestore); err != nil {
 		return used.ID, err
 	}

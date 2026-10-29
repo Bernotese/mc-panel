@@ -776,8 +776,8 @@ func startedAtMillis(s string) int64 {
 	return t.UnixMilli()
 }
 
-// Status reads the actual state from Docker and merges the worker state and the
-// cached stats. Instances with queued work or a last_error but no container are
+// Status reads the actual state from Docker and merges the worker state (operation
+// and queued power actions, see instanceState.snapshot) and the cached stats. Instances with queued work or a last_error but no container are
 // reported with state "missing".
 func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 	ctx, cancel := context.WithTimeout(ctx, m.statusTimeout)
@@ -787,16 +787,16 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 		Instances: []agentapi.InstanceStatus{},
 		Router:    agentapi.RouterStatus{State: agentapi.StateMissing},
 	}
-	list, listErr := m.dc.List(ctx, LabelInstance)
-
+	type workState struct {
+		op              agentapi.Operation
+		queued          []agentapi.PowerAction // a fresh slice, safe to use after m.mu
+		lastError, name string
+	}
 	m.mu.Lock()
-	work := make(map[int64]instanceState, len(m.inst))
+	work := make(map[int64]workState, len(m.inst))
 	for id, st := range m.inst {
-		op := st.op
-		if op == agentapi.OpNone && len(st.pending) > 0 { // between two jobs: work is still queued
-			op = initialOp(st.pending[0])
-		}
-		work[id] = instanceState{op: op, lastError: st.lastError, name: st.name}
+		op, queued := st.snapshot()
+		work[id] = workState{op: op, queued: queued, lastError: st.lastError, name: st.name}
 	}
 	stats := make(map[int64]sample, len(m.stats))
 	for id, s := range m.stats {
@@ -804,6 +804,9 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 	}
 	resp.Router.LastError = m.routerErr
 	m.mu.Unlock()
+	// The work is read before the listing (data safety spec §2.2): an action that ends in
+	// between shows in the containers' state, never as a settled container in its old state.
+	list, listErr := m.dc.List(ctx, LabelInstance)
 
 	if listErr != nil {
 		m.setDocker(false, listErr)
@@ -834,13 +837,15 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 				st.StartedAt = startedAtMillis(info.State.StartedAt)
 			}
 		default:
+			// the listing's state may be out of date: never settled (no data job on it)
+			st.Uncertain = true
 			m.log.Debug("inspect failed while listing", "id", id, "err", err)
 		}
 		if s, ok := stats[id]; ok && st.State == agentapi.StateRunning {
 			st.MemoryBytes, st.MemoryLimitBytes, st.CPUPercent = s.memory, s.limit, s.cpuPercent
 		}
 		if w, ok := work[id]; ok {
-			st.Operation, st.LastError = w.op, w.lastError
+			st.Operation, st.Queued, st.LastError = w.op, w.queued, w.lastError
 		}
 		seen[id] = true
 		resp.Instances = append(resp.Instances, st)
@@ -848,7 +853,8 @@ func (m *Manager) Status(ctx context.Context) agentapi.InstancesResponse {
 	for id, w := range work {
 		if !seen[id] {
 			resp.Instances = append(resp.Instances, agentapi.InstanceStatus{
-				ID: id, Name: w.name, State: agentapi.StateMissing, Operation: w.op, LastError: w.lastError,
+				ID: id, Name: w.name, State: agentapi.StateMissing, Operation: w.op, Queued: w.queued,
+				LastError: w.lastError,
 			})
 		}
 	}
