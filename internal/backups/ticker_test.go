@@ -106,10 +106,12 @@ func TestTickSkipsBusyServer(t *testing.T) {
 	e := newEnv(t)
 	id := e.instance("survival")
 	putSchedule(e, id, scheduleBody("interval", 1, 240, 0))
+	// the run is due before the manual job starts: a clock jump during its backup would trip
+	// the stall watchdog and end it early
+	e.clk.Advance(time.Hour)
 	release := e.files.holdPlan("manual")
 	e.create(id, map[string]any{})
 	e.waitStep(id, "backing_up")
-	e.clk.Advance(time.Hour)
 	backups.Tick(t.Context(), e.h)
 	if j := e.job(id); j.Trigger != "manual" {
 		t.Fatalf("the scheduled run replaced the manual job: %+v", j)
@@ -210,10 +212,10 @@ func TestQueuedScheduledRunOfDeletedServer(t *testing.T) {
 	a := e.instance("alpha")
 	b := e.instance("beta")
 	putSchedule(e, b, scheduleBody("interval", 1, 240, 0))
+	e.clk.Advance(time.Hour) // before alpha starts: see TestTickSkipsBusyServer
 	release := e.files.holdPlan("manual")
 	e.create(a, map[string]any{})
 	e.waitStep(a, "backing_up")
-	e.clk.Advance(time.Hour)
 	backups.Tick(t.Context(), e.h) // queues beta's run behind alpha
 	e.deleteServer(b)
 	release()
@@ -223,7 +225,7 @@ func TestQueuedScheduledRunOfDeletedServer(t *testing.T) {
 	if state, c, _ := backups.JobOf(e.h, b); state != "failed" || c != "canceled" {
 		t.Fatalf("beta job = %s %s, want failed canceled", state, c)
 	}
-	if n := e.files.count(fmt.Sprintf("create %d", b)); n != 0 {
+	if n := e.files.count(fmt.Sprintf("create %d", b)) + e.files.count("cancel"); n != 0 {
 		t.Fatalf("calls = %v", e.files.callLog())
 	}
 	if n := len(e.notes.Types()); n != 0 {
