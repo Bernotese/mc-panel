@@ -87,9 +87,11 @@ verify-release-build:
 # Builds REF on the internal test VM from GitHub and (re)deploys it there (docs/dev/README.md, "Test VM").
 TESTVM ?= claude@192.168.1.117
 REF ?= main
+# Keepalives end a stalled connection to the VM after about a minute (scripts/test-vm.sh does the same).
+TESTVM_SSH_OPTS := -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o ConnectTimeout=10
 
 deploy-testvm:
-	ssh $(TESTVM) 'bash -s -- $(REF)' < scripts/testvm-deploy.sh
+	ssh $(TESTVM_SSH_OPTS) $(TESTVM) 'bash -s -- $(REF)' < scripts/testvm-deploy.sh
 
 # Copies the working tree to the test VM and runs the test suites there (docs/dev/README.md,
 # "Tests on the test VM"): SUITE=all|go|lint|web|e2e|shots.

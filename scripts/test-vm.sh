@@ -18,12 +18,16 @@ esac
 root="$(git rev-parse --show-toplevel)"
 dest="mc-panel-test/$(basename "${root}")"
 
+# The SSH connection to the VM sometimes stalls (#123, N6): keepalives end a dead connection after
+# about a minute instead of hanging until the run is killed by hand.
+ssh_opts=(-o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o ConnectTimeout=10)
+
 # The excludes mirror .gitignore (rsync cannot read it reliably: it has a "!" rule). Excluded paths
 # on the VM are kept by --delete, so node_modules and build output survive between runs. They
 # have no trailing slash on purpose: "/x/" matches only a directory, so a symlink web/node_modules
 # (or bin, .dev, ...) in a worktree would be copied to the VM.
-ssh "${vm}" "mkdir -p ~/${dest}"
-rsync -az --delete \
+ssh "${ssh_opts[@]}" "${vm}" "mkdir -p ~/${dest}"
+rsync -az --delete -e "ssh ${ssh_opts[*]}" \
   --exclude=/.git \
   --exclude=/bin --exclude=/build --exclude=/dist --exclude=/.dev \
   --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' \
@@ -34,11 +38,11 @@ rsync -az --delete \
   "${root}/" "${vm}:${dest}/"
 
 echo "==> ${vm}:~/${dest}: suite ${suite}"
-ssh "${vm}" "cd ~/${dest} && bash scripts/vm-test.sh ${suite}"
+ssh "${ssh_opts[@]}" "${vm}" "cd ~/${dest} && bash scripts/vm-test.sh ${suite}"
 
 # Screenshots come back into the local checkout (gitignored) for review.
 if [ "${suite}" = shots ]; then
   rm -rf "${root}/web/screenshots"
-  rsync -az "${vm}:${dest}/web/screenshots/" "${root}/web/screenshots/"
+  rsync -az -e "ssh ${ssh_opts[*]}" "${vm}:${dest}/web/screenshots/" "${root}/web/screenshots/"
   echo "==> screenshots in ${root}/web/screenshots/"
 fi
