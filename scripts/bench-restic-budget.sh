@@ -113,7 +113,8 @@ if all(p):
 sample_restic_rss() {
   local peak=0 r
   while :; do
-    r=$(ps -C restic -o rss= 2> /dev/null | sort -n | tail -1 | tr -d ' ')
+    # ps exits 1 while no restic runs; under pipefail and set -e that would end the sampler
+    r=$(ps -C restic -o rss= 2> /dev/null | sort -n | tail -1 | tr -d ' ') || true
     if [[ -n $r ]] && ((r > peak)); then
       peak=$r
       echo "$peak" > "$1"
