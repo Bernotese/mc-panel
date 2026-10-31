@@ -4,6 +4,6 @@
   "license": "AGPL-3.0-or-later",
   "description": "Pinned @redocly/cli for the CI job openapi (installed with npm ci --ignore-scripts).",
   "dependencies": {
-    "@redocly/cli": "2.66.0"
+    "@redocly/cli": "2.71.2"
   }
 }
